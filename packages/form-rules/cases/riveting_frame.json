@@ -1,0 +1,1770 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "Six exact-stage forms; all unmet needs and independence at every value of both other joints.",
+  "cases": [
+    {
+      "name": "insert_1_independent_0",
+      "act": {
+        "this": "t1",
+        "form": "insert_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 0,
+              "rivet_2": 0,
+              "rivet_3": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "insert_1_independent_1",
+      "act": {
+        "this": "t1",
+        "form": "insert_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 0,
+              "rivet_2": 1,
+              "rivet_3": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "insert_1_independent_2",
+      "act": {
+        "this": "t1",
+        "form": "insert_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 0,
+              "rivet_2": 2,
+              "rivet_3": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "insert_1_refuses_field_differs",
+      "act": {
+        "this": "t1",
+        "form": "insert_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 1,
+              "rivet_2": 2,
+              "rivet_3": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "insert_1_refuses_no_free_hand",
+      "act": {
+        "this": "t1",
+        "form": "insert_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 0,
+              "rivet_2": 2,
+              "rivet_3": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "propL",
+              "right": "propR"
+            },
+            "effector_mm": [
+              -260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "insert_1_refuses_out_of_reach",
+      "act": {
+        "this": "t1",
+        "form": "insert_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 0,
+              "rivet_2": 2,
+              "rivet_3": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "set_1_independent_0",
+      "act": {
+        "this": "t1",
+        "form": "set_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 1,
+              "rivet_2": 0,
+              "rivet_3": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "set_1_independent_1",
+      "act": {
+        "this": "t1",
+        "form": "set_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 1,
+              "rivet_2": 1,
+              "rivet_3": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "set_1_independent_2",
+      "act": {
+        "this": "t1",
+        "form": "set_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 1,
+              "rivet_2": 2,
+              "rivet_3": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "set_1_refuses_field_differs",
+      "act": {
+        "this": "t1",
+        "form": "set_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 2,
+              "rivet_2": 2,
+              "rivet_3": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "set_1_refuses_no_free_hand",
+      "act": {
+        "this": "t1",
+        "form": "set_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 1,
+              "rivet_2": 2,
+              "rivet_3": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "propL",
+              "right": "propR"
+            },
+            "effector_mm": [
+              -260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "set_1_refuses_out_of_reach",
+      "act": {
+        "this": "t1",
+        "form": "set_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 1,
+              "rivet_2": 2,
+              "rivet_3": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "insert_2_independent_0",
+      "act": {
+        "this": "t1",
+        "form": "insert_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 0,
+              "rivet_2": 0,
+              "rivet_3": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "insert_2_independent_1",
+      "act": {
+        "this": "t1",
+        "form": "insert_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 1,
+              "rivet_2": 0,
+              "rivet_3": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "insert_2_independent_2",
+      "act": {
+        "this": "t1",
+        "form": "insert_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 2,
+              "rivet_2": 0,
+              "rivet_3": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "insert_2_refuses_field_differs",
+      "act": {
+        "this": "t1",
+        "form": "insert_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 2,
+              "rivet_2": 1,
+              "rivet_3": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "insert_2_refuses_no_free_hand",
+      "act": {
+        "this": "t1",
+        "form": "insert_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 2,
+              "rivet_2": 0,
+              "rivet_3": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "propL",
+              "right": "propR"
+            },
+            "effector_mm": [
+              0,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "insert_2_refuses_out_of_reach",
+      "act": {
+        "this": "t1",
+        "form": "insert_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 2,
+              "rivet_2": 0,
+              "rivet_3": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "set_2_independent_0",
+      "act": {
+        "this": "t1",
+        "form": "set_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 0,
+              "rivet_2": 1,
+              "rivet_3": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "set_2_independent_1",
+      "act": {
+        "this": "t1",
+        "form": "set_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 1,
+              "rivet_2": 1,
+              "rivet_3": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "set_2_independent_2",
+      "act": {
+        "this": "t1",
+        "form": "set_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 2,
+              "rivet_2": 1,
+              "rivet_3": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "set_2_refuses_field_differs",
+      "act": {
+        "this": "t1",
+        "form": "set_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 2,
+              "rivet_2": 2,
+              "rivet_3": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "set_2_refuses_no_free_hand",
+      "act": {
+        "this": "t1",
+        "form": "set_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 2,
+              "rivet_2": 1,
+              "rivet_3": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "propL",
+              "right": "propR"
+            },
+            "effector_mm": [
+              0,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "set_2_refuses_out_of_reach",
+      "act": {
+        "this": "t1",
+        "form": "set_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 2,
+              "rivet_2": 1,
+              "rivet_3": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "insert_3_independent_0",
+      "act": {
+        "this": "t1",
+        "form": "insert_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 0,
+              "rivet_2": 0,
+              "rivet_3": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "insert_3_independent_1",
+      "act": {
+        "this": "t1",
+        "form": "insert_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 1,
+              "rivet_2": 1,
+              "rivet_3": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "insert_3_independent_2",
+      "act": {
+        "this": "t1",
+        "form": "insert_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 2,
+              "rivet_2": 2,
+              "rivet_3": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "insert_3_refuses_field_differs",
+      "act": {
+        "this": "t1",
+        "form": "insert_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 2,
+              "rivet_2": 2,
+              "rivet_3": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "insert_3_refuses_no_free_hand",
+      "act": {
+        "this": "t1",
+        "form": "insert_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 2,
+              "rivet_2": 2,
+              "rivet_3": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "propL",
+              "right": "propR"
+            },
+            "effector_mm": [
+              260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "insert_3_refuses_out_of_reach",
+      "act": {
+        "this": "t1",
+        "form": "insert_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 2,
+              "rivet_2": 2,
+              "rivet_3": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "set_3_independent_0",
+      "act": {
+        "this": "t1",
+        "form": "set_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 0,
+              "rivet_2": 0,
+              "rivet_3": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "set_3_independent_1",
+      "act": {
+        "this": "t1",
+        "form": "set_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 1,
+              "rivet_2": 1,
+              "rivet_3": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "set_3_independent_2",
+      "act": {
+        "this": "t1",
+        "form": "set_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 2,
+              "rivet_2": 2,
+              "rivet_3": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "set_3_refuses_field_differs",
+      "act": {
+        "this": "t1",
+        "form": "set_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 2,
+              "rivet_2": 2,
+              "rivet_3": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "set_3_refuses_no_free_hand",
+      "act": {
+        "this": "t1",
+        "form": "set_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 2,
+              "rivet_2": 2,
+              "rivet_3": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "propL",
+              "right": "propR"
+            },
+            "effector_mm": [
+              260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "set_3_refuses_out_of_reach",
+      "act": {
+        "this": "t1",
+        "form": "set_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 2,
+              "rivet_2": 2,
+              "rivet_3": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    }
+  ]
+}

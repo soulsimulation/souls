@@ -1,0 +1,2103 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:riveting_frame",
+  "owner": "thing",
+  "state": {
+    "rivet_1": {
+      "n": 28,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 2,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "rivet_2": {
+      "n": 29,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 2,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "rivet_3": {
+      "n": 30,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 2,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand_1": {
+      "role": "stand",
+      "at_mm": [
+        -260,
+        0,
+        700
+      ],
+      "yaw_mdeg": 180000
+    },
+    "control_1": {
+      "role": "contact",
+      "at_mm": [
+        -260,
+        900,
+        190
+      ]
+    },
+    "stand_2": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        700
+      ],
+      "yaw_mdeg": 180000
+    },
+    "control_2": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        900,
+        190
+      ]
+    },
+    "stand_3": {
+      "role": "stand",
+      "at_mm": [
+        260,
+        0,
+        700
+      ],
+      "yaw_mdeg": 180000
+    },
+    "control_3": {
+      "role": "contact",
+      "at_mm": [
+        260,
+        900,
+        190
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1200,
+      1540,
+      600
+    ]
+  },
+  "forms": {
+    "insert_1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "rivet_1",
+          "is": 0,
+          "says": "wrong_stage"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control_1"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand_1"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "control_1"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "rivet_1",
+          "to": 1,
+          "event": "rivet_changed"
+        }
+      ]
+    },
+    "set_1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "rivet_1",
+          "is": 1,
+          "says": "wrong_stage"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control_1"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand_1"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "control_1"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "rivet_1",
+          "to": 2,
+          "event": "rivet_changed"
+        }
+      ]
+    },
+    "insert_2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "rivet_2",
+          "is": 0,
+          "says": "wrong_stage"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control_2"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand_2"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "control_2"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "rivet_2",
+          "to": 1,
+          "event": "rivet_changed"
+        }
+      ]
+    },
+    "set_2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "rivet_2",
+          "is": 1,
+          "says": "wrong_stage"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control_2"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand_2"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "control_2"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "rivet_2",
+          "to": 2,
+          "event": "rivet_changed"
+        }
+      ]
+    },
+    "insert_3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "rivet_3",
+          "is": 0,
+          "says": "wrong_stage"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control_3"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand_3"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "control_3"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "rivet_3",
+          "to": 1,
+          "event": "rivet_changed"
+        }
+      ]
+    },
+    "set_3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "rivet_3",
+          "is": 1,
+          "says": "wrong_stage"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control_3"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand_3"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "control_3"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "rivet_3",
+          "to": 2,
+          "event": "rivet_changed"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:riveting_frame",
+    "table": [
+      {
+        "part": "rivet_1_front_die",
+        "field": "rivet_1",
+        "do": "slide",
+        "axis": "y",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": -120
+        }
+      },
+      {
+        "part": "rivet_1_front_die",
+        "field": "rivet_1",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": -51
+        }
+      },
+      {
+        "part": "rivet_1_rear_die",
+        "field": "rivet_1",
+        "do": "slide",
+        "axis": "y",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": -120
+        }
+      },
+      {
+        "part": "rivet_1_rear_die",
+        "field": "rivet_1",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 43
+        }
+      },
+      {
+        "part": "rivet_1_rack_head",
+        "field": "rivet_1",
+        "do": "show",
+        "at": {
+          "0": 1,
+          "1": 0,
+          "2": 0
+        }
+      },
+      {
+        "part": "rivet_1_rack_shank",
+        "field": "rivet_1",
+        "do": "show",
+        "at": {
+          "0": 1,
+          "1": 0,
+          "2": 0
+        }
+      },
+      {
+        "part": "rivet_1_head",
+        "field": "rivet_1",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 1,
+          "2": 1
+        }
+      },
+      {
+        "part": "rivet_1_inserted_shank",
+        "field": "rivet_1",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 1,
+          "2": 0
+        }
+      },
+      {
+        "part": "rivet_1_set_shank",
+        "field": "rivet_1",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 1
+        }
+      },
+      {
+        "part": "rivet_1_shophead",
+        "field": "rivet_1",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 1
+        }
+      },
+      {
+        "part": "rivet_2_front_die",
+        "field": "rivet_2",
+        "do": "slide",
+        "axis": "y",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": -120
+        }
+      },
+      {
+        "part": "rivet_2_front_die",
+        "field": "rivet_2",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": -51
+        }
+      },
+      {
+        "part": "rivet_2_rear_die",
+        "field": "rivet_2",
+        "do": "slide",
+        "axis": "y",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": -120
+        }
+      },
+      {
+        "part": "rivet_2_rear_die",
+        "field": "rivet_2",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 43
+        }
+      },
+      {
+        "part": "rivet_2_rack_head",
+        "field": "rivet_2",
+        "do": "show",
+        "at": {
+          "0": 1,
+          "1": 0,
+          "2": 0
+        }
+      },
+      {
+        "part": "rivet_2_rack_shank",
+        "field": "rivet_2",
+        "do": "show",
+        "at": {
+          "0": 1,
+          "1": 0,
+          "2": 0
+        }
+      },
+      {
+        "part": "rivet_2_head",
+        "field": "rivet_2",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 1,
+          "2": 1
+        }
+      },
+      {
+        "part": "rivet_2_inserted_shank",
+        "field": "rivet_2",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 1,
+          "2": 0
+        }
+      },
+      {
+        "part": "rivet_2_set_shank",
+        "field": "rivet_2",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 1
+        }
+      },
+      {
+        "part": "rivet_2_shophead",
+        "field": "rivet_2",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 1
+        }
+      },
+      {
+        "part": "rivet_3_front_die",
+        "field": "rivet_3",
+        "do": "slide",
+        "axis": "y",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": -120
+        }
+      },
+      {
+        "part": "rivet_3_front_die",
+        "field": "rivet_3",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": -51
+        }
+      },
+      {
+        "part": "rivet_3_rear_die",
+        "field": "rivet_3",
+        "do": "slide",
+        "axis": "y",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": -120
+        }
+      },
+      {
+        "part": "rivet_3_rear_die",
+        "field": "rivet_3",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 43
+        }
+      },
+      {
+        "part": "rivet_3_rack_head",
+        "field": "rivet_3",
+        "do": "show",
+        "at": {
+          "0": 1,
+          "1": 0,
+          "2": 0
+        }
+      },
+      {
+        "part": "rivet_3_rack_shank",
+        "field": "rivet_3",
+        "do": "show",
+        "at": {
+          "0": 1,
+          "1": 0,
+          "2": 0
+        }
+      },
+      {
+        "part": "rivet_3_head",
+        "field": "rivet_3",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 1,
+          "2": 1
+        }
+      },
+      {
+        "part": "rivet_3_inserted_shank",
+        "field": "rivet_3",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 1,
+          "2": 0
+        }
+      },
+      {
+        "part": "rivet_3_set_shank",
+        "field": "rivet_3",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 1
+        }
+      },
+      {
+        "part": "rivet_3_shophead",
+        "field": "rivet_3",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 1
+        }
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            40,
+            0
+          ],
+          "size": [
+            1200,
+            80,
+            600
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -500,
+            800,
+            0
+          ],
+          "size": [
+            60,
+            1440,
+            80
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            500,
+            800,
+            0
+          ],
+          "size": [
+            60,
+            1440,
+            80
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1510,
+            0
+          ],
+          "size": [
+            1060,
+            50,
+            80
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            550,
+            110
+          ],
+          "size": [
+            1040,
+            40,
+            300
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            900,
+            0
+          ],
+          "size": [
+            1040,
+            80,
+            60
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "lathe",
+          "at": [
+            -260,
+            1200,
+            6
+          ],
+          "profile": [
+            [
+              20,
+              -6
+            ],
+            [
+              60,
+              -6
+            ],
+            [
+              60,
+              6
+            ],
+            [
+              20,
+              6
+            ],
+            [
+              20,
+              -6
+            ]
+          ],
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "front"
+        },
+        {
+          "kind": "lathe",
+          "at": [
+            0,
+            1200,
+            6
+          ],
+          "profile": [
+            [
+              20,
+              -6
+            ],
+            [
+              60,
+              -6
+            ],
+            [
+              60,
+              6
+            ],
+            [
+              20,
+              6
+            ],
+            [
+              20,
+              -6
+            ]
+          ],
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "front"
+        },
+        {
+          "kind": "lathe",
+          "at": [
+            260,
+            1200,
+            6
+          ],
+          "profile": [
+            [
+              20,
+              -6
+            ],
+            [
+              60,
+              -6
+            ],
+            [
+              60,
+              6
+            ],
+            [
+              20,
+              6
+            ],
+            [
+              20,
+              -6
+            ]
+          ],
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "front"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -130,
+            1200,
+            6
+          ],
+          "size": [
+            180,
+            40,
+            12
+          ],
+          "tint": "front"
+        },
+        {
+          "kind": "box",
+          "at": [
+            130,
+            1200,
+            6
+          ],
+          "size": [
+            180,
+            40,
+            12
+          ],
+          "tint": "front"
+        },
+        {
+          "kind": "lathe",
+          "at": [
+            -260,
+            1200,
+            -6
+          ],
+          "profile": [
+            [
+              20,
+              -6
+            ],
+            [
+              60,
+              -6
+            ],
+            [
+              60,
+              6
+            ],
+            [
+              20,
+              6
+            ],
+            [
+              20,
+              -6
+            ]
+          ],
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "back"
+        },
+        {
+          "kind": "lathe",
+          "at": [
+            0,
+            1200,
+            -6
+          ],
+          "profile": [
+            [
+              20,
+              -6
+            ],
+            [
+              60,
+              -6
+            ],
+            [
+              60,
+              6
+            ],
+            [
+              20,
+              6
+            ],
+            [
+              20,
+              -6
+            ]
+          ],
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "back"
+        },
+        {
+          "kind": "lathe",
+          "at": [
+            260,
+            1200,
+            -6
+          ],
+          "profile": [
+            [
+              20,
+              -6
+            ],
+            [
+              60,
+              -6
+            ],
+            [
+              60,
+              6
+            ],
+            [
+              20,
+              6
+            ],
+            [
+              20,
+              -6
+            ]
+          ],
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "back"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -130,
+            1200,
+            -6
+          ],
+          "size": [
+            180,
+            40,
+            12
+          ],
+          "tint": "back"
+        },
+        {
+          "kind": "box",
+          "at": [
+            130,
+            1200,
+            -6
+          ],
+          "size": [
+            180,
+            40,
+            12
+          ],
+          "tint": "back"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -260,
+            1490,
+            0
+          ],
+          "size": [
+            70,
+            60,
+            260
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -260,
+            1370,
+            100
+          ],
+          "size": [
+            70,
+            300,
+            60
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -260,
+            1370,
+            -100
+          ],
+          "size": [
+            70,
+            300,
+            60
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -200,
+            1200,
+            0
+          ],
+          "size": [
+            20,
+            70,
+            260
+          ],
+          "tint": "clamp"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -190,
+            1330,
+            100
+          ],
+          "size": [
+            20,
+            280,
+            60
+          ],
+          "tint": "clamp"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -220,
+            1480,
+            100
+          ],
+          "size": [
+            100,
+            60,
+            60
+          ],
+          "tint": "clamp"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -260,
+            1320,
+            100
+          ],
+          "r": 36,
+          "h": 50,
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "die",
+          "role": "rivet_1_front_die",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -260,
+            1320,
+            -100
+          ],
+          "r": 36,
+          "h": 50,
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "die",
+          "role": "rivet_1_rear_die",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -260,
+            550,
+            200
+          ],
+          "size": [
+            90,
+            40,
+            140
+          ],
+          "tint": "rack"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -260,
+            900,
+            100
+          ],
+          "r": 30,
+          "h": 180,
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "control"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -246,
+            1380,
+            136
+          ],
+          "size": [
+            6,
+            20,
+            12
+          ],
+          "tint": "label"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -246,
+            1360,
+            136
+          ],
+          "size": [
+            6,
+            20,
+            12
+          ],
+          "tint": "label"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -246,
+            560,
+            276
+          ],
+          "size": [
+            6,
+            20,
+            12
+          ],
+          "tint": "label"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -246,
+            540,
+            276
+          ],
+          "size": [
+            6,
+            20,
+            12
+          ],
+          "tint": "label"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -260,
+            600,
+            218
+          ],
+          "r": 30,
+          "h": 12,
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "metal1",
+          "role": "rivet_1_rack_head"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -260,
+            600,
+            177
+          ],
+          "r": 16,
+          "h": 74,
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "metal1",
+          "role": "rivet_1_rack_shank"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -260,
+            1200,
+            18
+          ],
+          "r": 30,
+          "h": 12,
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "metal1",
+          "role": "rivet_1_head"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -260,
+            1200,
+            -23
+          ],
+          "r": 16,
+          "h": 74,
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "metal1",
+          "role": "rivet_1_inserted_shank"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -260,
+            1200,
+            0
+          ],
+          "r": 16,
+          "h": 28,
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "metal1",
+          "role": "rivet_1_set_shank"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -260,
+            1200,
+            -22
+          ],
+          "r": 24,
+          "h": 20,
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "metal1",
+          "role": "rivet_1_shophead"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1490,
+            0
+          ],
+          "size": [
+            70,
+            60,
+            260
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1370,
+            100
+          ],
+          "size": [
+            70,
+            300,
+            60
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1370,
+            -100
+          ],
+          "size": [
+            70,
+            300,
+            60
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            60,
+            1200,
+            0
+          ],
+          "size": [
+            20,
+            70,
+            260
+          ],
+          "tint": "clamp"
+        },
+        {
+          "kind": "box",
+          "at": [
+            70,
+            1330,
+            100
+          ],
+          "size": [
+            20,
+            280,
+            60
+          ],
+          "tint": "clamp"
+        },
+        {
+          "kind": "box",
+          "at": [
+            40,
+            1480,
+            100
+          ],
+          "size": [
+            100,
+            60,
+            60
+          ],
+          "tint": "clamp"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            1320,
+            100
+          ],
+          "r": 36,
+          "h": 50,
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "die",
+          "role": "rivet_2_front_die",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            1320,
+            -100
+          ],
+          "r": 36,
+          "h": 50,
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "die",
+          "role": "rivet_2_rear_die",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            550,
+            200
+          ],
+          "size": [
+            90,
+            40,
+            140
+          ],
+          "tint": "rack"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            900,
+            100
+          ],
+          "r": 30,
+          "h": 180,
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "control"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1390,
+            136
+          ],
+          "size": [
+            28,
+            6,
+            12
+          ],
+          "tint": "label"
+        },
+        {
+          "kind": "box",
+          "at": [
+            14,
+            1380,
+            136
+          ],
+          "size": [
+            6,
+            20,
+            12
+          ],
+          "tint": "label"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1350,
+            136
+          ],
+          "size": [
+            28,
+            6,
+            12
+          ],
+          "tint": "label"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -14,
+            1360,
+            136
+          ],
+          "size": [
+            6,
+            20,
+            12
+          ],
+          "tint": "label"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1370,
+            136
+          ],
+          "size": [
+            28,
+            6,
+            12
+          ],
+          "tint": "label"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            570,
+            276
+          ],
+          "size": [
+            28,
+            6,
+            12
+          ],
+          "tint": "label"
+        },
+        {
+          "kind": "box",
+          "at": [
+            14,
+            560,
+            276
+          ],
+          "size": [
+            6,
+            20,
+            12
+          ],
+          "tint": "label"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            530,
+            276
+          ],
+          "size": [
+            28,
+            6,
+            12
+          ],
+          "tint": "label"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -14,
+            540,
+            276
+          ],
+          "size": [
+            6,
+            20,
+            12
+          ],
+          "tint": "label"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            550,
+            276
+          ],
+          "size": [
+            28,
+            6,
+            12
+          ],
+          "tint": "label"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            600,
+            218
+          ],
+          "r": 30,
+          "h": 12,
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "metal2",
+          "role": "rivet_2_rack_head"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            600,
+            177
+          ],
+          "r": 16,
+          "h": 74,
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "metal2",
+          "role": "rivet_2_rack_shank"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            1200,
+            18
+          ],
+          "r": 30,
+          "h": 12,
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "metal2",
+          "role": "rivet_2_head"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            1200,
+            -23
+          ],
+          "r": 16,
+          "h": 74,
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "metal2",
+          "role": "rivet_2_inserted_shank"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            1200,
+            0
+          ],
+          "r": 16,
+          "h": 28,
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "metal2",
+          "role": "rivet_2_set_shank"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            1200,
+            -22
+          ],
+          "r": 24,
+          "h": 20,
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "metal2",
+          "role": "rivet_2_shophead"
+        },
+        {
+          "kind": "box",
+          "at": [
+            260,
+            1490,
+            0
+          ],
+          "size": [
+            70,
+            60,
+            260
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            260,
+            1370,
+            100
+          ],
+          "size": [
+            70,
+            300,
+            60
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            260,
+            1370,
+            -100
+          ],
+          "size": [
+            70,
+            300,
+            60
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            320,
+            1200,
+            0
+          ],
+          "size": [
+            20,
+            70,
+            260
+          ],
+          "tint": "clamp"
+        },
+        {
+          "kind": "box",
+          "at": [
+            330,
+            1330,
+            100
+          ],
+          "size": [
+            20,
+            280,
+            60
+          ],
+          "tint": "clamp"
+        },
+        {
+          "kind": "box",
+          "at": [
+            300,
+            1480,
+            100
+          ],
+          "size": [
+            100,
+            60,
+            60
+          ],
+          "tint": "clamp"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            260,
+            1320,
+            100
+          ],
+          "r": 36,
+          "h": 50,
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "die",
+          "role": "rivet_3_front_die",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            260,
+            1320,
+            -100
+          ],
+          "r": 36,
+          "h": 50,
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "die",
+          "role": "rivet_3_rear_die",
+          "pivot": [
+            0,
+            0,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            260,
+            550,
+            200
+          ],
+          "size": [
+            90,
+            40,
+            140
+          ],
+          "tint": "rack"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            260,
+            900,
+            100
+          ],
+          "r": 30,
+          "h": 180,
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "control"
+        },
+        {
+          "kind": "box",
+          "at": [
+            260,
+            1390,
+            136
+          ],
+          "size": [
+            28,
+            6,
+            12
+          ],
+          "tint": "label"
+        },
+        {
+          "kind": "box",
+          "at": [
+            274,
+            1380,
+            136
+          ],
+          "size": [
+            6,
+            20,
+            12
+          ],
+          "tint": "label"
+        },
+        {
+          "kind": "box",
+          "at": [
+            274,
+            1360,
+            136
+          ],
+          "size": [
+            6,
+            20,
+            12
+          ],
+          "tint": "label"
+        },
+        {
+          "kind": "box",
+          "at": [
+            260,
+            1350,
+            136
+          ],
+          "size": [
+            28,
+            6,
+            12
+          ],
+          "tint": "label"
+        },
+        {
+          "kind": "box",
+          "at": [
+            260,
+            1370,
+            136
+          ],
+          "size": [
+            28,
+            6,
+            12
+          ],
+          "tint": "label"
+        },
+        {
+          "kind": "box",
+          "at": [
+            260,
+            570,
+            276
+          ],
+          "size": [
+            28,
+            6,
+            12
+          ],
+          "tint": "label"
+        },
+        {
+          "kind": "box",
+          "at": [
+            274,
+            560,
+            276
+          ],
+          "size": [
+            6,
+            20,
+            12
+          ],
+          "tint": "label"
+        },
+        {
+          "kind": "box",
+          "at": [
+            274,
+            540,
+            276
+          ],
+          "size": [
+            6,
+            20,
+            12
+          ],
+          "tint": "label"
+        },
+        {
+          "kind": "box",
+          "at": [
+            260,
+            530,
+            276
+          ],
+          "size": [
+            28,
+            6,
+            12
+          ],
+          "tint": "label"
+        },
+        {
+          "kind": "box",
+          "at": [
+            260,
+            550,
+            276
+          ],
+          "size": [
+            28,
+            6,
+            12
+          ],
+          "tint": "label"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            260,
+            600,
+            218
+          ],
+          "r": 30,
+          "h": 12,
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "metal3",
+          "role": "rivet_3_rack_head"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            260,
+            600,
+            177
+          ],
+          "r": 16,
+          "h": 74,
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "metal3",
+          "role": "rivet_3_rack_shank"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            260,
+            1200,
+            18
+          ],
+          "r": 30,
+          "h": 12,
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "metal3",
+          "role": "rivet_3_head"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            260,
+            1200,
+            -23
+          ],
+          "r": 16,
+          "h": 74,
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "metal3",
+          "role": "rivet_3_inserted_shank"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            260,
+            1200,
+            0
+          ],
+          "r": 16,
+          "h": 28,
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "metal3",
+          "role": "rivet_3_set_shank"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            260,
+            1200,
+            -22
+          ],
+          "r": 24,
+          "h": 20,
+          "pitch": 90000,
+          "segments": 32,
+          "tint": "metal3",
+          "role": "rivet_3_shophead"
+        }
+      ],
+      "palette": {
+        "frame": "#344b5c",
+        "front": "#a9bbcb",
+        "back": "#6c8195",
+        "clamp": "#476d66",
+        "die": "#343a44",
+        "rack": "#665247",
+        "label": "#fff1ac",
+        "control": "#b4ceab",
+        "metal1": "#df9462",
+        "metal2": "#d9e2e7",
+        "metal3": "#e6c45e"
+      },
+      "tags": [
+        "tool",
+        "rivet",
+        "exhibit"
+      ]
+    }
+  },
+  "text": {
+    "work": "work",
+    "rivet": "solid rivets",
+    "squeezer": "squeezer practice",
+    "card": "Insert and set three original solid rivets on an instructional squeezer frame.",
+    "wrong_stage": "Insert this numbered rivet only from its rack, then set it only while inserted. A set joint is permanent on this fixture.",
+    "free_hand": "Put down an object so a hand is free for the numbered practice control.",
+    "howto_rivet": "Each fixed numbered control operates its matching numbered joint and original rack rivet. First insert that rivet through the two aligned open holes, then set its exposed rear tail into a wider, shorter shophead. The original front manufactured head stays unchanged. The two predrilled strips are prealigned and clamped; integral indexed dies/backing meet both head faces at the set pose. Other joints remain independent. Each fixture is supplied for three permanent practice joints: there is no reset, reload, extraction, loose stock or output to carry. This attached instructional depiction snaps between indexed poses. It does not simulate drilling, impacts, continuous squeezing/contact paths, precise material volume, forces, load-bearing strength, real fabrication or aircraft work. The hand touches a practice control; anatomical rivet-working contact is not guaranteed."
+  },
+  "card": {
+    "text": "card",
+    "category": "work",
+    "synonyms": [
+      "rivet",
+      "squeezer"
+    ]
+  },
+  "howtos": {
+    "rivet": {
+      "text": "howto_rivet",
+      "steps": [
+        {
+          "form": "insert_1"
+        },
+        {
+          "form": "set_1"
+        },
+        {
+          "form": "insert_2"
+        },
+        {
+          "form": "set_2"
+        },
+        {
+          "form": "insert_3"
+        },
+        {
+          "form": "set_3"
+        }
+      ]
+    }
+  }
+}

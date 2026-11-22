@@ -1,0 +1,1410 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "All six single-field changes with other joints at each stage; generic harness replays every receipt exactly once.",
+  "cases": [
+    {
+      "name": "insert_1_independent_0",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 0,
+              "rivet_2": 0,
+              "rivet_3": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "insert_1"
+          },
+          "receipt": "single",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "rivet_1",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:rivet_changed",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:riveting_frame",
+          "fields": {
+            "rivet_1": 1,
+            "rivet_2": 0,
+            "rivet_3": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "insert_1_independent_1",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 0,
+              "rivet_2": 1,
+              "rivet_3": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "insert_1"
+          },
+          "receipt": "single",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "rivet_1",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:rivet_changed",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:riveting_frame",
+          "fields": {
+            "rivet_1": 1,
+            "rivet_2": 1,
+            "rivet_3": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "insert_1_independent_2",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 0,
+              "rivet_2": 2,
+              "rivet_3": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "insert_1"
+          },
+          "receipt": "single",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "rivet_1",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:rivet_changed",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:riveting_frame",
+          "fields": {
+            "rivet_1": 1,
+            "rivet_2": 2,
+            "rivet_3": 2
+          }
+        }
+      }
+    },
+    {
+      "name": "set_1_independent_0",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 1,
+              "rivet_2": 0,
+              "rivet_3": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "set_1"
+          },
+          "receipt": "single",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "rivet_1",
+                "n": 28,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:rivet_changed",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:riveting_frame",
+          "fields": {
+            "rivet_1": 2,
+            "rivet_2": 0,
+            "rivet_3": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "set_1_independent_1",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 1,
+              "rivet_2": 1,
+              "rivet_3": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "set_1"
+          },
+          "receipt": "single",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "rivet_1",
+                "n": 28,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:rivet_changed",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:riveting_frame",
+          "fields": {
+            "rivet_1": 2,
+            "rivet_2": 1,
+            "rivet_3": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "set_1_independent_2",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 1,
+              "rivet_2": 2,
+              "rivet_3": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "set_1"
+          },
+          "receipt": "single",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "rivet_1",
+                "n": 28,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:rivet_changed",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:riveting_frame",
+          "fields": {
+            "rivet_1": 2,
+            "rivet_2": 2,
+            "rivet_3": 2
+          }
+        }
+      }
+    },
+    {
+      "name": "insert_2_independent_0",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 0,
+              "rivet_2": 0,
+              "rivet_3": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "insert_2"
+          },
+          "receipt": "single",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "rivet_2",
+                "n": 29,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:rivet_changed",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:riveting_frame",
+          "fields": {
+            "rivet_1": 0,
+            "rivet_2": 1,
+            "rivet_3": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "insert_2_independent_1",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 1,
+              "rivet_2": 0,
+              "rivet_3": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "insert_2"
+          },
+          "receipt": "single",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "rivet_2",
+                "n": 29,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:rivet_changed",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:riveting_frame",
+          "fields": {
+            "rivet_1": 1,
+            "rivet_2": 1,
+            "rivet_3": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "insert_2_independent_2",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 2,
+              "rivet_2": 0,
+              "rivet_3": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "insert_2"
+          },
+          "receipt": "single",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "rivet_2",
+                "n": 29,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:rivet_changed",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:riveting_frame",
+          "fields": {
+            "rivet_1": 2,
+            "rivet_2": 1,
+            "rivet_3": 2
+          }
+        }
+      }
+    },
+    {
+      "name": "set_2_independent_0",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 0,
+              "rivet_2": 1,
+              "rivet_3": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "set_2"
+          },
+          "receipt": "single",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "rivet_2",
+                "n": 29,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:rivet_changed",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:riveting_frame",
+          "fields": {
+            "rivet_1": 0,
+            "rivet_2": 2,
+            "rivet_3": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "set_2_independent_1",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 1,
+              "rivet_2": 1,
+              "rivet_3": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "set_2"
+          },
+          "receipt": "single",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "rivet_2",
+                "n": 29,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:rivet_changed",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:riveting_frame",
+          "fields": {
+            "rivet_1": 1,
+            "rivet_2": 2,
+            "rivet_3": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "set_2_independent_2",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 2,
+              "rivet_2": 1,
+              "rivet_3": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "set_2"
+          },
+          "receipt": "single",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "rivet_2",
+                "n": 29,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:rivet_changed",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:riveting_frame",
+          "fields": {
+            "rivet_1": 2,
+            "rivet_2": 2,
+            "rivet_3": 2
+          }
+        }
+      }
+    },
+    {
+      "name": "insert_3_independent_0",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 0,
+              "rivet_2": 0,
+              "rivet_3": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "insert_3"
+          },
+          "receipt": "single",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "rivet_3",
+                "n": 30,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:rivet_changed",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:riveting_frame",
+          "fields": {
+            "rivet_1": 0,
+            "rivet_2": 0,
+            "rivet_3": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "insert_3_independent_1",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 1,
+              "rivet_2": 1,
+              "rivet_3": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "insert_3"
+          },
+          "receipt": "single",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "rivet_3",
+                "n": 30,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:rivet_changed",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:riveting_frame",
+          "fields": {
+            "rivet_1": 1,
+            "rivet_2": 1,
+            "rivet_3": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "insert_3_independent_2",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 2,
+              "rivet_2": 2,
+              "rivet_3": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "insert_3"
+          },
+          "receipt": "single",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "rivet_3",
+                "n": 30,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:rivet_changed",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:riveting_frame",
+          "fields": {
+            "rivet_1": 2,
+            "rivet_2": 2,
+            "rivet_3": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "set_3_independent_0",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 0,
+              "rivet_2": 0,
+              "rivet_3": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "set_3"
+          },
+          "receipt": "single",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "rivet_3",
+                "n": 30,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:rivet_changed",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:riveting_frame",
+          "fields": {
+            "rivet_1": 0,
+            "rivet_2": 0,
+            "rivet_3": 2
+          }
+        }
+      }
+    },
+    {
+      "name": "set_3_independent_1",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 1,
+              "rivet_2": 1,
+              "rivet_3": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "set_3"
+          },
+          "receipt": "single",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "rivet_3",
+                "n": 30,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:rivet_changed",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:riveting_frame",
+          "fields": {
+            "rivet_1": 1,
+            "rivet_2": 1,
+            "rivet_3": 2
+          }
+        }
+      }
+    },
+    {
+      "name": "set_3_independent_2",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:riveting_frame",
+            "fields": {
+              "rivet_1": 2,
+              "rivet_2": 2,
+              "rivet_3": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              260,
+              900,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "set_3"
+          },
+          "receipt": "single",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "rivet_3",
+                "n": 30,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:rivet_changed",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:riveting_frame",
+          "fields": {
+            "rivet_1": 2,
+            "rivet_2": 2,
+            "rivet_3": 2
+          }
+        }
+      }
+    }
+  ]
+}
