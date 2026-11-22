@@ -135,6 +135,6 @@ knobs:
   video:
     max_seconds: 90             # one uncut, real-speed clip; longer journeys are split into separate clips
     phone_when_layout: true     # add a phone-viewport clip when layout or CSS changed
-  modal_gates_per_day: 3        # full release gates, across all releases
+  modal_gates_per_day: 4        # full release gates, across all releases
   playtest_budget_minutes: 30   # wall-clock budget for one PR's T3 playtests
   review_after_milestones: 2    # a reviewer-agent pass after every N milestones of a long lane

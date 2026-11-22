@@ -112,6 +112,14 @@
       "reason": "skips as root only (the remote gate's containers): chmod 000 does not stop root reading the file; every non-root run (CI's launcher job, local) runs it (#2557)",
       "owner": "#2557",
       "exit": "the gate's containers run tests as a non-root user, or the test makes the file unreadable in a way root cannot read; then drop this entry"
+    },
+    {
+      "step": "V3-launcher-unit",
+      "id": "A2 A5: an idle serve runs the pass on its schedule, through the real CLI; a Soul with none set off doesn't",
+      "status": "fail",
+      "reason": "fails in the remote gate's root containers for both the baseline (v0.130) and the 0.131 candidate (gate run 45015778232) and passes locally and as root in a node:22 container; pre-existing, not a 0.131 regression; cause not yet seen (the gate keeps no per-test log; #4076)",
+      "owner": "#4076",
+      "exit": "#4076 makes the test pass as root and removes this entry"
     }
   ],
   "scopeExclusions": [
