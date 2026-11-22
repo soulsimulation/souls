@@ -132,13 +132,15 @@ struct Sent {
     duplicates: u64,
     resent: u64,
     restarting: u64,
+    /// Acts answered accepted (kind 3) and not yet ended when the drain ran out: answered, so not an error (W11).
+    unfinished: u64,
     /// X10's trace lines (`--trace`): `ack|dup <agent> <sequence> <unix ms>`, `first <agent> <sequence> <sent unix ms>
     /// <answer unix ms> <receipt or refusal name>`, `gone|back <agent> <unix ms>`.
     trace: Vec<String>,
 }
 
-/// One minute of the run's answers: receipts (a receipt, or a move's acceptance), refusals and errors by name, and
-/// each answered act's latency from its send to its first answer, in microseconds.
+/// One minute of the run's answers: receipts (an act's end, kind 1), refusals and errors by name, and each answered
+/// act's latency from its send to its first answer (an acceptance, a receipt or a refusal), in microseconds.
 #[derive(Default)]
 struct Minute {
     receipts: u64,
@@ -349,8 +351,11 @@ fn intent(actor: Actor, verb: &Name, target: Option<Id>, sequence: u64, basis: &
 /// What a frame from the gateway says about the acts.
 #[derive(Debug, PartialEq)]
 enum Heard {
-    /// An act's receipt, or a move's acceptance (`replica::intents::Answer` kinds 1 and 3), by its sequence and kind.
-    Receipt(u64, u64),
+    /// An act's receipt (`replica::intents::Answer` kind 1), by its sequence: its end.
+    Receipt(u64),
+    /// An act accepted and still going (kind 3, C20's progress answer; W11 #4087), by its sequence: its first answer,
+    /// not its end, which a receipt or a refusal brings later.
+    Accepted(u64),
     /// An act refused, by its sequence and the refusal's name (kind 2).
     Refused(u64, String),
     /// Bytes the gateway could not read (kind 5), or a gateway's own word (`{4: name}`, a token refused): an error.
@@ -374,7 +379,8 @@ fn heard(bytes: &[u8]) -> Heard {
         return Heard::Other;
     };
     match (a.get(&2), a.get(&3)) {
-        (Some(Value::Uint(s)), Some(Value::Uint(k @ (1 | 3)))) => Heard::Receipt(*s, *k),
+        (Some(Value::Uint(s)), Some(Value::Uint(1))) => Heard::Receipt(*s),
+        (Some(Value::Uint(s)), Some(Value::Uint(3))) => Heard::Accepted(*s),
         (Some(Value::Uint(s)), Some(Value::Uint(2))) => Heard::Refused(*s, name(a.get(&4))),
         (_, Some(Value::Uint(5))) => Heard::Error(name(a.get(&4))),
         _ => Heard::Other,
@@ -479,7 +485,9 @@ async fn come_back(url: &str, token: &str, k: u32, jitter: bool) -> Option<(Tx, 
 }
 
 /// One agent: first frame and sign-in, then each intent the schedule hands it, sent at once; then its answers, each
-/// act's first answer timed from its send. Acts still unanswered 5 s after the last is sent are errors (`unanswered`).
+/// act's first answer timed from its send (an accepted act's acceptance, W11 #4087), each act kept until its end (its
+/// receipt or refusal). Acts still unanswered at the drain's end are errors (`unanswered`); accepted ones not yet
+/// ended are counted as `unfinished`, not as errors.
 /// With [`Faults`] it comes back after a lost or dropped socket and sends again, under its old sequence, every intent
 /// it has no answer for (the runbook's client, `v2/docs/runbook/gateway-upgrade.md`). A second receipt for one
 /// sequence is counted as a duplicate.
@@ -512,7 +520,7 @@ async fn agent(
         while ok && Instant::now() < until {
             match tokio::time::timeout_at(until.into(), rx.next()).await {
                 Ok(Some(Ok(Message::Binary(b)))) => match heard(&b) {
-                    Heard::Receipt(s, _) | Heard::Refused(s, _) if s == sequence => break,
+                    Heard::Receipt(s) | Heard::Refused(s, _) if s == sequence => break,
                     _ => {}
                 },
                 Ok(Some(Ok(_))) => {}
@@ -533,6 +541,8 @@ async fn agent(
     let mut verb_of: HashMap<u64, Name> = HashMap::new();
     // Sequences with a receipt (kind 1): a second is a duplicate.
     let mut receipted: std::collections::HashSet<u64> = std::collections::HashSet::new();
+    // Pending sequences answered accepted (kind 3): their first answer is timed; their end is still to come.
+    let mut accepted: std::collections::HashSet<u64> = std::collections::HashSet::new();
     // Intents answered `world.restarting`: sent again at their time.
     let mut retry: std::collections::VecDeque<(Instant, u64)> = std::collections::VecDeque::new();
     let mut start: Option<Instant> = None;
@@ -578,11 +588,21 @@ async fn agent(
                     let now = Instant::now();
                     let s0 = start.unwrap_or(now);
                     match heard(&b) {
-                        Heard::Receipt(s, kind) => {
-                            if kind == 1 && !receipted.insert(s) {
+                        // Accepted: the act's first answer, timed; it stays pending until its receipt or refusal.
+                        Heard::Accepted(s) if pending.contains_key(&s) => {
+                            if accepted.insert(s) {
+                                let (sent_at, sent_ms, _) = pending[&s];
+                                let m = out.minute(s0, now);
+                                m.latency_us.push(now.duration_since(sent_at).as_micros() as u64);
+                                out.trace.push(format!("first {k} {s} {sent_ms} {} accepted", unix_ms()));
+                            }
+                            out.other += 1;
+                        }
+                        Heard::Receipt(s) => {
+                            if !receipted.insert(s) {
                                 out.duplicates += 1;
                                 out.trace.push(format!("dup {k} {s} {}", unix_ms()));
-                            } else if kind == 1 {
+                            } else {
                                 out.trace.push(format!("ack {k} {s} {}", unix_ms()));
                             }
                             if let Some((sent_at, sent_ms, _)) = pending.remove(&s) {
@@ -590,11 +610,13 @@ async fn agent(
                                 if verb_of.remove(&s).is_some_and(|v| v.as_str().ends_with(":sit")) {
                                     seated.store(true, Ordering::Relaxed);
                                 }
+                                out.receipts += 1;
                                 let m = out.minute(s0, now);
                                 m.receipts += 1;
-                                m.latency_us.push(now.duration_since(sent_at).as_micros() as u64);
-                                out.receipts += 1;
-                                out.trace.push(format!("first {k} {s} {sent_ms} {} receipt", unix_ms()));
+                                if !accepted.remove(&s) {
+                                    m.latency_us.push(now.duration_since(sent_at).as_micros() as u64);
+                                    out.trace.push(format!("first {k} {s} {sent_ms} {} receipt", unix_ms()));
+                                }
                             } else {
                                 out.other += 1;
                             }
@@ -609,10 +631,15 @@ async fn agent(
                             let verb = verb_of.remove(&s).map_or("?".into(), |v| v.as_str().to_owned());
                             *out.refused_by.entry(format!("{verb} {reason}")).or_default() += 1;
                             let (sent_at, sent_ms, _) = pending.remove(&s).expect("pending");
-                            out.trace.push(format!("first {k} {s} {sent_ms} {} {reason}", unix_ms()));
+                            let first = !accepted.remove(&s);
+                            if first {
+                                out.trace.push(format!("first {k} {s} {sent_ms} {} {reason}", unix_ms()));
+                            }
                             let m = out.minute(s0, now);
                             *m.refusals.entry(reason).or_default() += 1;
-                            m.latency_us.push(now.duration_since(sent_at).as_micros() as u64);
+                            if first {
+                                m.latency_us.push(now.duration_since(sent_at).as_micros() as u64);
+                            }
                             out.other += 1;
                         }
                         Heard::Error(name) => out.error(s0, now, &name),
@@ -674,7 +701,12 @@ async fn agent(
     }
     if let Some(s0) = start {
         for (s, (at, sent_ms, _)) in pending {
-            out.error(s0, at, "unanswered");
+            // Accepted and still going at the drain's end: answered, not ended, so counted apart, not an error.
+            if accepted.contains(&s) {
+                out.unfinished += 1;
+            } else {
+                out.error(s0, at, "unanswered");
+            }
             out.trace.push(format!("open {k} {s} {sent_ms}"));
         }
     }
@@ -1214,6 +1246,7 @@ async fn main() {
     let duplicates: u64 = sent.iter().map(|x| x.duplicates).sum();
     let resent: u64 = sent.iter().map(|x| x.resent).sum();
     let restarting: u64 = sent.iter().map(|x| x.restarting).sum();
+    let unfinished: u64 = sent.iter().map(|x| x.unfinished).sum();
     let mut viewers = Vec::new();
     for v in watching {
         if let Ok(v) = v.await {
@@ -1271,6 +1304,7 @@ async fn main() {
         .n("duplicateReceipts", duplicates as f64)
         .n("resent", resent as f64)
         .n("restartingAnswers", restarting as f64)
+        .n("unfinished", unfinished as f64)
         .raw("viewers", serde_like::list(&viewers));
     let on_time = total.get("onTimeShare").unwrap_or(0.0);
     println!(
@@ -1306,6 +1340,7 @@ async fn main() {
         println!("  minute {}", m.json());
     }
     println!("  refused by verb {}", counts(&refused_by));
+    println!("  accepted, not ended by the drain's end: {unfinished}");
     if a.reconnect || a.drop.is_some() || !viewers.is_empty() {
         println!(
             "  faults: duplicate receipts {duplicates}, sent again {resent}, world.restarting answers {restarting}"

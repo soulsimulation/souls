@@ -31,6 +31,23 @@ use worldd::answers::{self, Config, MOVE_ENDED, MOVE_STARTED};
 use worldd::bodies::Bodies;
 use worldd::checkers::toggles;
 
+thread_local! {
+    /// The acts that had their one progress answer (C20) on this test's thread.
+    static PROGRESSED: std::cell::RefCell<std::collections::BTreeSet<(Vec<u8>, u64)>> =
+        std::cell::RefCell::default();
+}
+
+/// Whether `frame` is an act's progress answer (C20, W11 #4087), which the answer helpers read past. An act has at
+/// most one: a second fails the test.
+fn progress_once(frame: &[u8]) -> bool {
+    let Some(key) = answers::progress_of(frame) else {
+        return false;
+    };
+    let first = PROGRESSED.with(|p| p.borrow_mut().insert(key));
+    assert!(first, "a second progress answer for one act");
+    true
+}
+
 const LINEAGE: Scope = Scope([0x4b; 16]);
 const CHAIR: &str = include_str!("../../replica/fixtures/seats/chair.diag");
 
@@ -185,10 +202,16 @@ impl Client {
 
     /// The next answer: a receipt's intent id and entries, or a refusal's reason.
     fn answer(&mut self) -> Result<(Id, Vec<u64>), String> {
-        let mut len = [0u8; 4];
-        self.0.read_exact(&mut len).expect("an answer");
-        let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
-        self.0.read_exact(&mut frame).unwrap();
+        // A progress answer (C20, sent as a run starts) is read past.
+        let frame = loop {
+            let mut len = [0u8; 4];
+            self.0.read_exact(&mut len).expect("an answer");
+            let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
+            self.0.read_exact(&mut frame).unwrap();
+            if !progress_once(&frame) {
+                break frame;
+            }
+        };
         read_answer(&frame)
     }
 }
@@ -919,6 +942,9 @@ fn a_walk_whose_act_times_out_mid_move_stops_and_ends_by_name() {
         .send(answers::Event::RunTo { tick: 100, done })
         .unwrap();
     ran.recv().unwrap();
+    // Accepted as its route is planned (C20, W11 #4087), with what is left of its 1 s; then its end.
+    let frame = rx.recv_timeout(Duration::from_secs(20)).expect("an answer");
+    assert!(answers::is_progress(&frame), "accepted first");
     let frame = rx.recv_timeout(Duration::from_secs(20)).expect("an answer");
     assert_eq!(read_answer(&frame), Err("act.timed-out".into()));
     world.stop();
@@ -959,6 +985,226 @@ fn a_walk_whose_act_times_out_mid_move_stops_and_ends_by_name() {
         "timed out: stopped at {stopped:?} um; {} later records, none moving the body",
         ticks.len() - k - 1
     );
+}
+
+/// W11 (#4087), A3: the same 4 m walk with its route planned in the next tick and with the planner's answers held back
+/// for `late` ticks. Lockstep, so the planner's batches are taken by the body schedule (K18b's replay control). Returns
+/// the act deadline's distance from the tick that wrote it (the planning tick), the planning tick's time and how the
+/// walk ended.
+fn walk_planned_late(late: i64) -> (i64, i64, String) {
+    let store = Mem::with(Vec::new());
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.tick = Duration::from_millis(50);
+    cfg.deadline = 10_000_000;
+    cfg.lockstep = true;
+    cfg.bodies = Some(Box::new(move |_: &worldd::bodies::Placed| {
+        let mut b = bodies()?;
+        // Body ticks 1..=late take none of the planner's batches: the route arrives after them.
+        for t in 1..=late {
+            b.schedule.insert(t * 50_000, 0);
+        }
+        Ok(b)
+    }));
+    let world = answers::start(
+        toggles::World::build(0, 0, 0).replica,
+        toggles::rules(),
+        store.clone(),
+        cfg,
+    )
+    .expect("the world starts");
+    let (reply, rx) = channel();
+    let bytes = intent_bytes(
+        body_id(),
+        1,
+        "eden:walk",
+        Some(Target::Node(thing())),
+        &[],
+        60_000_000,
+    );
+    world
+        .events
+        .send(answers::Event::ArrivalAt {
+            tick: 0,
+            bytes,
+            reply,
+        })
+        .unwrap();
+    let (done, ran) = channel();
+    world
+        .events
+        .send(answers::Event::RunTo { tick: 400, done })
+        .unwrap();
+    ran.recv().unwrap();
+    let frame = rx.recv_timeout(Duration::from_secs(20)).expect("an answer");
+    assert!(
+        answers::is_progress(&frame),
+        "accepted as its route is planned"
+    );
+    let frame = rx.recv_timeout(Duration::from_secs(20)).expect("an answer");
+    assert!(!answers::is_progress(&frame), "one progress answer");
+    let answered = read_answer(&frame);
+    world.stop();
+    let bytes = store.0.lock().unwrap().bytes.clone();
+    let mut deadline = None;
+    for r in recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        for e in Part::read(&r).unwrap().effects {
+            for ev in e.events.unwrap_or_default() {
+                if ev.name.as_str() == answers::ACT_DEADLINE {
+                    let Some(Value::Uint(n)) = ev.fields.get(&5) else {
+                        panic!("deadline")
+                    };
+                    deadline = Some((*n as i64 - e.envelope.at, e.envelope.at));
+                }
+            }
+        }
+    }
+    let (span, planned) = deadline.expect("the walk's deadline entry");
+    let how = match answered {
+        Ok(_) => "done".to_owned(),
+        Err(r) => r,
+    };
+    (span, planned, how)
+}
+
+/// W11 (#4087), A3: a walk's deadline is its route's time from the tick its route is planned, not from the move's
+/// start. With its route 6 s late, the walk keeps the same span as one planned at once, and arrives; counted from its
+/// start (the old rule), its 4 m route's 8 s would have had 2 s left when it could first walk, and it ended
+/// `act.timed-out` on its way.
+#[test]
+fn a_walk_whose_route_comes_late_keeps_its_whole_route_time_and_arrives() {
+    let (prompt, prompt_at, prompt_how) = walk_planned_late(0);
+    let (late, late_at, late_how) = walk_planned_late(120);
+    println!(
+        "planned at {prompt_at} us: span {prompt} us, {prompt_how}; planned at {late_at} us: span {late} us, {late_how}"
+    );
+    assert!(late_at >= prompt_at + 6_000_000, "the route came 6 s later");
+    assert_eq!(
+        late, prompt,
+        "the same route's time, counted from its planning tick"
+    );
+    assert_eq!(prompt_how, "done");
+    assert_eq!(late_how, "done", "the late walk arrives, not timed out");
+}
+
+/// W11 (#4087): a Soul's answers reach it in version order. Its walk's route is planned a tick or two after the walk
+/// starts, and in each of those ticks the same Soul's sit on bare ground is refused at the moves' start, after the
+/// bodies stepped, so its refusal is framed after the walk's deadline entry raised the version. Every frame on the one
+/// stream the Soul's answers share carries a version no older than the frame before it; the walk has one progress
+/// answer and the sits none.
+#[test]
+fn a_souls_answers_keep_version_order_when_its_walk_is_accepted() {
+    let store = Mem::with(Vec::new());
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.tick = Duration::from_millis(50);
+    cfg.deadline = 10_000_000;
+    cfg.lockstep = true;
+    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
+    let world = answers::start(
+        toggles::World::build(0, 0, 0).replica,
+        toggles::rules(),
+        store,
+        cfg,
+    )
+    .expect("the world starts");
+    let ground = bodies().unwrap().town.ground;
+    let (reply, rx) = channel();
+    let walk = intent_bytes(
+        body_id(),
+        1,
+        "eden:walk",
+        Some(Target::Node(thing())),
+        &[],
+        60_000_000,
+    );
+    world
+        .events
+        .send(answers::Event::ArrivalAt {
+            tick: 0,
+            bytes: walk,
+            reply: reply.clone(),
+        })
+        .unwrap();
+    for (tick, sequence) in (1..=4).zip(2..) {
+        // A ranked sit (C14) with no free place among its candidates is refused before it would replace the walk.
+        let sit = intent_bytes(
+            body_id(),
+            sequence,
+            "eden:sit",
+            Some(Target::Node(ground)),
+            &[ground],
+            60_000_000,
+        );
+        world
+            .events
+            .send(answers::Event::ArrivalAt {
+                tick,
+                bytes: sit,
+                reply: reply.clone(),
+            })
+            .unwrap();
+    }
+    drop(reply);
+    let (done, ran) = channel();
+    world
+        .events
+        .send(answers::Event::RunTo { tick: 200, done })
+        .unwrap();
+    ran.recv().unwrap();
+    world.stop();
+    let mut seen = Vec::new();
+    while let Ok(frame) = rx.recv_timeout(Duration::from_secs(5)) {
+        let Value::Map(m) = decode(&frame).unwrap().value else {
+            panic!("a frame")
+        };
+        let Some(Value::Array(v)) = m.get(&1) else {
+            panic!("a version")
+        };
+        let Some(Value::Uint(version)) = v.get(3) else {
+            panic!("a version's sequence")
+        };
+        let Some(Value::Map(a)) = m.get(&2) else {
+            panic!("an answer")
+        };
+        let Some(Value::Uint(sequence)) = a.get(&2) else {
+            panic!("a sequence")
+        };
+        let how = match answers::is_progress(&frame) {
+            true => "accepted".to_owned(),
+            false => match read_answer(&frame) {
+                Ok(_) => "done".to_owned(),
+                Err(r) => r,
+            },
+        };
+        seen.push((*version, *sequence, how));
+    }
+    println!("one Soul's stream (version, sequence, answer): {seen:?}");
+    for w in seen.windows(2) {
+        assert!(
+            w[1].0 >= w[0].0,
+            "a version went back on the stream: {seen:?}"
+        );
+    }
+    let of = |s: u64| -> Vec<&str> {
+        seen.iter()
+            .filter(|f| f.1 == s)
+            .map(|f| f.2.as_str())
+            .collect()
+    };
+    assert_eq!(
+        of(1),
+        ["accepted", "done"],
+        "the walk: one progress answer, then done"
+    );
+    for s in 2..=5 {
+        let sit = of(s);
+        assert!(
+            sit.len() == 1 && sit[0] != "accepted" && sit[0] != "done",
+            "sit {s}: one refusal, no progress answer: {sit:?}"
+        );
+    }
 }
 
 /// A walk ended mid-move by a new move of the same body (`claim-taken`) stops in the tick the new move starts: its end
@@ -1136,8 +1382,11 @@ fn c19_a_partly_occupied_primary_precedes_its_ranked_fallback() {
 }
 
 /// C29: the unchanged 20 m B7b leader distance must outlive the default 10 s and arrive, with exactly one C20
-/// progress frame and a route deadline entry named in its receipt.
+/// progress frame and a route deadline entry named in its receipt. W11 (#4087): the progress frame, the act's
+/// "accepted", comes within 2 s of the send (as its route is planned), not at the 10 s arrival deadline.
 #[test]
+// Times the first answer from the send by the wall clock, as the gateway sees it.
+#[allow(clippy::disallowed_methods)]
 fn a_twenty_metre_gateway_walk_gets_one_progress_answer_and_arrives() {
     let (world, mut c, store, path) = served(10_000_000, "longwalk");
     let ground = bodies().unwrap().town.ground;
@@ -1177,6 +1426,7 @@ fn a_twenty_metre_gateway_walk_gets_one_progress_answer_and_arrives() {
         reflex: false,
     };
     let bytes = encode(&i.to_value()).unwrap();
+    let sent = std::time::Instant::now();
     c.0.write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
         .unwrap();
     c.0.write_all(&bytes).unwrap();
@@ -1184,19 +1434,33 @@ fn a_twenty_metre_gateway_walk_gets_one_progress_answer_and_arrives() {
     c.0.read_exact(&mut len).unwrap();
     let mut frame = vec![0; u32::from_be_bytes(len) as usize];
     c.0.read_exact(&mut frame).unwrap();
+    let accepted = sent.elapsed();
     let Value::Map(m) = decode(&frame).unwrap().value else {
         panic!("frame")
     };
     let Some(Value::Map(a)) = m.get(&2) else {
         panic!("answer")
     };
-    assert_eq!(
-        a.get(&3),
-        Some(&Value::Uint(3)),
-        "one in-progress answer at 10 s"
+    assert_eq!(a.get(&3), Some(&Value::Uint(3)), "one in-progress answer");
+    // 2 s is the bar; a loaded CI runner gets 5 s, and the measured time is printed either way.
+    let most = Duration::from_secs(if std::env::var_os("CI").is_some() {
+        5
+    } else {
+        2
+    });
+    println!("20 m: accepted after {accepted:?} (bar {most:?})");
+    assert!(
+        accepted < most,
+        "accepted within {most:?} of its send, not at the arrival deadline: {accepted:?}"
     );
     assert!(matches!(a.get(&answers::LEFT), Some(Value::Uint(n)) if *n > 0));
-    let (id, receipt) = c.answer().expect("the next answer is the final receipt");
+    // Exactly one progress answer: the next frame is the act's own answer.
+    let mut len = [0; 4];
+    c.0.read_exact(&mut len).unwrap();
+    let mut frame = vec![0; u32::from_be_bytes(len) as usize];
+    c.0.read_exact(&mut frame).unwrap();
+    assert!(!answers::is_progress(&frame), "a second progress answer");
+    let (id, receipt) = read_answer(&frame).expect("the next answer is the final receipt");
     world.stop();
     let _ = std::fs::remove_file(&path);
     let bytes = store.0.lock().unwrap().bytes.clone();
@@ -1225,10 +1489,7 @@ fn a_twenty_metre_gateway_walk_gets_one_progress_answer_and_arrives() {
     let end = log[&id].last().unwrap();
     assert_eq!(end.2.as_deref(), Some("done"));
     assert!(near(end.4, destination, 100_000), "arrived: {:?}", end.4);
-    println!(
-        "20 m: one progress answer then done; receipt {:?}; planned time {:?}",
-        receipt, due
-    );
+    println!("20 m: one progress answer, then done; receipt {receipt:?}; planned time {due:?}");
 }
 
 /// A synthetic mover edge across an otherwise planned route reproduces a walker making no progress. The test

@@ -83,6 +83,7 @@
 // A refusal prints its code, the operation that failed (`op`, its place in the batch) and a fix. The home is
 // SOULS_HOME, else the nearest .souls; the daemon's library is SOULS_REPLICA_PKG. The token never leaves the daemon.
 
+import { isMain } from '../../../../tools/lib/is-main.mjs';
 import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
@@ -764,7 +765,7 @@ export async function runLayer(l, ask) {
   return { ok: true, zones: zonesIn(zones), marked, secrets: 'off, as today' };
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const out = (v) => process.stdout.write(JSON.stringify(v) + '\n');
   try {
     const asked = requestOf(process.argv.slice(2));

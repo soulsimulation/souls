@@ -22,6 +22,7 @@
 // Prints one JSON verdict (also <out>/verdict.json): a row per run, the table per arm. Exits 0 when every run of the
 // first arm finished, 1 when one did not, 2 on a bad argument or a world that could not be reached. Local worlds only:
 // the Soul is made with the world's dev sign-in. Spend: each run's seat is held to its own world budget ($1 at most).
+import { isMain } from '../lib/is-main.mjs';
 import {readFileSync, writeFileSync, mkdirSync} from 'node:fs';
 import {tmpdir} from 'node:os';
 import {join, resolve} from 'node:path';
@@ -196,4 +197,4 @@ export async function main(argv) {
   return v.ok ? 0 : 1;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) process.exitCode = await main(process.argv.slice(2));
+if (isMain(import.meta.url)) process.exitCode = await main(process.argv.slice(2));

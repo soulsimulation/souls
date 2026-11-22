@@ -11,9 +11,9 @@
 //
 //   node v2/tools/ops/cutover/count.mjs --since <ISO time> [--args <directory.args>] [--accounts <file>] [--pairing <file>] [--json]
 // --args (default /etc/souls/directory.args) supplies --store and --pairing when they are not given.
+import { isMain } from '../../../../tools/lib/is-main.mjs';
 import { readFileSync } from 'node:fs';
 import { DatabaseSync } from 'node:sqlite';
-import { fileURLToPath } from 'node:url';
 
 /** The store and pairing paths named in directory.args (`DIRECTORYD_ARGS="... --store <p> --pairing <p> ..."`). */
 export function storesOf(text) {
@@ -54,7 +54,7 @@ export function line(r) {
     + 'kept untouched in the new system, they return at the next switch; nothing is copied back';
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const argv = process.argv.slice(2);
   const flag = (k) => { const i = argv.indexOf(`--${k}`); return i >= 0 ? argv[i + 1] : undefined; };
   const since = Date.parse(flag('since') ?? '');

@@ -1,11 +1,11 @@
 #!/usr/bin/env node
 // Immutable publishing, ported from db11f401 tools/blobs/cdn-upload.mjs.
 // Dry-run is the default and never reads credentials or contacts any server.
+import { isMain } from '../lib/is-main.mjs';
 import { createHash, createHmac } from 'node:crypto';
 import { constants } from 'node:fs';
 import { lstat, open, readFile, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { ALLOWED_LICENCES, BR_EXTENSIONS, CACHE, DEFAULT_BR_CACHE, DEFAULT_SOURCES, ROOT, TYPES, encodedCopy, inventory, isBrKey, licenceEvidence, parseCsv, readReviewed, readServedAll, shaFile, validKey } from './inventory.mjs';
 import { withNewReceipt } from './receipt.mjs';
 import { deployEnv } from '../world-launcher/deploy/deploy-env.mjs';
@@ -213,4 +213,4 @@ async function main() {
     console.log(JSON.stringify({ dryRun: true, ...plan.totals, out, manifest, largestFiles: plan.largestFiles.slice(0, 3) }));
   }
 }
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) main().catch(error => { console.error(error.message); process.exitCode = 1; });
+if (isMain(import.meta.url)) main().catch(error => { console.error(error.message); process.exitCode = 1; });

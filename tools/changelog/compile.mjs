@@ -19,6 +19,7 @@
 //       write CHANGELOG.md with the new section to <file> instead; the tree (CHANGELOG.md and the fragments) is left as
 //       it is. release.yml's ship job builds the web app from it (SIM_CHANGELOG_FILE), so the public changelog page
 //       shows the release it ships (#393); publish later writes the same section into the committed CHANGELOG.md.
+import { isMain } from '../lib/is-main.mjs';
 import { existsSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -100,6 +101,6 @@ function main(argv) {
   return 0;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   try { process.exitCode = main(process.argv.slice(2)); } catch (e) { console.error(`changelog: ${e.message}`); process.exitCode = 1; }
 }

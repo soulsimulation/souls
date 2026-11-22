@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Check exact outgoing text/JSON before a GitHub write or proof upload. Never print matched values.
 // node tools/proof/publication.mjs <body.md> <proof.json> ...
+import { isMain } from '../lib/is-main.mjs';
 import { existsSync, readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { SCRUB_RULES, privateIPv4 } from '../../.github/scripts/guards.mjs';
 
@@ -74,7 +74,7 @@ export function readPublication(file, read = readFileSync, { json = false } = {}
   return text;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const files = process.argv.slice(2);
   if (!files.length) { console.error('usage: publication.mjs <outgoing.md> <proof.json> ...'); process.exitCode = 2; }
   else {

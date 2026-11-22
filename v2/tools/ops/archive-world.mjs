@@ -1,7 +1,8 @@
 #!/usr/bin/env node
 // W17: existing finite placement lifecycle only. Root authenticates the operator; the Souls child owns Store/data.
+import { isMain } from '../../../tools/lib/is-main.mjs';
 import { lstat, mkdir, unlink, readdir, chown } from 'node:fs/promises';
-import { join, resolve, dirname } from 'node:path';
+import { join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
@@ -220,7 +221,7 @@ export async function operator(config,args,{getState=state,run=system,uid=proces
   fail('archive-restore-pending');
 }
 
-if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
+if(isMain(import.meta.url)) {
   try {
     if(process.getuid?.()!==0)fail('archive-root-only');
     const stat=await lstat(CONFIG);if(!stat.isFile()||stat.isSymbolicLink()||stat.uid!==0||(stat.mode&0o022))fail('archive-config-untrusted');
