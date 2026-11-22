@@ -7,6 +7,7 @@
 //! supervisor health [<world>]   print the health record (every world's, without a name)
 //! supervisor pin <world> <hash> pin a build in the directory (W8's set_build)
 //! supervisor hash <file>        a build's hash
+//! supervisor directory-get <key> print the directory store's object at <key> (exit 3 when there is none)
 //! ```
 //!
 //! The machine's folder is `$WORLDS_ROOT`: `builds/<hash>/worldd`, `worlds/<world>/` (each world's state), `cache/`
@@ -220,8 +221,33 @@ fn run(args: &[String]) -> Result<i32, String> {
             println!("{}", to_hex(&build_hash(&bytes)));
             Ok(0)
         }
+        // W3b's placement and archive tools (root) read the directory's create intent, name records and list through
+        // this, so they read the store the directory and the worlds use (#1960 B7), never a second rule.
+        Some("directory-get") => {
+            let key = args.get(2).filter(|_| args.len() == 3).ok_or("directory-get <key>")?;
+            let safe = |p: &str| {
+                !p.is_empty()
+                    && p.bytes()
+                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+            };
+            if !key.split('/').all(safe) {
+                return Err("directory-get: a key is lowercase words joined by /".into());
+            }
+            let got = with_store(&root, |s| s.get(key))?
+                .map_err(|e| format!("{}: {}", e.name, e.detail))?;
+            match got {
+                Some(o) => {
+                    use std::io::Write;
+                    std::io::stdout()
+                        .write_all(&o.bytes)
+                        .map_err(|e| e.to_string())?;
+                    Ok(0)
+                }
+                None => Ok(3),
+            }
+        }
         _ => Err(
-            "usage: supervisor launch|ready|exited|health|pin|hash ... (see the crate's docs)"
+            "usage: supervisor launch|ready|exited|health|pin|hash|directory-get ... (see the crate's docs)"
                 .into(),
         ),
     }
