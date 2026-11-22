@@ -118,6 +118,17 @@ fn base_world() -> Replica {
     r
 }
 
+/// The harness's humanoid with the eyes `worldd serve`'s has: a look claims the gaze.
+fn eyed() -> Family {
+    let mut f = humanoid();
+    f.resources.push(Resource {
+        name: name("souls:eyes"),
+        class: Class::Gaze,
+        slot: None,
+    });
+    f
+}
+
 fn serve_base(tag: &str) -> (Run, Client) {
     let store = Mem::with(Vec::new());
     let mut cfg = Config::new(LINEAGE, 1);
@@ -125,7 +136,7 @@ fn serve_base(tag: &str) -> (Run, Client) {
     cfg.engine = Some((tree_rules(), vec![pair_kind()]));
     cfg.join = Some(Join {
         entry: (ground(), entry()),
-        family: humanoid(),
+        family: eyed(),
         kind: name(&fullname(BODY)),
         per_tick: 8,
     });
