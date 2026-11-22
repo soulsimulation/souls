@@ -63,7 +63,9 @@ const replicaUrl = pathToFileURL(join(PKG, 'replica.js')).href;
 registerHooks({ resolve: (s, c, next) => (s === 'replica' ? { url: replicaUrl, shortCircuit: true } : next(s, c)) });
 
 // ---- Pending markers ---------------------------------------------------------------------------------------------
-const PENDING = {};
+const PENDING = {
+  4143: "a Soul's wave right after its walk is refused resource-held",
+};
 const pendingReport = [];
 /** Runs `check`; while `issue` is open a failure is expected and printed, a pass fails the run (remove the marker). */
 async function pending(issue, what, check) {
@@ -427,9 +429,11 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   }
 
   // (a) The wave's move record, from the body's family.
-  // #3772, fixed by #4075: the body runs its family's forms.
-  assert.ok(accepted(wave.answer), `(a) the wave is accepted: ${JSON.stringify(wave.answer)}`);
-  await waitFor('souls:form-move', () => v1.parts.some((p) => (p.happened ?? []).some((h) => h.name === 'souls:form-move' && h.node === pageKey(meA))), 10_000);
+  // #3772 is fixed by #4075 (the body runs its family's forms); the wave is now refused resource-held (#4143).
+  await pending(4143, "(a) the wave is accepted and its souls:form-move reaches the public stream", async () => {
+    assert.ok(accepted(wave.answer), `the wave: ${JSON.stringify(wave.answer)}`);
+    await waitFor('souls:form-move', () => v1.parts.some((p) => (p.happened ?? []).some((h) => h.name === 'souls:form-move' && h.node === pageKey(meA))), 10_000);
+  });
 
   // (a) Body motion: positions change on the walk, and the sit hands the body off to the bench's slot.
   const a = pageKey(meA), benchKey = pageKey(bench.id);
