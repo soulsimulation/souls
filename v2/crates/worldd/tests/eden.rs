@@ -3364,6 +3364,114 @@ fn c25_a_cottages_inner_door_from_its_bedroom() {
     assert!(wrong.is_empty(), "{wrong:#?}");
 }
 
+/// A step of [`served_steps`]: today's id, the form, its thing arguments by today's id, the ending wanted.
+type Step<'a> = (&'a str, &'a str, &'a [(&'a str, &'a str)], &'a str);
+
+/// 0.131 parity L46 (#3715): one Soul, born at `at` (`x,z` m), does each `(today's id, form, thing arguments by
+/// today's id, ending)` in turn on a served full Eden, from wherever the one before left it. Printed; each ending that
+/// differs from the one wanted is returned.
+fn served_steps(at: &str, tag: &str, cases: &[Step]) -> Vec<String> {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let (served, mut soul, dir) = serve(&facts, at, tag, im.nodes["world"].scope());
+    soul.0
+        .set_read_timeout(Some(Duration::from_secs(300)))
+        .unwrap();
+    let mut wrong = Vec::new();
+    for (today, form, things, want) in cases {
+        let a: Vec<(&str, Value)> = things
+            .iter()
+            .map(|(k, t)| (*k, im.nodes[*t].to_value()))
+            .collect();
+        let params = if a.is_empty() {
+            BTreeMap::new()
+        } else {
+            args(&a)
+        };
+        let ended = match soul.act(&format!("eden:{form}"), Some(im.nodes[*today]), params) {
+            Ok(_) => "done".to_owned(),
+            Err(name) => name,
+        };
+        let body = track(&dir).last().map(|b| (b.2, b.3));
+        println!("{tag}: {form} at {today}: {ended} (the body at {body:?})");
+        if ended != *want {
+            wrong.push(format!("{tag} {form} at {today}: {ended}, not {want}"));
+        }
+    }
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    wrong
+}
+
+/// L46 (#3715) A1: tea, coffee and eating on a served full Eden. In a cottage's kitchen a Soul takes a bowl from the
+/// table and eats from it, turns the sink's tap on, washes the bowl and turns it off, and switches the stove on and
+/// off. At the café it takes the kettle; there is no sink in the café to fill it at, as today's game finds no tap near
+/// it, so the fill has nothing to fill from (refused `thing.none-selected`, #3914). Carried to the cottage's kitchen,
+/// the kettle fills at the sink, the fill choosing the nearest sink in the building itself, and switches on. Eden has
+/// no cup to pour it into (left open; refused `thing.none-selected`).
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn l46_tea_coffee_and_eating() {
+    let mut wrong = served_steps(
+        "180.0,38.0",
+        "l46cottage",
+        &[
+            ("e_645e8b7a", "walk", &[], "done"),
+            ("e_928f6cbe", "walk", &[], "done"),
+            ("e_5348e9f1", "take", &[], "done"),
+            ("e_5348e9f1", "eat", &[], "done"),
+            ("e_95a50ab8", "turn_on", &[], "done"),
+            ("e_95a50ab8", "wash", &[("thing", "e_5348e9f1")], "done"),
+            ("e_95a50ab8", "turn_off", &[], "done"),
+            ("e_9c8ca409", "switch_on", &[], "done"),
+            ("e_9c8ca409", "switch_off", &[], "done"),
+        ],
+    );
+    wrong.extend(served_steps(
+        "96.5,25.0",
+        "l46cafe",
+        &[
+            ("e_d77094d8", "walk", &[], "done"),
+            ("e_d77094d8", "take", &[], "done"),
+            ("e_d77094d8", "fill", &[], "thing.none-selected"),
+            ("e_645e8b7a", "walk", &[], "done"),
+            ("e_d77094d8", "fill", &[], "done"),
+            ("e_d77094d8", "switch_on", &[], "done"),
+            ("e_d77094d8", "pour", &[], "thing.none-selected"),
+        ],
+    ));
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
+/// 0.131 parity L42 (#3710) A1: water and the garden on a served full Eden, from outside. At the street's firewood a
+/// Soul takes a log; it walks to a watering can on the street and takes it; at the park it turns the drinking fountain
+/// on, drinks, and turns it off. Left open (#3710): stacking the log back (`arg-missing`), watering the library's
+/// potted plant from the street and the greenhouse's vent (`walk.blocked`), and a cottage's bathroom upstairs (the
+/// bath, the basin: `out-of-reach`, the approach ends on the floor below).
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn l42_water_and_the_garden_from_outside() {
+    let mut wrong = served_steps(
+        "84.0,44.0",
+        "l42street",
+        &[
+            ("e_7e4e5663", "take_log", &[], "done"),
+            ("e_5bf741bc", "walk", &[], "done"),
+            ("e_5bf741bc", "take", &[], "done"),
+        ],
+    );
+    wrong.extend(served_steps(
+        "19.0,96.0",
+        "l42park",
+        &[
+            ("e_b729d948", "turn_on", &[], "done"),
+            ("e_b729d948", "drink", &[], "done"),
+            ("e_b729d948", "turn_off", &[], "done"),
+        ],
+    ));
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
 /// A body's logged frame, height and stance: `(node, slot, y µm, stance)`.
 type Stood = (Id, Option<u64>, i64, Option<sim::controller::Stance>);
 

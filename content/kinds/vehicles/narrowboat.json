@@ -48,14 +48,14 @@
     "lie_down": {
       "who": "anyone",
       "starts": "act",
-      "needs": [{"need":"state","field":"open","is":true},{"need":"slot_free","slot":"berth"}],
+      "needs": [{"need":"slot_free","slot":"berth"}],
       "steps": [{"step":"walk_to","point":"berth"},{"step":"sit","slot":"berth"}],
       "effects": [{"change":"reparent","what":"actor","into":"berth","event":"lay_down"}]
     },
     "sit_inside": {
       "who": "anyone",
       "starts": "act",
-      "needs": [{"need":"state","field":"open","is":true},{"need":"slot_free","slot":"galley"}],
+      "needs": [{"need":"slot_free","slot":"galley"}],
       "steps": [{"step":"walk_to","point":"galley"},{"step":"sit","slot":"galley"}],
       "effects": [{"change":"reparent","what":"actor","into":"galley","event":"sat_down"}]
     }
@@ -102,8 +102,8 @@
     "canal_boat": "canal boat",
     "barge": "barge",
     "houseboat": "houseboat",
-    "howto_rest": "Open the hatch, then lie down in the berth."
+    "howto_rest": "Lie down in the berth."
   },
   "card": {"text":"card","category":"getting_around","synonyms":["boat","canal_boat","barge","houseboat"]},
-  "howtos": {"rest":{"text":"howto_rest","steps":[{"form":"open"},{"form":"lie_down"}]}}
+  "howtos": {"rest":{"text":"howto_rest","steps":[{"form":"lie_down"}]}}
 }
