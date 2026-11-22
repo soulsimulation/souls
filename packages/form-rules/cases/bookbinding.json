@@ -2177,9 +2177,9 @@
               "right": null
             },
             "effector_mm": [
-              -200,
-              1000,
-              450
+              0,
+              300,
+              300
             ]
           },
           "b2": {
@@ -2203,6 +2203,9 @@
             "reach_mm": 500
           },
           "press": {
+            "reach_mm": 600
+          },
+          "touch": {
             "reach_mm": 600
           }
         }
@@ -2252,9 +2255,9 @@
               "right": "other"
             },
             "effector_mm": [
-              -200,
-              1000,
-              450
+              0,
+              300,
+              300
             ]
           },
           "b2": {
@@ -2279,6 +2282,9 @@
           },
           "press": {
             "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
           }
         }
       },
@@ -2291,6 +2297,86 @@
         "verdict": "no",
         "reason": "no_free_hand",
         "need": 0
+      }
+    },
+    {
+      "name": "take_volume_refuses_outside_contact_reach",
+      "act": {
+        "this": "volume",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 6,
+              "cover_pairs": 2,
+              "gathered": false,
+              "pierced": false,
+              "stitches": 0
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {},
+          "volume": {
+            "kind": "eden:cloth_bound_volume"
+          }
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 1
       }
     }
   ]

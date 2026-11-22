@@ -10,6 +10,15 @@
         25,
         0
       ]
+    },
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        450
+      ],
+      "yaw_mdeg": 180000
     }
   },
   "geometry": {
@@ -27,11 +36,21 @@
         {
           "need": "hand",
           "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": "grip"
         }
       ],
       "steps": [
         {
-          "step": "take"
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "grip"
         }
       ],
       "effects": [
