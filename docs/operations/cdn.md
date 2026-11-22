@@ -256,7 +256,7 @@ response that does (`tools/cdn/origin-cache.mjs`). One cache rule in the `soul.g
 test checks that this page carries `cdnRuleExpression()` exactly:
 
 ```
-http.host eq "soul.game" and ((http.request.uri.path strict wildcard "/w/*/v1/world/part/*" or http.request.uri.path strict wildcard "/w/*/v1/souls/*/profile-photo/*" or http.request.uri.path strict wildcard "/w/*/v1/world/snapshot") or ((http.request.uri.path strict wildcard "/assets/*" or http.request.uri.path strict wildcard "/w/*/assets/*" or http.request.uri.path strict wildcard "/w/*/art/*" or http.request.uri.path strict wildcard "/modular/*" or http.request.uri.path strict wildcard "/mars-assets/*" or http.request.uri.path strict wildcard "/world-assets/*" or http.request.uri.path strict wildcard "*.wasm" or http.request.uri.path strict wildcard "*.woff" or http.request.uri.path strict wildcard "*.woff2" or http.request.uri.path strict wildcard "*.ttf" or http.request.uri.path strict wildcard "*.otf") and not http.request.uri.path contains "/v1/" and not http.request.uri.path contains "/__sim/"))
+http.host eq "soul.game" and ((http.request.uri.path strict wildcard "/w/*/v1/world/part/*" or http.request.uri.path strict wildcard "/w/*/v1/souls/*/profile-photo/*" or http.request.uri.path strict wildcard "/w/*/v1/world/snapshot") or ((http.request.uri.path strict wildcard "/assets/*" or http.request.uri.path strict wildcard "/w/*/assets/*" or http.request.uri.path strict wildcard "/w/*/art/*" or http.request.uri.path strict wildcard "/modular/*" or http.request.uri.path strict wildcard "/mars-assets/*" or http.request.uri.path strict wildcard "/world-assets/*" or http.request.uri.path strict wildcard "*.wasm" or http.request.uri.path strict wildcard "*.woff" or http.request.uri.path strict wildcard "*.woff2" or http.request.uri.path strict wildcard "*.ttf" or http.request.uri.path strict wildcard "*.otf" or http.request.uri.path strict wildcard "/s/*") and not http.request.uri.path contains "/v1/" and not http.request.uri.path contains "/__sim/"))
 ```
 
 | Setting | Value |
@@ -272,7 +272,15 @@ photos are `immutable` for a year, release-stable files keep an hour or more, an
 `no-store` otherwise, so a stale or invented key never enters the cache. A `no-store`, `private` or header-less answer
 on an eligible path is never kept. No path that can answer per user is eligible: the static patterns never match under
 `/v1/` or `/__sim/`, and the three API reads are public by design (moderation-filtered, no auth read). The page,
-`/v1/config` and the world list stay outside it. Add no rule that bypasses everything else: other paths keep the CDN's
+`/v1/config` and the world list stay outside it.
+
+A world's public stream, `/s/*` (#4159), is in the rule: Caddy hands it to the viewers' origin, which answers a part,
+a baseline or a bundle header `public, max-age=31536000, immutable, no-transform`, the pointer (and a history's
+`live`) `public, max-age=1, no-transform`, and anything not yet written or asked with a query string a `no-store`
+404 ([viewer cache](../../v2/docs/viewer-cache.md)). The edge then fetches each file once and the pointer about once a
+second, whatever the number of viewers; without the rule every viewer's six requests a second reach the origin. The
+origin's other routes that `/s/*` also reaches answer `no-store` or `private`, so none is kept. The answers set no
+cookie and the page reads them from its own origin, so no CORS header is needed. Add no rule that bypasses everything else: other paths keep the CDN's
 default, which also respects the origin's headers.
 
 ### Hands-on steps, in this order

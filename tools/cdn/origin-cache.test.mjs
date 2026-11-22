@@ -1,10 +1,13 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
-import { readFileSync } from 'node:fs';
+import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
 import { cdnCacheEligible, cdnRuleExpression, originCacheClass, originCacheProblem } from './origin-cache.mjs';
 import { checkSoulGame } from '../world-launcher/deploy/caddy/check-soul-game.mjs';
 import { EDGE_SNAPSHOT_CACHE } from '../../apps/server/src/edge-snapshot.ts';
+import { createOrigin } from '../../v2/tools/origin/origin.mjs';
 
 const IMM = 'public, max-age=31536000, immutable', DAYSWR = 'public, max-age=86400, stale-while-revalidate=604800';
 const r = (path, cc, cf = 'HIT', status = 200) => ({ path, status, headers: { ...(cc ? { 'cache-control': cc } : {}), ...(cf ? { 'cf-cache-status': cf } : {}) } });
@@ -93,13 +96,13 @@ test('E2 A3: docs/operations/cdn.md gives the rule expression verbatim', () => {
 const listen = (s) => new Promise((yes) => s.listen(0, '127.0.0.1', () => yes({ url: `http://127.0.0.1:${s.address().port}`, close: () => { s.closeAllConnections(); s.close(); } })));
 /** A stand-in CDN: keeps a GET only on a path `eligible` allows, for the origin's s-maxage or max-age (none, no-store,
  *  private or 0: not kept, BYPASS); anything else passes through as DYNAMIC. Cloudflare's cf-cache-status words. */
-function standInCdn(origin, eligible) {
+function standInCdn(origin, eligible, upstreamPath = (u) => u) {
   const kept = new Map();
   return listen(createServer(async (req, res) => {
     const send = (st, h, body, cf, extra = {}) => res.writeHead(st, { ...h, 'cf-cache-status': cf, ...extra }).end(body);
     const hit = kept.get(req.url);
     if (eligible(req.url) && hit && hit.until > Date.now()) return send(hit.status, hit.headers, hit.body, 'HIT', { age: String(Math.floor((Date.now() - hit.at) / 1000)) });
-    const o = await fetch(origin + req.url, { headers: { accept: req.headers.accept ?? '*/*' } }), body = Buffer.from(await o.arrayBuffer());
+    const o = await fetch(origin + upstreamPath(req.url), { headers: { accept: req.headers.accept ?? '*/*' } }), body = Buffer.from(await o.arrayBuffer());
     const cc = o.headers.get('cache-control') ?? '', headers = { 'content-type': o.headers.get('content-type') ?? '', ...(cc ? { 'cache-control': cc } : {}) };
     if (!eligible(req.url)) return send(o.status, headers, body, 'DYNAMIC');
     const ttl = Number((/s-maxage=(\d+)/.exec(cc) ?? /max-age=(\d+)/.exec(cc) ?? [0, 0])[1]);
@@ -139,4 +142,41 @@ test('E2 A2: the same check fails without the rule (the CDN\'s by-extension defa
   assert.deepEqual(d.problems.map((p) => /^cache: (\w+)/.exec(p)?.[1]), ['part', 'snapshot'], d.problems.join('\n'));
   const s = await cacheCheck(cdnCacheEligible, { staleCacheable: true });
   assert.equal(s.problems.length, 1, s.problems.join('\n')); assert.match(s.problems[0], /stale key answered HIT/);
+});
+
+// --- #4159: a world's public stream (/s/*) behind the CDN -------------------------------------------------------------
+test('#4159 A1: every kind of stream file is eligible under the documented rule', () => {
+  const g = 'ab'.repeat(32);
+  for (const p of ['/s/eden/pointer', `/s/eden/g/${g}/baseline`, `/s/eden/g/${g}/baseline.text`, `/s/eden/g/${g}/12`, `/s/eden/g/${g}/12.text`,
+    '/s/eden/7', `/s/headers/${'cd'.repeat(32)}`, '/s/w/0123abcd/views/public/pointer', '/s/h/garden/garden/bundles/00000002/index',
+    '/s/w/0123abcd/history/live']) assert.equal(cdnCacheEligible(p), true, p);
+  for (const p of ['/s/v1/feed', '/s/w/eden/v1/bootstrap']) assert.equal(cdnCacheEligible(p), false, p);
+});
+test('#4159 A2: through a stand-in CDN from the rule and the real viewers\' origin: files kept, the pointer 1 s, misses never', async () => {
+  const dir = mkdtempSync(join(tmpdir(), 'cdn-4159-')), g = 'ab'.repeat(32), at = (...p) => join(dir, 'eden', ...p);
+  mkdirSync(at('g', g), { recursive: true });
+  writeFileSync(at('pointer'), 'p1'); writeFileSync(at('g', g, 'baseline'), 'base'); writeFileSync(at('g', g, '0'), 'part0');
+  const origin = await listen(createOrigin(dir).server);
+  // Caddy's `handle_path /s/*` hands the origin the path without /s.
+  const cdn = await standInCdn(origin.url, cdnCacheEligible, (u) => u.replace(/^\/s\//, '/'));
+  const get = async (p) => { const r = await fetch(cdn.url + p); return { status: r.status, cf: r.headers.get('cf-cache-status'), cc: r.headers.get('cache-control'), cookie: r.headers.get('set-cookie'), body: await r.text() }; };
+  try {
+    for (const p of [`/s/eden/g/${g}/baseline`, `/s/eden/g/${g}/0`]) {
+      const a = await get(p), b = await get(p);
+      assert.deepEqual([a.status, a.cf, b.cf], [200, 'MISS', 'HIT'], p); assert.match(a.cc, /immutable/); assert.equal(a.cookie, null);
+    }
+    const p1 = await get('/s/eden/pointer'), p2 = await get('/s/eden/pointer');
+    assert.deepEqual([p1.cf, p2.cf, p2.body], ['MISS', 'HIT', 'p1']); assert.equal(p1.cc, 'public, max-age=1, no-transform'); assert.equal(p1.cookie, null);
+    writeFileSync(at('pointer'), 'p2');
+    await new Promise((r) => setTimeout(r, 1100));
+    const p3 = await get('/s/eden/pointer');
+    assert.deepEqual([p3.cf, p3.body], ['MISS', 'p2'], 'the pointer is kept at most a second');
+    const early = await get(`/s/eden/g/${g}/1`), again = await get(`/s/eden/g/${g}/1`);
+    assert.deepEqual([early.status, early.cf, early.cc, again.cf], [404, 'BYPASS', 'no-store', 'BYPASS'], 'a part asked early is never kept');
+    writeFileSync(at('g', g, '1'), 'part1');
+    const now = await get(`/s/eden/g/${g}/1`);
+    assert.deepEqual([now.status, now.body], [200, 'part1'], 'once written it is served');
+    const q = await get('/s/eden/pointer?x=1'), q2 = await get('/s/eden/pointer?x=1');
+    assert.deepEqual([q.status, q.cf, q2.cf], [404, 'BYPASS', 'BYPASS'], 'a query string is a no-store 404, never kept');
+  } finally { cdn.close(); origin.close(); rmSync(dir, { recursive: true, force: true }); }
 });

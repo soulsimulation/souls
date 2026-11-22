@@ -55,10 +55,14 @@ export function originCacheProblem({ path, status, headers }) {
 // not"), so a no-store, private or header-less answer on an eligible path is never kept. No path that can answer per
 // user is listed: the static patterns never match under /v1/ or /__sim/, and the three API reads are public by design
 // (moderation-filtered, no auth read). docs/operations/cdn.md carries cdnRuleExpression() verbatim (the test checks).
+// A world's public stream, /s/* (#4159), is files the viewers' origin (v2/tools/origin/origin.mjs) serves with one of
+// three answers: immutable for a year (parts, baselines, bundle headers), max-age=1 (the pointer, history/live), or a
+// no-store 404 (a file not yet written, a query string); the CDN then keeps each file once per edge instead of every
+// viewer reaching the origin. Its other routes that Caddy's /s/* also reaches are no-store or private, so never kept.
 export const CDN_CACHE_RULE = {
   host: 'soul.game',
-  // static files: Vite bundles and content-addressed objects (HASHED 1, 2, 4), release-stable files (STABLE)
-  files: ['/assets/*', '/w/*/assets/*', '/w/*/art/*', '/modular/*', '/mars-assets/*', '/world-assets/*', '*.wasm', '*.woff', '*.woff2', '*.ttf', '*.otf'],
+  // static files: Vite bundles and content-addressed objects (HASHED 1, 2, 4), release-stable files (STABLE), the stream
+  files: ['/assets/*', '/w/*/assets/*', '/w/*/art/*', '/modular/*', '/mars-assets/*', '/world-assets/*', '*.wasm', '*.woff', '*.woff2', '*.ttf', '*.otf', '/s/*'],
   // public reads: snapshot parts (HASHED 3), profile photos (HASHED 5), the snapshot (s-maxage only for the current ?v= key)
   api: ['/w/*/v1/world/part/*', '/w/*/v1/souls/*/profile-photo/*', '/w/*/v1/world/snapshot'],
   never: ['/v1/', '/__sim/'],   // no static pattern matches a path containing these
