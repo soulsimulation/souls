@@ -1675,7 +1675,7 @@ fn w10_a2_a_walk_to_a_thing_100_m_away_ends_there() {
     let (world, mut c, store, path) = served_with(10_000_000, "w10far", far_chair);
     c.0.set_read_timeout(Some(Duration::from_secs(240)))
         .unwrap();
-    let t0 = std::time::Instant::now();
+    let t0 = answers::now();
     let bytes = intent_bytes(
         body_id(),
         1,
@@ -1699,7 +1699,7 @@ fn w10_a2_a_walk_to_a_thing_100_m_away_ends_there() {
         let Some(Value::Map(a)) = m.get(&2) else {
             panic!("an answer")
         };
-        answered.push((a.get(&3).cloned(), t0.elapsed()));
+        answered.push((a.get(&3).cloned(), answers::now() - t0));
         if a.get(&3) != Some(&Value::Uint(3)) {
             break read_answer(&frame);
         }
@@ -1723,7 +1723,7 @@ fn w10_a2_a_walk_to_a_thing_100_m_away_ends_there() {
     assert_eq!(answered.len(), 2, "one progress answer, then the receipt");
     assert_eq!(answered[0].0, Some(Value::Uint(3)));
     // 99.6 m at 1.4 m/s is 71 s: nothing answers the walk done before it could have been walked.
-    assert!(answered[1].1 > Duration::from_secs(60), "{answered:?}");
+    assert!(answered[1].1 > 60_000_000, "{answered:?}");
     let ended = events
         .iter()
         .find(|e| e.1 == id && e.2 == MOVE_ENDED)
