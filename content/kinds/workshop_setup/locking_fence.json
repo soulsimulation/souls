@@ -287,7 +287,7 @@
         "part": "lever",
         "field": "lever_locked",
         "do": "rotate",
-        "axis": "z",
+        "axis": "y",
         "at": {
           "false": 90000,
           "true": 0
