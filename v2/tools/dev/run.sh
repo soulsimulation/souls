@@ -14,8 +14,9 @@
 #   --host  the page's host (default 127.0.0.1). The dev sign-in is for loopback only: with any other host the
 #           directory refuses to start and so does this command, before anything listens.
 #
-# The world is at <url>/w/dev/ and, signed in as the test person Ada, at <url>/w/dev/?as=Ada. Ada owns the world's one
-# Soul; its token, for a local client, is the first line of <dir>/world/souls.tokens.
+# The world is at <url>/w/dev/ and, signed in as a test person (any name), at <url>/w/dev/?as=Ada. No Soul stands in
+# it until one joins: a client pairs against the directory (port + 1) and a test person approves, as
+# client/served/e2e/world.test.mjs does.
 #
 # What it needs: `caddy` and `node` on PATH (CADDY names another caddy). What is missing it builds, as `tools/ci.sh`
 # does: the four programs (`cargo build`, into target/debug), replica's WASM package (target/wasm-load/pkg) and the
@@ -30,7 +31,7 @@ while [ $# -gt 0 ]; do
     --port) PORT=$2; shift 2 ;;
     --dir) DIR=$2; shift 2 ;;
     --host) HOST=$2; shift 2 ;;
-    *) sed -n '2,24p' "$0" >&2; exit 2 ;;
+    *) sed -n '2,25p' "$0" >&2; exit 2 ;;
   esac
 done
 die() { echo "run.sh: $*" >&2; exit 1; }
@@ -68,17 +69,16 @@ if [ -z "${V2_WEB:-}" ]; then
 fi
 [ -f "$WEB/index.html" ] || die "no built page in $WEB"
 
-# The world: N2's test world, one Soul, the body's family from the repository's own entries. Seeded once per folder.
+# The world: N2's test world and the body's family from the repository's own entries. Seeded once per folder.
 cd "$DIR"
 if [ ! -f world/world.json ]; then
   mkdir -p seed/entries
   "$BIN/testworld" --seed 1 --things 0 --out seed > logs/seed.log
   cp "$V2/../content/kinds/body/humanoid.json" seed/entries/
-  "$BIN/worldd" seed --facts seed/testworld-s1-t0.facts.json --dir world --souls 1 --at 0,0 --entries seed/entries \
+  "$BIN/worldd" seed --facts seed/testworld-s1-t0.facts.json --dir world --souls 0 --at 0,0 --entries seed/entries \
     >> logs/seed.log 2>&1 || die "worldd seed failed: $(tail -n 3 logs/seed.log)"
   od -An -tx1 -N32 /dev/urandom | tr -d ' \n' > view.key
 fi
-GRANT=$(cut -d' ' -f1 world/tokens | head -n 1)
 
 PIDS=()
 stop() {
@@ -110,7 +110,7 @@ until_ready() {
 # The directory first: with the dev sign-in it refuses a page address that is not loopback, and nothing else starts.
 start directoryd "$BIN/directoryd" --listen "$DIRECTORY" --public-url "$BASE" --store "$DIR/accounts.sqlite" \
   --pairing "$DIR/pairing.sqlite" --gateway-tokens "$DIR/world/tokens" --view-key "$DIR/view.key" \
-  --test-sign-in --test-own "Ada=$GRANT"
+  --test-sign-in
 until_ready directoryd grep -q '^listening' logs/directoryd.log
 
 rm -f w.sock

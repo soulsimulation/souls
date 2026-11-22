@@ -41,6 +41,8 @@ step lints cargo clippy --workspace --all-targets --locked -- -D warnings
 step lints-wasm cargo clippy -p replica --target wasm32-unknown-unknown --locked -- -D warnings
 # The architecture's own rules (K14, #2648): a self-test on seeded violations, then the tree (v2/tools/arch/README.md).
 step arch node tools/arch/check.mjs
+# No document or skill names a path that is gone (V3, #4039): a self-test, then docs/ and .claude/ on X8's delete list.
+step no-dead-paths node tools/ci/no-dead-paths.mjs
 }
 # `cargo test --workspace`, in three parts that run on three runners: sim's and worldd's tests (about 8 of its 10
 # minutes) each on their own, and every other package's.
