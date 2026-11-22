@@ -13,6 +13,9 @@
 //!
 //! Needs the exported Eden facts file: `cargo test -p sim --release --test rooms -- --ignored --nocapture`.
 
+// Times its own calls: the wall-clock rule (K7) binds the engine, not this test.
+#![allow(clippy::disallowed_methods)]
+
 mod common;
 
 use replica::encode::Value;
@@ -25,6 +28,7 @@ use sim::spots::{
     Ask, Spots, Target, flat, footprint, to_outline, walkable, within, within_footprint,
 };
 use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
 
 fn text() -> String {
     let path = concat!(
@@ -134,6 +138,12 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
     let mut no_door = 0;
     // Pocket targets a form's walk and a plain walk now reach.
     let mut fixed = (0, 0);
+    // Each standable target the walker's walk does not reach: how long `within` and a spot grant took (#4072).
+    let mut calls: Vec<(Duration, Duration)> = Vec::new();
+    // Each footprint walk's search time, and whether it reached the thing.
+    let mut foot_calls: Vec<(Duration, bool)> = Vec::new();
+    // The map's parts are found on the first walk: not timed with the first target.
+    town.with_ground(|_, g| g.walk(ground, Vec3::ZERO, ground, Vec3::new(1_000_000, 0, 0)));
     let ids: Vec<Id> = im.nodes.values().copied().collect();
     for id in ids {
         let Some((floor, at, _)) = town.view().on_floor(id, Vec3::ZERO) else {
@@ -145,9 +155,13 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
         let Some(b) = parent(tree, floor) else {
             continue;
         };
-        let Some(&from) = door.get(&b) else {
-            no_door += 1;
-            continue;
+        // A building with no doorway onto the ground (a tower whose floors no way reaches) from another's.
+        let from = match door.get(&b) {
+            Some(&p) => p,
+            None => {
+                no_door += 1;
+                *door.values().next().expect("a doorway")
+            }
         };
         let target = Target::new(floor, at);
         let entry = tree
@@ -171,9 +185,12 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
         let (pocket, form, foot, walk, diag) = town.with_ground(|_, g| {
             let pocket =
                 g.stand(floor, at).is_some() && g.walk(ground, from, floor, at).is_none();
-            let form = within(g, target, reach, Some((ground, from)))
-                .is_some_and(|p| g.walk(ground, from, floor, p).is_some());
+            let t0 = Instant::now();
+            let form = within(g, target, reach, Some((ground, from)));
+            let t1 = Instant::now();
+            let form = form.is_some_and(|p| g.walk(ground, from, floor, p).is_some());
             // As worldd plans a form's walk to a thing argument: by its footprint when its entry gives one.
+            let t4 = Instant::now();
             let foot = match &shape {
                 Some((_, ring, middle)) => {
                     within_footprint(g, Target::new(floor, *middle), ring, on, reach, Some((ground, from)))
@@ -181,6 +198,9 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
                 }
                 None => form,
             };
+            if shape.is_some() {
+                foot_calls.push((t4.elapsed(), foot));
+            }
             let near = (!foot).then(|| match &shape {
                 Some((_, ring, middle)) => {
                     within_footprint(g, Target::new(floor, *middle), ring, false, 3_000_000, None)
@@ -196,7 +216,13 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
                 from,
                 target,
             };
-            let walk = spots.write(g, &[ask], 0).is_ok()
+            let t2 = Instant::now();
+            let wrote = spots.write(g, &[ask], 0).is_ok();
+            let t3 = Instant::now();
+            if pocket {
+                calls.push((t1 - t0, t3 - t2));
+            }
+            let walk = wrote
                 && matches!(spots.of(walker, &target), Some(Ok(p)) if g.walk(ground, from, floor, p).is_some());
             let refused = match spots.of(walker, &target) {
                 Some(Err(name)) => name,
@@ -322,6 +348,46 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
     for k in ["core-workbench", "core-floor-lamp", "core-bookshelf"] {
         println!("{k}: {} not reached at the footprint", unreached(k));
     }
+
+    // A target the walk does not reach answers at once: no route search per place round it (#4072's review: about
+    // 1 s per call before, on the planner thread every walker waits on).
+    let ms = |d: Duration| d.as_secs_f64() * 1e3;
+    let mut forms: Vec<f64> = calls.iter().map(|c| ms(c.0)).collect();
+    let mut grants: Vec<f64> = calls.iter().map(|c| ms(c.1)).collect();
+    forms.sort_by(f64::total_cmp);
+    grants.sort_by(f64::total_cmp);
+    let mid = |v: &[f64]| v.get(v.len() / 2).copied().unwrap_or(0.0);
+    let top = |v: &[f64]| v.last().copied().unwrap_or(0.0);
+    println!(
+        "unreached standable targets: {}; within: median {:.2} ms, max {:.2} ms; a spot grant: median {:.2} ms, max \
+         {:.2} ms",
+        calls.len(),
+        mid(&forms),
+        top(&forms),
+        mid(&grants),
+        top(&grants)
+    );
+    assert!(
+        top(&forms) < 50.0 && top(&grants) < 50.0,
+        "an unreached target answers without a search per place"
+    );
+    let mut reached: Vec<f64> = foot_calls.iter().filter(|c| c.1).map(|c| ms(c.0)).collect();
+    let mut missed: Vec<f64> = foot_calls
+        .iter()
+        .filter(|c| !c.1)
+        .map(|c| ms(c.0))
+        .collect();
+    reached.sort_by(f64::total_cmp);
+    missed.sort_by(f64::total_cmp);
+    println!(
+        "footprint walks: {} reached, median {:.2} ms, max {:.2} ms; {} not reached, median {:.2} ms, max {:.2} ms",
+        reached.len(),
+        mid(&reached),
+        top(&reached),
+        missed.len(),
+        mid(&missed),
+        top(&missed)
+    );
     println!("school desks (pocket, form reached, walk reached):");
     for d in &desks {
         println!("  {d:?}");
