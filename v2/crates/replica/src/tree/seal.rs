@@ -111,6 +111,8 @@ fn int(n: i64) -> Value {
 
 impl Tree {
     /// A node's record without its children (field 10), its parent given (a flight's root names the node it left).
+    /// Field 10 must stay the record's last key (every key here below 10): [`Tree::head`] takes the record's bytes
+    /// before the children as a head that ends where field 10's array begins, and checks that only in debug builds.
     fn record(&self, rec: &NodeRec, parent: Option<Id>) -> Value {
         let mut m = BTreeMap::from([
             (1, rec.id.to_value()),

@@ -4,7 +4,8 @@
 
 use replica::apply::Replica;
 use replica::effects::{
-    Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, FIXTURE_HEADER, Rest, fixture_bytes,
+    Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, FIXTURE_HEADER, Rest, TransferRec,
+    fixture_bytes,
 };
 use replica::encode::{Name, Value, encode};
 use replica::ids::{Id, Scope};
@@ -464,11 +465,15 @@ impl Gen {
     }
 }
 
+/// How often the generated run below hashes the whole tree: every tick when optimised, every sixth in a debug build
+/// (CI's workspace run), where hashing the large fields whole at every tick took most of a minute.
+const WHOLE_EVERY: u64 = if cfg!(debug_assertions) { 6 } else { 1 };
+
 /// #1960: with large fields, a node's record up to its children is kept between ticks (`Tree::head`) and only its
 /// children's hashes are taken again while nodes below it change (the root, with a large field, has dozens of
 /// children attached and taken out). Over 3,000 ticks of generated parts, refused parts that set and undo a large
 /// field among them, the state hash so worked out equals the whole tree's, hashed with no mark and nothing kept, at
-/// every tick, and K5's seal's at every 100th.
+/// every tick (every sixth in a debug build, [`WHOLE_EVERY`]), and K5's seal's at every 100th.
 #[test]
 fn a_kept_head_gives_the_whole_trees_state_hash_on_every_tick() {
     let mut g = Gen::new(1960);
@@ -490,7 +495,10 @@ fn a_kept_head_gives_the_whole_trees_state_hash_on_every_tick() {
         }
         let tree = g.replica.tree_for_seal();
         let got = tree.state_hashes().unwrap();
-        assert_eq!(got, tree.state_hashes_whole().unwrap(), "tick {tick}");
+        // The whole tree at every tick in a release build; every sixth in a debug one (CI's workspace run).
+        if tick % WHOLE_EVERY == 0 {
+            assert_eq!(got, tree.state_hashes_whole().unwrap(), "tick {tick}");
+        }
         kept = kept.max(tree.heads_kept());
         children = children.max(tree.children(tree.root()).map_or(0, <[_]>::len));
         if tick % 100 == 99 {
@@ -511,4 +519,113 @@ fn a_kept_head_gives_the_whole_trees_state_hash_on_every_tick() {
     assert!(kept >= 5, "heads kept: {kept}");
     assert!(children >= 48, "the root's children: {children}");
     assert!(refused > 300, "refused parts: {refused}");
+}
+
+impl Gen {
+    /// One transfer record by `by`'s entry, applied.
+    fn transfer(&mut self, by: Id, t: TransferRec) {
+        let e = Effect {
+            envelope: Envelope {
+                sequence: self.seq,
+                at: self.seq as i64 * 50_000,
+                cause: Cause::World,
+                actor: Actor::World,
+                audience: Audience::Everyone,
+                node: by,
+            },
+            body: Body::Transfer(t),
+            events: None,
+            rest: Rest::new(),
+        };
+        let v = Value::Map(BTreeMap::from([
+            (1, Value::Bytes(self.header_hash.clone())),
+            (2, Value::Array(vec![e.to_value()])),
+        ]));
+        self.replica.apply_bytes(&encode(&v).unwrap()).unwrap();
+        self.seq += 1;
+    }
+
+    /// The state hash from what changed equals the whole tree's.
+    fn same_as_whole(&mut self, when: &str) {
+        let tree = self.replica.tree_for_seal();
+        let got = tree.state_hashes().unwrap();
+        assert_eq!(got, tree.state_hashes_whole().unwrap(), "{when}");
+    }
+}
+
+/// #1960: a node with a kept head (a 5 KiB field) that leaves and lands again, by an arrive in its own zone under
+/// another parent and by a return to the node it left, has its head let go as it lands: the state hash equals the
+/// whole tree's after every step, its head kept again once it is hashed.
+#[test]
+fn a_kept_head_is_let_go_when_its_node_leaves_and_lands() {
+    let mut g = Gen::new(4080);
+    let (root, lineage) = (g.nodes[0], g.replica.header().lineage);
+    let kind = g.kinds[0].clone();
+    let create = |g: &mut Gen, fields: BTreeMap<u64, Value>| {
+        let node = g.id();
+        let c = Change::Create {
+            node,
+            kind: kind.clone(),
+            pose: g.pose(root, None),
+            audience: Audience::Everyone,
+            fields,
+        };
+        g.apply(root, c);
+        node
+    };
+    let big = BTreeMap::from([(1, Value::Bytes(vec![7; 5_120]))]);
+    let (a, b) = (
+        create(&mut g, BTreeMap::new()),
+        create(&mut g, BTreeMap::new()),
+    );
+    let node = create(&mut g, big);
+    g.same_as_whole("created");
+    assert_eq!(
+        g.replica.tree().heads_kept(),
+        1,
+        "the large node's head kept"
+    );
+    let mut transfer = 9_000;
+    let mut leave = |g: &mut Gen, to: Id, zone: Id| {
+        transfer += 1;
+        let t = Id::new(g.scope, transfer).unwrap();
+        let pose = g.pose(to, None);
+        g.transfer(
+            node,
+            TransferRec::Leave {
+                transfer: t,
+                node,
+                lineage,
+                zone,
+                pose,
+            },
+        );
+        g.same_as_whole("left");
+        t
+    };
+    // An arrive here under `a`, then under `b`: a new parent each time.
+    for to in [a, b] {
+        let t = leave(&mut g, to, root);
+        g.transfer(
+            to,
+            TransferRec::Arrive {
+                transfer: t,
+                carried: Vec::new(),
+            },
+        );
+        g.same_as_whole("arrived");
+        assert_eq!(g.replica.tree().heads_kept(), 1, "kept again once hashed");
+    }
+    // To another zone, and returned to `b`, the node it left.
+    let elsewhere = Id::new(g.scope, 8_888).unwrap();
+    let t = leave(&mut g, a, elsewhere);
+    g.transfer(
+        b,
+        TransferRec::Return {
+            transfer: t,
+            reason: Name::new("souls:refused").unwrap(),
+        },
+    );
+    g.same_as_whole("returned");
+    assert_eq!(g.replica.tree().heads_kept(), 1);
 }
