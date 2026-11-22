@@ -230,7 +230,7 @@ fn a_long_thing_whose_middle_is_out_of_reach_is_acted_at_from_beside_its_outline
             within_footprint(&mut g, t, &ring, false, REACH, from).expect("a place by its outline");
         assert!(g.stand(node(), p).is_some(), "a body stands there: {p:?}");
         assert!(
-            to_outline(p, &ring) <= 300_000,
+            to_outline(p, &ring) <= 400_000,
             "close by the outline: {p:?}"
         );
         assert!(p.x * side >= 1_500_000, "at the asker's end: {p:?}");

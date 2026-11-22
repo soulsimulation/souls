@@ -33,26 +33,26 @@ fn path_x() -> [i64; 2] {
     [s.x - 5_000_000, s.x + 5_000_000]
 }
 
-/// A bench 6 m long along x and 0.9 m deep, its entry's bounds (`test:bench`, by its field 27), 12 m east and 10 m
+/// A bench 6 m long along x and 0.9 m deep, its entry's bounds (`test:bench`, by its field 27), 6 m west and 3 m
 /// south of the first birth's spot: no form's walk from there ends near its middle by its outline.
 fn bench() -> Id {
     id(22)
 }
 fn bench_at() -> Vec3 {
     let s = first_spot();
-    Vec3::new(s.x + 12_000_000, 0, s.z + 10_000_000)
+    Vec3::new(s.x - 6_000_000, 0, s.z + 3_000_000)
 }
 fn bench_ring() -> [Vec3; 4] {
     let (m, x, z) = (bench_at(), 3_000_000, 450_000);
     [(-x, -z), (x, -z), (x, z), (-x, z)].map(|(u, v)| Vec3::new(m.x + u, 0, m.z + v))
 }
-/// A mat 3 m by 2 m (`test:mat`: an area, so walkable), 10 m west and 10 m south of the first birth's spot.
+/// A mat 3 m by 2 m (`test:mat`: an area, so walkable), 2 m east and 6 m south of the first birth's spot.
 fn mat() -> Id {
     id(23)
 }
 fn mat_at() -> Vec3 {
     let s = first_spot();
-    Vec3::new(s.x - 10_000_000, 0, s.z + 10_000_000)
+    Vec3::new(s.x + 2_000_000, 0, s.z + 6_000_000)
 }
 fn mat_ring() -> [Vec3; 4] {
     let (m, x, z) = (mat_at(), 1_500_000, 1_000_000);
@@ -354,12 +354,12 @@ fn a_walk_to_a_bounded_thing_ends_by_its_outline_and_on_a_walkable_one() {
     assert!(gap <= slack, "by its outline: {at:?}");
     assert!(mid >= 2_000_000, "not at its middle: {at:?}");
     // touch, from away: the walk ends within the touch's own reach, so the touch is done.
-    go(&mut a, "go_to", "place", path());
+    go(&mut a, "go_to", "place", base());
     let at = go(&mut a, "touch", "target", bench());
     let gap = to_outline(at, &bench_ring());
     println!("  touch bench: {gap} µm from its outline");
     assert!(gap <= 600_000 + slack, "within a touch of it: {at:?}");
-    go(&mut a, "go_to", "place", path());
+    go(&mut a, "go_to", "place", base());
     go(&mut a, "lean_on", "support", bench());
     // go_to the mat: on it.
     let at = go(&mut a, "go_to", "place", mat());

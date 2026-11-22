@@ -433,8 +433,8 @@ pub const ON_DEPTH: i64 = 400_000;
 ///
 /// On each band at most [`BAND_PLACES`] places, a pitch apart or spread evenly round a longer band. Kept, as
 /// [`within`]'s rings are, on walkable ground, out of doorways and off stairs. Nearest as [`within`]'s: the least walk
-/// from `from` plus [`WEIGHT`] times the place's gap to the outline (0 inside it; a place beside a walkable thing
-/// counts `reach` more), ties by (band, edge, place); with no `from`, by the gap alone. With no such place, the middle
+/// from `from` plus [`WEIGHT`] times the place's gap to the outline (0 inside it; a place off a walkable thing, its edge
+/// too, counts `reach` more), ties by (band, edge, place); with no `from`, by the gap alone. With no such place, the middle
 /// when a body may stand there, as [`within`] keeps it, else `None`.
 pub fn within_footprint(
     g: &mut dyn Ground,
@@ -466,9 +466,10 @@ pub fn within_footprint(
         );
     }
     bands.extend((0..=reach / REACH_PITCH).map(|n| n * REACH_PITCH));
-    // What a place's gap to the outline counts: beside a walkable thing, more than any place on it.
-    let cost = |gap: i64| {
-        if on && gap > 0 {
+    // What a place's gap to the outline counts, on band `d`: off a walkable thing (its edge too), more than any place
+    // on it.
+    let cost = |gap: i64, d: i64| {
+        if on && d >= 0 {
             WEIGHT * (gap + reach)
         } else {
             WEIGHT * gap
@@ -510,7 +511,7 @@ pub fn within_footprint(
                     continue;
                 }
                 order.push((
-                    cost(to_outline(at, ring)) + walker.map_or(0, |(_, _, w)| flat(world, w)),
+                    cost(to_outline(at, ring), d) + walker.map_or(0, |(_, _, w)| flat(world, w)),
                     (band, i, j),
                     at,
                 ));
@@ -529,7 +530,7 @@ pub fn within_footprint(
                 let Some(walk) = g.walk(node, p, target.node, at) else {
                     continue;
                 };
-                let c = walk + cost(to_outline(at, ring));
+                let c = walk + cost(to_outline(at, ring), bands[key.0]);
                 if best.is_none_or(|b| (c, key) < (b.0, b.1)) {
                     best = Some((c, key, at));
                 }
