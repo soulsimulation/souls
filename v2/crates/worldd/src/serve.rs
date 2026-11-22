@@ -2013,6 +2013,8 @@ fn serve(args: &[String]) -> R<()> {
         &std::fs::read_to_string(&facts).map_err(io(&facts))?,
         &kinds,
     )?;
+    // A Soul's body runs its family's forms (E21, #2791): a wave or a bow on its own body.
+    replica::kinds::entry::family_forms(&mut kinds, plain(&built.body_kind));
     let stored_header = if meta.get("fork") == Some(&Json::Bool(true)) {
         let header =
             replica::effects::Header::read(&std::fs::read(dir.join("header")).map_err(io(&dir))?)

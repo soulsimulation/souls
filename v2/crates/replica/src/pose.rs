@@ -1144,6 +1144,18 @@ impl Pose {
 }
 
 impl HandOff {
+    /// What [`HandOff::from_value`] refuses of a hand-off built in memory, in its order: an island owner, then the
+    /// pose's support against its frame ([`Pose::check`]). Its ids, time, velocities and unit orientation hold by
+    /// construction.
+    pub fn check(&self) -> R<()> {
+        if self.from == Owner::Island || self.to == Owner::Island {
+            return Err(PoseRefusal::IslandReserved);
+        }
+        self.pose.check()
+    }
+}
+
+impl HandOff {
     /// A stored hand-off (T6's motion sample): T3 ids, owners as [`Owner`] reads them (an island is refused), and
     /// in its one byte form, else `not-a-record`.
     pub fn from_value(v: &Value) -> R<HandOff> {
