@@ -17,6 +17,8 @@
 //! run on a world people visit says nothing out loud.
 
 use std::collections::BTreeMap;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
 
 use futures_util::{SinkExt, StreamExt};
 use replica::encode::{Name, Value, decode, encode};
@@ -43,6 +45,15 @@ pub struct Targets {
     pub sit: Vec<Id>,
     /// Shape kind → the form's verb (`<entry namespace>:<form>`) and the things that offer it; none: the Soul's body.
     pub forms: BTreeMap<String, (String, Vec<Id>)>,
+    /// Each Soul's body in the copy (its `souls:body-of` link), for a body family's form.
+    pub bodies: BTreeMap<Id, Id>,
+}
+
+/// What a test Soul's copy holds: each node's id and plain kind, and each body's Soul.
+#[derive(Debug, Default)]
+pub struct Seen {
+    pub nodes: Vec<(Id, String)>,
+    pub bodies: BTreeMap<Id, Id>,
 }
 
 fn entry_ns(e: &Json) -> &str {
@@ -64,15 +75,25 @@ fn has_slot(e: &Json, posture: Option<&str>) -> bool {
     })
 }
 
+/// Whether the entry offers `form` to a Soul standing anywhere: a form that needs the thing held first (a book's
+/// `read`, an apple's `bite`) is left out, since an agent would take the thing before it.
 fn has_form(e: &Json, form: &str) -> bool {
-    e.get("forms")
-        .and_then(Json::obj)
-        .is_some_and(|f| f.iter().any(|(n, _)| n == form))
+    e.get("forms").and_then(Json::obj).is_some_and(|f| {
+        f.iter().any(|(n, f)| {
+            n == form
+                && !f.get("needs").and_then(Json::arr).is_some_and(|needs| {
+                    needs
+                        .iter()
+                        .any(|x| x.get("need").and_then(Json::str) == Some("held_by_actor"))
+                })
+        })
+    })
 }
 
 impl Targets {
     /// The targets from the copy's nodes (id, plain kind) and the world's entries (a JSON array).
-    pub fn of(nodes: &[(Id, String)], entries: &Json) -> Targets {
+    pub fn of(seen: &Seen, entries: &Json) -> Targets {
+        let nodes = &seen.nodes;
         let all = entries.arr().unwrap_or(&[]);
         let by_kind: BTreeMap<&str, &Json> = all
             .iter()
@@ -120,6 +141,7 @@ impl Targets {
             walk,
             sit: ids(&|e| has_slot(e, Some("sit"))),
             forms,
+            bodies: seen.bodies.clone(),
         }
     }
 
@@ -138,9 +160,10 @@ impl Targets {
             })
             .collect();
         format!(
-            "{{\"walk\": {}, \"sit\": {}, \"forms\": {{{}}}}}",
+            "{{\"walk\": {}, \"sit\": {}, \"bodies\": {}, \"forms\": {{{}}}}}",
             self.walk.len(),
             self.sit.len(),
+            self.bodies.len(),
             forms.join(", ")
         )
     }
@@ -156,25 +179,28 @@ pub struct Chosen {
     pub stand_in: Option<String>,
 }
 
-/// One agent's state across its acts: seated by its last sit, and how many acts it has sent.
+/// One agent's state across its acts: seated by its last sit (cleared by the agent's socket when that sit is
+/// refused), and how many acts it has sent.
 #[derive(Default, Clone)]
 pub struct Choice {
-    seated: bool,
+    pub seated: Arc<AtomicBool>,
     n: u64,
 }
 
 impl Choice {
     /// The intent for agent `agent`'s next act of shape kind `kind` (its schedule verb `verb`, whose namespace walks,
-    /// sits and rises take), or `None` for a say withheld. `body` is the agent's own body.
+    /// sits and rises take), or `None` for a say withheld. `soul` is the agent's Soul.
     pub fn next(
         &mut self,
         t: &Targets,
         kind: &str,
         verb: &str,
         agent: u32,
-        body: Id,
+        soul: Id,
         speech: bool,
     ) -> Option<Chosen> {
+        let seated = self.seated.load(Ordering::Relaxed);
+        let sit = |to: bool| self.seated.store(to, Ordering::Relaxed);
         let ns = verb.split_once(':').map_or("eden", |(ns, _)| ns);
         let pick = |v: &[Id], k: u64| (!v.is_empty()).then(|| v[(k % v.len() as u64) as usize]);
         let a = u64::from(agent);
@@ -193,23 +219,25 @@ impl Choice {
                 words: true,
                 stand_in: None,
             },
-            "walk" | "sit" if self.seated => {
-                self.seated = false;
+            "walk" | "sit" if seated => {
+                sit(false);
                 plain(format!("{ns}:rise"), None)
             }
             "walk" => plain(format!("{ns}:walk"), pick(&t.walk, a * 7 + n)),
             "sit" if !t.sit.is_empty() => {
-                self.seated = true;
+                sit(true);
                 plain(format!("{ns}:sit"), pick(&t.sit, a))
             }
             k => match t.forms.get(k) {
-                Some((v, on)) if on.is_empty() => plain(v.clone(), Some(body)),
-                Some((v, on)) => plain(v.clone(), pick(on, a + n)),
-                None if self.seated => {
-                    self.seated = false;
+                Some((v, on)) if on.is_empty() && t.bodies.contains_key(&soul) => {
+                    plain(v.clone(), t.bodies.get(&soul).copied())
+                }
+                Some((v, on)) if !on.is_empty() => plain(v.clone(), pick(on, a + n)),
+                _ if seated => {
+                    sit(false);
                     plain(format!("{ns}:rise"), None)
                 }
-                None => Chosen {
+                _ => Chosen {
                     stand_in: Some(k.to_owned()),
                     ..plain(format!("{ns}:walk"), pick(&t.walk, a * 7 + n))
                 },
@@ -258,8 +286,31 @@ fn plain_kind(record: &BTreeMap<u64, Value>) -> Option<String> {
     Some(k.split_once('@').map_or(k, |(p, _)| p).to_owned())
 }
 
-/// The nodes of a test Soul's scope, as its copy holds them after a sync from nothing: (id, plain kind).
-pub async fn read_copy(url: &str, token: &str) -> Result<Vec<(Id, String)>, String> {
+/// The Soul a body record's `souls:body-of` link names (field 9's links `[[id, {1: type, 2: [body, soul]}], ...]`).
+fn soul_of(record: &BTreeMap<u64, Value>) -> Option<Id> {
+    let Some(Value::Array(links)) = record.get(&9) else {
+        return None;
+    };
+    links.iter().find_map(|l| {
+        let Value::Array(pair) = l else { return None };
+        let Some(Value::Map(link)) = pair.get(1) else {
+            return None;
+        };
+        let Some(Value::Text(ty)) = link.get(&1) else {
+            return None;
+        };
+        if ty.as_str().split('@').next() != Some("souls:body-of") {
+            return None;
+        }
+        let Some(Value::Array(ends)) = link.get(&2) else {
+            return None;
+        };
+        replica::effects::read_id(ends.get(1)?).ok()
+    })
+}
+
+/// The nodes of a test Soul's scope, as its copy holds them after a sync from nothing.
+pub async fn read_copy(url: &str, token: &str) -> Result<Seen, String> {
     let (mut ws, _) = tokio_tungstenite::connect_async(url)
         .await
         .map_err(|e| format!("targets: connect: {e}"))?;
@@ -307,7 +358,7 @@ pub async fn read_copy(url: &str, token: &str) -> Result<Vec<(Id, String)>, Stri
     }
     copy.finish(d).map_err(|r| r.name)?;
     let _ = ws.send(Message::Close(None)).await;
-    let mut out = Vec::new();
+    let mut out = Seen::default();
     for h in copy.reach().map_err(|r| r.name)? {
         let Some(Ok(Value::Map(m))) = copy.record(&h).map(|b| decode(b).map(|d| d.value)) else {
             continue;
@@ -316,10 +367,13 @@ pub async fn read_copy(url: &str, token: &str) -> Result<Vec<(Id, String)>, Stri
             m.get(&1).and_then(|v| replica::effects::read_id(v).ok()),
             plain_kind(&m),
         ) {
-            out.push((id, kind));
+            if let Some(soul) = soul_of(&m) {
+                out.bodies.insert(soul, id);
+            }
+            out.nodes.push((id, kind));
         }
     }
-    out.sort();
+    out.nodes.sort();
     Ok(out)
 }
 
@@ -378,18 +432,23 @@ mod tests {
     const ENTRIES: &str = r#"[
       {"kind": "eden:chair", "slots": {"seat": {"admits": "body", "posture": "sit"}}, "forms": {"sit": {}}},
       {"kind": "eden:speaker", "forms": {"play_music": {}}},
+      {"kind": "eden:book", "forms": {"read": {"needs": [{"need": "held_by_actor"}]}}},
       {"kind": "eden:humanoid", "owner": "family", "forms": {"wave": {}, "sit_down": {}}}
     ]"#;
 
     #[test]
     fn targets_come_from_the_copy_and_the_entries() {
-        let nodes = [
-            (id(1), "eden:chair".to_owned()),
-            (id(2), "eden:chair".to_owned()),
-            (id(3), "eden:speaker".to_owned()),
-            (id(4), "souls:ground".to_owned()),
-        ];
-        let t = Targets::of(&nodes, &json::parse(ENTRIES).unwrap());
+        let seen = Seen {
+            nodes: vec![
+                (id(1), "eden:chair".to_owned()),
+                (id(2), "eden:chair".to_owned()),
+                (id(3), "eden:speaker".to_owned()),
+                (id(4), "souls:ground".to_owned()),
+                (id(5), "eden:book".to_owned()),
+            ],
+            bodies: BTreeMap::new(),
+        };
+        let t = Targets::of(&seen, &json::parse(ENTRIES).unwrap());
         assert_eq!(t.walk, [id(1), id(2)]);
         assert_eq!(t.sit, [id(1), id(2)]);
         assert_eq!(
@@ -398,15 +457,21 @@ mod tests {
         );
         assert_eq!(t.forms["gesture"], ("eden:wave".into(), Vec::new()));
         assert_eq!(t.forms["sit-ground"], ("eden:sit_down".into(), Vec::new()));
-        assert!(!t.forms.contains_key("read"));
+        assert!(
+            !t.forms.contains_key("read"),
+            "a form that needs the thing held"
+        );
     }
 
     #[test]
     fn a_seated_soul_rises_first_says_are_withheld_and_an_unoffered_kind_walks() {
-        let nodes = [(id(1), "eden:chair".to_owned())];
-        let t = Targets::of(&nodes, &json::parse(ENTRIES).unwrap());
-        let mut c = Choice::default();
         let me = id(9);
+        let seen = Seen {
+            nodes: vec![(id(1), "eden:chair".to_owned())],
+            bodies: BTreeMap::from([(me, id(8))]),
+        };
+        let t = Targets::of(&seen, &json::parse(ENTRIES).unwrap());
+        let mut c = Choice::default();
         let verb = |c: &mut Choice, kind| {
             c.next(&t, kind, "eden:x", 0, me, false)
                 .map(|x| (x.verb, x.target))
@@ -420,12 +485,25 @@ mod tests {
         );
         assert_eq!(
             verb(&mut c, "gesture"),
-            Some(("eden:wave".into(), Some(me)))
+            Some(("eden:wave".into(), Some(id(8))))
         );
         let read = c.next(&t, "read", "eden:read", 0, me, false).unwrap();
         assert_eq!(
             (read.verb.as_str(), read.stand_in.as_deref()),
             ("eden:walk", Some("read"))
+        );
+        let other = c.next(&t, "gesture", "eden:wave", 0, id(7), false).unwrap();
+        assert_eq!(
+            other.stand_in.as_deref(),
+            Some("gesture"),
+            "a body not in the copy"
+        );
+        c.next(&t, "sit", "eden:sit", 0, me, false);
+        c.seated.store(false, Ordering::Relaxed);
+        let walk = c.next(&t, "walk", "eden:walk", 0, me, false).unwrap();
+        assert_eq!(
+            walk.verb, "eden:walk",
+            "a refused sit leaves the Soul standing"
         );
         let say = c.next(&t, "say", "eden:say", 0, me, true).unwrap();
         assert!(say.words && say.verb == "eden:say");

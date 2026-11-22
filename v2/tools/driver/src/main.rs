@@ -125,6 +125,8 @@ struct Sent {
     closed: bool,
     /// The answers by the minute of the run they came in (X7 A2).
     minutes: Vec<Minute>,
+    /// Refusals by `<verb> <name>`, over the run.
+    refused_by: BTreeMap<String, u64>,
 }
 
 /// One minute of the run's answers: receipts (a receipt, or a move's acceptance), refusals and errors by name, and
@@ -377,7 +379,11 @@ struct Due {
     bytes: Vec<u8>,
     sequence: u64,
     start: Instant,
+    verb: Name,
 }
+
+/// How long an agent waits for its answers after its last act: a form's receipt comes when it ends, seconds later.
+const DRAIN_S: u64 = 15;
 
 /// One agent: first frame and sign-in, then each intent the schedule hands it, sent at once; then its answers, each
 /// act's first answer timed from its send. Acts still unanswered 5 s after the last is sent are errors (`unanswered`).
@@ -388,6 +394,7 @@ async fn agent(
     token: String,
     gate: Arc<Semaphore>,
     ready: Arc<AtomicU64>,
+    seated: Arc<std::sync::atomic::AtomicBool>,
     mut acts: mpsc::UnboundedReceiver<Due>,
 ) -> Sent {
     let mut out = Sent::default();
@@ -430,6 +437,7 @@ async fn agent(
     }
     // Sent and not yet answered: sequence → when it went.
     let mut pending: HashMap<u64, Instant> = HashMap::new();
+    let mut verb_of: HashMap<u64, Name> = HashMap::new();
     let mut start: Option<Instant> = None;
     let mut drain_until: Option<Instant> = None;
     loop {
@@ -448,9 +456,10 @@ async fn agent(
                     }
                     let now = Instant::now();
                     pending.insert(d.sequence, now);
+                    verb_of.insert(d.sequence, d.verb);
                     out.late_us.push(now.duration_since(d.at).as_micros() as u64);
                 }
-                None => drain_until = Some(Instant::now() + Duration::from_secs(5)),
+                None => drain_until = Some(Instant::now() + Duration::from_secs(DRAIN_S)),
             },
             m = rx.next() => match m {
                 Some(Ok(Message::Binary(b))) => {
@@ -465,6 +474,12 @@ async fn agent(
                             out.receipts += 1;
                         }
                         Heard::Refused(s, reason) if pending.contains_key(&s) => {
+                            let verb = verb_of.remove(&s).map_or("?".into(), |v| v.as_str().to_owned());
+                            // A sit refused leaves the Soul standing: its next walk needs no rise.
+                            if verb.ends_with(":sit") {
+                                seated.store(false, Ordering::Relaxed);
+                            }
+                            *out.refused_by.entry(format!("{verb} {reason}")).or_default() += 1;
                             let m = out.minute(s0, now);
                             *m.refusals.entry(reason).or_default() += 1;
                             m.latency_us.push(now.duration_since(pending[&s]).as_micros() as u64);
@@ -637,9 +652,10 @@ async fn main() {
                     // The world's ids and forms, through the first test Soul, on a socket of its own before its agent's.
                     let token = signed.first().map_or("", |(t, _)| t.as_str());
                     match targets::read_copy(&url, token).await {
-                        Ok(nodes) => targets::read_entries(&url, token)
-                            .await
-                            .map(|e| (url, signed, nodes.len(), targets::Targets::of(&nodes, &e))),
+                        Ok(seen) => targets::read_entries(&url, token).await.map(|e| {
+                            let t = targets::Targets::of(&seen, &e);
+                            (url, signed, seen.nodes.len(), t)
+                        }),
                         Err(e) => Err(e),
                     }
                 }
@@ -716,7 +732,10 @@ async fn main() {
     let mut chans = Vec::new();
     let mut tasks = Vec::new();
     let actors: Vec<Actor> = signed.iter().map(|(_, a)| *a).collect();
-    for (token, _) in signed {
+    // Each agent's own choice state (a cloned one would share its seated flag).
+    let mut choices: Vec<targets::Choice> =
+        (0..s.agents).map(|_| targets::Choice::default()).collect();
+    for ((token, _), c) in signed.into_iter().zip(&choices) {
         let (tx, rx) = mpsc::unbounded_channel();
         chans.push(tx);
         tasks.push(tokio::spawn(agent(
@@ -724,6 +743,7 @@ async fn main() {
             token,
             gate.clone(),
             ready.clone(),
+            c.seated.clone(),
             rx,
         )));
     }
@@ -748,7 +768,6 @@ async fn main() {
     let mut unmapped: BTreeMap<&str, u64> = BTreeMap::new();
     let mut by_verb: BTreeMap<String, u64> = BTreeMap::new();
     let (mut withheld, mut stand_ins) = (BTreeMap::new(), BTreeMap::new());
-    let mut choices = vec![targets::Choice::default(); s.agents as usize];
     for act in &s.acts {
         let Some(v) = act.verb else {
             *unmapped.entry(&s.kinds[act.kind]).or_default() += 1;
@@ -785,6 +804,7 @@ async fn main() {
             bytes: intent(actors[k], &verb, target, sequence[k], &based),
             sequence: sequence[k],
             start,
+            verb,
         });
     }
     drop(chans);
@@ -809,6 +829,10 @@ async fn main() {
     let other: u64 = sent.iter().map(|x| x.other).sum();
     let closed = sent.iter().filter(|x| x.closed).count();
     let tenths = by_tenth(&sent, a.late_ms);
+    let mut refused_by = BTreeMap::new();
+    for x in &sent {
+        add(&mut refused_by, &x.refused_by);
+    }
     let minutes = per_minute(&sent, wall);
     let report = serde_like::Obj::new()
         .s("describe", &s.describe)
@@ -833,6 +857,7 @@ async fn main() {
         )
         .raw("withheld", counts(&withheld))
         .raw("standIns", counts(&stand_ins))
+        .raw("refusedBy", counts(&refused_by))
         .raw("perMinute", serde_like::list(&minutes));
     let on_time = total.get("onTimeShare").unwrap_or(0.0);
     println!(
@@ -867,6 +892,7 @@ async fn main() {
     for m in &minutes {
         println!("  minute {}", m.json());
     }
+    println!("  refused by verb {}", counts(&refused_by));
     std::fs::write(a.dir.join("report.json"), report.json() + "\n").expect("report.json");
 }
 
