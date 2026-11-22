@@ -336,3 +336,95 @@ fn review_each_entry_writes_its_own_node_and_every_refusal_is_named() {
     );
     assert_eq!(got.name, "schema-unknown");
 }
+
+/// What `Part::read` gives for `effects` under `header`, from their value encoded: the reader `Part::of_effects`
+/// must agree with.
+fn read_of(
+    header: &[u8],
+    effects: &[replica::effects::Effect],
+) -> Result<Part, replica::effects::Refusal> {
+    let v = Value::Map(std::collections::BTreeMap::from([
+        (1, Value::Bytes(header.to_vec())),
+        (
+            2,
+            Value::Array(effects.iter().map(|e| e.to_value()).collect()),
+        ),
+    ]));
+    Part::read(&encode(&v).unwrap())
+}
+
+/// #4117 review (0.132 scaling, #1960): `Part::of_effects` gives what `Part::read` gives for the same effects, in
+/// every build (CI runs this in release too). Every fixture part comes out the same, bytes included: motion,
+/// reparents and transfers built without a decode, the others read back. A motion sample or a leave whose pose or
+/// owner the reader refuses is refused by the reader's name, so the world's writer takes its per-sample fallback and
+/// never logs a record its restart cannot read.
+#[test]
+fn a_built_part_is_the_read_part_and_a_bad_pose_is_refused_by_the_readers_name() {
+    use replica::pose::{Owner, Support};
+    let mut motions = 0;
+    let mut leaves = 0;
+    for (name, _) in FIXTURES {
+        let p = part(name);
+        let built = Part::of_effects(p.header.clone(), p.effects.clone()).expect("built");
+        assert_eq!(built, p, "{name}: the same part");
+        assert_eq!(built.stored(), p.stored(), "{name}: the same bytes");
+        let refused_alike = |effects: Vec<replica::effects::Effect>, what: &str| {
+            let want = read_of(&p.header, &effects).expect_err("the reader refuses it");
+            let got = Part::of_effects(p.header.clone(), effects).expect_err(what);
+            assert_eq!(got.name, want.name, "{name}: {what}");
+        };
+        for (k, e) in p.effects.iter().enumerate() {
+            if let Body::Changes(c) = &e.body {
+                for (j, ch) in c.iter().enumerate() {
+                    let Change::Motion(h) = ch.change else {
+                        continue;
+                    };
+                    motions += 1;
+                    let mut slot_on_surface = h;
+                    slot_on_surface.pose.frame.slot = Some(1);
+                    slot_on_surface.pose.support = Support::None;
+                    let mut slot_off_frame = h;
+                    slot_off_frame.pose.frame.slot = None;
+                    slot_off_frame.pose.support = Support::Slot;
+                    let mut below = h;
+                    below.pose.frame.slot = None;
+                    below.pose.support = Support::Surface {
+                        surface: h.node,
+                        height: -1,
+                    };
+                    let mut island = h;
+                    island.to = Owner::Island;
+                    for (what, bad) in [
+                        ("a slot's pose not in the slot", slot_on_surface),
+                        ("the slot's support off a slot", slot_off_frame),
+                        ("a height below its surface", below),
+                        ("an island owner", island),
+                    ] {
+                        let mut effects = p.effects.clone();
+                        if let Body::Changes(cs) = &mut effects[k].body {
+                            cs[j].change = Change::Motion(bad);
+                        }
+                        refused_alike(effects, what);
+                    }
+                }
+            }
+            if let Body::Transfer(TransferRec::Leave { .. }) = &e.body {
+                leaves += 1;
+                let mut effects = p.effects.clone();
+                if let Body::Transfer(TransferRec::Leave { pose, .. }) = &mut effects[k].body {
+                    pose.frame.slot = None;
+                    pose.support = Support::Slot;
+                }
+                refused_alike(effects, "a leave's pose");
+            }
+        }
+    }
+    println!(
+        "of_effects: every fixture part the same; {motions} motion samples refused four ways and {leaves} leaves by the \
+         reader's names"
+    );
+    assert!(
+        motions > 0 && leaves > 0,
+        "the fixtures hold motion and leaves"
+    );
+}
