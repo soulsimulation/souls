@@ -1045,6 +1045,10 @@ checksum = "3763264f6b73151db08c50ff20d7d8a0b8796e021cdea7ceedad07b80155fa0e"
 [[package]]
 name = "stall-test"
 version = "0.0.0"
+dependencies = [
+ "replica",
+ "sim",
+]
 
 [[package]]
 name = "stream-check"

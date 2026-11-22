@@ -106,6 +106,27 @@ CI's `driver-served` step (`v2/tools/ci.sh`, client leg) runs a 60 s `ladder-10-
 test world (no entries: walks go to any node of the copy, and the other kinds stand in as walks) under `worldd serve`
 and its own gatewayd.
 
+## Faults (X10, #4019)
+
+Flags for a fault pass on a served world (`v2/tools/stall-test/x10-faults.sh` runs the whole pass and prints its
+table, `x10-check` reads each arm):
+
+- `--reconnect`: an agent whose socket is lost comes back as the runbook's client does (a wait inside 2 s, then a try
+  every 50 to 250 ms for up to 120 s), and sends again, under its old sequence, every intent it has no answer for. A
+  `world.restarting` answer is sent again 200 ms later.
+- `--drop <share>@<second>+<seconds away>`: that share of the agents there at that second of the clock (an act due
+  before it), spread across them, close their sockets then and come back after the seconds away; acts due meanwhile
+  go when they are back.
+- `--viewers <n>@<slow share> --view-key <file> [--slow-read-ms 2000]`: n view sockets, signed in with view tokens
+  minted with the gateway's `--view-key`, each following one Soul's body at the full level; the slow share waits
+  `--slow-read-ms` after each frame it reads. The report's `viewers` gives each one's items, longest gap and how often
+  it was let go.
+- `--trace <file>`: one line per Soul (`soul <agent> <scope hex>:<counter>`), per receipt (`ack` or, a second one for
+  the same sequence, `dup`), per first answer (`first <agent> <sequence> <sent ms> <answered ms> <receipt or refusal>`),
+  per lost and regained socket (`gone`, `back`) and per act never answered (`open`), times in Unix ms.
+
+The report adds `duplicateReceipts`, `resent` and `restartingAnswers`.
+
 Limits: every agent signs in before the clock starts, so a late arrival is a socket that is idle until its first
 act. Targets are read once, from the first agent's scope (the room its body is in), so on a world whose test Souls
 stand in different rooms the others walk to that room's things, and a Soul whose body is elsewhere stands in a walk
