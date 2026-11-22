@@ -1,0 +1,4530 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "Every need on all18 forms; forward accepts both pawl states; named state/hand/reach refusals.",
+  "cases": [
+    {
+      "name": "forward_00_accepted_true",
+      "act": {
+        "this": "r1",
+        "form": "forward_00"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 0,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_00_accepted_false",
+      "act": {
+        "this": "r1",
+        "form": "forward_00"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 0,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_00_refuses_0_field_differs",
+      "act": {
+        "this": "r1",
+        "form": "forward_00"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 1,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "forward_00_refuses_1_no_free_hand",
+      "act": {
+        "this": "r1",
+        "form": "forward_00"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 0,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "prop_left",
+              "right": "prop_right"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "forward_00_refuses_2_out_of_reach",
+      "act": {
+        "this": "r1",
+        "form": "forward_00"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 0,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "forward_01_accepted_true",
+      "act": {
+        "this": "r1",
+        "form": "forward_01"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 1,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_01_accepted_false",
+      "act": {
+        "this": "r1",
+        "form": "forward_01"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 1,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_01_refuses_0_field_differs",
+      "act": {
+        "this": "r1",
+        "form": "forward_01"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 2,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "forward_01_refuses_1_no_free_hand",
+      "act": {
+        "this": "r1",
+        "form": "forward_01"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 1,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "prop_left",
+              "right": "prop_right"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "forward_01_refuses_2_out_of_reach",
+      "act": {
+        "this": "r1",
+        "form": "forward_01"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 1,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "forward_02_accepted_true",
+      "act": {
+        "this": "r1",
+        "form": "forward_02"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 2,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_02_accepted_false",
+      "act": {
+        "this": "r1",
+        "form": "forward_02"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 2,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_02_refuses_0_field_differs",
+      "act": {
+        "this": "r1",
+        "form": "forward_02"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 3,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "forward_02_refuses_1_no_free_hand",
+      "act": {
+        "this": "r1",
+        "form": "forward_02"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 2,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "prop_left",
+              "right": "prop_right"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "forward_02_refuses_2_out_of_reach",
+      "act": {
+        "this": "r1",
+        "form": "forward_02"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 2,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "forward_03_accepted_true",
+      "act": {
+        "this": "r1",
+        "form": "forward_03"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 3,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_03_accepted_false",
+      "act": {
+        "this": "r1",
+        "form": "forward_03"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 3,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_03_refuses_0_field_differs",
+      "act": {
+        "this": "r1",
+        "form": "forward_03"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 4,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "forward_03_refuses_1_no_free_hand",
+      "act": {
+        "this": "r1",
+        "form": "forward_03"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 3,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "prop_left",
+              "right": "prop_right"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "forward_03_refuses_2_out_of_reach",
+      "act": {
+        "this": "r1",
+        "form": "forward_03"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 3,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "forward_04_accepted_true",
+      "act": {
+        "this": "r1",
+        "form": "forward_04"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 4,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_04_accepted_false",
+      "act": {
+        "this": "r1",
+        "form": "forward_04"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 4,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_04_refuses_0_field_differs",
+      "act": {
+        "this": "r1",
+        "form": "forward_04"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 5,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "forward_04_refuses_1_no_free_hand",
+      "act": {
+        "this": "r1",
+        "form": "forward_04"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 4,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "prop_left",
+              "right": "prop_right"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "forward_04_refuses_2_out_of_reach",
+      "act": {
+        "this": "r1",
+        "form": "forward_04"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 4,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "forward_05_accepted_true",
+      "act": {
+        "this": "r1",
+        "form": "forward_05"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 5,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_05_accepted_false",
+      "act": {
+        "this": "r1",
+        "form": "forward_05"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 5,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_05_refuses_0_field_differs",
+      "act": {
+        "this": "r1",
+        "form": "forward_05"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 6,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "forward_05_refuses_1_no_free_hand",
+      "act": {
+        "this": "r1",
+        "form": "forward_05"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 5,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "prop_left",
+              "right": "prop_right"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "forward_05_refuses_2_out_of_reach",
+      "act": {
+        "this": "r1",
+        "form": "forward_05"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 5,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "forward_06_accepted_true",
+      "act": {
+        "this": "r1",
+        "form": "forward_06"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 6,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_06_accepted_false",
+      "act": {
+        "this": "r1",
+        "form": "forward_06"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 6,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_06_refuses_0_field_differs",
+      "act": {
+        "this": "r1",
+        "form": "forward_06"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 7,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "forward_06_refuses_1_no_free_hand",
+      "act": {
+        "this": "r1",
+        "form": "forward_06"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 6,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "prop_left",
+              "right": "prop_right"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "forward_06_refuses_2_out_of_reach",
+      "act": {
+        "this": "r1",
+        "form": "forward_06"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 6,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "forward_07_accepted_true",
+      "act": {
+        "this": "r1",
+        "form": "forward_07"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 7,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_07_accepted_false",
+      "act": {
+        "this": "r1",
+        "form": "forward_07"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 7,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_07_refuses_0_field_differs",
+      "act": {
+        "this": "r1",
+        "form": "forward_07"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 0,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "forward_07_refuses_1_no_free_hand",
+      "act": {
+        "this": "r1",
+        "form": "forward_07"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 7,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "prop_left",
+              "right": "prop_right"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "forward_07_refuses_2_out_of_reach",
+      "act": {
+        "this": "r1",
+        "form": "forward_07"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 7,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "reverse_00_accepted_false",
+      "act": {
+        "this": "r1",
+        "form": "reverse_00"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 0,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "reverse_00_refuses_0_field_differs",
+      "act": {
+        "this": "r1",
+        "form": "reverse_00"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 1,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "reverse_00_refuses_1_field_differs",
+      "act": {
+        "this": "r1",
+        "form": "reverse_00"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 0,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "reverse_00_refuses_2_no_free_hand",
+      "act": {
+        "this": "r1",
+        "form": "reverse_00"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 0,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "prop_left",
+              "right": "prop_right"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "reverse_00_refuses_3_out_of_reach",
+      "act": {
+        "this": "r1",
+        "form": "reverse_00"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 0,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "reverse_01_accepted_false",
+      "act": {
+        "this": "r1",
+        "form": "reverse_01"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 1,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "reverse_01_refuses_0_field_differs",
+      "act": {
+        "this": "r1",
+        "form": "reverse_01"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 2,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "reverse_01_refuses_1_field_differs",
+      "act": {
+        "this": "r1",
+        "form": "reverse_01"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 1,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "reverse_01_refuses_2_no_free_hand",
+      "act": {
+        "this": "r1",
+        "form": "reverse_01"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 1,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "prop_left",
+              "right": "prop_right"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "reverse_01_refuses_3_out_of_reach",
+      "act": {
+        "this": "r1",
+        "form": "reverse_01"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 1,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "reverse_02_accepted_false",
+      "act": {
+        "this": "r1",
+        "form": "reverse_02"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 2,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "reverse_02_refuses_0_field_differs",
+      "act": {
+        "this": "r1",
+        "form": "reverse_02"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 3,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "reverse_02_refuses_1_field_differs",
+      "act": {
+        "this": "r1",
+        "form": "reverse_02"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 2,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "reverse_02_refuses_2_no_free_hand",
+      "act": {
+        "this": "r1",
+        "form": "reverse_02"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 2,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "prop_left",
+              "right": "prop_right"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "reverse_02_refuses_3_out_of_reach",
+      "act": {
+        "this": "r1",
+        "form": "reverse_02"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 2,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "reverse_03_accepted_false",
+      "act": {
+        "this": "r1",
+        "form": "reverse_03"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 3,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "reverse_03_refuses_0_field_differs",
+      "act": {
+        "this": "r1",
+        "form": "reverse_03"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 4,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "reverse_03_refuses_1_field_differs",
+      "act": {
+        "this": "r1",
+        "form": "reverse_03"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 3,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "reverse_03_refuses_2_no_free_hand",
+      "act": {
+        "this": "r1",
+        "form": "reverse_03"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 3,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "prop_left",
+              "right": "prop_right"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "reverse_03_refuses_3_out_of_reach",
+      "act": {
+        "this": "r1",
+        "form": "reverse_03"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 3,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "reverse_04_accepted_false",
+      "act": {
+        "this": "r1",
+        "form": "reverse_04"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 4,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "reverse_04_refuses_0_field_differs",
+      "act": {
+        "this": "r1",
+        "form": "reverse_04"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 5,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "reverse_04_refuses_1_field_differs",
+      "act": {
+        "this": "r1",
+        "form": "reverse_04"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 4,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "reverse_04_refuses_2_no_free_hand",
+      "act": {
+        "this": "r1",
+        "form": "reverse_04"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 4,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "prop_left",
+              "right": "prop_right"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "reverse_04_refuses_3_out_of_reach",
+      "act": {
+        "this": "r1",
+        "form": "reverse_04"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 4,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "reverse_05_accepted_false",
+      "act": {
+        "this": "r1",
+        "form": "reverse_05"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 5,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "reverse_05_refuses_0_field_differs",
+      "act": {
+        "this": "r1",
+        "form": "reverse_05"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 6,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "reverse_05_refuses_1_field_differs",
+      "act": {
+        "this": "r1",
+        "form": "reverse_05"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 5,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "reverse_05_refuses_2_no_free_hand",
+      "act": {
+        "this": "r1",
+        "form": "reverse_05"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 5,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "prop_left",
+              "right": "prop_right"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "reverse_05_refuses_3_out_of_reach",
+      "act": {
+        "this": "r1",
+        "form": "reverse_05"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 5,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "reverse_06_accepted_false",
+      "act": {
+        "this": "r1",
+        "form": "reverse_06"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 6,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "reverse_06_refuses_0_field_differs",
+      "act": {
+        "this": "r1",
+        "form": "reverse_06"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 7,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "reverse_06_refuses_1_field_differs",
+      "act": {
+        "this": "r1",
+        "form": "reverse_06"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 6,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "reverse_06_refuses_2_no_free_hand",
+      "act": {
+        "this": "r1",
+        "form": "reverse_06"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 6,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "prop_left",
+              "right": "prop_right"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "reverse_06_refuses_3_out_of_reach",
+      "act": {
+        "this": "r1",
+        "form": "reverse_06"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 6,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "reverse_07_accepted_false",
+      "act": {
+        "this": "r1",
+        "form": "reverse_07"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 7,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "reverse_07_refuses_0_field_differs",
+      "act": {
+        "this": "r1",
+        "form": "reverse_07"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 0,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "reverse_07_refuses_1_field_differs",
+      "act": {
+        "this": "r1",
+        "form": "reverse_07"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 7,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "reverse_07_refuses_2_no_free_hand",
+      "act": {
+        "this": "r1",
+        "form": "reverse_07"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 7,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "prop_left",
+              "right": "prop_right"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "reverse_07_refuses_3_out_of_reach",
+      "act": {
+        "this": "r1",
+        "form": "reverse_07"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 7,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "raise_pawl_accepted_true",
+      "act": {
+        "this": "r1",
+        "form": "raise_pawl"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 3,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "raise_pawl_refuses_0_field_differs",
+      "act": {
+        "this": "r1",
+        "form": "raise_pawl"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 3,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "raise_pawl_refuses_1_no_free_hand",
+      "act": {
+        "this": "r1",
+        "form": "raise_pawl"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 3,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "prop_left",
+              "right": "prop_right"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "raise_pawl_refuses_2_out_of_reach",
+      "act": {
+        "this": "r1",
+        "form": "raise_pawl"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 3,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "lower_pawl_accepted_false",
+      "act": {
+        "this": "r1",
+        "form": "lower_pawl"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 3,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "lower_pawl_refuses_0_field_differs",
+      "act": {
+        "this": "r1",
+        "form": "lower_pawl"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 3,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "lower_pawl_refuses_1_no_free_hand",
+      "act": {
+        "this": "r1",
+        "form": "lower_pawl"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 3,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "prop_left",
+              "right": "prop_right"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "lower_pawl_refuses_2_out_of_reach",
+      "act": {
+        "this": "r1",
+        "form": "lower_pawl"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 3,
+              "pawl_engaged": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    }
+  ]
+}

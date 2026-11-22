@@ -1,0 +1,729 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Both wraps with engaged forward, raised reverse, reversal and phase-preserving pawl operations. Generic harness replays each receipt for idempotence.",
+  "cases": [
+    {
+      "name": "indexed_ratchet_cycles_interlock_and_reversal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "r1"
+            ]
+          },
+          "r1": {
+            "kind": "eden:indexed_ratchet",
+            "fields": {
+              "phase": 0,
+              "pawl_engaged": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "r1",
+            "form": "forward_00"
+          },
+          "receipt": "ratchet0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "r1",
+                "field": "phase",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "r1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "r1",
+            "form": "forward_01"
+          },
+          "receipt": "ratchet1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "r1",
+                "field": "phase",
+                "n": 28,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "r1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "r1",
+            "form": "forward_02"
+          },
+          "receipt": "ratchet2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "r1",
+                "field": "phase",
+                "n": 28,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "r1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "r1",
+            "form": "forward_03"
+          },
+          "receipt": "ratchet3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "r1",
+                "field": "phase",
+                "n": 28,
+                "to": 4
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "r1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "r1",
+            "form": "forward_04"
+          },
+          "receipt": "ratchet4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "r1",
+                "field": "phase",
+                "n": 28,
+                "to": 5
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "r1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "r1",
+            "form": "forward_05"
+          },
+          "receipt": "ratchet5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "r1",
+                "field": "phase",
+                "n": 28,
+                "to": 6
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "r1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "r1",
+            "form": "forward_06"
+          },
+          "receipt": "ratchet6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "r1",
+                "field": "phase",
+                "n": 28,
+                "to": 7
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "r1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "r1",
+            "form": "forward_07"
+          },
+          "receipt": "ratchet7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "r1",
+                "field": "phase",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "r1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "r1",
+            "form": "raise_pawl"
+          },
+          "receipt": "ratchet8",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "r1",
+                "field": "pawl_engaged",
+                "n": 29,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:pawl_changed",
+                "node": "r1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "r1",
+            "form": "reverse_00"
+          },
+          "receipt": "ratchet9",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "r1",
+                "field": "phase",
+                "n": 28,
+                "to": 7
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "r1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "r1",
+            "form": "reverse_07"
+          },
+          "receipt": "ratchet10",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "r1",
+                "field": "phase",
+                "n": 28,
+                "to": 6
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "r1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "r1",
+            "form": "reverse_06"
+          },
+          "receipt": "ratchet11",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "r1",
+                "field": "phase",
+                "n": 28,
+                "to": 5
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "r1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "r1",
+            "form": "reverse_05"
+          },
+          "receipt": "ratchet12",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "r1",
+                "field": "phase",
+                "n": 28,
+                "to": 4
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "r1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "r1",
+            "form": "reverse_04"
+          },
+          "receipt": "ratchet13",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "r1",
+                "field": "phase",
+                "n": 28,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "r1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "r1",
+            "form": "reverse_03"
+          },
+          "receipt": "ratchet14",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "r1",
+                "field": "phase",
+                "n": 28,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "r1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "r1",
+            "form": "reverse_02"
+          },
+          "receipt": "ratchet15",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "r1",
+                "field": "phase",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "r1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "r1",
+            "form": "reverse_01"
+          },
+          "receipt": "ratchet16",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "r1",
+                "field": "phase",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "r1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "r1",
+            "form": "forward_00"
+          },
+          "receipt": "ratchet17",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "r1",
+                "field": "phase",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "r1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "r1",
+            "form": "reverse_01"
+          },
+          "receipt": "ratchet18",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "r1",
+                "field": "phase",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "r1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "r1",
+            "form": "lower_pawl"
+          },
+          "receipt": "ratchet19",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "r1",
+                "field": "pawl_engaged",
+                "n": 29,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:pawl_changed",
+                "node": "r1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "r1",
+            "form": "raise_pawl"
+          },
+          "receipt": "ratchet20",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "r1",
+                "field": "pawl_engaged",
+                "n": 29,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:pawl_changed",
+                "node": "r1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "r1",
+            "form": "reverse_00"
+          },
+          "receipt": "ratchet21",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "r1",
+                "field": "phase",
+                "n": 28,
+                "to": 7
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "r1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "r1",
+            "form": "forward_07"
+          },
+          "receipt": "ratchet22",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "r1",
+                "field": "phase",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "r1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "r1",
+            "form": "lower_pawl"
+          },
+          "receipt": "ratchet23",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "r1",
+                "field": "pawl_engaged",
+                "n": 29,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:pawl_changed",
+                "node": "r1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "r1": {
+          "kind": "eden:indexed_ratchet",
+          "fields": {
+            "phase": 0,
+            "pawl_engaged": 1
+          }
+        }
+      }
+    }
+  ]
+}
