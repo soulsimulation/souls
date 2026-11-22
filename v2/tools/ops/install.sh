@@ -216,6 +216,7 @@ install_all() {
 # Private ops settings: SIM_SITE_OWNERS, SOULS_OPS_PUBLIC_ORIGIN, CLERK_AUTHORIZED_PARTIES.
 # Match the provider and application origin configured for souls-directory.
 # Serving processes on the origin's port: ORIGIN_PROCESSES (default: the cores less ORIGIN_RESERVE_CORES, 2).
+# Streams from the CDN hostname: SOULS_STREAM_ORIGIN=https://stream.eden.art, only once that host answers (#4159).
 SOULS_OPS_DIRECTORY=http://127.0.0.1:$DIRECTORY_PORT"
   ensure_once "$ETC/secrets.env" 600 root root "$SECRETS"
   for u in "${UNIT_FILES[@]}"; do

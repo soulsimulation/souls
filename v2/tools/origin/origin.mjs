@@ -8,7 +8,8 @@
 // - every 404, a temporary file (`*.tmp`) and any URL with a query string: `no-store`. A 404 a browser asked for as a
 //   page (Accept naming text/html, not an API path) carries site.mjs's "No page here" page (C1, #3673).
 //
-// Each 200 carries a strong ETag, the SHA-256 of the bytes, which the reader tool checks.
+// Each 200 carries a strong ETag, the SHA-256 of the bytes, which the reader tool checks. Each stream answer (a 200 and
+// the plain 404) carries `Access-Control-Allow-Origin: *`, so the page can read it from the stream's CDN hostname (#4159).
 //
 // An immutable file is read once and its one buffer is shared by every request for it (#4018: a join wave of 250
 // viewers, each with its own copy of a 9 MB baseline, took the origin past its unit's 256 MB). Requests in flight
@@ -37,6 +38,8 @@ import { worldRoutes } from './world-routes.mjs';
 export const IMMUTABLE = 'public, max-age=31536000, immutable, no-transform';
 export const POINTER = 'public, max-age=1, no-transform';
 export const MISS = 'no-store';
+// The page may read the stream from its CDN hostname (#4159): a plain GET of public bytes, so the reader needs only this.
+export const CORS = { 'access-control-allow-origin': '*' };
 
 /** What a path is: the pointer, an immutable file (a part or a header), or nothing to serve. */
 export function kindOf(path) {
@@ -101,14 +104,14 @@ export function sharedFiles(cacheBytes, stats = {}) {
  * `cacheBytes` bounds the immutable buffers held after their requests end (sharedFiles).
  */
 export function createOrigin(dir, site = {}, { cacheBytes = Number(process.env.ORIGIN_CACHE_MB ?? 64) * 2 ** 20 } = {}) {
-  const root = resolve(dir), pages = siteRoutes(site), worlds = worldRoutes(site.worldRoutes), upgrade = upgradeRefusal(site.client);
+  const root = resolve(dir), pages = siteRoutes(site), worlds = worldRoutes(site.worldRoutes, site.streamOrigin), upgrade = upgradeRefusal(site.client);
   const stats = { pointer: 0, immutable: 0, miss: 0, perPath: new Map(), bytes: {} }; // bytes: served, by first segment (O11)
   const shared = sharedFiles(cacheBytes, stats);
   const server = createServer(async (req, res) => {
     const miss = () => {
       stats.miss++;
       if (wantsPage(req)) return noPage(req, res); // C1 (#3673): a person gets a page, a program the empty 404
-      res.writeHead(404, { 'cache-control': MISS, 'content-length': 0 }).end();
+      res.writeHead(404, { 'cache-control': MISS, 'content-length': 0, ...CORS }).end();
     };
     try {
       if (upgrade.handle(req, res)) return;
@@ -147,6 +150,7 @@ export function createOrigin(dir, site = {}, { cacheBytes = Number(process.env.O
       'content-length': body.length,
       'cache-control': kind === 'pointer' ? POINTER : IMMUTABLE,
       etag,
+      ...CORS,
     });
     res.end(req.method === 'HEAD' ? undefined : body);
   });

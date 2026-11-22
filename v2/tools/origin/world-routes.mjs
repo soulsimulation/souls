@@ -5,6 +5,14 @@ import { request } from 'node:http';
 export const WORLD_ROUTES = '/var/lib/souls/routes/worlds.json';
 const WORLD = /^\/(preview\/)?w\/([a-z0-9][a-z0-9-]{0,62})(\/.*)?$/;
 const local = (host) => host === 'localhost' || host === '[::1]' || /^127\.(?:\d{1,3}\.){2}\d{1,3}$/.test(host);
+/** SOULS_STREAM_ORIGIN (#4159): the one CDN hostname the page may read streams and histories from, named in the
+ *  bootstrap as `streamOrigin`; unset, the page reads them from its own host. An https origin with nothing after it. */
+export function streamOrigin(value = process.env.SOULS_STREAM_ORIGIN) {
+  if (!value) return null;
+  const u = new URL(value);
+  if (u.protocol !== 'https:' || u.origin !== value) throw Error(`SOULS_STREAM_ORIGIN must be an https origin with no path, not ${value}`);
+  return value;
+}
 const publicPath = (s) => typeof s === 'string' && /^\/s\/[A-Za-z0-9._/-]+\/$/.test(s) && !s.split('/').some(p => p === '.' || p === '..');
 
 /** Only operator/placement-owned file bytes may name native listeners. Invalid metadata refuses closed. */
@@ -25,7 +33,7 @@ const reply = (res, status, refused, head = false) => res.writeHead(status, { 'c
 const socketReply = (socket, status, refused) => socket.end(`HTTP/1.1 ${status} Refused\r\nContent-Type: application/json\r\nCache-Control: no-store\r\nConnection: close\r\n\r\n${JSON.stringify({ refused })}`);
 
 /** The public bootstrap and exactly three native gateway endpoints (the socket, the creator token, the entries), on canonical and preview world paths. */
-export function worldRoutes(file = process.env.SOULS_WORLD_ROUTES || WORLD_ROUTES) {
+export function worldRoutes(file = process.env.SOULS_WORLD_ROUTES || WORLD_ROUTES, files = streamOrigin()) {
   const selected = (req) => {
     const url = new URL(req.url, 'http://origin'), match = WORLD.exec(url.pathname);
     if (!match) return null;
@@ -58,7 +66,7 @@ export function worldRoutes(file = process.env.SOULS_WORLD_ROUTES || WORLD_ROUTE
     const { entry, world, path, base } = route;
     if (path === '/v1/bootstrap' || path === '/views/world.json') {
       if (req.method !== 'GET' && req.method !== 'HEAD') { reply(res, 405, 'read-only'); return true; }
-      const body = JSON.stringify({ world, stream: entry.stream, ...(entry.history ? { history: entry.history } : {}), directory: '/', gateway: `${base}/v2/ws`, creatorToken: `${base}/v2/creator-token` });
+      const body = JSON.stringify({ world, stream: entry.stream, ...(entry.history ? { history: entry.history } : {}), ...(files ? { streamOrigin: files } : {}), directory: '/', gateway: `${base}/v2/ws`, creatorToken: `${base}/v2/creator-token` });
       res.writeHead(200, { 'content-type': 'application/json', 'content-length': Buffer.byteLength(body), 'cache-control': 'no-store', 'x-robots-tag': 'noindex, nofollow', 'x-content-type-options': 'nosniff' }).end(req.method === 'HEAD' ? undefined : body);
       return true;
     }

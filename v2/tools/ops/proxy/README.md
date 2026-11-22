@@ -7,6 +7,7 @@ each rule does is in the header of [`soul-game.caddy`](soul-game.caddy).
 |---|---|---|
 | `soul-game.caddy` | `/etc/caddy/sites/soul-game.caddy` | `soul.game` after the switch; replaces today's file of that name |
 | `souls-game.caddy` | `/etc/caddy/sites/souls-game.caddy` | `souls.game` redirects to `soul.game`, path and query kept |
+| `stream-eden-art.caddy` | `/etc/caddy/sites/stream-eden-art.caddy` | `stream.eden.art`: only `/s/*`, from the viewers' origin, for the CDN (#4159, [cdn](../../../../docs/operations/cdn.md#the-stream-hostname)) |
 | `routes.mjs` | run by `souls-routes.timer` | the active map from the directory and trusted placement metadata: `/var/lib/souls-routes/slugs/<slug>` and `sitemap.xml` |
 | `souls-routes.service`, `.timer` | `/etc/systemd/system/` | runs `routes.mjs` each minute as `simworlds` |
 | `standin.mjs` | not installed | the local stand-in that proves all of this (below) |

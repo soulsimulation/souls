@@ -1,0 +1,20 @@
+# stream.eden.art on the PRODUCTION host (#4159): the worlds' public streams and histories, the same `/s/*` files soul.game
+# serves, under a hostname in the eden.art zone, which is behind Cloudflare. The CDN keeps them by its cache rule for
+# this host (docs/operations/cdn.md, "The stream hostname") and asks this host once per file, so viewers no longer reach
+# the origin one by one. Installed as /etc/caddy/sites/stream-eden-art.caddy; it touches no other site. Until the
+# eden.art record points here, Caddy cannot get a certificate for the name and retries with back-off; nothing else is
+# affected. The page reads here only when the origin's SOULS_STREAM_ORIGIN names this host.
+#
+# - /s/* goes to the viewers' origin on 7320 without the /s, exactly as on soul.game; its answers carry their own
+#   Cache-Control and Access-Control-Allow-Origin, so nothing is added here.
+# - Everything else is a 404 the CDN never keeps: no page, no API, no socket lives on this host.
+https://stream.eden.art {
+	header X-Robots-Tag "noindex, nofollow"
+	handle_path /s/* {
+		reverse_proxy localhost:7320
+	}
+	handle {
+		header Cache-Control no-store
+		respond 404
+	}
+}

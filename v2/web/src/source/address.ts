@@ -1,5 +1,7 @@
 // An installed world's address is its own trusted bootstrap, never a public query naming a bearer destination.
-export type WorldAddress = { world: string; stream: string; history?: string; directory: string; gateway: string; creatorToken: string };
+export type WorldAddress = { world: string; stream: string; history?: string; streamOrigin?: string; directory: string; gateway: string; creatorToken: string };
+/** The one host besides the page's own that may serve a world's public stream and history: its CDN hostname (#4159). */
+export const STREAM_ORIGIN = 'https://stream.eden.art';
 const WORLD = /^\/(preview\/)?w\/([a-z0-9][a-z0-9-]{0,62})(?:\/|$)/;
 const local = (u: URL) => u.protocol === 'http:' && (u.hostname === 'localhost' || u.hostname === '[::1]' || /^127\.(?:\d{1,3}\.){2}\d{1,3}$/.test(u.hostname));
 
@@ -11,8 +13,9 @@ export async function worldAddress(href: string, get: typeof fetch = fetch): Pro
   if (!res.ok) throw new Error(`world routing refused: ${res.status}`);
   const data = await res.json() as WorldAddress;
   const stream = (p: unknown) => typeof p === 'string' && /^\/s\/[A-Za-z0-9._/-]+\/$/.test(p) && !p.split('/').some(s => s === '.' || s === '..');
-  if (data.world !== match[2] || !stream(data.stream) || (data.history !== undefined && !stream(data.history)) || data.directory !== '/' || data.gateway !== `${base}/v2/ws` || data.creatorToken !== `${base}/v2/creator-token`) throw new Error('world routing is invalid');
-  return { world: data.world, stream: new URL(data.stream, at).href, ...(data.history ? { history: new URL(data.history, at).href } : {}), directory: at.origin, gateway: new URL(data.gateway, at.href.replace(/^http/, 'ws')).href, creatorToken: new URL(data.creatorToken, at).href };
+  if (data.world !== match[2] || !stream(data.stream) || (data.history !== undefined && !stream(data.history)) || data.directory !== '/' || data.gateway !== `${base}/v2/ws` || data.creatorToken !== `${base}/v2/creator-token` || (data.streamOrigin !== undefined && data.streamOrigin !== STREAM_ORIGIN)) throw new Error('world routing is invalid');
+  const files = data.streamOrigin === undefined ? at : new URL(STREAM_ORIGIN);
+  return { world: data.world, stream: new URL(data.stream, files).href, ...(data.history ? { history: new URL(data.history, files).href } : {}), directory: at.origin, gateway: new URL(data.gateway, at.href.replace(/^http/, 'ws')).href, creatorToken: new URL(data.creatorToken, at).href };
 }
 
 /** Explicit development endpoints remain local to an HTTP-loopback page; public pages ignore these parameters. */

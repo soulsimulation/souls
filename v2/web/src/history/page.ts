@@ -6,6 +6,7 @@ import * as THREE from 'three';
 import type { FreeCamera } from '../camera/camera.ts';
 import { cameraAt, placeCamera } from '../camera/link.ts';
 import type { NodeRec, SampleRec } from '../source/source.ts';
+import { STREAM_ORIGIN } from '../source/address.ts';
 import { HistoryClock } from './clock.ts';
 import { historyBase, writeMoment, type Moment } from './link.ts';
 import type { HistoryMsg, Seeked } from './worker.ts';
@@ -30,7 +31,7 @@ export function historyLocation(moment: Moment, href: string, installed?: Histor
   const prefix = new URL('../views/', base).href;
   const path = PUBLIC_STREAM.exec(`../views/${stream.href.startsWith(prefix) ? stream.href.slice(prefix.length) : ''}`);
   if (!identity || identity[1] !== moment.world || !path || path[1] !== moment.lineage || path[2] !== path[4]
-    || base.origin !== page.origin || base.username || base.password || base.search || base.hash
+    || (base.origin !== page.origin && base.origin !== STREAM_ORIGIN) || base.username || base.password || base.search || base.hash
     || new URL(path[0], base).href !== stream.href) throw Error('history-live-foreign');
   return base;
 }

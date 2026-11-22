@@ -8,7 +8,7 @@ import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { after, before, test } from 'node:test';
 import { createOrigin } from './origin.mjs';
-import { readWorldRoutes } from './world-routes.mjs';
+import { readWorldRoutes, streamOrigin } from './world-routes.mjs';
 import { localAddresses, worldAddress } from '../../web/src/source/address.ts';
 import { updateWorldRoute } from '../ops/proxy/route-config.mjs';
 import { makeRoutes } from '../ops/proxy/routes.mjs';
@@ -305,4 +305,30 @@ test('#4018: concurrent requests for one immutable file share one read and one b
     }
   }
   rmSync(name);
+});
+
+test('#4159: every stream answer lets the page read it from the stream host (Access-Control-Allow-Origin: *), nothing more', async () => {
+  for (const [path, status] of [[`${base}/7`, 200], [`${base}/pointer`, 200], [`${base}/8`, 404], [`${base}/7?x=1`, 404]]) {
+    const r = await fetch(path, { headers: { origin: 'https://soul.game' } });
+    assert.equal(r.status, status, path);
+    assert.equal(r.headers.get('access-control-allow-origin'), '*', path);
+    assert.equal(r.headers.get('access-control-allow-credentials'), null, path);
+  }
+});
+
+test('#4159: SOULS_STREAM_ORIGIN names the stream host in the bootstrap, and the page reads stream and history there', async () => {
+  assert.equal(streamOrigin(''), null);
+  assert.equal(streamOrigin('https://stream.eden.art'), 'https://stream.eden.art');
+  for (const bad of ['http://stream.eden.art', 'https://stream.eden.art/', 'https://stream.eden.art/s', 'stream.eden.art']) assert.throws(() => streamOrigin(bad), undefined, bad);
+  const file = join(dir, 'world-routes-4159.json');
+  writeFileSync(file, JSON.stringify({ schema: 'souls/world-routes/1', worlds: { eden: { gateway: 'http://127.0.0.1:1', stream: '/s/eden/', history: '/s/history/eden/', canonical: true } } }));
+  const { server: s } = createOrigin(dir, { worldRoutes: file, streamOrigin: 'https://stream.eden.art' });
+  await new Promise(ok => s.listen(0, '127.0.0.1', ok));
+  const at = `http://127.0.0.1:${s.address().port}`;
+  try {
+    const body = await (await fetch(`${at}/w/eden/v1/bootstrap`)).json();
+    assert.equal(body.streamOrigin, 'https://stream.eden.art');
+    const a = await worldAddress('https://soul.game/w/eden/', async () => new Response(JSON.stringify(body)));
+    assert.deepEqual([a.stream, a.history, a.gateway], ['https://stream.eden.art/s/eden/', 'https://stream.eden.art/s/history/eden/', 'wss://soul.game/w/eden/v2/ws']);
+  } finally { s.close(); }
 });
