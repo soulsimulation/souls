@@ -12,8 +12,8 @@ Use this only on the directory machine, with its direct HTTP loopback origin in 
 
 A load run pairs N test Souls in one command and retires them together afterwards. Both refuse anything but the direct loopback origin, as above.
 
-1. Choose a tokens file outside this repository, in a private folder of the directory machine, for example `$HOME/load/tokens` (the folder must exist; the file must not).
-2. Run `node v2/tools/ops/test-soul pair <world> <n> --directory "$DIRECTORY_ORIGIN" --out "$HOME/load/tokens"` (n is 1 to 1,000). For each Soul it asks a new pairing for the world as a client would, approves it with the same operator approve, and takes its token by the normal poll; the first token comes after the poll interval, 5 s. It answers `{"ok":true,"world":…,"paired":n,"test":true}` and never prints a token.
+1. Choose a tokens file outside this repository, in a private folder of the directory machine, and put its path in `TOKENS_FILE` (the folder must exist; the file must not).
+2. Run `node v2/tools/ops/test-soul pair <world> <n> --directory "$DIRECTORY_ORIGIN" --out "$TOKENS_FILE"` (n is 1 to 1,000). For each Soul it asks a new pairing for the world as a client would, approves it with the same operator approve, and takes its token by the normal poll; the first token comes after the poll interval, 5 s. It answers `{"ok":true,"world":…,"paired":n,"test":true}` and never prints a token.
 3. The tokens file has one line per Soul, `<soul> <token>`, mode 0600. The load driver reads it. Never paste it, post it, commit it or attach it to proof. A file inside the repository, or one that already exists, is refused before any Soul is paired. If a pairing is refused part-way, the file is removed and the Souls already approved stay listed: retire them with the next step.
 4. After the run, `node v2/tools/ops/test-soul retire-all <world> --directory "$DIRECTORY_ORIGIN"` retires every active test Soul of that world, each by normal retirement, and answers how many. Then delete the tokens file.
 
