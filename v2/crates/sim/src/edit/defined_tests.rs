@@ -428,6 +428,40 @@ fn review_blockers_are_refused_at_define_by_name() {
     .expect("removed together");
 }
 
+/// A chain of forms, each starting the next by many 1 µs timers (#3697 re-review): with no ring, the ring search
+/// keeps the soonest timer per pair of forms and stays polynomial, so the record defines at once; the same chain
+/// closed into a ring under a tick is still `kind.effects`.
+fn chain(forms: usize, timers: usize, ring: bool) -> String {
+    let form = |i: usize| {
+        let next = if i + 1 < forms {
+            Some(i + 1)
+        } else {
+            ring.then_some(0)
+        };
+        let effects = next.map_or(String::new(), |n| {
+            vec![format!(r#"{{"change":"timer","form":"f{n}","after_us":1}}"#); timers].join(",")
+        });
+        format!(r#""f{i}":{{"who":"anyone","effects":[{effects}]}}"#)
+    };
+    let forms = (0..forms).map(form).collect::<Vec<_>>().join(",");
+    format!(
+        r#"{{"format":"souls-entry/1","kind":"gene:chain","owner":"thing","forms":{{{forms}}}}}"#
+    )
+}
+
+#[test]
+fn a_long_chain_of_quick_timers_with_no_ring_is_checked_fast() {
+    let mut w = W::new();
+    let root = w.root;
+    // 30^9 paths for the old search, which never finished; the soonest per pair checks 10 forms at once.
+    w.define(1, &chain(10, 30, false))
+        .expect("a ring-free chain of quick timers");
+    assert_eq!(
+        w.code(vec![define_op(2, root, &chain(10, 30, true))]),
+        "kind.effects"
+    );
+}
+
 /// `kind.in-use` holds at commit (#3697 review): a thing of the kind made after the removal was checked (as a Soul's
 /// form makes one) refuses it on the live copy, which the read set alone would not.
 #[test]
