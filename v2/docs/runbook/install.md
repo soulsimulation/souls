@@ -9,11 +9,12 @@ sends to these programs once the owner places its site file. Routing between the
 | What | Where | Owner, mode |
 |---|---|---|
 | The unprivileged user and group | `souls`, no shell, no home of its own | system user |
-| The programs: `supervisor`, `worldd`, `gatewayd`, `directoryd`, `deploy` (O7's, for the runbook's `world-deploy.sh`), `gateway-upgrade` (O16's, for `gateway-upgrade.sh`), `import-accounts` (X11), `import-world` (X6), `publish-template` (G9's `templates`, renamed because `/usr/local/lib/souls/templates` is W3b's catalogue, built on the machine from Eden's facts) | `/usr/local/lib/souls/` | root, 755 |
+| The programs: `supervisor`, `worldd`, `gatewayd`, `directoryd`, `deploy` (O7's, for the runbook's `world-deploy.sh`), `gateway-upgrade` (O16's, for `gateway-upgrade.sh`), `import-accounts` (X11), `import-world` (X6), `register-world` (an imported world in the directory), `publish-template` (G9's `templates`, renamed because `/usr/local/lib/souls/templates` is W3b's catalogue, built on the machine from Eden's facts) | `/usr/local/lib/souls/` | root, 755 |
 | The viewers' origin (`origin.mjs`, `cache.mjs`) and the page's files (V5) | `/usr/local/lib/souls/origin/`, `/usr/local/lib/souls/web/` | root, 644 |
 | The served client (R17: `eden.mjs`, the skills, the daemon's library, `soul-client.json`), at the version its skill declares; placed only when absent, so release-v2's move replaces it and a later install never puts an older one back. Today's launcher's cut-over fence checks it (`clientDir`) | `/usr/local/lib/souls/client/` | root, 644 |
 | Data: worlds, the directory's store, the view tier's stream files | `/var/lib/souls/{worlds,directory,views}` | souls, 750 |
 | The world route file, which today's launcher's cut-over fence also reads (the parent `/var/lib/souls` is 751) | `/var/lib/souls/routes/worlds.json` | souls, 755 |
+| The settings folder, which today's launcher enters (not lists) to read its cut-over binding, `cutover-binding.json` | `/etc/souls/` | root:souls, 751 |
 | The directory's arguments, written once, never overwritten | `/etc/souls/directory.args` | root:souls, 640 |
 | Secrets, `KEY=value`, written once (empty), never overwritten | `/etc/souls/secrets.env` | root, 600 |
 | What the install made (its record; see below) | `/etc/souls/install.state` | root, 644 |
@@ -122,6 +123,26 @@ or worker permission is granted. SQLite opens the backup read-only and immutable
 backup (the validator also accepts several facts files). The convenience `import-world.ts` wrapper invokes
 `cargo run`; use the installed validator above on production.
 
+### An imported world in the directory
+
+A world brought over from today's system (Eden: `import-world`, `worldd seed`, `place-world.sh`) is made by no create,
+so nothing else puts it in the directory's list. `register-world` writes its name record and its list row in the store
+the directory reads (the bucket `DIRECTORY_STORE_URL` names, else the folder `DIRECTORYD_WORLD_STORE`), then its entry
+and aliases in the world-authority map. Run it as root after placing the world and before the directory (re)starts
+with the map naming it: a map entry the directory cannot find in its own list stops every pairing
+(`world-authority-unavailable`).
+
+```sh
+DIRECTORYD_WORLD_STORE=/var/lib/souls/worlds/directory /usr/local/lib/souls/register-world eden \
+  --instance <placed instance> --creator <the creator's principal> --label Eden --alias eden-2026 \
+  --env-file /etc/souls/secrets.env --authority /etc/souls/placement-data/authority.json
+```
+
+It is idempotent: a second run says `kept` and changes nothing. It refuses, changing nothing, a name that is another
+world's (`name-taken`), the same world under another name (`world-registered`), another founder (`creator-differs`)
+and a map entry or alias that differs (`authority-conflict`). On a folder store it hands what it made to the folder's
+owner. Rules: `v2/crates/directoryd/src/worlds/list/register.rs`.
+
 ## After the install: the owner's steps
 
 1. Configure the public browser fields in `/etc/souls/origin.env`: `AUTH_PROVIDER=clerk`, the matching `CLERK_PUBLISHABLE_KEY` and HTTPS `CLERK_ISSUER_URL`; optional `CLERK_SATELLITE_DOMAIN` and `CLERK_SIGN_IN_URL` keep the existing satellite sign-in. The origin unit reads this public-only file, never `secrets.env`. `/v1/auth/config` exposes only these allowlisted fields with no-store; missing or invalid fields refuse sign-in. Test keys and test-person forms remain restricted to HTTP loopback. No copied session token is needed.
@@ -144,6 +165,29 @@ backup (the validator also accepts several facts files). The convenience `import
    ```
 
 4. Start units by name when a world is placed (X5): `systemctl start souls-origin souls-directory`.
+
+## A world's models
+
+The page draws a world's things from the models its bake wrote (`v2/tools/import-eden/bake/bake.ts`), found at
+`/w/<slug>/models/` beside the world page: `models.json` and `worlds/models/<hash>.glb`. The front door
+(`v2/tools/ops/proxy/soul-game.caddy`) serves that path from `/var/lib/souls/models/<slug>`, which the install makes
+(root, 755) and never mirrors: an install or release removes nothing there. A model is named by its hash and cached
+as immutable; `models.json` is revalidated. A world with no folder there answers 404 and its page draws boxes.
+
+Bake from the same backup and map the world's facts were exported from (`export.ts --backup`), in a checkout of the
+released head after `pnpm install --frozen-lockfile` and `pnpm assets:pull`, then check and place:
+
+```sh
+node v2/tools/import-eden/bake/bake.ts --backup <backup.db> --world <id> --map content/worlds/<world>/map.json --out <scratch>/models
+node -e 'const r=(p)=>require(require("path").resolve(p)),f=r(process.argv[1]),t=r(process.argv[2]).things;console.log(f.things.filter((x)=>x.id in t).length,"of",Object.keys(t).length)' <facts.json> <scratch>/models/models.json
+install -d -o root -g root -m 755 /var/lib/souls/models/<slug> /var/lib/souls/models/<slug>/worlds/models
+install -o root -g root -m 644 <scratch>/models/worlds/models/*.glb /var/lib/souls/models/<slug>/worlds/models/
+install -o root -g root -m 644 <scratch>/models/models.json /var/lib/souls/models/<slug>/models.json
+```
+
+The check prints how many of the facts' things the table maps, of its rows: the two numbers are equal for a bake of
+the same backup (Eden: 5,171 of 5,171); near 0 means the ids differ (a template bake, or another backup), so do not
+place it. Files are only added and are named by their hash, so a re-bake needs no delete; `models.json` goes last.
 
 ## Not yet in it
 

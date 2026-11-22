@@ -283,3 +283,19 @@ pub fn envelope(sequence: u64, at: Micros, intent: Id, actor: Actor, node: Id) -
         node,
     }
 }
+
+#[cfg(test)]
+mod reserved_tests {
+    use replica::fields::{On, reserved};
+
+    /// The body fields this crate and `skills` number are in the engine's one list of reserved fields.
+    #[test]
+    fn body_fields_are_reserved() {
+        for n in [super::NAME, super::DESCRIPTION, skills::wear::BODY] {
+            assert!(
+                reserved().iter().any(|f| f.n == n && f.on == On::Body),
+                "{n}"
+            );
+        }
+    }
+}

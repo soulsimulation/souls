@@ -108,7 +108,7 @@ completed intent with the same form decoder as the gateway before sending it.
 
 15. **An edit is a creator's batch under one cause** (Engine v2 G1b, #3362; the batch and its checks are G1's,
     `replica::edit`, committed by `sim::edit`). Its verb is `souls:edit` and its parameters are `{1: [operation, ...]}`,
-    1 to 256 operations; its basis's sequence is the version it was planned against. It carries nothing else: no
+    1 to 256 operations, with `6: claim id` when it is sent under a build claim (#3701, `replica::edit::claims`); its basis's sequence is the version it was planned against. It carries nothing else: no
     target, resources, fallbacks, replaced intent or body, since it drives none (`edit-not-bare`), and each operation
     is in its one byte form (`edit-not-a-batch`). The operations are place `{1: 1, 2: name, 3: kind's plain name, 4:
     kind's hash, 5: parent, 6: spot, 7: audience, 8: fields}` (7 left out for everyone, else the audience's id; 8
@@ -121,7 +121,7 @@ completed intent with the same form decoder as the gateway before sending it.
     containing building of both places; `closed` and `open` contain 1–64 distinct authored solid rows each (nine
     bounded integers per row). Only exact unique `closed` rows are replaced, leaving unrelated solids intact.
     The check prepares the resulting wall field off-clock, and BUILDSAFE judges that same committed field. Leaf
-    field 29 is engine-owned `[wall,closed,open]`; removal restores its patch only while the owned open rows still
+    field 100 is engine-owned `[wall,closed,open]`; removal restores its patch only while the owned open rows still
     match (`edit.doorway-wall-changed`), with intervening wall writes refused `edit.stale` by the normal stamp check.
     Imported doors have no inferred restoration: their creator supplies an explicit wall Set in the same removal
     batch. The JSON batch uses `wall`, `closed` and `open` with the same meaning. A node is an id, or the

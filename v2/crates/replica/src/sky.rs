@@ -34,15 +34,23 @@ pub const F_SEED: u64 = 64;
 pub const F_WEATHER_UNTIL: u64 = 65;
 // 66 to 68 on the root are the clock's mapping (`crate::time::F_CLOCK_WORLD`, E7b).
 
-/// How the sky is drawn (V19c, #3521): settings no rule reads, carried for a page to draw today's sky. The month and
+/// How the sky is drawn (V19c, #3521; 88 to 90 since #3695, as the clock's mapping holds 66 to 68 on the same node):
+/// settings no rule reads, carried for a page to draw today's sky. The month and
 /// day the sky is drawn on, `[month, day]`, whatever the calendar's date (today's `state.time.calendar`: Eden's sky is
 /// always 5 June); the year and the hour stay the calendar's.
-pub const F_SKY_DATE: u64 = 66;
+pub const F_SKY_DATE: u64 = 88;
 /// The sky palette's name (today's `state.sky.palette`, as `souls:<palette>`).
-pub const F_PALETTE: u64 = 67;
+pub const F_PALETTE: u64 = 89;
 /// The morning mist: `[peak, half-width, strength]`, the peak and half-width in µs after local midnight and the
 /// strength 0 to 100 (today's `morningMist`: 06:30, 2.5 h, 100).
-pub const F_MIST: u64 = 68;
+pub const F_MIST: u64 = 90;
+/// A creator's staged hour (`souls-god time HH:MM`): the local time of day, µs after local midnight, a page draws the
+/// sky and its light at, for a staged scene; the text `souls:live` (or no field) draws the world's own time. Display
+/// only, like 88 to 90: no rule reads it, and world time, a Soul's clock and the calendar never change for it.
+pub const F_SKY_HOUR: u64 = 91;
+/// The creator's last lightning strike (#3695, today's `strike`): `[x, z, at]`, the point in mm on the world's open
+/// ground and the world time it struck. A page draws the bolt and plays the thunder once, near `at`; nothing reads it.
+pub const F_STRIKE: u64 = 69;
 
 /// The light now, and the world time it next changes.
 pub const F_LIGHT: u64 = 70;

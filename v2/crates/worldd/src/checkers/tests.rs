@@ -159,3 +159,40 @@ fn the_read_set_is_the_thing_and_the_body() {
         );
     }
 }
+
+#[test]
+/// #3911's finding: a text field reads its words' reference once written and null once cleared, never `{}` for both.
+fn a_text_field_reads_its_reference_once_written_and_null_once_cleared() {
+    use replica::encode::{Name, Value as Cbor};
+    use replica::rules::json::{Value as J, parse};
+    use std::collections::BTreeMap;
+    let entry = parse(
+        r#"{"kind": "test:board", "state": {"words": {"n": 3, "type": "text", "default": null}, "count": {"n": 4, "type": "int", "default": 0}}}"#,
+    )
+    .unwrap();
+    let words = Id::new(replica::ids::Scope([0xab; 16]), 9).unwrap();
+    let record = |text: Cbor| {
+        Cbor::Map(BTreeMap::from([
+            (2, Cbor::Text(Name::new("test:board").unwrap())),
+            (
+                6,
+                Cbor::Map(BTreeMap::from([(3, text), (4, Cbor::Uint(2))])),
+            ),
+        ]))
+    };
+    let written = super::thing(
+        &record(Cbor::Map(BTreeMap::from([(
+            replica::audience::REFERENCE,
+            words.to_value(),
+        )]))),
+        &entry,
+    );
+    let cleared = super::thing(&record(Cbor::Map(BTreeMap::new())), &entry);
+    let f = |t: &J, k: &str| t.get("fields").and_then(|f| f.get(k)).cloned();
+    assert_eq!(
+        f(&written, "words"),
+        Some(J::s(&replica::world_model::show(words)))
+    );
+    assert_eq!(f(&cleared, "words"), Some(J::Null));
+    assert_eq!(f(&written, "count"), Some(J::Int(2)));
+}

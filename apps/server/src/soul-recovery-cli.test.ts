@@ -4,7 +4,7 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import { createServer } from 'node:http';
 import { execFile } from 'node:child_process';
-import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -14,6 +14,8 @@ import { buildApp } from './http.ts';
 import type { Hub } from './hub.ts';
 import type { AccountIdentity } from './accounts/store.ts';
 import { marsFactory, GREEN_FIELD_WORLD } from '@souls/engine-mars';
+// @ts-expect-error plain .mjs Souls home (its feed claim)
+import { openHome } from '../../../tools/world-launcher/soul/home.mjs';
 
 const CLI = fileURLToPath(new URL('../../../tools/world-launcher/soul/eden.mjs', import.meta.url));
 
@@ -37,7 +39,11 @@ async function site(t: { after: (f: () => unknown) => void }) {
   const code = async (name = 'gene') => (await (await owner(name, '/v1/account/window-code')).json() as { code: string }).code;
   const folder = (name: string) => {
     const dir = join(root, name); mkdirSync(dir, { recursive: true }); copyFileSync(CLI, join(dir, 'eden.mjs'));
-    const raw = (...args: string[]) => new Promise<{ code: number; out: string; err: string }>(resolve => execFile(process.execPath, ['eden.mjs', ...args], { cwd: dir, env: { ...process.env, HOME: dir } }, (e, out, err) => resolve({ code: e ? (e.code as number) ?? 1 : 0, out, err })));
+    // A command in a home whose platform feed is due starts a detached `news --fetch` that rewrites .souls/config.json after
+    // the command has returned; one still writing when the test's teardown removes the folder fails it with ENOTEMPTY. The
+    // test claims the feed check itself, as that child would, so no command here leaves a writer behind.
+    const claimFeed = () => { try { if (existsSync(join(dir, '.souls', 'config.json'))) openHome(join(dir, '.souls')).claimFeeds(); } catch { /* an unreadable config starts no check either */ } };
+    const raw = (...args: string[]) => (claimFeed(), new Promise<{ code: number; out: string; err: string }>(resolve => execFile(process.execPath, ['eden.mjs', ...args], { cwd: dir, env: { ...process.env, HOME: dir } }, (e, out, err) => resolve({ code: e ? (e.code as number) ?? 1 : 0, out, err }))));
     const run = async (...args: string[]) => { const r = await raw(...args); assert.equal(r.code, 0, `${args.join(' ')}: ${r.err || r.out}`); return JSON.parse(r.out) as Record<string, any>; };
     return { dir, raw, run };
   };

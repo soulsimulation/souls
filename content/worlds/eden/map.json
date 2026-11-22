@@ -185,7 +185,7 @@
     {"def": "core/car-lift@1", "placed": 1, "entry": "eden:car_lift", "forms": "own", "pr": 3049, "state": {"raised": "default"}},
     {"def": "core/carousel@1", "placed": 1, "entry": "eden:carousel", "forms": "own", "pr": 3049, "state": {"under_way": "default"}},
     {"def": "core/chapel@3", "placed": 1, "entry": "eden:chapel", "forms": "own", "dropped": {"paint": "a god's repaint of the walls, not a Soul's act; the colour is the look's (palette wall)"}, "pr": 3076},
-    {"def": "core/chess-table@1", "placed": 1, "entry": "eden:chess_table", "forms": "own", "note": "its rules are the code hatch content/kinds/games/chess_table.wasm (#3713)"},
+    {"def": "core/chess-table@1", "placed": 1, "waiting": "none"},
     {"def": "core/church@4", "placed": 1, "entry": "eden:church", "forms": "own", "state": {"open_times": "default", "services": "default"}, "note": "its pews, altar, lectern, piano and vestry furniture are today's def contents; their with list waits on those kinds' entries", "pr": 3076},
     {"def": "core/climbing-frame@1", "placed": 1, "entry": "eden:climbing_frame", "forms": "own", "pr": 3042},
     {"def": "core/croissant-pack@1", "placed": 1, "entry": "eden:croissant", "forms": "own", "pr": 3048, "state": {"bites": "default"}},

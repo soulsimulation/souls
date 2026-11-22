@@ -1,0 +1,154 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:flower_press (from core-flower-press@1, #3716). The press starts open with its flower raw; closing the leaf presses the flower for good, and the leaf opens and closes again after.",
+  "cases": [
+    {
+      "name": "flower_press_close_open",
+      "act": {
+        "this": "t1",
+        "form": "close"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:flower_press"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "flower_press_close_when_closed_names_open",
+      "act": {
+        "this": "t1",
+        "form": "close"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:flower_press",
+            "fields": {
+              "open": false,
+              "pressed": true
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "open",
+          "found": false,
+          "wanted": {
+            "is": true
+          }
+        },
+        "fix": {
+          "form": "open"
+        }
+      }
+    },
+    {
+      "name": "flower_press_open_closed",
+      "act": {
+        "this": "t1",
+        "form": "open"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:flower_press",
+            "fields": {
+              "open": false,
+              "pressed": true
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "flower_press_open_when_open_names_close",
+      "act": {
+        "this": "t1",
+        "form": "open"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:flower_press"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "open",
+          "found": true,
+          "wanted": {
+            "is": false
+          }
+        },
+        "fix": {
+          "form": "close"
+        }
+      }
+    }
+  ]
+}

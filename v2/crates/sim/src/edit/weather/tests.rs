@@ -1,7 +1,7 @@
 //! G5's A4 (#2762): the creator's weather is E6's one effect, seen in every view of the world, ended by its timer, and
 //! no second weather field exists. `cargo test -p sim --lib weather -- --nocapture`.
 
-use super::{ENDED, LEVEL, set};
+use super::{ENDED, LEVEL, PARTIAL, asked, set};
 use crate::daylight::{Config, Daylight, Write};
 use crate::timers::DueList;
 use replica::effects::{
@@ -314,4 +314,57 @@ fn a4_no_second_weather_field() {
     }
     assert!(found.is_empty(), "A4: a second weather field: {found:#?}");
     println!("A4: no weather field outside replica::sky");
+}
+
+/// #3695: a creator's weather travels as plain sets on the world node; the batch is read whole, or refused as partial.
+#[test]
+fn a_batch_asks_for_weather_by_its_five_fields_on_the_world_node() {
+    use replica::edit::{Op, Ref};
+    let world = Id::new(Scope([0x65; 16]), 1).expect("an id");
+    let other = Id::new(Scope([0x65; 16]), 2).expect("an id");
+    let set = |node: Id, field: u64, to: Value| Op::Set {
+        node: Ref::Node(node),
+        field,
+        to,
+    };
+    let five = |kind: &str| {
+        vec![
+            set(world, sky::F_WEATHER, Value::Text(name(kind))),
+            set(world, sky::F_CLOUD, sky::int(100)),
+            set(world, sky::F_RAIN, sky::int(90)),
+            set(world, sky::F_WIND, sky::int(80)),
+            set(world, sky::F_WEATHER_UNTIL, sky::int(2 * HOUR)),
+        ]
+    };
+    let got = asked(&five("souls:storm"), world)
+        .expect("asked")
+        .expect("whole");
+    assert_eq!(got.kind.as_str(), "souls:storm");
+    assert_eq!(got.levels, [100, 90, 80]);
+    assert_eq!(got.until, 2 * HOUR);
+    // Not the world node, or no weather field: no weather asked.
+    assert!(
+        asked(
+            &[set(other, sky::F_WEATHER, Value::Text(name("souls:rain")))],
+            world
+        )
+        .is_none()
+    );
+    assert!(asked(&[set(world, 3, sky::int(1))], world).is_none());
+    // Some but not all, or a level that is not an integer: refused by name.
+    let mut four = five("souls:rain");
+    four.pop();
+    assert_eq!(
+        asked(&four, world)
+            .expect("asked")
+            .expect_err("partial")
+            .name,
+        PARTIAL
+    );
+    let mut bad = five("souls:rain");
+    bad[1] = set(world, sky::F_CLOUD, Value::Text(name("lots")));
+    assert_eq!(
+        asked(&bad, world).expect("asked").expect_err("typed").name,
+        PARTIAL
+    );
 }

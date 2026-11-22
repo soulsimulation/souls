@@ -120,8 +120,9 @@ type Stretch = (i64, i64, (i32, i32), u32);
 /// A link a search came to and could not use: the link, why, and how near its far end is to the goal (mm).
 type Failed = (u32, &'static str, i64);
 
-/// How far a doorway's end may lie off a piece and still be its portal, mm (the grid's rounding).
-const MEET_OFF: i64 = 20;
+/// How far a doorway's end may lie off a piece and still be its portal, mm: the grid's rounding, and a modelled floor
+/// that stops short of its wall's inner face (the Mars campus's Mimos: its end lies 50 mm off the floor).
+const MEET_OFF: i64 = 60;
 
 const NONE: u32 = u32::MAX;
 /// In a search's `via`: reached across a link (its index below this bit), not across a piece.
@@ -555,7 +556,7 @@ impl Map {
         buildings.push((gates, HashMap::new()));
         // Steps from one thing's floor onto another's (#3227), and every floor's first piece and piece count.
         for (i, l) in floor_joins(&buildings.iter().map(|(b, _)| b).collect::<Vec<_>>()) {
-            buildings[i].0.links.push(l);
+            buildings[i].0.join(l);
         }
         let all: HashMap<Id, (u32, u32)> = buildings
             .iter()
