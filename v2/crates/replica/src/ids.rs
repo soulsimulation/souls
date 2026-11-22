@@ -255,6 +255,20 @@ impl Hash {
         Hash(sha256(&input))
     }
 
+    /// SHA-256 with `purpose`'s label taken, as [`Hash::of`] starts: the stored bytes go in with [`Sha256::update`],
+    /// in one piece or several, and [`Hash::of_taken`] gives the same hash [`Hash::of`] gives of them in one piece.
+    pub fn taking(purpose: Purpose) -> Sha256 {
+        let label = Name::new(purpose.label()).expect("labels are names");
+        let mut h = Sha256::new();
+        h.update(&encode(&Value::Text(label)).expect("a label is one flat item"));
+        h
+    }
+
+    /// The hash of what a [`Hash::taking`] SHA-256 has taken.
+    pub fn of_taken(h: Sha256) -> Hash {
+        Hash(h.finish())
+    }
+
     pub fn digest(self) -> [u8; 32] {
         self.0
     }
@@ -297,6 +311,7 @@ const SHA256_K: [u32; 64] = [
 ];
 
 /// [`sha256`] taken in pieces (#3799): the same digest of the pieces one after another, with no copy of them.
+#[derive(Clone)]
 pub struct Sha256 {
     h: [u32; 8],
     block: [u8; 64],
