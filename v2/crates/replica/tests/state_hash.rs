@@ -49,6 +49,8 @@ struct Gen {
     seq: u64,
     nodes: Vec<Id>,
     links: Vec<Id>,
+    /// Some fields large enough that their nodes' heads are kept.
+    big: bool,
 }
 
 impl Gen {
@@ -65,6 +67,7 @@ impl Gen {
             seq: 0,
             nodes: vec![root],
             links: Vec::new(),
+            big: false,
             replica,
         }
     }
@@ -79,6 +82,11 @@ impl Gen {
     }
 
     fn value(&mut self) -> Value {
+        // A large field now and then, when asked: its node's record up to its children is kept (`Tree::head`).
+        if self.big && self.rng.below(8) == 0 {
+            let n = 4_096 + self.rng.below(2_048);
+            return Value::Bytes((0..n).map(|_| self.rng.next() as u8).collect());
+        }
         match self.rng.below(3) {
             0 => Value::Uint(self.rng.next() >> 20),
             1 => Value::Text(Name::new(&format!("souls:v{}", self.rng.below(50))).unwrap()),
@@ -413,4 +421,78 @@ impl Gen {
         self.replica.apply_bytes(&encode(&v).unwrap()).unwrap();
         self.seq += 1;
     }
+
+    /// A part that sets a large field on a node, then removes a node that is not there: refused whole, its set
+    /// undone. Whether it was refused.
+    fn refused_part(&mut self) -> bool {
+        let node = self.nodes[1 + self.rng.below(self.nodes.len() - 1)];
+        let mut set = self.set(node);
+        while !matches!(&set, Change::Set { to: Value::Bytes(b), .. } if b.len() >= 4_096) {
+            set = self.set(node);
+        }
+        let missing = Id::new(self.scope, 999_999_999).unwrap();
+        let e = Effect {
+            envelope: Envelope {
+                sequence: self.seq,
+                at: self.seq as i64 * 50_000,
+                cause: Cause::World,
+                actor: Actor::World,
+                audience: self.audience_of(node),
+                node,
+            },
+            body: Body::Changes(
+                [set, Change::Remove { node: missing }]
+                    .into_iter()
+                    .map(|change| ChangeRec {
+                        change,
+                        rest: Rest::new(),
+                    })
+                    .collect(),
+            ),
+            events: None,
+            rest: Rest::new(),
+        };
+        let v = Value::Map(BTreeMap::from([
+            (1, Value::Bytes(self.header_hash.clone())),
+            (2, Value::Array(vec![e.to_value()])),
+        ]));
+        self.replica.apply_bytes(&encode(&v).unwrap()).is_err()
+    }
+}
+
+/// #1960: with large fields, a node's record up to its children is kept between ticks (`Tree::head`) and only its
+/// children's hashes are taken again while nodes below it change. Over 3,000 ticks of generated parts, refused parts
+/// that set and undo a large field among them, the state hash so worked out equals the whole tree's, hashed with no
+/// mark and nothing kept, at every tick, and K5's seal's at every 100th.
+#[test]
+fn a_kept_head_gives_the_whole_trees_state_hash_on_every_tick() {
+    let mut g = Gen::new(1960);
+    g.big = true;
+    let (mut kept, mut refused) = (0usize, 0u64);
+    for tick in 0..3_000u64 {
+        for _ in 0..1 + g.rng.below(3) {
+            g.part();
+        }
+        if tick % 7 == 3 && g.nodes.len() > 1 && g.refused_part() {
+            refused += 1;
+        }
+        let tree = g.replica.tree_for_seal();
+        let got = tree.state_hashes().unwrap();
+        assert_eq!(got, tree.state_hashes_whole().unwrap(), "tick {tick}");
+        kept = kept.max(tree.heads_kept());
+        if tick % 100 == 99 {
+            assert_eq!(
+                tree.seal()
+                    .unwrap()
+                    .hashes()
+                    .into_iter()
+                    .collect::<Vec<_>>(),
+                got,
+                "tick {tick}, seal"
+            );
+        }
+    }
+    println!("up to {kept} heads kept; {refused} refused parts");
+    assert!(kept >= 5, "heads kept: {kept}");
+    assert!(refused > 300, "refused parts: {refused}");
 }
