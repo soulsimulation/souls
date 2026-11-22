@@ -1,0 +1,1350 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:prefix_reversal_board",
+  "owner": "thing",
+  "state": {
+    "order": {
+      "n": 28,
+      "type": "int",
+      "unit": "count",
+      "default": 1,
+      "min": 0,
+      "max": 5,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        1100
+      ],
+      "yaw_mdeg": 180000
+    },
+    "board": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        850,
+        590
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1420,
+      900,
+      1360
+    ]
+  },
+  "forms": {
+    "reverse_2_from_123": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "order",
+          "is": 0,
+          "says": "order_changed"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "order",
+          "to": 2,
+          "event": "prefix_reversed"
+        }
+      ]
+    },
+    "reverse_3_from_123": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "order",
+          "is": 0,
+          "says": "order_changed"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "order",
+          "to": 5,
+          "event": "prefix_reversed"
+        }
+      ]
+    },
+    "reverse_2_from_132": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "order",
+          "is": 1,
+          "says": "order_changed"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "order",
+          "to": 4,
+          "event": "prefix_reversed"
+        }
+      ]
+    },
+    "reverse_3_from_132": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "order",
+          "is": 1,
+          "says": "order_changed"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "order",
+          "to": 3,
+          "event": "prefix_reversed"
+        }
+      ]
+    },
+    "reverse_2_from_213": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "order",
+          "is": 2,
+          "says": "order_changed"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "order",
+          "to": 0,
+          "event": "prefix_reversed"
+        }
+      ]
+    },
+    "reverse_3_from_213": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "order",
+          "is": 2,
+          "says": "order_changed"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "order",
+          "to": 4,
+          "event": "prefix_reversed"
+        }
+      ]
+    },
+    "reverse_2_from_231": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "order",
+          "is": 3,
+          "says": "order_changed"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "order",
+          "to": 5,
+          "event": "prefix_reversed"
+        }
+      ]
+    },
+    "reverse_3_from_231": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "order",
+          "is": 3,
+          "says": "order_changed"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "order",
+          "to": 1,
+          "event": "prefix_reversed"
+        }
+      ]
+    },
+    "reverse_2_from_312": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "order",
+          "is": 4,
+          "says": "order_changed"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "order",
+          "to": 1,
+          "event": "prefix_reversed"
+        }
+      ]
+    },
+    "reverse_3_from_312": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "order",
+          "is": 4,
+          "says": "order_changed"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "order",
+          "to": 2,
+          "event": "prefix_reversed"
+        }
+      ]
+    },
+    "reverse_2_from_321": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "order",
+          "is": 5,
+          "says": "order_changed"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "order",
+          "to": 3,
+          "event": "prefix_reversed"
+        }
+      ]
+    },
+    "reverse_3_from_321": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "order",
+          "is": 5,
+          "says": "order_changed"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "order",
+          "to": 0,
+          "event": "prefix_reversed"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:prefix_reversal_board",
+    "table": [
+      {
+        "part": "bar1",
+        "field": "order",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "0": -330,
+          "1": -330,
+          "2": 0,
+          "3": 330,
+          "4": 0,
+          "5": 330
+        }
+      },
+      {
+        "part": "bar2",
+        "field": "order",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "0": 0,
+          "1": 330,
+          "2": -330,
+          "3": -330,
+          "4": 330,
+          "5": 0
+        }
+      },
+      {
+        "part": "bar3",
+        "field": "order",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "0": 330,
+          "1": 0,
+          "2": 330,
+          "3": 0,
+          "4": -330,
+          "5": -330
+        }
+      }
+    ],
+    "shape": {
+      "round": 2,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            790,
+            0
+          ],
+          "size": [
+            1400,
+            40,
+            1340
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -630,
+            385,
+            -600
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -630,
+            385,
+            600
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            630,
+            385,
+            -600
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            630,
+            385,
+            600
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            817,
+            0
+          ],
+          "size": [
+            1350,
+            14,
+            1290
+          ],
+          "tint": "paper"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -560,
+            827,
+            -585
+          ],
+          "size": [
+            10,
+            6,
+            60
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -560,
+            827,
+            -550
+          ],
+          "size": [
+            10,
+            6,
+            70
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -140,
+            827,
+            -550
+          ],
+          "size": [
+            10,
+            6,
+            70
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            827,
+            -585
+          ],
+          "size": [
+            10,
+            6,
+            50
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            25,
+            827,
+            -568
+          ],
+          "size": [
+            10,
+            6,
+            35
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            827,
+            -550
+          ],
+          "size": [
+            10,
+            6,
+            50
+          ],
+          "tint": "ink",
+          "yaw": -90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -25,
+            827,
+            -532
+          ],
+          "size": [
+            10,
+            6,
+            35
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            827,
+            -515
+          ],
+          "size": [
+            10,
+            6,
+            50
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            140,
+            827,
+            -585
+          ],
+          "size": [
+            10,
+            6,
+            50
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            165,
+            827,
+            -550
+          ],
+          "size": [
+            10,
+            6,
+            70
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            140,
+            827,
+            -550
+          ],
+          "size": [
+            10,
+            6,
+            50
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            140,
+            827,
+            -515
+          ],
+          "size": [
+            10,
+            6,
+            50
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            50,
+            827,
+            -330
+          ],
+          "size": [
+            1020,
+            6,
+            140
+          ],
+          "tint": "track"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -560,
+            827,
+            -330
+          ],
+          "size": [
+            10,
+            6,
+            70
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            50,
+            827,
+            0
+          ],
+          "size": [
+            1020,
+            6,
+            140
+          ],
+          "tint": "track"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -560,
+            827,
+            -35
+          ],
+          "size": [
+            10,
+            6,
+            50
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -535,
+            827,
+            -18
+          ],
+          "size": [
+            10,
+            6,
+            35
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -560,
+            827,
+            0
+          ],
+          "size": [
+            10,
+            6,
+            50
+          ],
+          "tint": "ink",
+          "yaw": -90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -585,
+            827,
+            18
+          ],
+          "size": [
+            10,
+            6,
+            35
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -560,
+            827,
+            35
+          ],
+          "size": [
+            10,
+            6,
+            50
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            50,
+            827,
+            330
+          ],
+          "size": [
+            1020,
+            6,
+            140
+          ],
+          "tint": "track"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -560,
+            827,
+            295
+          ],
+          "size": [
+            10,
+            6,
+            50
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -535,
+            827,
+            330
+          ],
+          "size": [
+            10,
+            6,
+            70
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -560,
+            827,
+            330
+          ],
+          "size": [
+            10,
+            6,
+            50
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -560,
+            827,
+            365
+          ],
+          "size": [
+            10,
+            6,
+            50
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            80,
+            840,
+            0
+          ],
+          "size": [
+            320,
+            20,
+            120
+          ],
+          "tint": "bar1",
+          "role": "bar1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            80,
+            853,
+            0
+          ],
+          "size": [
+            10,
+            6,
+            70
+          ],
+          "tint": "number",
+          "role": "bar1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            80,
+            840,
+            0
+          ],
+          "size": [
+            600,
+            20,
+            120
+          ],
+          "tint": "bar2",
+          "role": "bar2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            80,
+            853,
+            -35
+          ],
+          "size": [
+            10,
+            6,
+            50
+          ],
+          "tint": "number",
+          "role": "bar2",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            105,
+            853,
+            -18
+          ],
+          "size": [
+            10,
+            6,
+            35
+          ],
+          "tint": "number",
+          "role": "bar2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            80,
+            853,
+            0
+          ],
+          "size": [
+            10,
+            6,
+            50
+          ],
+          "tint": "number",
+          "role": "bar2",
+          "yaw": -90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            55,
+            853,
+            18
+          ],
+          "size": [
+            10,
+            6,
+            35
+          ],
+          "tint": "number",
+          "role": "bar2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            80,
+            853,
+            35
+          ],
+          "size": [
+            10,
+            6,
+            50
+          ],
+          "tint": "number",
+          "role": "bar2",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            80,
+            840,
+            0
+          ],
+          "size": [
+            880,
+            20,
+            120
+          ],
+          "tint": "bar3",
+          "role": "bar3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            80,
+            853,
+            -35
+          ],
+          "size": [
+            10,
+            6,
+            50
+          ],
+          "tint": "number",
+          "role": "bar3",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            105,
+            853,
+            0
+          ],
+          "size": [
+            10,
+            6,
+            70
+          ],
+          "tint": "number",
+          "role": "bar3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            80,
+            853,
+            0
+          ],
+          "size": [
+            10,
+            6,
+            50
+          ],
+          "tint": "number",
+          "role": "bar3",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            80,
+            853,
+            35
+          ],
+          "size": [
+            10,
+            6,
+            50
+          ],
+          "tint": "number",
+          "role": "bar3",
+          "yaw": 90000
+        }
+      ],
+      "palette": {
+        "wood": "#75543b",
+        "paper": "#eee2c3",
+        "ink": "#142833",
+        "track": "#8a9ba2",
+        "bar1": "#b23b29",
+        "bar2": "#286f97",
+        "bar3": "#347a40",
+        "number": "#fff4d5"
+      },
+      "tags": [
+        "puzzle",
+        "prefix",
+        "reversal",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "puzzle": "puzzle",
+    "card": "Sort three numbered bars by reversing the top two or all three.",
+    "prefix": "prefix-reversal board",
+    "sorting": "three-bar prefix sorting",
+    "hands_empty": "Put down what you hold before reversing a prefix.",
+    "order_changed": "The order has changed. Read the current arrangement and choose its offered reversal.",
+    "rules": "An introductory six-arrangement prefix-reversal diagram, with three original integral numbered bars. From the front contact side, top means the far row, then middle, then the near bottom row. Fixed row references 1, 2 and 3 state the target: bar 1 at top, bar 2 in middle, bar 3 at bottom. The fixed T 123 heading repeats that target. The narrow red bar is 1, medium blue is 2 and wide green is 3; each mounted number moves with its same bar. Reverse top two exchanges only the first two rows and preserves the bottom row. Reverse top three reverses the whole order. Each operation is its own inverse.",
+    "orders": "The single order index documents these top-to-bottom permutations: 0=123, 1=132, 2=213, 3=231, 4=312, 5=321. The default is 132. Its worked worst case is 132 to 312 by top two, then 213 by top three, then target 123 by top two. All six arrangements can be sorted in at most three reversals. The offered forms choose the prefix length for the exact current arrangement. This is a small introductory exercise, not a deep puzzle or automatic solver.",
+    "limits": "These are the same three indexed diagram bars, never loose food, carried inventory or created output. A whole order change commits at native hand contact. Picture interpolation does not simulate a physical stack flip, precise individual-bar hand contact or collision-free simultaneous trajectories. There is no arbitrary destination, reset, score, turn, winner, solver, timer or food claim."
+  },
+  "card": {
+    "text": "card",
+    "category": "puzzle",
+    "synonyms": [
+      "prefix",
+      "sorting"
+    ]
+  },
+  "howtos": {
+    "rules": {
+      "text": "rules",
+      "steps": [
+        {
+          "form": "reverse_2_from_132"
+        }
+      ]
+    },
+    "worked_sort": {
+      "text": "orders",
+      "steps": [
+        {
+          "form": "reverse_2_from_132"
+        },
+        {
+          "form": "reverse_3_from_312"
+        },
+        {
+          "form": "reverse_2_from_213"
+        }
+      ]
+    },
+    "limits": {
+      "text": "limits",
+      "steps": [
+        {
+          "form": "reverse_2_from_123"
+        },
+        {
+          "form": "reverse_2_from_213"
+        }
+      ]
+    }
+  }
+}

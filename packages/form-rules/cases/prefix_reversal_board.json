@@ -1,0 +1,4590 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "All72 order/form decisions plus every hand/reach guard. Reach is evaluator-level.",
+  "cases": [
+    {
+      "name": "reverse_2_from_123_at_0",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_123"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "reverse_2_from_123_at_1",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_123"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_2_from_123_at_2",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_123"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_2_from_123_at_3",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_123"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_2_from_123_at_4",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_123"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 4
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_2_from_123_at_5",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_123"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_2_from_123_need_1",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_123"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "reverse_2_from_123_need_2",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_123"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "reverse_3_from_123_at_0",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_123"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "reverse_3_from_123_at_1",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_123"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_3_from_123_at_2",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_123"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_3_from_123_at_3",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_123"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_3_from_123_at_4",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_123"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 4
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_3_from_123_at_5",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_123"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_3_from_123_need_1",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_123"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "reverse_3_from_123_need_2",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_123"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "reverse_2_from_132_at_0",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_132"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_2_from_132_at_1",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_132"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "reverse_2_from_132_at_2",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_132"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_2_from_132_at_3",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_132"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_2_from_132_at_4",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_132"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 4
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_2_from_132_at_5",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_132"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_2_from_132_need_1",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_132"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "reverse_2_from_132_need_2",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_132"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "reverse_3_from_132_at_0",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_132"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_3_from_132_at_1",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_132"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "reverse_3_from_132_at_2",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_132"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_3_from_132_at_3",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_132"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_3_from_132_at_4",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_132"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 4
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_3_from_132_at_5",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_132"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_3_from_132_need_1",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_132"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "reverse_3_from_132_need_2",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_132"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "reverse_2_from_213_at_0",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_213"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_2_from_213_at_1",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_213"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_2_from_213_at_2",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_213"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "reverse_2_from_213_at_3",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_213"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_2_from_213_at_4",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_213"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 4
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_2_from_213_at_5",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_213"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_2_from_213_need_1",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_213"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "reverse_2_from_213_need_2",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_213"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "reverse_3_from_213_at_0",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_213"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_3_from_213_at_1",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_213"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_3_from_213_at_2",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_213"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "reverse_3_from_213_at_3",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_213"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_3_from_213_at_4",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_213"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 4
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_3_from_213_at_5",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_213"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_3_from_213_need_1",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_213"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "reverse_3_from_213_need_2",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_213"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "reverse_2_from_231_at_0",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_231"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_2_from_231_at_1",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_231"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_2_from_231_at_2",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_231"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_2_from_231_at_3",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_231"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "reverse_2_from_231_at_4",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_231"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 4
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_2_from_231_at_5",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_231"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_2_from_231_need_1",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_231"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "reverse_2_from_231_need_2",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_231"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "reverse_3_from_231_at_0",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_231"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_3_from_231_at_1",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_231"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_3_from_231_at_2",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_231"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_3_from_231_at_3",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_231"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "reverse_3_from_231_at_4",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_231"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 4
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_3_from_231_at_5",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_231"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_3_from_231_need_1",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_231"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "reverse_3_from_231_need_2",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_231"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "reverse_2_from_312_at_0",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_312"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_2_from_312_at_1",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_312"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_2_from_312_at_2",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_312"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_2_from_312_at_3",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_312"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_2_from_312_at_4",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_312"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 4
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "reverse_2_from_312_at_5",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_312"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_2_from_312_need_1",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_312"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 4
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "reverse_2_from_312_need_2",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_312"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 4
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "reverse_3_from_312_at_0",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_312"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_3_from_312_at_1",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_312"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_3_from_312_at_2",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_312"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_3_from_312_at_3",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_312"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_3_from_312_at_4",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_312"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 4
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "reverse_3_from_312_at_5",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_312"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_3_from_312_need_1",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_312"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 4
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "reverse_3_from_312_need_2",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_312"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 4
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "reverse_2_from_321_at_0",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_321"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_2_from_321_at_1",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_321"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_2_from_321_at_2",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_321"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_2_from_321_at_3",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_321"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_2_from_321_at_4",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_321"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 4
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_2_from_321_at_5",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_321"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "reverse_2_from_321_need_1",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_321"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "reverse_2_from_321_need_2",
+      "act": {
+        "this": "p1",
+        "form": "reverse_2_from_321"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "reverse_3_from_321_at_0",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_321"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_3_from_321_at_1",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_321"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_3_from_321_at_2",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_321"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_3_from_321_at_3",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_321"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_3_from_321_at_4",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_321"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 4
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "reverse_3_from_321_at_5",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_321"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "reverse_3_from_321_need_1",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_321"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "reverse_3_from_321_need_2",
+      "act": {
+        "this": "p1",
+        "form": "reverse_3_from_321"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:prefix_reversal_board",
+            "fields": {
+              "order": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              590
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    }
+  ]
+}
