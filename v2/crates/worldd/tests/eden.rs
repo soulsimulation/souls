@@ -3310,13 +3310,13 @@ fn c25_lights_fire_doors_and_locks_from_outside() {
 }
 
 /// C25 (#3688) A1: a cottage's inner door, its bedroom's, on a served full Eden. Born outside the cottage, the Soul
-/// walks in to the bedroom's rug, then closes, knocks on and opens the door from there: each form first walks to the
-/// door's point, as today's game walks to the hand's point. Eden's cottage doors are seeded open (the facts'
+/// walks in to the bedroom's rug, then closes, knocks on, opens and closes the door from there: each form first walks
+/// to the door's point, as today's game walks to the hand's point. Eden's cottage doors are seeded open (the facts'
 /// `door.open`), so the world, deciding a form's needs at commit (#3888), refuses an `open` first by its need
-/// `field_differs`. The close's walk may end in the door's own doorway (#3688), as no place out of it on the bedroom's
-/// side is within an arm of the door's leaf. Left open (#3688): from outside, a form's approach walks in through the
-/// front door and approaches again from the cottage's floor, but its walk on the ground ends `walk.blocked` on the way
-/// there (the route lane's).
+/// `field_differs`. The knock's walk may end in the door's own doorway, as no place out of it on the bedroom's side is
+/// within an arm of the door's panel. Left open (#3688): from outside, a form's approach walks in through the front
+/// door and approaches again from the cottage's floor, but its walk on the ground ends `walk.blocked` on the way there
+/// (the route lane's).
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
 fn c25_a_cottages_inner_door_from_its_bedroom() {
@@ -3329,6 +3329,7 @@ fn c25_a_cottages_inner_door_from_its_bedroom() {
             ("e_00385aae", "close", "done"),
             ("e_00385aae", "knock", "done"),
             ("e_00385aae", "open", "done"),
+            ("e_00385aae", "close", "done"),
         ],
     );
     assert!(wrong.is_empty(), "{wrong:#?}");
@@ -3712,11 +3713,12 @@ fn i3691_the_balloons_fly_their_loops_and_a_soul_rides_one() {
 
 /// #1960: a Soul closes, knocks on and opens a door from each side of it, on a served full Eden, at doors of each
 /// kind of building: the library's and the café's from inside (their outsides are
-/// [`c25_lights_fire_doors_and_locks_from_outside`]'s), a cottage's front door from behind the cottage and from its living room, and its inner doors from each room; a
-/// townhouse's front door from the street and its hall, its inner doors from each room, and an upstairs door from its
-/// landing and its bedroom. Each form walks to the door first, on the body's own side. Before, the upstairs door was
-/// carried onto the ground floor (every floor node stands at the thing's origin), and the front door from behind its
-/// cottage was aimed short of it toward the body, inside the cottage: both ended `out-of-reach` where the body stood.
+/// [`c25_lights_fire_doors_and_locks_from_outside`]'s), a cottage's front door from behind the cottage and from its
+/// living room, and its inner doors from each room; a townhouse's front door from the street and its hall, its inner
+/// doors from each room, and an upstairs door from its landing and its bedroom. Each form walks to the door first, on
+/// the body's own side. Before, the upstairs door was carried onto the ground floor (every floor node stands at the
+/// thing's origin), and the front door from behind its cottage was aimed short of it toward the body, inside the
+/// cottage: both ended `out-of-reach` where the body stood.
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
 fn c25_doors_from_either_side() {
