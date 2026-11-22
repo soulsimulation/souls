@@ -29,25 +29,39 @@
     "show_interest": {
       "who": "anyone",
       "starts": "act",
-      "needs": [{ "need": "unlinked", "link": "interested" }],
+      "needs": [{ "need": "unlinked", "link": "interested", "end": "actor" }],
       "steps": [],
       "effects": [{ "change": "link", "link": "interested", "from": "actor", "event": "interest_shown" }]
     },
     "drop_interest": {
       "who": "anyone",
       "starts": "act",
-      "needs": [{ "need": "linked", "link": "interested" }],
+      "needs": [{ "need": "linked", "link": "interested", "end": "actor" }],
       "steps": [],
       "effects": [{ "change": "unlink", "link": "interested", "from": "actor", "event": "interest_dropped" }]
+    },
+    "take_down": {
+      "who": { "link": "poster" },
+      "starts": "act",
+      "needs": [{ "need": "linked", "link": "poster", "end": "actor", "says": "not_your_notice" }],
+      "steps": [],
+      "effects": [
+        { "change": "unlink", "link": "interested", "from": "all", "event": "interest_cleared" },
+        { "change": "unlink", "link": "poster", "from": "actor", "event": "entry_taken_down" },
+        { "change": "set", "field": "words", "to": null, "event": "words_cleared" }
+      ]
     }
   },
-  "motion": { "how": "fixed" },
+  "points": { "grip": { "role": "grip", "at_mm": [0, 100, 0] } },
+  "geometry": { "bounds_mm": [210, 297, 4], "front": "none" },
+  "motion": { "how": "one_hand" },
   "loose": { "ever": true },
   "text": {
     "card": "A notice of something that happens: where, when, and who is interested.",
     "calendar": "calendar",
     "event": "event",
-    "notice": "notice"
+    "notice": "notice",
+    "not_your_notice": "Only whoever posted this notice takes it down."
   },
   "card": { "text": "card", "category": "calendar", "synonyms": ["event", "notice"] }
 }
