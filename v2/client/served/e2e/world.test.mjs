@@ -279,6 +279,12 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   }
   // C4's answer kinds: 1 receipt, 2 refused, 3 accepted, 4 resolved, 5 unread.
   const accepted = (a) => a.answer === 1 || a.answer === 3;
+  // An act that starts a walk is answered accepted (3) as its route is planned (W11, #4087), not when it ends; the
+  // next act of the same body waits for its receipt (a body runs one form at a time, v2/docs/intents.md rules 7, 8).
+  async function ended(s, a, what) {
+    if (a.answer.answer === 3) assert.equal((await answered(s, a.sent.sequence, 30_000, true)).answer, 1, `${what} ends with its receipt`);
+    return a;
+  }
   const bodiesSeen = async (s) => (await s.cli('find', 'body', '--limit', '50')).found?.filter((r) => r.kind?.startsWith('souls:body')) ?? [];
 
   const A = await pairOne('alder');
@@ -333,6 +339,7 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   // B stands by the stump while A hides the apple, so A's entries are in B's interest.
   const toStump = await act(B, stump.id);
   assert.ok(accepted(toStump.answer), `B walks to the stump: ${JSON.stringify(toStump.answer)}`);
+  await ended(B, toStump, "B's walk to the stump");
   // #3914: a search of the empty stump, within reach of it, is refused by name, not `arg-missing`.
   const emptySearch = await act(B, `search:${stump.id}`);
   assert.equal(emptySearch.answer.reason, 'thing.none-selected', `B's search of the empty stump: ${JSON.stringify(emptySearch.answer)}`);
@@ -356,6 +363,7 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   // #3914 A2: B searches the stump with no argument and finds what is hidden: the apple is in B's hand, in B's copy.
   const found = await act(B, `search:${stump.id}`);
   assert.ok(accepted(found.answer), `B's search finds the apple: ${JSON.stringify(found.answer)}`);
+  await ended(B, found, "B's search");
   await waitFor("the found apple in B's copy", async () => (await apples(B)).find((r) => r.id === apple), 20_000);
   stage('the seeker searched and found the apple');
   // (e) The fridge's apple: in no copy, until B opens the fridge; then in B's, and still not in A's.
@@ -363,9 +371,12 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   assert.ok(fridge, 'the fridge is found by its words');
   const cold = async (s) => (await apples(s)).filter((r) => r.in?.startsWith(fridge.name));
   assert.deepEqual(await cold(B), [], "(e) B's copy holds nothing in the closed fridge");
-  assert.ok(accepted((await act(B, fridge.id)).answer), 'B walks to the fridge');
+  const toFridge = await act(B, fridge.id);
+  assert.ok(accepted(toFridge.answer), 'B walks to the fridge');
+  await ended(B, toFridge, "B's walk to the fridge");
   const opened = await act(B, `open:${fridge.id}`);
   assert.ok(accepted(opened.answer), `B opens the fridge: ${JSON.stringify(opened.answer)}`);
+  await ended(B, opened, "B's open");
   await waitFor("the fridge's apple in B's copy once B opened it", async () => (await cold(B)).length === 1, 20_000);
   assert.deepEqual(await cold(A), [], "(e) A, who did not open it, still holds nothing in the fridge");
   stage('the opener sees into the fridge');
@@ -381,6 +392,7 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   const fromPart = v1.parts.length;
   const walk = await act(A, bench.id);
   assert.ok(accepted(walk.answer), `A's walk to the bench: ${JSON.stringify(walk.answer)}`);
+  await ended(A, walk, "A's walk to the bench");
   const sit = await act(A, `sit:${bench.id}`);
   assert.ok(accepted(sit.answer), `A's sit on the bench: ${JSON.stringify(sit.answer)}`);
   const wave = await act(A, `wave:${meA}`);
