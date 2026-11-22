@@ -425,12 +425,12 @@ mod tests {
             [10_000_000, 10_000_000],
             [0, 10_000_000],
         ];
-        // Round a 10 m block, its leg's end 50 m off: at the corner nearest it after 14 s, then no nearer for 12 s.
+        // Round a 10 m block, its leg's end 50 m off: at the corner nearest it after 14 s, then no nearer for 30 s.
         let found = round(&mut Watch::new(), &block, 1, [50_000_000, 50_000_000], 4000);
-        eprintln!("found {found:?}");
-        // Round a 10 m block whose middle is its leg's end: at its first corner after 7 s, then no nearer for 12 s.
+        assert_eq!(found, Some(884));
+        // Round a 10 m block whose middle is its leg's end: at its first corner after 7 s, then no nearer for 30 s.
         let found = round(&mut Watch::new(), &block, 1, [5_000_000, 5_000_000], 4000);
-        eprintln!("found {found:?}");
+        assert_eq!(found, Some(740));
         // Orbiting 0.6 m round a leg's end it cannot reach, aiming two corners of a twelve-sided ring ahead.
         let (a, b) = (300_000, 519_615);
         let orbit = [
@@ -448,12 +448,13 @@ mod tests {
             [b, -a],
         ];
         let found = round(&mut Watch::new(), &orbit, 2, [0, 0], 4000);
-        eprintln!("found {found:?}");
-        // To and fro between two corners 10 m apart, its leg's end 20 m to the side (the 3 s window finds it).
+        assert_eq!(found, Some(604));
+        // To and fro between two corners 10 m apart, its leg's end 20 m to the side: each corner reached starts the 3 s
+        // watch again, so the backstop finds it, 30 s after its first corner.
         let pair = [[0, 0], [10_000_000, 0]];
         let found = round(&mut Watch::new(), &pair, 1, [5_000_000, 20_000_000], 4000);
-        eprintln!("found {found:?}");
-        // To and fro along 1.5 m of a wall, aiming at a corner 30 m off one way, then the other.
+        assert_eq!(found, Some(740));
+        // To and fro along 1.5 m of a wall, aiming at a corner 30 m off one way, then the other: the 3 s window finds it.
         let mut w = Watch::new();
         let found = (0..4000u32).find(|&t| {
             let (leg, f) = ((t / 21) % 2, i64::from(t % 21) * 70_000);
@@ -470,7 +471,7 @@ mod tests {
                 Micros::from(t) * TICK,
             )
         });
-        eprintln!("found {found:?}");
+        assert_eq!(found, Some(84));
     }
 
     /// Served Eden (#1960): born beside a cottage, the walk goes north round its west wall, away from its leg's end (the
