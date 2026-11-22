@@ -1,0 +1,2135 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:five_tile_slide",
+  "owner": "thing",
+  "state": {
+    "tile_1": {
+      "n": 28,
+      "type": "int",
+      "unit": "count",
+      "default": 1,
+      "min": 0,
+      "max": 5,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "tile_2": {
+      "n": 29,
+      "type": "int",
+      "unit": "count",
+      "default": 4,
+      "min": 0,
+      "max": 5,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "tile_3": {
+      "n": 30,
+      "type": "int",
+      "unit": "count",
+      "default": 2,
+      "min": 0,
+      "max": 5,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "tile_4": {
+      "n": 31,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 5,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "tile_5": {
+      "n": 32,
+      "type": "int",
+      "unit": "count",
+      "default": 5,
+      "min": 0,
+      "max": 5,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "blank": {
+      "n": 33,
+      "type": "int",
+      "unit": "count",
+      "default": 3,
+      "min": 0,
+      "max": 5,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "solved": {
+      "n": 34,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        850
+      ],
+      "yaw_mdeg": 180000
+    },
+    "board": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        850,
+        300
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1100,
+      880,
+      800
+    ]
+  },
+  "forms": {
+    "slide_0_to_1": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "tile": {
+          "type": "field",
+          "of": [
+            "tile_1",
+            "tile_2",
+            "tile_3",
+            "tile_4",
+            "tile_5"
+          ]
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": {
+            "arg": "tile"
+          },
+          "is": 0,
+          "says": "wrong_source"
+        },
+        {
+          "need": "state",
+          "field": "blank",
+          "is": 1,
+          "says": "not_blank"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": {
+            "arg": "tile"
+          },
+          "to": 1,
+          "event": "tile_slid"
+        },
+        {
+          "change": "set",
+          "field": "blank",
+          "to": 0,
+          "event": "blank_moved"
+        },
+        {
+          "change": "set",
+          "field": "solved",
+          "to": false,
+          "event": "claim_cleared"
+        }
+      ]
+    },
+    "slide_0_to_3": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "tile": {
+          "type": "field",
+          "of": [
+            "tile_1",
+            "tile_2",
+            "tile_3",
+            "tile_4",
+            "tile_5"
+          ]
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": {
+            "arg": "tile"
+          },
+          "is": 0,
+          "says": "wrong_source"
+        },
+        {
+          "need": "state",
+          "field": "blank",
+          "is": 3,
+          "says": "not_blank"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": {
+            "arg": "tile"
+          },
+          "to": 3,
+          "event": "tile_slid"
+        },
+        {
+          "change": "set",
+          "field": "blank",
+          "to": 0,
+          "event": "blank_moved"
+        },
+        {
+          "change": "set",
+          "field": "solved",
+          "to": false,
+          "event": "claim_cleared"
+        }
+      ]
+    },
+    "slide_1_to_0": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "tile": {
+          "type": "field",
+          "of": [
+            "tile_1",
+            "tile_2",
+            "tile_3",
+            "tile_4",
+            "tile_5"
+          ]
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": {
+            "arg": "tile"
+          },
+          "is": 1,
+          "says": "wrong_source"
+        },
+        {
+          "need": "state",
+          "field": "blank",
+          "is": 0,
+          "says": "not_blank"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": {
+            "arg": "tile"
+          },
+          "to": 0,
+          "event": "tile_slid"
+        },
+        {
+          "change": "set",
+          "field": "blank",
+          "to": 1,
+          "event": "blank_moved"
+        },
+        {
+          "change": "set",
+          "field": "solved",
+          "to": false,
+          "event": "claim_cleared"
+        }
+      ]
+    },
+    "slide_1_to_2": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "tile": {
+          "type": "field",
+          "of": [
+            "tile_1",
+            "tile_2",
+            "tile_3",
+            "tile_4",
+            "tile_5"
+          ]
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": {
+            "arg": "tile"
+          },
+          "is": 1,
+          "says": "wrong_source"
+        },
+        {
+          "need": "state",
+          "field": "blank",
+          "is": 2,
+          "says": "not_blank"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": {
+            "arg": "tile"
+          },
+          "to": 2,
+          "event": "tile_slid"
+        },
+        {
+          "change": "set",
+          "field": "blank",
+          "to": 1,
+          "event": "blank_moved"
+        },
+        {
+          "change": "set",
+          "field": "solved",
+          "to": false,
+          "event": "claim_cleared"
+        }
+      ]
+    },
+    "slide_1_to_4": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "tile": {
+          "type": "field",
+          "of": [
+            "tile_1",
+            "tile_2",
+            "tile_3",
+            "tile_4",
+            "tile_5"
+          ]
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": {
+            "arg": "tile"
+          },
+          "is": 1,
+          "says": "wrong_source"
+        },
+        {
+          "need": "state",
+          "field": "blank",
+          "is": 4,
+          "says": "not_blank"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": {
+            "arg": "tile"
+          },
+          "to": 4,
+          "event": "tile_slid"
+        },
+        {
+          "change": "set",
+          "field": "blank",
+          "to": 1,
+          "event": "blank_moved"
+        },
+        {
+          "change": "set",
+          "field": "solved",
+          "to": false,
+          "event": "claim_cleared"
+        }
+      ]
+    },
+    "slide_2_to_1": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "tile": {
+          "type": "field",
+          "of": [
+            "tile_1",
+            "tile_2",
+            "tile_3",
+            "tile_4",
+            "tile_5"
+          ]
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": {
+            "arg": "tile"
+          },
+          "is": 2,
+          "says": "wrong_source"
+        },
+        {
+          "need": "state",
+          "field": "blank",
+          "is": 1,
+          "says": "not_blank"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": {
+            "arg": "tile"
+          },
+          "to": 1,
+          "event": "tile_slid"
+        },
+        {
+          "change": "set",
+          "field": "blank",
+          "to": 2,
+          "event": "blank_moved"
+        },
+        {
+          "change": "set",
+          "field": "solved",
+          "to": false,
+          "event": "claim_cleared"
+        }
+      ]
+    },
+    "slide_2_to_5": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "tile": {
+          "type": "field",
+          "of": [
+            "tile_1",
+            "tile_2",
+            "tile_3",
+            "tile_4",
+            "tile_5"
+          ]
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": {
+            "arg": "tile"
+          },
+          "is": 2,
+          "says": "wrong_source"
+        },
+        {
+          "need": "state",
+          "field": "blank",
+          "is": 5,
+          "says": "not_blank"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": {
+            "arg": "tile"
+          },
+          "to": 5,
+          "event": "tile_slid"
+        },
+        {
+          "change": "set",
+          "field": "blank",
+          "to": 2,
+          "event": "blank_moved"
+        },
+        {
+          "change": "set",
+          "field": "solved",
+          "to": false,
+          "event": "claim_cleared"
+        }
+      ]
+    },
+    "slide_3_to_0": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "tile": {
+          "type": "field",
+          "of": [
+            "tile_1",
+            "tile_2",
+            "tile_3",
+            "tile_4",
+            "tile_5"
+          ]
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": {
+            "arg": "tile"
+          },
+          "is": 3,
+          "says": "wrong_source"
+        },
+        {
+          "need": "state",
+          "field": "blank",
+          "is": 0,
+          "says": "not_blank"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": {
+            "arg": "tile"
+          },
+          "to": 0,
+          "event": "tile_slid"
+        },
+        {
+          "change": "set",
+          "field": "blank",
+          "to": 3,
+          "event": "blank_moved"
+        },
+        {
+          "change": "set",
+          "field": "solved",
+          "to": false,
+          "event": "claim_cleared"
+        }
+      ]
+    },
+    "slide_3_to_4": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "tile": {
+          "type": "field",
+          "of": [
+            "tile_1",
+            "tile_2",
+            "tile_3",
+            "tile_4",
+            "tile_5"
+          ]
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": {
+            "arg": "tile"
+          },
+          "is": 3,
+          "says": "wrong_source"
+        },
+        {
+          "need": "state",
+          "field": "blank",
+          "is": 4,
+          "says": "not_blank"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": {
+            "arg": "tile"
+          },
+          "to": 4,
+          "event": "tile_slid"
+        },
+        {
+          "change": "set",
+          "field": "blank",
+          "to": 3,
+          "event": "blank_moved"
+        },
+        {
+          "change": "set",
+          "field": "solved",
+          "to": false,
+          "event": "claim_cleared"
+        }
+      ]
+    },
+    "slide_4_to_1": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "tile": {
+          "type": "field",
+          "of": [
+            "tile_1",
+            "tile_2",
+            "tile_3",
+            "tile_4",
+            "tile_5"
+          ]
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": {
+            "arg": "tile"
+          },
+          "is": 4,
+          "says": "wrong_source"
+        },
+        {
+          "need": "state",
+          "field": "blank",
+          "is": 1,
+          "says": "not_blank"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": {
+            "arg": "tile"
+          },
+          "to": 1,
+          "event": "tile_slid"
+        },
+        {
+          "change": "set",
+          "field": "blank",
+          "to": 4,
+          "event": "blank_moved"
+        },
+        {
+          "change": "set",
+          "field": "solved",
+          "to": false,
+          "event": "claim_cleared"
+        }
+      ]
+    },
+    "slide_4_to_3": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "tile": {
+          "type": "field",
+          "of": [
+            "tile_1",
+            "tile_2",
+            "tile_3",
+            "tile_4",
+            "tile_5"
+          ]
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": {
+            "arg": "tile"
+          },
+          "is": 4,
+          "says": "wrong_source"
+        },
+        {
+          "need": "state",
+          "field": "blank",
+          "is": 3,
+          "says": "not_blank"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": {
+            "arg": "tile"
+          },
+          "to": 3,
+          "event": "tile_slid"
+        },
+        {
+          "change": "set",
+          "field": "blank",
+          "to": 4,
+          "event": "blank_moved"
+        },
+        {
+          "change": "set",
+          "field": "solved",
+          "to": false,
+          "event": "claim_cleared"
+        }
+      ]
+    },
+    "slide_4_to_5": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "tile": {
+          "type": "field",
+          "of": [
+            "tile_1",
+            "tile_2",
+            "tile_3",
+            "tile_4",
+            "tile_5"
+          ]
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": {
+            "arg": "tile"
+          },
+          "is": 4,
+          "says": "wrong_source"
+        },
+        {
+          "need": "state",
+          "field": "blank",
+          "is": 5,
+          "says": "not_blank"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": {
+            "arg": "tile"
+          },
+          "to": 5,
+          "event": "tile_slid"
+        },
+        {
+          "change": "set",
+          "field": "blank",
+          "to": 4,
+          "event": "blank_moved"
+        },
+        {
+          "change": "set",
+          "field": "solved",
+          "to": false,
+          "event": "claim_cleared"
+        }
+      ]
+    },
+    "slide_5_to_2": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "tile": {
+          "type": "field",
+          "of": [
+            "tile_1",
+            "tile_2",
+            "tile_3",
+            "tile_4",
+            "tile_5"
+          ]
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": {
+            "arg": "tile"
+          },
+          "is": 5,
+          "says": "wrong_source"
+        },
+        {
+          "need": "state",
+          "field": "blank",
+          "is": 2,
+          "says": "not_blank"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": {
+            "arg": "tile"
+          },
+          "to": 2,
+          "event": "tile_slid"
+        },
+        {
+          "change": "set",
+          "field": "blank",
+          "to": 5,
+          "event": "blank_moved"
+        },
+        {
+          "change": "set",
+          "field": "solved",
+          "to": false,
+          "event": "claim_cleared"
+        }
+      ]
+    },
+    "slide_5_to_4": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "tile": {
+          "type": "field",
+          "of": [
+            "tile_1",
+            "tile_2",
+            "tile_3",
+            "tile_4",
+            "tile_5"
+          ]
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": {
+            "arg": "tile"
+          },
+          "is": 5,
+          "says": "wrong_source"
+        },
+        {
+          "need": "state",
+          "field": "blank",
+          "is": 4,
+          "says": "not_blank"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": {
+            "arg": "tile"
+          },
+          "to": 4,
+          "event": "tile_slid"
+        },
+        {
+          "change": "set",
+          "field": "blank",
+          "to": 5,
+          "event": "blank_moved"
+        },
+        {
+          "change": "set",
+          "field": "solved",
+          "to": false,
+          "event": "claim_cleared"
+        }
+      ]
+    },
+    "reset": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "tile_1",
+          "to": 1,
+          "event": "layout_reset"
+        },
+        {
+          "change": "set",
+          "field": "tile_2",
+          "to": 4,
+          "event": "layout_reset"
+        },
+        {
+          "change": "set",
+          "field": "tile_3",
+          "to": 2,
+          "event": "layout_reset"
+        },
+        {
+          "change": "set",
+          "field": "tile_4",
+          "to": 0,
+          "event": "layout_reset"
+        },
+        {
+          "change": "set",
+          "field": "tile_5",
+          "to": 5,
+          "event": "layout_reset"
+        },
+        {
+          "change": "set",
+          "field": "blank",
+          "to": 3,
+          "event": "layout_reset"
+        },
+        {
+          "change": "set",
+          "field": "solved",
+          "to": false,
+          "event": "claim_cleared"
+        }
+      ]
+    },
+    "claim_solved": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "tile_1",
+          "is": 0,
+          "says": "not_solved"
+        },
+        {
+          "need": "state",
+          "field": "tile_2",
+          "is": 1,
+          "says": "not_solved"
+        },
+        {
+          "need": "state",
+          "field": "tile_3",
+          "is": 2,
+          "says": "not_solved"
+        },
+        {
+          "need": "state",
+          "field": "tile_4",
+          "is": 3,
+          "says": "not_solved"
+        },
+        {
+          "need": "state",
+          "field": "tile_5",
+          "is": 4,
+          "says": "not_solved"
+        },
+        {
+          "need": "state",
+          "field": "blank",
+          "is": 5,
+          "says": "not_solved"
+        },
+        {
+          "need": "state",
+          "field": "solved",
+          "is": false
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "solved",
+          "to": true,
+          "event": "solution_claimed"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:five_tile_slide",
+    "table": [
+      {
+        "part": "tile_1",
+        "field": "tile_1",
+        "do": "slide",
+        "axis": "x",
+        "at": {
+          "0": -300,
+          "1": 0,
+          "2": 300,
+          "3": -300,
+          "4": 0,
+          "5": 300
+        }
+      },
+      {
+        "part": "tile_1",
+        "field": "tile_1",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "0": -150,
+          "1": -150,
+          "2": -150,
+          "3": 150,
+          "4": 150,
+          "5": 150
+        }
+      },
+      {
+        "part": "tile_2",
+        "field": "tile_2",
+        "do": "slide",
+        "axis": "x",
+        "at": {
+          "0": -300,
+          "1": 0,
+          "2": 300,
+          "3": -300,
+          "4": 0,
+          "5": 300
+        }
+      },
+      {
+        "part": "tile_2",
+        "field": "tile_2",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "0": -150,
+          "1": -150,
+          "2": -150,
+          "3": 150,
+          "4": 150,
+          "5": 150
+        }
+      },
+      {
+        "part": "tile_3",
+        "field": "tile_3",
+        "do": "slide",
+        "axis": "x",
+        "at": {
+          "0": -300,
+          "1": 0,
+          "2": 300,
+          "3": -300,
+          "4": 0,
+          "5": 300
+        }
+      },
+      {
+        "part": "tile_3",
+        "field": "tile_3",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "0": -150,
+          "1": -150,
+          "2": -150,
+          "3": 150,
+          "4": 150,
+          "5": 150
+        }
+      },
+      {
+        "part": "tile_4",
+        "field": "tile_4",
+        "do": "slide",
+        "axis": "x",
+        "at": {
+          "0": -300,
+          "1": 0,
+          "2": 300,
+          "3": -300,
+          "4": 0,
+          "5": 300
+        }
+      },
+      {
+        "part": "tile_4",
+        "field": "tile_4",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "0": -150,
+          "1": -150,
+          "2": -150,
+          "3": 150,
+          "4": 150,
+          "5": 150
+        }
+      },
+      {
+        "part": "tile_5",
+        "field": "tile_5",
+        "do": "slide",
+        "axis": "x",
+        "at": {
+          "0": -300,
+          "1": 0,
+          "2": 300,
+          "3": -300,
+          "4": 0,
+          "5": 300
+        }
+      },
+      {
+        "part": "tile_5",
+        "field": "tile_5",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "0": -150,
+          "1": -150,
+          "2": -150,
+          "3": 150,
+          "4": 150,
+          "5": 150
+        }
+      },
+      {
+        "part": "solved",
+        "field": "solved",
+        "do": "show",
+        "at": {
+          "true": 1,
+          "false": 0
+        }
+      }
+    ],
+    "shape": {
+      "round": 2,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            790,
+            0
+          ],
+          "size": [
+            1080,
+            40,
+            760
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -480,
+            385,
+            -320
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -480,
+            385,
+            320
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            480,
+            385,
+            -320
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            480,
+            385,
+            320
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            816,
+            0
+          ],
+          "size": [
+            930,
+            12,
+            630
+          ],
+          "tint": "dark"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            835,
+            -322
+          ],
+          "size": [
+            990,
+            40,
+            20
+          ],
+          "tint": "rim"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            835,
+            322
+          ],
+          "size": [
+            990,
+            40,
+            20
+          ],
+          "tint": "rim"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -482,
+            835,
+            0
+          ],
+          "size": [
+            20,
+            40,
+            630
+          ],
+          "tint": "rim"
+        },
+        {
+          "kind": "box",
+          "at": [
+            482,
+            835,
+            0
+          ],
+          "size": [
+            20,
+            40,
+            630
+          ],
+          "tint": "rim"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            835,
+            0
+          ],
+          "size": [
+            274,
+            24,
+            274
+          ],
+          "tint": "color_1",
+          "role": "tile_1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            48,
+            850,
+            -36
+          ],
+          "size": [
+            15,
+            4,
+            62
+          ],
+          "tint": "ink",
+          "role": "tile_1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            48,
+            850,
+            36
+          ],
+          "size": [
+            15,
+            4,
+            62
+          ],
+          "tint": "ink",
+          "role": "tile_1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            835,
+            0
+          ],
+          "size": [
+            274,
+            24,
+            274
+          ],
+          "tint": "color_2",
+          "role": "tile_2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            850,
+            -72
+          ],
+          "size": [
+            88,
+            4,
+            15
+          ],
+          "tint": "ink",
+          "role": "tile_2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            48,
+            850,
+            -36
+          ],
+          "size": [
+            15,
+            4,
+            62
+          ],
+          "tint": "ink",
+          "role": "tile_2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            850,
+            0
+          ],
+          "size": [
+            88,
+            4,
+            15
+          ],
+          "tint": "ink",
+          "role": "tile_2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -48,
+            850,
+            36
+          ],
+          "size": [
+            15,
+            4,
+            62
+          ],
+          "tint": "ink",
+          "role": "tile_2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            850,
+            72
+          ],
+          "size": [
+            88,
+            4,
+            15
+          ],
+          "tint": "ink",
+          "role": "tile_2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            835,
+            0
+          ],
+          "size": [
+            274,
+            24,
+            274
+          ],
+          "tint": "color_3",
+          "role": "tile_3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            850,
+            -72
+          ],
+          "size": [
+            88,
+            4,
+            15
+          ],
+          "tint": "ink",
+          "role": "tile_3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            48,
+            850,
+            -36
+          ],
+          "size": [
+            15,
+            4,
+            62
+          ],
+          "tint": "ink",
+          "role": "tile_3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            850,
+            0
+          ],
+          "size": [
+            88,
+            4,
+            15
+          ],
+          "tint": "ink",
+          "role": "tile_3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            48,
+            850,
+            36
+          ],
+          "size": [
+            15,
+            4,
+            62
+          ],
+          "tint": "ink",
+          "role": "tile_3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            850,
+            72
+          ],
+          "size": [
+            88,
+            4,
+            15
+          ],
+          "tint": "ink",
+          "role": "tile_3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            835,
+            0
+          ],
+          "size": [
+            274,
+            24,
+            274
+          ],
+          "tint": "color_4",
+          "role": "tile_4"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -48,
+            850,
+            -36
+          ],
+          "size": [
+            15,
+            4,
+            62
+          ],
+          "tint": "ink",
+          "role": "tile_4"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            850,
+            0
+          ],
+          "size": [
+            88,
+            4,
+            15
+          ],
+          "tint": "ink",
+          "role": "tile_4"
+        },
+        {
+          "kind": "box",
+          "at": [
+            48,
+            850,
+            -36
+          ],
+          "size": [
+            15,
+            4,
+            62
+          ],
+          "tint": "ink",
+          "role": "tile_4"
+        },
+        {
+          "kind": "box",
+          "at": [
+            48,
+            850,
+            36
+          ],
+          "size": [
+            15,
+            4,
+            62
+          ],
+          "tint": "ink",
+          "role": "tile_4"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            835,
+            0
+          ],
+          "size": [
+            274,
+            24,
+            274
+          ],
+          "tint": "color_5",
+          "role": "tile_5"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            850,
+            -72
+          ],
+          "size": [
+            88,
+            4,
+            15
+          ],
+          "tint": "ink",
+          "role": "tile_5"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -48,
+            850,
+            -36
+          ],
+          "size": [
+            15,
+            4,
+            62
+          ],
+          "tint": "ink",
+          "role": "tile_5"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            850,
+            0
+          ],
+          "size": [
+            88,
+            4,
+            15
+          ],
+          "tint": "ink",
+          "role": "tile_5"
+        },
+        {
+          "kind": "box",
+          "at": [
+            48,
+            850,
+            36
+          ],
+          "size": [
+            15,
+            4,
+            62
+          ],
+          "tint": "ink",
+          "role": "tile_5"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            850,
+            72
+          ],
+          "size": [
+            88,
+            4,
+            15
+          ],
+          "tint": "ink",
+          "role": "tile_5"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            850,
+            -355
+          ],
+          "size": [
+            280,
+            18,
+            35
+          ],
+          "tint": "green",
+          "role": "solved"
+        }
+      ],
+      "palette": {
+        "wood": "#75543b",
+        "dark": "#242d36",
+        "rim": "#bb9766",
+        "ink": "#15232e",
+        "green": "#49d36e",
+        "color_1": "#efcd70",
+        "color_2": "#e69875",
+        "color_3": "#93c7d9",
+        "color_4": "#b9d790",
+        "color_5": "#d1b2df"
+      },
+      "tags": [
+        "puzzle",
+        "sliding",
+        "numbered",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "card": "Slide numbered tiles into the adjacent blank, then claim the ordered layout.",
+    "puzzle": "puzzle",
+    "sliding": "sliding puzzle",
+    "five_tile": "five tile puzzle",
+    "wrong_source": "Choose the numbered tile occupying the source cell of this move.",
+    "not_blank": "The destination must be the blank cell; only adjacent swaps are offered.",
+    "hands_empty": "Put down what you hold before sliding tiles.",
+    "not_solved": "Order 1, 2, 3 across the back row and 4, 5, blank across the front.",
+    "howto": "Cells 0, 1, 2 run left to right across the back row; 3, 4, 5 across the front. Choose tile_1 through tile_5 and the directed adjacent source-to-blank form. Every move swaps one tile and the blank; tiles stay on the board. Claim the exact 1, 2, 3 / 4, 5, blank layout for a green marker. A later move clears it. Reset returns to the supplied reachable scramble. Each swap commits at hand contact; the picture changes cells without a simulated sliding path."
+  },
+  "card": {
+    "text": "card",
+    "category": "puzzle",
+    "synonyms": [
+      "sliding",
+      "five_tile"
+    ]
+  },
+  "howtos": {
+    "solve": {
+      "text": "howto",
+      "steps": [
+        {
+          "form": "slide_0_to_3",
+          "args": {
+            "tile": "tile_4"
+          }
+        },
+        {
+          "form": "slide_1_to_0",
+          "args": {
+            "tile": "tile_1"
+          }
+        },
+        {
+          "form": "slide_4_to_1",
+          "args": {
+            "tile": "tile_2"
+          }
+        },
+        {
+          "form": "slide_5_to_4",
+          "args": {
+            "tile": "tile_5"
+          }
+        },
+        {
+          "form": "claim_solved"
+        }
+      ]
+    }
+  }
+}
