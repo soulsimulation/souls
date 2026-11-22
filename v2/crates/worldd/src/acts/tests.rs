@@ -403,6 +403,55 @@ fn c34_a_named_area_resolves_onto_its_rooms_floor_not_by_nearness() {
     );
 }
 
+/// #1960: a point of a thing with floors is carried onto the floor nearest its height. Every floor node stands at the
+/// thing's origin, so the height is read from its rooms and surfaces: a point at the upstairs room's height is on the
+/// upper floor (an upper landing's door), one at the ground's on the ground floor.
+#[test]
+fn a_point_upstairs_is_on_the_upper_floor() {
+    let generated = testworld::generate(1, 0).expect("the synthetic world");
+    let imported = import_eden::load(&generated.text).expect("the imported world");
+    let building = imported.nodes["building"];
+    let (floor0, floor1) = (
+        imported.nodes["building/floor-0"],
+        imported.nodes["building/floor-1"],
+    );
+    let tree = &imported.tree;
+    let room_y = tree
+        .node(tree.handle(imported.nodes["building/r1a"]).unwrap())
+        .unwrap()
+        .place()
+        .unwrap()
+        .position
+        .y;
+    assert!(room_y > 1_000_000, "the upstairs room is up: {room_y}");
+    let kinds = Json::Obj(Vec::new());
+    let toward = BTreeMap::new();
+    let planning = RefCell::new(Planning::default());
+    let sight = Sight {
+        bodies: BTreeMap::new(),
+        carrying: BTreeSet::new(),
+        tree,
+        split: None,
+        builds: BTreeMap::new(),
+        kind: Name::new("souls:body").unwrap(),
+        kinds: &kinds,
+        toward: &toward,
+        asked: RefCell::new(BTreeMap::new()),
+        context: BTreeMap::new(),
+        walks: BTreeMap::new(),
+        approaches: Default::default(),
+        sit_walks: BTreeMap::new(),
+        planning: &planning,
+        map: Arc::new(Versions::default()),
+    };
+    let up = Vec3::new(1_000_000, room_y + 1_000_000, 0);
+    let (floor, on) = sight.floor_of(building, up).expect("a thing with floors");
+    assert_eq!(floor, floor1, "a handle 1 m above the upstairs floor");
+    assert_eq!((on.x, on.z), (up.x, up.z), "{on:?}");
+    let down = Vec3::new(1_000_000, 1_000_000, 0);
+    assert_eq!(sight.floor_of(building, down).map(|f| f.0), Some(floor0));
+}
+
 #[test]
 /// #3914: a thing argument left out is bound by its selector: the nearest (or furthest) of the set, never the act's
 /// node itself; a kind no thing has finds nothing; a selector off the closed list is not read.

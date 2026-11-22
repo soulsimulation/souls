@@ -3310,13 +3310,13 @@ fn c25_lights_fire_doors_and_locks_from_outside() {
 }
 
 /// C25 (#3688) A1: a cottage's inner door, its bedroom's, on a served full Eden. Born outside the cottage, the Soul
-/// walks in to the bedroom's rug, then knocks, closes and opens the door from there: each form first walks to the door's
-/// point, as today's game walks to the hand's point. Eden's cottage doors are seeded open (the facts' `door.open`), so
-/// the world, deciding a form's needs at commit (#3888), refuses an `open` first by its need `field_differs`. The knock's
-/// walk, and the close's, may end in the door's own doorway, as no place out of it on the bedroom's side is within an
-/// arm of the door's panel or its leaf. Left open (#3688): from outside, a form's approach walks in through the front
-/// door and approaches again from the cottage's floor, but its walk on the ground ends `walk.blocked` on the way there
-/// (the route lane's).
+/// walks in to the bedroom's rug, then closes, knocks on and opens the door from there: each form first walks to the
+/// door's point, as today's game walks to the hand's point. Eden's cottage doors are seeded open (the facts'
+/// `door.open`), so the world, deciding a form's needs at commit (#3888), refuses an `open` first by its need
+/// `field_differs`. The close's walk may end in the door's own doorway (#3688), as no place out of it on the bedroom's
+/// side is within an arm of the door's leaf. Left open (#3688): from outside, a form's approach walks in through the
+/// front door and approaches again from the cottage's floor, but its walk on the ground ends `walk.blocked` on the way
+/// there (the route lane's).
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
 fn c25_a_cottages_inner_door_from_its_bedroom() {
@@ -3325,9 +3325,9 @@ fn c25_a_cottages_inner_door_from_its_bedroom() {
         "c25cottage",
         &[
             ("e_7ff72484", "walk", "done"),
-            ("e_00385aae", "knock", "done"),
             ("e_00385aae", "open", "field_differs"),
             ("e_00385aae", "close", "done"),
+            ("e_00385aae", "knock", "done"),
             ("e_00385aae", "open", "done"),
         ],
     );
@@ -3708,4 +3708,80 @@ fn i3691_the_balloons_fly_their_loops_and_a_soul_rides_one() {
     );
     let h = out.expect("and out of it");
     assert_eq!(h.pose.frame.node, im.nodes["ground"], "out onto the ground");
+}
+
+/// #1960: a Soul closes, knocks on and opens a door from each side of it, on a served full Eden, at doors of each
+/// kind of building: the library's and the café's from inside (their outsides are
+/// [`c25_lights_fire_doors_and_locks_from_outside`]'s), a cottage's front door from behind the cottage and from its living room, and its inner doors from each room; a
+/// townhouse's front door from the street and its hall, its inner doors from each room, and an upstairs door from its
+/// landing and its bedroom. Each form walks to the door first, on the body's own side. Before, the upstairs door was
+/// carried onto the ground floor (every floor node stands at the thing's origin), and the front door from behind its
+/// cottage was aimed short of it toward the body, inside the cottage: both ended `out-of-reach` where the body stood.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn c25_doors_from_either_side() {
+    fn door(d: &'static str) -> [(&'static str, &'static str, &'static str); 3] {
+        [
+            (d, "close", "done"),
+            (d, "knock", "done"),
+            (d, "open", "done"),
+        ]
+    }
+    fn walk(t: &'static str) -> (&'static str, &'static str, &'static str) {
+        (t, "walk", "done")
+    }
+    type Case = (&'static str, &'static str, &'static str);
+    let fams: Vec<(&str, &str, Vec<Case>)> = vec![
+        (
+            "74.0,-1.0",
+            "swlib",
+            [vec![walk("e_d6a599a3")], door("e_89d82b59").to_vec()].concat(),
+        ),
+        (
+            "96.5,25.0",
+            "swcafe",
+            [vec![walk("e_4fb9a218")], door("e_61537992").to_vec()].concat(),
+        ),
+        (
+            "-99.0,-93.0",
+            "swcot",
+            [
+                door("e_a37c56ff").to_vec(),
+                vec![walk("e_8be0821b")],
+                door("e_00385aae").to_vec(),
+                door("e_a8b7eee5").to_vec(),
+                door("e_a37c56ff").to_vec(),
+                vec![walk("e_f2faf709")],
+                door("e_a8b7eee5").to_vec(),
+                vec![walk("e_7ff72484")],
+                door("e_00385aae").to_vec(),
+            ]
+            .concat(),
+        ),
+        (
+            "127.0,-26.2",
+            "swtown",
+            [
+                door("e_128a27e8").to_vec(),
+                vec![walk("e_5c18bca2")],
+                door("e_128a27e8").to_vec(),
+                door("e_89b3fb97").to_vec(),
+                door("e_459738c5").to_vec(),
+                vec![walk("e_3b990fad")],
+                door("e_89b3fb97").to_vec(),
+                vec![walk("e_e4c099b5")],
+                door("e_459738c5").to_vec(),
+                vec![walk("e_bb5f11f5")],
+                door("e_7cd700b7").to_vec(),
+                vec![walk("e_e952b07d")],
+                door("e_7cd700b7").to_vec(),
+            ]
+            .concat(),
+        ),
+    ];
+    let mut wrong = Vec::new();
+    for (at, tag, cases) in &fams {
+        wrong.extend(served_family(at, tag, cases));
+    }
+    assert!(wrong.is_empty(), "{wrong:#?}");
 }
