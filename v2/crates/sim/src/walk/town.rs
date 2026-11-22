@@ -1913,9 +1913,9 @@ pub fn ground_boxes(buildings: &[Building], ground: Id) -> Vec<Option<[i64; 4]>>
 /// link, or within half the link's width and half [`CLEAR`] of its line. On the open ground a building outside its
 /// box in `boxes` ([`ground_boxes`]) is skipped; with no boxes, every building is tested.
 ///
-/// Two limits (#4072): on a building's own floor, a flight's line counts only where it lies within a step
-/// ([`crate::ground::STEP`]) of `p`'s height, so a landing over a stair's foot is no stair (the open ground's plan has
-/// no heights, so there the whole line counts). And a step's width lies along its edge, which its ends hold: its line
+/// Two limits (#4072): on a building's own floor, a flight's line counts only where it lies from a step below `p`'s
+/// height to a body's height above it ([`level_part`]), so a landing over a stair's foot is no stair (the open
+/// ground's plan has no heights, so there the whole line counts). And a step's width lies along its edge, which its ends hold: its line
 /// counts only within half [`CLEAR`], so a porch front 9 m wide is no doorway 4.85 m deep through the wall behind it.
 pub fn in_passage(
     buildings: &[Building],
@@ -1987,18 +1987,19 @@ pub fn in_passage_but(
     })
 }
 
-/// The part of the segment `a`–`c` (µm) whose height lies within a step ([`crate::ground::STEP`]) of `y`, or `None`
-/// when no part does.
-fn level_part(a: Vec3, c: Vec3, y: i64) -> Option<(Vec3, Vec3)> {
-    let step = crate::ground::STEP * 1000;
+/// The part of a flight's line segment `a`–`c` (µm) a body standing at height `y` meets ([`in_passage_but`]): from a
+/// step ([`crate::ground::STEP`]) below `y`, its foot, to the body's height ([`crate::ground::BODY_HIGH`]) above; `None`
+/// when no part does. A flight lower than a step under `y` runs beneath that floor.
+pub fn level_part(a: Vec3, c: Vec3, y: i64) -> Option<(Vec3, Vec3)> {
+    let (under, over) = (crate::ground::STEP * 1000, crate::ground::BODY_HIGH * 1000);
     let (a, c) = if a.y <= c.y { (a, c) } else { (c, a) };
     let rise = i128::from(c.y - a.y);
     if rise == 0 {
-        return ((a.y - y).abs() <= step).then_some((a, c));
+        return (a.y >= y - under && a.y <= y + over).then_some((a, c));
     }
     // Along the segment from `a` (0) to `c` (`rise`), as heights above `a`.
-    let lo = i128::from(y - step - a.y).max(0);
-    let hi = i128::from(y + step - a.y).min(rise);
+    let lo = i128::from(y - under - a.y).max(0);
+    let hi = i128::from(y + over - a.y).min(rise);
     if lo > hi {
         return None;
     }
@@ -3248,8 +3249,8 @@ mod passage_tests {
 
     /// #4072 (the cottage e_989779ca's landing lamp): a flight 1 m wide rising 2.8 m along +z from a floor to a
     /// landing whose floor also reaches back over its foot. On the landing, 0.34 m in plan from the line where the
-    /// flight is 0.1 to 0.6 m up, is no stair (it was: 0.34 m against 0.85 m); the flight's top on the landing and its
-    /// foot on the floor below still are.
+    /// flight is 0.1 to 0.6 m up, is no stair (it was: 0.34 m against 0.85 m); the flight's top on the landing, its
+    /// foot on the floor below and the floor under it within a body's height still are.
     #[test]
     fn a_landing_over_a_stairs_foot_is_no_stair() {
         let (ground, f0, f1) = (id(2), id(3), id(4));
@@ -3283,8 +3284,13 @@ mod passage_tests {
             "the flight's foot on the floor"
         );
         assert!(at(f0, v(0, 0, -600_000)), "within CLEAR of its foot end");
-        // Under the flight where it is over 2 m up: no stair at the floor's height (whether a body may stand there
-        // is the floor's patch's to say, cut round the flight's solids).
+        // Under the flight: where it is 1.4 m up, a body standing there meets a body on it, so it is still a stair;
+        // where it is 2.1 m up, over a standing body's height, it is not (whether a body may stand there is the
+        // floor's patch's to say, cut round the flight's solids).
+        assert!(
+            at(f0, v(0, 0, 2_000_000)),
+            "the floor under the flight's middle"
+        );
         assert!(
             !at(f0, v(0, 0, 3_000_000)),
             "the floor under the flight's top"
