@@ -6,8 +6,9 @@
 //!   old pose and fields, and each removed node's whole subtree with every link at it. The inverse follows from T6's
 //!   generic layer alone: what the batch created is removed (a link it made, unlinked), what it removed is created
 //!   again with the same ids, kinds, poses, audiences, fields and links, and what it moved or set is moved or set back.
-//!   A change with no generic inverse (a field the batch added, since T6 has no unset; a node in motion; a body that is
-//!   not changes; an unlink) makes that batch's undo refused `undo.no-inverse`.
+//!   A change with no generic inverse (a field the batch added, since T6 has no unset, unless its reader has a value
+//!   that reads as unset, `replica::edit::claims::neutral`; a node in motion; a body that is not changes; an unlink)
+//!   makes that batch's undo refused `undo.no-inverse`.
 //! - **Undo, redo.** Undo reverses the newest batch not undone, redo the newest undo, and a new edit clears redo (the
 //!   rules of `apps/server/src/god/god.ts`). Each is written by the creator under `Cause::Effect(first)`, where `first`
 //!   is the sequence of the reversed batch's first effect ([`replica::edit::reverses`]).
@@ -100,15 +101,17 @@ struct LinkWas {
     audience: Audience,
 }
 
-/// The before-values of the nodes a batch is about to touch.
+/// The before-values of the nodes a batch is about to touch: read with [`Before::of`] just before the batch is
+/// written, and handed to [`History::record`] with the part it wrote.
 #[derive(Default)]
-struct Before {
+pub struct Before {
     nodes: BTreeMap<Id, Was>,
     links: BTreeMap<Id, LinkWas>,
 }
 
 impl Before {
-    fn of(tree: &Tree, ids: impl IntoIterator<Item = Id>) -> Before {
+    /// The nodes `ids` (and the links at them) as they stand on `tree`.
+    pub fn of(tree: &Tree, ids: impl IntoIterator<Item = Id>) -> Before {
         let mut b = Before::default();
         for id in ids {
             if b.nodes.contains_key(&id) {
@@ -321,8 +324,22 @@ fn inverse(before: &Before, tree: &Tree, part: &Part) -> Result<Vec<Write>, Refu
                 });
             }
         }
-        if let Some(k) = n.fields().keys().find(|k| !w.fields.contains_key(k)) {
-            return no_inverse(format!("{id:?} field {k} was added, and T6 has no unset"));
+        for k in n.fields().keys().filter(|k| !w.fields.contains_key(k)) {
+            // A field the batch added is set back to the value that reads as unset, where its reader has one (a
+            // claim list, a plan); any other has no inverse, since T6 has no unset.
+            let Some(to) = replica::edit::claims::neutral(*k) else {
+                return no_inverse(format!("{id:?} field {k} was added, and T6 has no unset"));
+            };
+            out.push(Write {
+                node: *id,
+                audience: n.audience(),
+                change: Change::Set {
+                    node: *id,
+                    field: *k,
+                    to,
+                    by: None,
+                },
+            });
         }
         for (field, to) in &w.fields {
             if n.fields().get(field) != Some(to) {
@@ -452,11 +469,59 @@ impl History {
         let checked = &planned.checked;
         let before = Before::of(live.tree(), checked.reads.iter().map(|(_, id)| *id));
         let c = commit(live, minter, planned, bodies, at)?;
+        self.record(&before, live, &c.part, step);
+        Ok(c)
+    }
+
+    /// Keeps a batch committed elsewhere (the world's own commit path) as [`History::edit`] keeps its own: `before`
+    /// read just before `part` was written on `live`, `step` its build step's name if any. A new edit clears redo.
+    pub fn record(&mut self, before: &Before, live: &Replica, part: &Part, step: Option<Step>) {
         self.undone.clear();
-        let batch = self.batch(&before, live, &c.part, step);
+        let batch = self.batch(before, live, part, step);
         self.done.push_back(batch);
         self.trim();
-        Ok(c)
+    }
+
+    /// The effects an undo (or, with `redo`, a redo) would write on `live` now, after G1's gate and the conflict
+    /// check, numbered from `live`'s version; nothing is written. The world plans its guard and maps on these off the
+    /// clock, then commits with [`History::undo`] or [`History::redo`], whose rule finds the same effects.
+    pub fn preview(
+        &self,
+        redo: bool,
+        live: &Replica,
+        world: &World,
+        actor: Actor,
+        at: Micros,
+    ) -> Result<Vec<Effect>, Refused> {
+        let b = if redo {
+            self.undone.last().ok_or_else(|| Refused {
+                op: None,
+                name: "undo.nothing-to-redo",
+                detail: "no undo to redo".to_owned(),
+            })?
+        } else {
+            self.done.back().ok_or_else(|| Refused {
+                op: None,
+                name: "undo.nothing",
+                detail: "no batch to undo".to_owned(),
+            })?
+        };
+        let writes = Self::admit(b, live, world, actor)?;
+        Ok(effects(
+            &writes,
+            live.version(),
+            at,
+            Cause::Effect(b.first),
+            actor,
+        ))
+    }
+
+    /// The step names of the batches that can be undone, oldest first (a build's steps, as `history` lists them).
+    pub fn steps(&self) -> Vec<(u64, Option<Step>)> {
+        self.done
+            .iter()
+            .map(|b| (b.first, b.step.clone()))
+            .collect()
     }
 
     /// Undoes the newest batch not undone (the module's notes), or refuses and changes nothing.
@@ -555,6 +620,34 @@ impl History {
         at: Micros,
         rule: Rule<'_>,
     ) -> Result<(Reversed, Batch), Refused> {
+        let writes = Self::admit(b, live, world, actor)?;
+        let tree = live.tree();
+        let cause = Cause::Effect(b.first);
+        let list = effects(&writes, live.version(), at, cause, actor);
+        rule(live, &list)?;
+        let before = Before::of(tree, reads(tree, &writes));
+        let part = write(live, &list).map_err(|r| Refused {
+            op: None,
+            name: "undo.conflict",
+            detail: format!("{}: {}", r.name, r.detail),
+        })?;
+        let next = self.batch(&before, live, &part, b.step.clone());
+        Ok((
+            Reversed {
+                part,
+                reverses: b.first,
+            },
+            next,
+        ))
+    }
+
+    /// G1's gate and the conflict check for writing `b`'s inverse on `live`: its writes, or why not.
+    fn admit(
+        b: &Batch,
+        live: &Replica,
+        world: &World,
+        actor: Actor,
+    ) -> Result<Vec<Write>, Refused> {
         if actor != Actor::Creator(world.creator) {
             return Err(Refused {
                 op: None,
@@ -586,23 +679,7 @@ impl History {
                 return conflict(format!("{x:?} was put in {node:?} since batch {}", b.first));
             }
         }
-        let cause = Cause::Effect(b.first);
-        let list = effects(&writes, live.version(), at, cause, actor);
-        rule(live, &list)?;
-        let before = Before::of(tree, reads(tree, &writes));
-        let part = write(live, &list).map_err(|r| Refused {
-            op: None,
-            name: "undo.conflict",
-            detail: format!("{}: {}", r.name, r.detail),
-        })?;
-        let next = self.batch(&before, live, &part, b.step.clone());
-        Ok((
-            Reversed {
-                part,
-                reverses: b.first,
-            },
-            next,
-        ))
+        Ok(writes)
     }
 
     /// The history's record of a committed part.

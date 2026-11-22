@@ -4,6 +4,7 @@
 // matrix in the model's frame each. The page admits no file of its own: what it draws is what the bake wrote.
 import * as THREE from 'three';
 import { GLTFLoader } from 'three/examples/jsm/loaders/GLTFLoader.js';
+import { MeshoptDecoder } from 'three/examples/jsm/libs/meshopt_decoder.module.js';
 import { patchWind, windModeOf, windWeights } from '../sky/wind.ts';
 import { storeyOf, type Storey } from './interior.ts';
 import { isNightGlass, nightWindows } from './windows.ts';
@@ -21,9 +22,15 @@ export type ModelIndex = {
   states: Map<string, Record<string, string[]>>;
   /** A model's hash -> its kind's name (`core-flagpole`), which says whether its cloth sways (C9). */
   kinds?: Map<string, string>;
+  /** A stored model's hash -> how today's page fits it to its kind's box (the bake's `fit`, `[scale, x, y, z]`) and
+   *  whether it is drawn a hair towards the camera (`flat`: a rug, a lily pad). */
+  fits?: Map<string, Fit>;
 };
 
-type ModelsJson = { kinds: { kind?: string; models: Record<string, string>; states?: Record<string, string[]> }[]; things?: Record<string, string> };
+/** A stored model's placement: its point p is drawn at `scale * p + (x, y, z)` in the thing's frame. */
+export type Fit = { fit?: number[]; flat?: boolean };
+
+type ModelsJson = { kinds: { kind?: string; models: Record<string, string>; states?: Record<string, string[]>; fit?: number[]; flat?: boolean }[]; things?: Record<string, string> };
 
 export async function fetchIndex(root: string): Promise<ModelIndex> {
   const res = await fetch(new URL('models.json', root));
@@ -32,25 +39,31 @@ export async function fetchIndex(root: string): Promise<ModelIndex> {
 }
 
 export function indexOf(j: ModelsJson): ModelIndex {
-  const states = new Map<string, Record<string, string[]>>(), kinds = new Map<string, string>();
+  const states = new Map<string, Record<string, string[]>>(), kinds = new Map<string, string>(), fits = new Map<string, Fit>();
   for (const k of j.kinds) for (const h of Object.values(k.models)) {
     if (h && k.states) states.set(h, k.states);
     if (h && k.kind) kinds.set(h, k.kind);
+    if (h && (k.fit || k.flat)) fits.set(h, { ...(k.fit ? { fit: k.fit } : {}), ...(k.flat ? { flat: true } : {}) });
   }
-  return { things: j.things ?? {}, states, kinds };
+  return { things: j.things ?? {}, states, kinds, fits };
 }
 
 /** Materials are shared by what they look like, so one-off shapes with the same material go in one batch. */
 const shared = new Map<string, THREE.Material>();
+/** The texture maps a stored model's material may carry (its glTF's WebP or AVIF images). */
+const MAPS = ['map', 'normalMap', 'roughnessMap', 'metalnessMap', 'aoMap', 'emissiveMap', 'alphaMap'] as const;
+const mapsOf = (m: THREE.Material) => MAPS.map((k) => (m as unknown as Record<string, THREE.Texture | null | undefined>)[k]?.uuid ?? '');
 function materialKey(m: THREE.Material): string {
   const s = m as THREE.MeshStandardMaterial;
   return [m.type, s.color?.getHexString(), s.roughness, s.metalness, s.emissive?.getHexString(), s.emissiveIntensity,
-    m.transparent, m.opacity, m.side, m.alphaTest, s.vertexColors, isNightGlass(m)].join('|');
+    m.transparent, m.opacity, m.side, m.alphaTest, s.vertexColors, isNightGlass(m), ...mapsOf(m)].join('|');
 }
+/** Does a material sample a texture (its geometry then keeps its uv)? */
+const textured = (m: THREE.Material) => mapsOf(m).some(Boolean);
 
 /** Every geometry in a batch has the same attributes and an index: position, normal and colour (three floats), and on
  *  the building kit's window glass its pane (four floats, the bake's `_edenpane`; C10). */
-function plainGeometry(g: THREE.BufferGeometry, pane = false): THREE.BufferGeometry {
+function plainGeometry(g: THREE.BufferGeometry, pane = false, uv = false): THREE.BufferGeometry {
   const out = new THREE.BufferGeometry();
   const pos = g.getAttribute('position'), n = pos.count;
   out.setAttribute('position', new THREE.Float32BufferAttribute(Array.from({ length: n * 3 }, (_, i) => pos.getComponent(Math.floor(i / 3), i % 3)), 3));
@@ -58,6 +71,10 @@ function plainGeometry(g: THREE.BufferGeometry, pane = false): THREE.BufferGeome
   out.setAttribute('normal', nor ? new THREE.Float32BufferAttribute(Array.from({ length: n * 3 }, (_, i) => nor.getComponent(Math.floor(i / 3), i % 3)), 3) : new THREE.Float32BufferAttribute(new Float32Array(n * 3), 3));
   const col = g.getAttribute('color');
   out.setAttribute('color', new THREE.Float32BufferAttribute(col ? Array.from({ length: n * 3 }, (_, i) => col.getComponent(Math.floor(i / 3), i % 3)) : new Float32Array(n * 3).fill(1), 3));
+  if (uv) {
+    const t = g.getAttribute('uv');
+    out.setAttribute('uv', new THREE.Float32BufferAttribute(t ? Array.from({ length: n * 2 }, (_, i) => t.getComponent(Math.floor(i / 2), i % 2)) : new Float32Array(n * 2), 2));
+  }
   if (pane) {
     const p = g.getAttribute('_edenpane');
     out.setAttribute('edenPane', new THREE.Float32BufferAttribute(p ? Array.from({ length: n * 4 }, (_, i) => p.getComponent(Math.floor(i / 4), i % 4)) : new Float32Array(n * 4), 4));
@@ -67,13 +84,20 @@ function plainGeometry(g: THREE.BufferGeometry, pane = false): THREE.BufferGeome
   return out;
 }
 
+/** One loader for every model, with the meshopt decoder a stored file needs (WebP and AVIF images load as they are). */
+const loader = new GLTFLoader().setMeshoptDecoder(MeshoptDecoder);
+
 /** A model's parts, from its glTF bytes. `glowRoles`: the named parts its kind's `on`/`lit` state changes; `kind`: its
  *  kind's name, for the wind (C9): a part that sways gets its own copy of its material, patched to sway, and its
- *  geometry carries each vertex's share of the sway. */
-export async function partsOf(bytes: ArrayBuffer, glowRoles: string[], glowMaterials: boolean, kind = ''): Promise<Part[]> {
-  const gltf = await new GLTFLoader().parseAsync(bytes, '');
+ *  geometry carries each vertex's share of the sway. `place`: a stored model's fit to its kind's box (today's
+ *  `instantiate`) and its flat look; a stored file is meshopt-compressed with WebP or AVIF textures, as today's page
+ *  gets it. */
+export async function partsOf(bytes: ArrayBuffer, glowRoles: string[], glowMaterials: boolean, kind = '', place?: Fit): Promise<Part[]> {
+  const gltf = await loader.parseAsync(bytes, '');
   const root = gltf.scene;
+  const [scale, x, y, z] = place?.fit ?? [1, 0, 0, 0];
   root.updateMatrixWorld(true);
+  const fit = new THREE.Matrix4().makeScale(scale, scale, scale).setPosition(x, y, z);
   const parts: Part[] = [];
   root.traverse((o) => {
     const mesh = o as THREE.Mesh;
@@ -84,8 +108,10 @@ export async function partsOf(bytes: ArrayBuffer, glowRoles: string[], glowMater
     for (const original of [mesh.material].flat()) {
       const mode = windModeOf(original.name, kind);
       const weights = mode && windWeights(mesh.geometry, mesh.matrixWorld, mode);
-      const m = weights ? original.clone() : original;
-      const k = materialKey(m) + (weights ? `|wind:${mode}` : '');
+      const m = weights || place?.flat ? original.clone() : original;
+      // today's flat things (a few cm thick) are drawn a hair towards the camera against gently uneven ground
+      if (place?.flat) Object.assign(m, { polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -4 });
+      const k = materialKey(m) + (weights ? `|wind:${mode}` : '') + (place?.flat ? '|flat' : '');
       if (!shared.has(k)) {
         const s = m as THREE.MeshStandardMaterial;
         s.vertexColors = true;
@@ -103,9 +129,9 @@ export async function partsOf(bytes: ArrayBuffer, glowRoles: string[], glowMater
       const mat = shared.get(k)!;
       const s = mat as THREE.MeshStandardMaterial;
       const glow = role || (glowMaterials && ((s.emissive && s.emissive.getHex() !== 0) || mat.type === 'MeshBasicMaterial'));
-      const geometry = plainGeometry(mesh.geometry, isNightGlass(mat));
+      const geometry = plainGeometry(mesh.geometry, isNightGlass(mat), textured(mat));
       if (weights) geometry.setAttribute('edenWind', new THREE.Float32BufferAttribute(weights, 1));
-      parts.push({ geometry, material: mat, matrix: mesh.matrixWorld.clone(), key: k, glow, flame, ...(storey ? { storey } : {}) });
+      parts.push({ geometry, material: mat, matrix: fit.clone().multiply(mesh.matrixWorld), key: k, glow, flame, ...(storey ? { storey } : {}) });
     }
   });
   return parts;
