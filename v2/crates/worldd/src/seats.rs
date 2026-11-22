@@ -48,7 +48,7 @@ pub fn places(
         // A stand point in a doorway's clearance is one the spot tables never give a walker (N9): a walk to it ends
         // a ring out, beyond the sit's reach, so it is moved out of the doorway as a blocked one is moved clear.
         let passage = |p: Vec3| sim::walk::town::in_passage(&buildings, &[], ground, floor, p);
-        let clear = stand.ok().and_then(|stand| {
+        let clear = stand.as_ref().ok().and_then(|&stand| {
             if view.stand_near(floor, stand, 1, None).is_none() {
                 view.stand_near(floor, stand, skills::form_runner::REACH, None)
             } else if passage(stand) {
