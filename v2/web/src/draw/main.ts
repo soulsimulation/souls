@@ -18,6 +18,7 @@ import { GroundLod, workerLevels, type Levels } from './lod.ts';
 import { WorldView } from './world.ts';
 import { support } from './support.ts';
 import { pageThings } from '../things/page.ts';
+import { rendererPictures } from '../things/standins.ts';
 import { HistoryPage, readMoment, historyLocation } from '../history/page.ts';
 import { WorldSound } from '../sound/sound.ts';
 import { pageSouls } from '../souls/page.ts';
@@ -97,7 +98,7 @@ scene.add(lightning.group);
 // #3603: the replica's courseAt, loaded on this thread only when a node with a course (a rowing punt) arrives.
 world.onCourse = () => void import('replica').then(async (r) => { await r.default(); world.courseAt = r.courseAt; }, (e) => console.warn('courses stand still:', e));
 const clock = new PlaybackClock();
-const things = pageThings(scene, world, new URLSearchParams(location.search));
+const things = pageThings(scene, world, new URLSearchParams(location.search), undefined, rendererPictures(renderer)); // #3786: far stand-ins' pictures
 const fx = pageFx(scene, world, things, q, quality.tier === 'phone'); // C8: flames, fountain water and steam
 const fauna = pageFauna(scene, world, q); // N-V7: birds, gulls, ducks and butterflies
 const souls = pageSouls(canvas, world, new URLSearchParams(location.search)); // W4: chips, status, speech, a Soul's page
