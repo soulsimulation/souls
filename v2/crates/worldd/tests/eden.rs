@@ -704,12 +704,30 @@ fn c17_a3_a_soul_walks_into_the_library_and_uses_a_thing_there_by_its_own_entry(
     let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
     // The library's west rug (today's e_7cefb7c4, at (71.5, -6.3) m); the library's door at (74.0, -2.91) m.
     let rug = im.nodes["e_7cefb7c4"];
-    let (served, mut soul, dir) = serve(&facts, "74.0,-1.0", "c17a3", im.nodes["world"].scope());
+    // Eden seeds its rugs unrolled, and `unroll` needs the rug rolled (the world decides a form's needs at commit,
+    // #3888): served with the rugs seeded rolled, as C20 seeds the blocks knocked down.
+    let root = format!("{}/../../..", env!("CARGO_MANIFEST_DIR"));
+    let rolled = std::env::temp_dir().join(format!("eden-c17a3-rolled-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&rolled);
+    copy_dir(Path::new(&format!("{root}/content/kinds")), &rolled);
+    let file = rolled.join("floors/rug.json");
+    let text = std::fs::read_to_string(&file).unwrap();
+    let seeded = text.replacen(r#""default":false"#, r#""default":true"#, 1);
+    assert_ne!(text, seeded, "the rugs seeded unrolled");
+    std::fs::write(&file, seeded).unwrap();
+    let (served, mut soul, dir, _) = serve_entries(
+        &facts,
+        rolled.to_str().unwrap(),
+        "74.0,-1.0",
+        "c17a3",
+        im.nodes["world"].scope(),
+    );
     // `unroll`, a walk in and a 3 s pause (C20 gives `roll_up`'s 5 s pause after the walk its own time too).
     let unrolled = soul.act("eden:unroll", Some(rug), BTreeMap::new());
     println!("from outside, unroll the library's west rug: {unrolled:?}");
     drop(served);
     let _ = std::fs::remove_dir_all(&dir);
+    let _ = std::fs::remove_dir_all(&rolled);
     unrolled.expect("walked indoors and used the rug through its own entry");
 }
 
@@ -1365,6 +1383,14 @@ fn act_at(at: &str, today: &str, verb: &str, tag: &str) -> Result<Vec<u64>, Stri
 
 /// [`act_at`] on the facts file `facts`.
 fn act_in(facts: &str, at: &str, today: &str, verb: &str, tag: &str) -> Result<Vec<u64>, String> {
+    act_ending(facts, at, today, verb, tag).0
+}
+
+/// An act's receipt entries, and where the body stood at the end: its node and its place there (µm, the node's frame).
+type Ending = (Result<Vec<u64>, String>, Option<(Id, replica::pose::Vec3)>);
+
+/// [`act_in`], with where the body stood at the end ([`Ending`]).
+fn act_ending(facts: &str, at: &str, today: &str, verb: &str, tag: &str) -> Ending {
     let im = import_eden::load(&std::fs::read_to_string(facts).unwrap()).expect("Eden loads");
     let thing = im.nodes[today];
     let (served, mut soul, dir) = serve(facts, at, tag, im.nodes["world"].scope());
@@ -1380,9 +1406,31 @@ fn act_in(facts: &str, at: &str, today: &str, verb: &str, tag: &str) -> Result<V
     for (at, names, _) in &entries {
         println!("  {at} µs: {names:?}");
     }
+    let end = end_pose(&dir);
+    println!("  the body's last place: {end:?}");
     drop(served);
     let _ = std::fs::remove_dir_all(&dir);
-    done
+    (done, end)
+}
+
+/// The node and place (µm, the node's frame) of the last body row in the world's log.
+fn end_pose(dir: &Path) -> Option<(Id, replica::pose::Vec3)> {
+    let bytes = std::fs::read(dir.join("log")).unwrap();
+    let mut out = None;
+    for r in sim::log::recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        let Ok(Value::Map(m)) = decode(&r).map(|d| d.value) else {
+            continue;
+        };
+        if let Some(Value::Array(rows)) = m.get(&answers::BODIES) {
+            for (_, pose, _) in rows.iter().filter_map(worldd::bodies::read_row) {
+                out = Some((pose.frame.node, pose.position));
+            }
+        }
+    }
+    out
 }
 
 /// C22 (#3485) A1: born outside the hall's front door, a Soul walks to the arcade cabinet in its bar (today's
@@ -2720,6 +2768,51 @@ fn c34_a2_a_greenhouses_vent_and_a_chapels_nave() {
     enter.expect("the nave entered, done");
     outside.expect("the vent opened from outside, done");
     beside.expect("the vent opened from beside its pole, done");
+}
+
+/// C22 sweep (#1960): an area that is none of a thing's rooms and that no floor of the thing stands a body near is
+/// walked to on the ground under it, as today's game walks to an area by its centre: round the back of a house
+/// (e_0aacfcae, `go_round_back` to `back`, behind it) ends `done`. Deck-stand (#1960): a thing with no rooms is sized
+/// by its own floors and stairs, so its kind's areas are fitted to them. Born west of the botanic garden's bridge
+/// (today's e_57696e8b, a path laid in the world's frame), a Soul crosses it (`cross`: `end_a`, then `end_b`) and
+/// ends on its deck at the east end, 182 mm up. Born beside the office's roof stairs (e_b2780f91, a flight 12.6 m
+/// long and 9.02 m high, the kind's 4.5 m and 2.8 m), it goes up (`go_up` to `top`) onto the office's roof, the
+/// floor the flight's top lands on, 9.02 m up; and down (`go_down` to `bottom`) to the flight's foot, on the ground.
+/// Before, the bridge's areas were at the world's origin and the flight's `top` 6.2 m below its landing, which cut to
+/// nothing and met no floor: each ended `done` on the ground, beside or under them.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn c22_an_area_off_a_things_floors_is_walked_to_on_the_ground() {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let (deck, roof, ground) = (
+        im.nodes["e_57696e8b/floor-0"],
+        im.nodes["e_948bae23/floor-3"],
+        im.nodes["ground"],
+    );
+    let (cross, c) = act_ending(&facts, "-86.0,-152.0", "e_57696e8b", "eden:cross", "c22br");
+    let (up, u) = act_ending(&facts, "79.8,16.5", "e_b2780f91", "eden:go_up", "c22su");
+    let (down, d) = act_ending(&facts, "79.8,16.5", "e_b2780f91", "eden:go_down", "c22sd");
+    let back = act_at("219.0,95.0", "e_0aacfcae", "eden:go_round_back", "c22hb");
+    cross.expect("the bridge crossed, done");
+    let (node, at) = c.expect("the body's end");
+    assert_eq!(node, deck, "on the bridge's deck: {at:?}");
+    assert!(
+        at.x > -60_000_000 && at.y >= 182_000,
+        "at its east end, on the deck: {at:?}"
+    );
+    up.expect("up the stairs, done");
+    let (node, at) = u.expect("the body's end");
+    assert_eq!(node, roof, "on the office's roof: {at:?}");
+    assert_eq!(at.y, 9_020_000, "9.02 m up: {at:?}");
+    down.expect("down the stairs, done");
+    let (node, at) = d.expect("the body's end");
+    assert_eq!(node, ground, "on the ground: {at:?}");
+    assert!(
+        (at.x - 73_380_000).abs() < 2_000_000 && (at.z - 15_000_000).abs() < 2_000_000,
+        "at the flight's foot: {at:?}"
+    );
+    back.expect("round the back of the house, done");
 }
 
 /// A Soul walks to a bed and lies in it through the gateway, then gets up, as today's soul.game lets it (parity ledger,

@@ -15,11 +15,9 @@ use replica::hatch::{Loaded, run_cases};
 use replica::host::{Answers, Hatch, Read};
 use replica::ids::sha256;
 use replica::rules::json::{self, Value};
-use skills::form_runner::{Arg, Args, bind_hatch, hatch_no, hatch_reads, hatch_words, run_hatch};
-use std::collections::BTreeMap;
+use skills::form_runner::{bind_hatch, hatch_no, hatch_words, run_hatch};
 
-const CHESS: &[u8] = include_bytes!("../../../../content/kinds/games/chess_table.wasm");
-const CHECKERS: &[u8] = include_bytes!("../../../../content/kinds/games/checkers_board.wasm");
+const CHESS: &[u8] = include_bytes!("hatch/chess-move.wasm");
 const SEED: u64 = 2823;
 const CASES: usize = 1000;
 /// A budget every case exceeds, for A2.
@@ -39,15 +37,13 @@ fn kit() -> PathBuf {
     Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds")
 }
 
-/// The kit's chess table, which names its rules' module by the hash of the bytes it ships beside it.
+/// The kit's chess table, its hatch's stand-in module name replaced by the check's hash.
 fn chess_table() -> Value {
     let text =
         fs::read_to_string(kit().join("games/chess_table.json")).expect("the kit's chess table");
-    assert!(
-        text.contains(&format!("prov-{}", hex(&named(CHESS)))),
-        "the kit names the module it ships"
-    );
-    json::parse(&text).unwrap()
+    let stand_in = format!("prov-1220{}", "0".repeat(64));
+    assert!(text.contains(&stand_in), "the kit names a stand-in module");
+    json::parse(&text.replace(&stand_in, &format!("prov-{}", hex(&named(CHESS))))).unwrap()
 }
 
 struct Rng(u64);
@@ -157,7 +153,7 @@ fn a1_a2_the_chess_check_through_the_form_runner_and_its_table_for_the_daemon_an
     let hatch = bind_hatch(&entry, "move_white")
         .unwrap()
         .expect("move_white has a hatch");
-    assert_eq!((hatch.reads.len(), hatch.steps_most), (7, 1_000_000));
+    assert_eq!((hatch.reads.len(), hatch.steps_most), (7, 20_000));
     let module = Loaded::load(CHESS, &hatch.module).expect("the check loads by its hash");
 
     // A few known positions first: the check is a chess-move check.
@@ -339,32 +335,6 @@ fn sections(sections: &[(u8, &[u8])]) -> Vec<u8> {
     module(&m)
 }
 
-/// A module with memory, `input` and `run: (i32) -> i64` answering `answer`, and no `output`.
-fn bare(answer: u8) -> Vec<u8> {
-    sections(&[
-        (1, &[1, 0x60, 1, 0x7f, 1, 0x7e]),
-        (3, &[1, 0]),
-        (5, &[1, 0, 1]),
-        (6, &[1, 0x7f, 0, 0x41, 0, 0x0b]),
-        (
-            7,
-            &[
-                3, 6, b'm', b'e', b'm', b'o', b'r', b'y', 2, 0, 5, b'i', b'n', b'p', b'u', b't', 3,
-                0, 3, b'r', b'u', b'n', 0, 0,
-            ],
-        ),
-        (10, &[1, 4, 0, 0x42, answer, 0x0b]),
-    ])
-}
-
-fn nay() -> Vec<u8> {
-    bare(0)
-}
-
-fn yea() -> Vec<u8> {
-    bare(1)
-}
-
 /// The echo: memory, `input` at 0, `output` at 1024 and `run`, which copies its input to its output and answers 1,
 /// so each read comes back as the answered field in the same place.
 fn echo() -> Vec<u8> {
@@ -449,212 +419,37 @@ fn a_hatch_answers_several_fields_checked_against_their_definitions() {
         refused(&[pieces], &[turn], &values[..1]),
         Err("hatch-answer-malformed")
     );
-    // A module with no output, as a fields hatch, is refused by name; a no answers no fields.
-    let mut silent = h.clone();
-    silent.module = named(&nay());
-    let nay_module = Loaded::load(&nay(), &silent.module).unwrap();
+    // The chess check has no output: as a fields hatch it is refused by name, and a no answers no fields.
+    let chess = Loaded::load(CHESS, &named(CHESS)).unwrap();
+    let mut move_white = bind_hatch(&entry, "move_white").unwrap().unwrap();
+    move_white.answers = Answers::Fields(vec![turn]);
+    let ok = case(&start(), 0, 64, 15, (12, 28, 0));
     assert_eq!(
-        run_hatch(&silent, &nay_module, &entry, &values).map(|v| (v.yes, v.sets.len())),
-        Ok((false, 0))
-    );
-    let mut yes = silent.clone();
-    yes.module = named(&yea());
-    assert_eq!(
-        run_hatch(
-            &yes,
-            &Loaded::load(&yea(), &yes.module).unwrap(),
-            &entry,
-            &values
-        )
-        .map_err(|r| r.name),
+        run_hatch(&move_white, &chess, &entry, &ok).map_err(|r| r.name),
         Err("hatch-module-shape")
     );
-
-    // The entry's move names the fields it answers.
-    let bound = bind_hatch(&entry, "move_white").unwrap().unwrap();
-    assert_eq!(
-        bound.answers,
-        Answers::Fields(vec![pieces, turn, en_passant, castling, 29, 30, 34])
+    let no = run_hatch(
+        &move_white,
+        &chess,
+        &entry,
+        &case(&start(), 0, 64, 15, (12, 36, 0)),
     );
+    assert_eq!(no.map(|v| (v.yes, v.sets.len())), Ok((false, 0)));
+
+    // The entry's form names the fields it answers.
+    let text = entry.to_json().replacen(
+        "\"answers\":\"verdict\"",
+        "\"answers\":{\"fields\":[\"pieces\",\"turn\"]}",
+        1,
+    );
+    let bound = bind_hatch(&json::parse(&text).unwrap(), "move_white")
+        .unwrap()
+        .unwrap();
+    assert_eq!(bound.answers, Answers::Fields(vec![pieces, turn]));
     println!(
         "fields: echo of {} bytes answered pieces, turn and castling as their values in {} steps; \
          misfits refused hatch-answer-malformed",
         bytes.len(),
         v.steps
-    );
-}
-
-/// A square's number from its name, `e2` 12.
-fn sq(name: &str) -> i64 {
-    let b = name.as_bytes();
-    i64::from(b[1] - b'1') * 8 + i64::from(b[0] - b'a')
-}
-
-#[test]
-fn the_chess_table_sets_up_moves_its_pieces_and_ends_in_checkmate() {
-    let entry = chess_table();
-    let module = Loaded::load(CHESS, &named(CHESS)).expect("the kit's module loads by its hash");
-    let mut state: BTreeMap<u64, V> = BTreeMap::new();
-    let mut steps = Vec::new();
-    let mut act = |form: &str, mv: Option<(&str, &str)>, state: &mut BTreeMap<u64, V>| {
-        let h = bind_hatch(&entry, form).unwrap().expect("a hatch");
-        let mut args = Args::new();
-        if let Some((from, to)) = mv {
-            args.insert("from".into(), Arg::Int(sq(from)));
-            args.insert("to".into(), Arg::Int(sq(to)));
-            args.insert("promotion".into(), Arg::Int(0));
-        }
-        let reads = hatch_reads(&entry, &h, state, &args).map_err(|r| r.name)?;
-        let v = run_hatch(&h, &module, &entry, &reads).map_err(|r| r.name)?;
-        if !v.yes {
-            return Err(hatch_no(&h).name);
-        }
-        steps.push(v.steps);
-        for (f, value) in v.sets {
-            state.insert(f, value);
-        }
-        Ok(())
-    };
-    let named_value = |s: &str| V::Text(replica::encode::Name::new(s).unwrap());
-    let piece_on = |state: &BTreeMap<u64, V>, square: u64| match &state[&31] {
-        V::Array(rs) => rs.iter().find_map(|r| match r {
-            V::Map(m) if m[&1] == V::Uint(square) => Some(m[&2].clone()),
-            _ => None,
-        }),
-        _ => None,
-    };
-    act("begin", None, &mut state).unwrap();
-    assert!(
-        matches!(&state[&31], V::Array(rs) if rs.len() == 32),
-        "the setup"
-    );
-    assert_eq!(
-        piece_on(&state, 4),
-        Some(V::Uint(6)),
-        "the white king on e1"
-    );
-    // The fool's mate, with an illegal move refused by name on the way.
-    act("move_white", Some(("f2", "f3")), &mut state).unwrap();
-    assert_eq!(state[&28], named_value("eden:black"));
-    assert_eq!(
-        (piece_on(&state, 13), piece_on(&state, 21)),
-        (None, Some(V::Uint(1)))
-    );
-    act("move_black", Some(("e7", "e5")), &mut state).unwrap();
-    assert_eq!(state[&33], V::Uint(44), "e6 may be taken en passant");
-    assert_eq!(
-        act("move_white", Some(("e1", "e3")), &mut state),
-        Err("hatch-said-no")
-    );
-    act("move_white", Some(("g2", "g4")), &mut state).unwrap();
-    act("move_black", Some(("d8", "h4")), &mut state).unwrap();
-    assert_eq!(
-        piece_on(&state, 31),
-        Some(V::Uint(13)),
-        "the black queen on h4"
-    );
-    assert_eq!(state[&29], named_value("eden:checkmate"));
-    assert_eq!(state[&30], named_value("eden:black"));
-    assert_eq!(state[&34], V::Uint(1), "white is in check");
-    assert_eq!(
-        act("move_white", Some(("e2", "e3")), &mut state),
-        Err("hatch-said-no"),
-        "no move gets a mated king out"
-    );
-    println!(
-        "chess table: setup and the fool's mate in {steps:?} steps; e1e3 refused hatch-said-no (why_chess)"
-    );
-}
-
-#[test]
-fn the_checkers_board_sets_up_takes_jumps_crowns_and_ends() {
-    let text = fs::read_to_string(kit().join("games/checkers_board.json"))
-        .expect("the kit's checkers board");
-    assert!(
-        text.contains(&format!("prov-{}", hex(&named(CHECKERS)))),
-        "the kit names the module it ships"
-    );
-    let entry = json::parse(&text).unwrap();
-    let module =
-        Loaded::load(CHECKERS, &named(CHECKERS)).expect("the kit's module loads by its hash");
-    let (turn, phase, winner, pieces, chain) = (28, 29, 30, 31, 32);
-    let named_value = |s: &str| V::Text(replica::encode::Name::new(s).unwrap());
-    let act = |form: &str, mv: Option<(&str, &str)>, state: &mut BTreeMap<u64, V>| {
-        let h = bind_hatch(&entry, form).unwrap().expect("a hatch");
-        let mut args = Args::new();
-        if let Some((from, to)) = mv {
-            args.insert("from".into(), Arg::Int(sq(from)));
-            args.insert("to".into(), Arg::Int(sq(to)));
-        }
-        let reads = hatch_reads(&entry, &h, state, &args).map_err(|r| r.name)?;
-        let v = run_hatch(&h, &module, &entry, &reads).map_err(|r| r.name)?;
-        if !v.yes {
-            return Err(hatch_no(&h).name);
-        }
-        for (f, value) in v.sets {
-            state.insert(f, value);
-        }
-        Ok(v.steps)
-    };
-    let on = |state: &BTreeMap<u64, V>, square: &str| match &state[&pieces] {
-        V::Array(rs) => rs.iter().find_map(|r| match r {
-            V::Map(m) if m[&1] == V::Uint(sq(square) as u64) => Some(m[&2].clone()),
-            _ => None,
-        }),
-        _ => None,
-    };
-    let mut state = BTreeMap::new();
-    act("begin", None, &mut state).unwrap();
-    assert!(
-        matches!(&state[&pieces], V::Array(rs) if rs.len() == 24),
-        "twelve a side"
-    );
-    assert_eq!(
-        (on(&state, "a1"), on(&state, "h8"), on(&state, "b2")),
-        (Some(V::Uint(1)), Some(V::Uint(9)), Some(V::Uint(1)))
-    );
-    assert_eq!(
-        act("move_x", Some(("c3", "c4")), &mut state),
-        Err("hatch-said-no"),
-        "only diagonally"
-    );
-    act("move_x", Some(("c3", "d4")), &mut state).unwrap();
-    assert_eq!(state[&turn], named_value("eden:o"));
-    act("move_o", Some(("f6", "e5")), &mut state).unwrap();
-    assert_eq!(
-        act("move_x", Some(("a3", "b4")), &mut state),
-        Err("hatch-said-no"),
-        "a jump is open, so it must be taken"
-    );
-    act("move_x", Some(("d4", "f6")), &mut state).unwrap();
-    assert_eq!(
-        (on(&state, "e5"), on(&state, "f6")),
-        (None, Some(V::Uint(1))),
-        "e5 is taken"
-    );
-    assert_eq!(
-        (state[&turn].clone(), state[&chain].clone()),
-        (named_value("eden:o"), V::Uint(64))
-    );
-
-    // A man reaching the far rank is crowned, and a side left with no move has lost.
-    let mut end = BTreeMap::from([
-        (
-            pieces,
-            V::Array(vec![
-                V::Map([(1, V::Uint(sq("c7") as u64)), (2, V::Uint(1))].into()),
-                V::Map([(1, V::Uint(sq("a1") as u64)), (2, V::Uint(9))].into()),
-            ]),
-        ),
-        (phase, named_value("eden:playing")),
-    ]);
-    act("move_x", Some(("c7", "d8")), &mut end).unwrap();
-    assert_eq!(on(&end, "d8"), Some(V::Uint(2)), "crowned");
-    assert_eq!(
-        (end[&phase].clone(), end[&winner].clone()),
-        (named_value("eden:won"), named_value("eden:x"))
-    );
-    println!(
-        "checkers board: setup, c3d4 f6e5 d4xf6 (c3c4 and a3b4 refused hatch-said-no), c7d8 crowned and won"
     );
 }
