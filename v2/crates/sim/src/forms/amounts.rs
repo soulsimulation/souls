@@ -675,8 +675,9 @@ impl Cx<'_> {
 }
 
 /// The fields a made thing starts with: a creator's kind's solids (N1's field 12, from its record's bounds), as the
-/// creator's own place gives it (#3697 review), so walkers go round it and the safety rule judges it; none for a boot
-/// kind, whose solids come from its geometry as today.
+/// creator's own place gives it (#3697 review). Such a thing is made only into a hand (into a slot is `kind.effects`
+/// at define, since a made thing is not judged for what it would bury), so the set-down that puts it in the world
+/// judges it and walkers then go round it; none for a boot kind, whose solids come from its geometry as today.
 pub(crate) fn made_fields(tree: &Tree, kind: &Name) -> BTreeMap<u64, Value> {
     replica::kinds::defined::defined_named(tree, kind.as_str())
         .and_then(|d| replica::kinds::defined::solids_of(&d.entry))

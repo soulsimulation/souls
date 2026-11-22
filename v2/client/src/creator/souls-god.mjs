@@ -162,7 +162,7 @@ export const FIX = {
   'edit.kind-unknown': 'use a kind describe lists under kinds (your own kinds too, once defined)',
   'kind.invalid': 'a souls-entry/1 record as content/kinds holds them: whole numbers, sections it can hold (no roles), its kind loads',
   'kind.too-large': 'a record is at most 64 KiB and its bounds_mm at most 1 km: fewer parts, a shorter text or smaller bounds',
-  'kind.effects': 'a form creates only a kind describe lists (its full name) into a slot that admits it, and timers that start each other wait 50 ms or more',
+  'kind.effects': 'a form creates only a kind describe lists (its full name) into a slot that admits it (a kind with solids only into a hand), and timers that start each other wait 50 ms or more',
   'kind.audience': 'define a kind for everyone (no audience)',
   'kind.namespace': 'name it in your own namespace (not souls: or eden:, nor one the world\'s own kinds use)',
   'kind.collision': 'that kind is defined already: place it by the full name describe lists',

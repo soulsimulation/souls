@@ -19,8 +19,9 @@
 //! - `kind.in-use`: removing a kind that placed things still use, or that another definition's form creates (in
 //!   `edit::check`, and again on the live copy in `edit::confirm`);
 //! - `kind.effects`: a form's effect the world would refuse every time it ran ([`effects_checked`]): a `create` of a
-//!   kind the world neither pins nor defines, or into a slot that does not admit it, or forms that start each other
-//!   by timer sooner than [`TIMER_LEAST_US`] in a ring.
+//!   kind the world neither pins nor defines, or into a slot that does not admit it, or of a kind with solids into a
+//!   slot (a made thing is not judged for what it would bury, so only one made into a hand has solids), or forms that
+//!   start each other by timer sooner than [`TIMER_LEAST_US`] in a ring.
 //!
 //! The record's `forms` are checked by the same entry checker content entries pass (the form runner's, which runs in
 //! the world's edit checker); the client's checker checks the rest.
@@ -247,13 +248,15 @@ pub fn creates(entry: &Json) -> Vec<&str> {
 
 /// A record's forms' effects that the world would refuse each time they ran, refused now, `kind.effects` (#3697
 /// review): a `create` of a kind `kinds` (the world's, by full name) does not hold, or into a slot of this kind that
-/// does not admit it; and forms that start each other by `timer` in a ring that goes round sooner than
+/// does not admit it, or of a kind with solids (`solid`, the creator kinds that have them, by full name) into any slot;
+/// and forms that start each other by `timer` in a ring that goes round sooner than
 /// [`TIMER_LEAST_US`]. `kind` is this record's own rules. What depends on a form's arguments is left to the run, which
 /// refuses that act alone.
 pub fn effects_checked(
     entry: &Json,
     kind: &Kind,
     kinds: &BTreeMap<String, Kind>,
+    solid: &BTreeMap<String, Value>,
 ) -> Result<(), Why> {
     let no = |why: String| Err(("kind.effects", why));
     let forms = entry.get("forms").and_then(Json::obj).unwrap_or(&[]);
@@ -283,6 +286,14 @@ pub fn effects_checked(
                     if !admits {
                         return no(format!(
                             "{form}: creates {} into {into}, a slot that does not admit it",
+                            plain(made)
+                        ));
+                    }
+                    // A made thing is not judged for what it would bury or cut off (BUILDSAFE judges edits and
+                    // set-downs), so one with solids is made only into a hand, and judged when it is set down.
+                    if solid.contains_key(made) {
+                        return no(format!(
+                            "{form}: creates {} into {into}, but a thing with solids is made only into a hand",
                             plain(made)
                         ));
                     }

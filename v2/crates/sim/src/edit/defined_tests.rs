@@ -42,6 +42,7 @@ struct W {
     intents: Minter,
     parts: Vec<Arc<Part>>,
     at: Micros,
+    history: undo::History,
 }
 
 impl W {
@@ -80,6 +81,7 @@ impl W {
             intents: Minter::new(Scope([0x11; 16])),
             parts: Vec::new(),
             at: 0,
+            history: undo::History::default(),
         };
         let room = pinned(&w.header, "souls:room");
         w.room = w
@@ -100,7 +102,14 @@ impl W {
         let checked = check(edit, &copy, &self.world)?;
         let planned = plan(checked, &copy, None)?;
         self.at += 1_000;
-        let c = commit(&mut self.live, &mut self.minter, &planned, &[], self.at)?;
+        let c = self.history.edit(
+            &mut self.live,
+            &mut self.minter,
+            &planned,
+            &[],
+            self.at,
+            None,
+        )?;
         self.parts.push(c.part);
         Ok(c.names)
     }
@@ -391,8 +400,13 @@ fn review_blockers_are_refused_at_define_by_name() {
     assert_eq!(w.code(vec![private]), "kind.audience");
     // kind.effects: a create of a kind the world neither pins nor defines (by its full name) ...
     let (seed_def, seed) = w
-        .define(1, &BIRDBATH.replace("birdbath", "seed"))
-        .expect("a seed");
+        .define(
+            1,
+            &BIRDBATH
+                .replace("birdbath", "seed")
+                .replace("[1000,1200,1000]", "[100,100,100]"),
+        )
+        .expect("a seed, too low to have solids");
     let day = 86_400_000_000;
     for makes in ["eden:apple@1220aa", "gene:typo", "gene:seed"] {
         let r = pod("\"gene:seed\"", makes, day, None);
@@ -426,6 +440,29 @@ fn review_blockers_are_refused_at_define_by_name() {
         },
     ])
     .expect("removed together");
+}
+
+/// #3697 re-review: a made thing is not judged for what it would bury, so a form that would make a thing with solids
+/// into a slot (where a Soul may stand, fixed geometry once the slot has a point) is refused at define,
+/// `kind.effects`; the same thing made into a hand defines, and keeps its solids for when it is set down and judged.
+#[test]
+fn a_form_that_would_make_a_thing_with_solids_into_a_slot_is_refused() {
+    let mut w = W::new();
+    let root = w.root;
+    let (_, birdbath) = w.define(1, BIRDBATH).expect("a birdbath, 1.2 m tall");
+    let day = 86_400_000_000;
+    let into_slot = pod("\"gene:birdbath\"", &birdbath, day, None);
+    let no = w
+        .edit(vec![define_op(1, root, &into_slot)])
+        .expect_err("refused");
+    println!("a pod that makes a birdbath into its tray: {}", no.detail);
+    assert_eq!(no.name, "kind.effects", "{}", no.detail);
+    assert!(no.detail.contains("made only into a hand"), "{}", no.detail);
+    let into_hand = into_slot.replace(r#""into":"tray""#, r#""into":"actor_hand""#);
+    w.define(1, &into_hand)
+        .expect("made into a hand, it defines");
+    let made = crate::forms::amounts::made_fields(w.live.tree(), &full(&birdbath));
+    assert!(made.contains_key(&12), "a made birdbath keeps its solids");
 }
 
 /// A chain of forms, each starting the next by many 1 µs timers (#3697 re-review): with no ring, the ring search
@@ -511,4 +548,70 @@ fn a_made_thing_of_a_creators_kind_has_its_solids() {
     assert!(made.contains_key(&12));
     let room = pinned(&w.header, "souls:room");
     assert!(crate::forms::amounts::made_fields(w.live.tree(), &room).is_empty());
+}
+
+/// #3697 re-review: an undo or a redo that would remove a creator's definition while a thing of its kind is left (one
+/// a Soul's form made since, outside the creator's batches) is refused `kind.in-use`, as an edit's removal is: in the
+/// preview the checker plans on and at the tick. Without a thing left, the same undo goes through.
+#[test]
+fn an_undo_or_redo_that_removes_a_kind_a_thing_still_has_is_refused() {
+    let mut w = W::new();
+    let (def, name) = w.define(1, BIRDBATH).expect("defined");
+    let removal = vec![Op::Remove {
+        node: Ref::Node(def),
+    }];
+    w.edit(removal).expect("removed, nothing uses it");
+    let creator = Actor::Creator(w.world.creator);
+    let next = |w: &mut W| {
+        w.at += 1_000;
+        w.at
+    };
+    let at = next(&mut w);
+    w.history
+        .undo(&mut w.live, &w.world, creator, at, &mut |_, _| Ok(()))
+        .expect("the removal undone, the definition back");
+    // A thing of the kind made outside the history, as a Soul's form makes one.
+    let history = std::mem::take(&mut w.history);
+    let room = w.room;
+    let thing = w
+        .edit(vec![place(
+            1,
+            &full(&name),
+            Ref::Node(room),
+            BTreeMap::new(),
+        )])
+        .expect("a birdbath made")[&1];
+    w.history = history;
+    let at = next(&mut w);
+    let preview = w
+        .history
+        .preview(true, &w.live, &w.world, creator, at)
+        .expect_err("refused");
+    println!("redo of the removal while {thing:?} is a birdbath: {preview:?}");
+    assert_eq!(preview.name, "kind.in-use");
+    let redo = w
+        .history
+        .redo(&mut w.live, &w.world, creator, at, &mut |_, _| Ok(()))
+        .expect_err("refused at the tick");
+    assert_eq!(redo.name, "kind.in-use");
+    // Undo, past the redo: the definition's own batch, which would remove it from under the birdbath.
+    let undo = w
+        .history
+        .undo(&mut w.live, &w.world, creator, at, &mut |_, _| Ok(()))
+        .expect_err("refused");
+    println!("undo of the definition while {thing:?} is a birdbath: {undo:?}");
+    assert_eq!(undo.name, "kind.in-use");
+    assert!(w.live.tree().handle(def).is_some(), "the definition stays");
+    // With the thing gone (outside the history again), the undo goes through.
+    let history = std::mem::take(&mut w.history);
+    w.edit(vec![Op::Remove {
+        node: Ref::Node(thing),
+    }])
+    .expect("the birdbath removed");
+    w.history = history;
+    let at = next(&mut w);
+    w.history
+        .undo(&mut w.live, &w.world, creator, at, &mut |_, _| Ok(()))
+        .expect("nothing has the kind now");
+    assert!(w.live.tree().handle(def).is_none(), "the definition undone");
 }

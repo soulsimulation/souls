@@ -150,7 +150,7 @@ the root, which `describe` shows), and from then on you place it like any other 
 | `edit.not-the-creator` | this token is not the creator's |
 | `kind.invalid` | the record is not one the world can keep: its `detail` names the part |
 | `kind.too-large` | the record is over 64 KiB, or a `bounds_mm` is over 1 km |
-| `kind.effects` | a form would fail every time it ran: it creates a kind the world has not got (use its full name), into a slot that does not admit it, or its timers start each other sooner than 50 ms in a ring |
+| `kind.effects` | a form would fail every time it ran: it creates a kind the world has not got (use its full name), into a slot that does not admit it, a kind with solids into a slot rather than a hand, or its timers start each other sooner than 50 ms in a ring |
 | `kind.audience` | a kind is defined for everyone |
 | `kind.namespace` | that namespace is not yours |
 | `kind.collision` | that kind is defined already: place it by the name `describe` lists |
