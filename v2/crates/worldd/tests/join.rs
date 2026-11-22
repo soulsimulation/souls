@@ -1046,9 +1046,12 @@ fn motion_history_is_bit_identical_to_its_pinned_hash() {
     assert_eq!(hash, PINNED_MOTION_HISTORY, "the history is bit-identical");
 }
 
-/// [`motion_history_is_bit_identical_to_its_pinned_hash`]'s effect hash, as `origin/main` (c919d8126) writes it.
+/// [`motion_history_is_bit_identical_to_its_pinned_hash`]'s effect hash. Re-pinned by W11 (#4087): a walk's
+/// `souls:act-deadline` now counts from the tick its route is planned, not from the move's start. Same 810 records and
+/// 1,543 motion samples; with only that rule put back the run writes the previous pin (b18f5b81...), so the deadline
+/// values are the whole difference.
 const PINNED_MOTION_HISTORY: &str =
-    "b18f5b817f8e19faaf0174ffbc43f546e27dc4732af99949575138ad374be048";
+    "6a52c87d4b5129e91fe73a81329b978b0aea1242369b08a4117b81bad3c8655d";
 
 /// R21: private membership is checked against the joined actor's authoritative body, not its principal id.
 #[test]
