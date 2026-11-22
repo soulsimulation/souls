@@ -157,7 +157,8 @@ export class WorldSky {
   readonly dome = new SkyDome();
   state: SkyState = skyState(null, 0);
   /** #3795: a picture's local hour, minutes after midnight (`?hour=HH:MM`), or null for the world's own time. Only the
-   *  sky, its light and the lit windows are drawn at it; the record in force and the rain keep world time. */
+   *  sky, its light and the lit windows are drawn at it; the record in force and the rain keep world time. Without
+   *  one, a creator's staged hour (`souls-god time`, the record's `skyHour`) is drawn the same way. */
   hour: number | null = null;
   /** The records read, each with the world time it holds from, in the order applied (a seek starts the list again). */
   private entries: { from: number; rec: SkyRecord }[] = [];
@@ -204,7 +205,8 @@ export class WorldSky {
   /** Draws world time `t` (µs); returns the direction toward the sun for the shadow's light. */
   update(t: number, camera: THREE.Camera): THREE.Vector3 {
     const r = this.recordAt(t), worldT = t;
-    if (r && this.hour !== null) t = hourTime(r, t, this.hour);
+    const hour = this.hour ?? (r?.skyHour != null ? r.skyHour / 60_000_000 : null);
+    if (r && hour !== null) t = hourTime(r, t, hour);
     const s = (this.state = skyState(r, t));
     (this.scene.background as THREE.Color).copy(s.background);
     // V19c: a world with a palette or mist settings gets today's exp² fog, thickened by the weather's fog and rain

@@ -100,3 +100,13 @@ test('W17 missing data or occupied address refuses restore before CAS/start and 
     assert.deepEqual(readWorldRoutes(f.config.worldRoutes)['old-garden'],foreign);assert.equal(f.phase.state,'archived');await unchanged(f);
   }finally{await rm(f.dir,{recursive:true,force:true});}
 });
+
+test('#1960 B7: on a bucket the archive reads the name record there, never the folder',async()=>{
+  const f=await fixture();try{
+    const named=join(f.config.worldsRoot,'directory/world-name/garden'),bytes=await readFile(named);await rm(named);
+    const keys=[],store={kind:'bucket',get:async key=>{keys.push(key);if(key==='world-name/garden')return bytes;throw Object.assign(Error('absent'),{code:'ENOENT'});}};
+    assert.equal(await archiveRequest(f.config,f.phase.request,{...f.options,store}),true);assert.equal(f.phase.state,'archived');
+    assert.ok(keys.length>0&&keys.every(k=>k==='world-name/garden'));
+    await assert.rejects(archiveRequest(f.config,f.phase.request,f.options),{code:'ENOENT'},'the folder has no record: the folder is not read on a bucket');
+  }finally{await rm(f.dir,{recursive:true,force:true});}
+});

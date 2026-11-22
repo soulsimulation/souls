@@ -19,7 +19,8 @@ archives its history (V3) under `h/<world>/<lineage>/`, which the page's history
 backups (`SOULS_BACKUP_URL`): the offsite bucket, keys from the environment and never in the URL, never printed.
 
 ```sh
-# In the environment of directoryd, the supervisor and each worldd@ unit (worldd@ reads /etc/souls/directory.env)
+# /etc/souls/secrets.env (root, 600): souls-directory reads it, and every worldd@ through the install's drop-in
+# (worldd@.service.d/10-install.conf), so the directory, the launcher and each world use one store
 DIRECTORY_STORE_URL=s3:https://<host>/<bucket>/<prefix>   # worldd serve uses it when --store and WORLDD_STORE are unset
 AWS_ACCESS_KEY_ID=<key id>
 AWS_SECRET_ACCESS_KEY=<secret>
