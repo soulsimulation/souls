@@ -336,6 +336,8 @@ struct Sight<'a> {
     /// Each run's walk in progress right before a sit into a slot the places hold: its step, the seat's floor and its
     /// stand point on that floor (moved clear at registration when the entry's point is blocked).
     sit_walks: BTreeMap<Id, (usize, Id, Vec3)>,
+    /// The bodies whose walk in progress is to be there, not to act from there ([`Forms::goal_walks`]).
+    goals: BTreeSet<Id>,
     planning: &'a RefCell<Planning>,
     map: Arc<Versions>,
 }
@@ -473,6 +475,127 @@ impl Sight<'_> {
     }
 }
 
+impl Sight<'_> {
+    /// The radius of the area a body walks to, at step `step`, to be there (no move or sit after it): the walk may end
+    /// within reach of the area's circle. `None` for any other walk.
+    fn area_radius(&self, body: Id, step: usize) -> Option<i64> {
+        if !self.goals.contains(&body) {
+            return None;
+        }
+        let &(at_step, thing, ref point) = self.walks.get(&body)?;
+        if at_step != step {
+            return None;
+        }
+        let n = self.tree.node(self.tree.handle(thing)?)?;
+        let r = self
+            .kinds
+            .get(plain(n.kind()))?
+            .get("areas")?
+            .get(point.as_str())?
+            .get("radius_mm")?;
+        match r {
+            Json::Int(mm) => i64::try_from(*mm).ok()?.checked_mul(1000),
+            _ => None,
+        }
+    }
+
+    fn on_shape(&self, body: Id, step: usize, node: Id) -> Option<Vec3> {
+        let &(at_step, thing, ref point) = self.walks.get(&body)?;
+        if at_step != step {
+            return None;
+        }
+        let n = self.tree.node(self.tree.handle(thing)?)?;
+        if n.parent() != Some(node) {
+            return None;
+        }
+        on_drawn_shape(&n, self.kinds.get(plain(n.kind()))?, point.as_str())
+    }
+}
+
+/// Point `point` of entry `entry` laid on thing `n`'s own shape, when `n` is drawn in its parent's frame (placed at its
+/// origin, with a line or an outline field), as Eden's land features are: on its line ([`on_line`]) when the entry
+/// is long along x (a hedge's, a bridge's: x at least twice z), else on the box of its line's or outline's points
+/// ([`on_outline`]: a pond, a garden, a winding channel). `None` for any other thing or point.
+pub fn on_drawn_shape(n: &replica::tree::NodeRef<'_>, entry: &Json, point: &str) -> Option<Vec3> {
+    use import_eden::{F_LINE, F_OUTLINE};
+    if n.place().is_some_and(|p| p.position != Vec3::ZERO) {
+        return None;
+    }
+    let p = ["points", "areas"]
+        .iter()
+        .find_map(|k| um(entry.get(k)?.get(point)?.get("at_mm")))?;
+    let bounds = um(entry.get("geometry")?.get("bounds_mm"))?;
+    let xz = |v: &replica::encode::Value| -> Option<Vec<[i64; 2]>> {
+        let replica::encode::Value::Array(rows) = v else {
+            return None;
+        };
+        rows.iter()
+            .map(|r| match r {
+                replica::encode::Value::Array(c) => {
+                    Some([int_of(c.first()?)? * 1000, int_of(c.get(1)?)? * 1000])
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    if let Some(line) = n.fields().get(&F_LINE).and_then(xz) {
+        if bounds.x >= 2 * bounds.z {
+            return on_line(p, bounds, &line);
+        }
+        return on_outline(p, bounds, &line);
+    }
+    on_outline(p, bounds, &n.fields().get(&F_OUTLINE).and_then(xz)?)
+}
+
+/// `v` stretched from `from` to `to` (µm).
+fn stretch(v: i64, from: i64, to: i64) -> Option<i64> {
+    i64::try_from(i128::from(v) * i128::from(to) / i128::from(from.max(1))).ok()
+}
+
+/// Point `p` of an entry whose bounds are `bounds` laid on `line` (`[x, z]` µm): its x along the line from the first
+/// point to the last, stretched from the bounds' x to the line's length, from the line's middle; its z across it, as
+/// it is; its y as it is.
+fn on_line(p: Vec3, bounds: Vec3, line: &[[i64; 2]]) -> Option<Vec3> {
+    let (a, b) = (line.first()?, line.last()?);
+    let (dx, dz) = (b[0] - a[0], b[1] - a[1]);
+    let len = flat(*a, *b);
+    if len == 0 {
+        return None;
+    }
+    let along = stretch(p.x, bounds.x, len)?;
+    let on = |u: i64, w: i64| i64::try_from(i128::from(u) * i128::from(w) / i128::from(len)).ok();
+    // The line's way is (dx, dz), and across it (-dz, dx), each over its length.
+    Some(Vec3::new(
+        (a[0] + b[0]) / 2 + on(along, dx)? - on(p.z, dz)?,
+        p.y,
+        (a[1] + b[1]) / 2 + on(along, dz)? + on(p.z, dx)?,
+    ))
+}
+
+/// Point `p` of an entry whose bounds are `bounds` laid on `outline` (`[x, z]` µm): from the middle of the outline's
+/// box, each of x and z stretched from the bounds to the box; its y as it is.
+fn on_outline(p: Vec3, bounds: Vec3, outline: &[[i64; 2]]) -> Option<Vec3> {
+    let lo = [0, 1].map(|k| outline.iter().map(|q| q[k]).min());
+    let hi = [0, 1].map(|k| outline.iter().map(|q| q[k]).max());
+    let ([Some(x0), Some(z0)], [Some(x1), Some(z1)]) = (lo, hi) else {
+        return None;
+    };
+    Some(Vec3::new(
+        (x0 + x1) / 2 + stretch(p.x, bounds.x, x1 - x0)?,
+        p.y,
+        (z0 + z1) / 2 + stretch(p.z, bounds.z, z1 - z0)?,
+    ))
+}
+
+/// A whole number of the encoding as an `i64`.
+fn int_of(v: &replica::encode::Value) -> Option<i64> {
+    match v {
+        replica::encode::Value::Uint(u) => i64::try_from(*u).ok(),
+        replica::encode::Value::Nint(n) => i64::try_from(*n).ok().map(|n| -n - 1),
+        _ => None,
+    }
+}
+
 impl Geometry for Sight<'_> {
     fn ask(&self, body: Id, q: &Ask) -> Option<Answer> {
         match q {
@@ -543,6 +666,9 @@ impl Geometry for Sight<'_> {
         let Some(me) = self.bodies.get(&body) else {
             return WalkPlan::Legs(Vec::new());
         };
+        let at = self.on_shape(body, step, node).unwrap_or(at);
+        // A walk to be in an area ends within reach of the area's circle, not of its middle.
+        let reach = reach.saturating_add(self.area_radius(body, step).unwrap_or(0));
         // A walk before a sit goes to the seat's own stand point, the one its sit is measured from.
         let (node, at) = match self.sit_walks.get(&body) {
             Some(&(at_step, floor, stand)) if at_step == step => (floor, stand),
@@ -742,6 +868,14 @@ impl Reach for Sight<'_> {
             AT_ARG => *self.toward.get(&body)?,
             _ => target,
         };
+        // A thing in the body's own hand is within its reach (#3715): a held kettle's switch.
+        let parent = self
+            .tree
+            .handle(target)
+            .and_then(|h| self.tree.node(h)?.parent());
+        if parent == Some(body) {
+            return Some(0);
+        }
         if let Some(d) = self.to_thing(body, sim::walk::node_of(me), a, target, point) {
             return Some(d);
         }
@@ -931,16 +1065,18 @@ fn within_reach(tree: &Tree, entry: &Json, body: Id, body_at: Option<Vec3>, node
 /// `form-rules`' `selectThing` reads it the same way, #3914). `Ok(Some(thing))` binds it, `Ok(None)` finds nothing
 /// that qualifies, and `Err(())` is a selector this does not read (the argument stays missing).
 ///
-/// - **The set** (`in`): `this` the children of the act's node; `here` those of the node the actor's body is in
-///   (the act's node's parent when the body is not in the tree) and what the body holds, within [`HERE_REACH_MM`]
-///   of the anchor; `parent` those of the act's node's parent. Never the act's node, the actor's body, a body (a
-///   node linked `souls:body-of`) or a node of a private audience; with `kind`, only that kind.
+/// - **The set** (`in`): `this` the children of the act's node; `here` every thing within [`HERE_REACH_MM`] of the
+///   anchor across x and z, what the body holds included, in the same building or on the same ground as the act's
+///   node when both say (#3715: the kettle fills at the nearest sink in its own building), and never one inside a
+///   closed container; `parent` those of the act's node's parent. Never the act's node, the actor's body, a body (a
+///   node linked `souls:body-of`) or a node of a private audience; with `kind`, only things of that kind or entry.
 /// - **The order**: by squared distance in the zone's frame (x, y and z) from the `anchor` (`me` the body, `this`
 ///   the act's node), `nearest` first or `furthest` first, ties by id; a thing with no place goes after every placed
 ///   one, by id.
 /// - **The rank**: 1, 2, ... or `last`. Too few is nothing.
 pub(crate) fn select_thing(
     tree: &Tree,
+    kinds: &Json,
     select: &Json,
     node: Id,
     body: Id,
@@ -953,11 +1089,8 @@ pub(crate) fn select_thing(
     let here = select.get("in").and_then(Json::str) == Some("here");
     let sets: Vec<Id> = match select.get("in").and_then(Json::str) {
         Some("this") => vec![node],
-        Some("here") => parent(body)
-            .or_else(|| parent(node))
-            .into_iter()
-            .chain([body])
-            .collect(),
+        // Every node of the tree, narrowed below by reach, building and closed containers.
+        Some("here") => Vec::new(),
         Some("parent") => parent(node).into_iter().collect(),
         _ => return Err(()),
     };
@@ -987,20 +1120,68 @@ pub(crate) fn select_thing(
         d(a.x, p.x) + d(a.y, p.y) + d(a.z, p.z)
     };
     let reach = i128::from(HERE_REACH_MM * 1_000) * i128::from(HERE_REACH_MM * 1_000);
-    let mut ranked: Vec<(Option<i128>, Id)> = sets
-        .iter()
-        .filter_map(|s| tree.children(tree.handle(*s)?))
-        .flatten()
-        .filter_map(|&h| tree.node(h))
+    let handles: Vec<replica::tree::Handle> = if here {
+        let mut all = Vec::new();
+        let mut stack = vec![tree.root()];
+        while let Some(h) = stack.pop() {
+            stack.extend(tree.children(h).unwrap_or(&[]));
+            all.push(h);
+        }
+        all
+    } else {
+        sets.iter()
+            .filter_map(|s| tree.children(tree.handle(*s)?))
+            .flatten()
+            .copied()
+            .collect()
+    };
+    // Here: the same building or ground as the act's node, when both say; never inside a closed container.
+    let frame = replica::select::standing(tree, node).ok().map(|f| f.0);
+    let same_place = |id: Id| match (frame, replica::select::standing(tree, id)) {
+        (Some(f), Ok((g, _))) => f == g,
+        _ => true,
+    };
+    let closed_above = |id: Id| {
+        let mut up = parent(id);
+        for _ in 0..64 {
+            let Some(p) = up else { return false };
+            let Some(pn) = tree.node(tree.handle(p).unwrap_or_else(|| tree.root())) else {
+                return false;
+            };
+            if p != node
+                && kinds
+                    .get(plain(pn.kind()))
+                    .and_then(|e| e.get("closed"))
+                    .is_some()
+            {
+                return true;
+            }
+            up = pn.parent();
+        }
+        true
+    };
+    let xz = |a: Vec3, p: Vec3| {
+        let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+        d(a.x, p.x) + d(a.z, p.z)
+    };
+    let of_kind = |n: &replica::tree::NodeRef<'_>| {
+        kind.is_none_or(|k| plain(n.kind()) == k || entry_of(n).split('@').next() == Some(k))
+    };
+    let mut ranked: Vec<(Option<i128>, Id)> = handles
+        .into_iter()
+        .filter_map(|h| tree.node(h))
         .filter(|n| n.id() != node && n.id() != body)
         .filter(|n| n.audience() == replica::world_model::Audience::Everyone)
-        .filter(|n| kind.is_none_or(|k| plain(n.kind()) == k))
+        .filter(|n| of_kind(n))
         .filter(|n| !is_body(n.id()))
-        .map(|n| {
-            let d = anchor.zip(world_at(tree, n.id())).map(|(a, p)| d2(a, p));
-            (d, n.id())
+        .filter(|n| !here || (same_place(n.id()) && !closed_above(n.id())))
+        .filter_map(|n| {
+            let p = world_at(tree, n.id());
+            if here && anchor.zip(p).is_none_or(|(a, p)| xz(a, p) > reach) {
+                return None;
+            }
+            Some((anchor.zip(p).map(|(a, p)| d2(a, p)), n.id()))
         })
-        .filter(|(d, _)| !here || d.is_some_and(|d| d <= reach))
         .collect();
     ranked.sort_by(|(da, a), (db, b)| {
         let by = match (da, db) {
@@ -1099,6 +1280,11 @@ impl Acts {
             let mut e = entry.clone();
             if let Json::Obj(o) = &mut e {
                 o.retain(|(k, _)| k != "forms");
+                // A timed field (a kettle's heat) is not an amount, and the kind format cannot hold its default yet:
+                // left out, so the entry's amounts load (#3715).
+                if let Some((_, Json::Obj(state))) = o.iter_mut().find(|(k, _)| k == "state") {
+                    state.retain(|(_, f)| f.get("type").and_then(Json::str) != Some("timed"));
+                }
             }
             if let Ok(text) = replica::kinds::entry::entry_to_kind(&e.to_json()) {
                 loaded.load(&[("entry", text.as_str())]);
@@ -1248,6 +1434,7 @@ impl Acts {
             walks,
             approaches,
             sit_walks,
+            goals: self.forms.goal_walks(),
             planning: &self.planning,
             map,
         };
@@ -1461,7 +1648,7 @@ impl Acts {
                     let Some(select) = take.get("select") else {
                         continue;
                     };
-                    match select_thing(tree, select, *node, body, body_at) {
+                    match select_thing(tree, &self.kinds, select, *node, body, body_at) {
                         Ok(Some(t)) => {
                             all.insert(key.clone(), skills::form_runner::Arg::Node(t));
                             picked = true;

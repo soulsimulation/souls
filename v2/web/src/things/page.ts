@@ -10,6 +10,7 @@ import { Catalogue } from '../kinds/catalogue.ts';
 import { KindLayer } from '../kinds/layer.ts';
 import { fetchIndex, type ModelIndex } from './models.ts';
 import { ThingLayer } from './things.ts';
+import type { CardPictures } from './standins.ts';
 import { BoardPieces } from './board.ts';
 import { Displays } from './displays.ts';
 import { setWindowLife } from './windows.ts';
@@ -71,7 +72,7 @@ export function modelsRoot(params: URLSearchParams, page: string): URL {
  *  models root); a thing with none, from its kind's entry (#3871) once its kind's file arrives; anything else stays a
  *  box. Until the models' index arrives nothing is drawn for things; when it cannot be had (no bake for this world, a
  *  404), the world view's boxes are drawn, and kinds' entries where they have them. `things=0` draws none. */
-export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSearchParams, index: (root: string) => Promise<ModelIndex> = fetchIndex): PageThings {
+export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSearchParams, index: (root: string) => Promise<ModelIndex> = fetchIndex, pictures?: CardPictures): PageThings {
   // N-V10, N-V11 (#3725): the library's hung pictures and the classroom screen's slide; N-V12 (#3726): game boards'
   // pieces; each with or without models.
   const displays = new Displays();
@@ -140,7 +141,7 @@ export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSear
   index(base.href).then((index) => {
     const copies = Number(params.get('copies') ?? 1);
     layer = new ThingLayer({
-      index, copies,
+      index, copies, pictures,
       hideRoofs: params.has('hideRoofs') && params.get('hideRoofs') !== '0', cut: params.has('cut') ? Number(params.get('cut')) : null,
       fetch: (h) => fetch(new URL(`worlds/models/${h}.glb`, base)).then((r) => (r.ok ? r.arrayBuffer() : Promise.reject(new Error(String(r.status))))),
     });
