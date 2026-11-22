@@ -13,7 +13,7 @@
 // with the WASM replica), from the world's `views/world.json` as the page resolves a placed world.
 //
 //   (a) the public stream carries both bodies, the said sentence and not the whisper's words (in no part and in no
-//       public file), a private conversation's turn as who spoke, when and among whom, never its words (#3775), a `souls:form-move` for the wave, and body motion: changing positions on the walk and a slot
+//       public file), a private conversation's turn as who spoke, when and among whom, never its words (#3775), the seated wave's run on A's body (#4143), and body motion: changing positions on the walk and a slot
 //       hand-off on the sit;
 //   (b) A's copy holds the world's kind entries after pairing, and `can wave:<A's body>` answers yes;
 //   (c) the malformed word is refused by name, and the world then restarts cleanly on the same folder;
@@ -430,9 +430,15 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
     assert.ok(!bytes.includes(Buffer.from('second bell')), `#3775: the private words are in no public file: ${f.slice(world.length)}`);
   }
 
-  // (a) The wave's move record, from the body's family (#4075), made seated where the body is (#4143).
+  // (a) The wave, from the body's family (#4075), made seated where the body is (#4143): it ends with its receipt, and
+  // its run is in the public stream as the entries of a form on A's body itself, started and then ended (the sit's
+  // are the bench's). No entry names the move: the engine writes none (`souls:form-move` was never one).
   assert.ok(accepted(wave.answer), `(a) the wave on the seated body: ${JSON.stringify(wave.answer)}`);
-  await waitFor('souls:form-move', () => v1.parts.some((p) => (p.happened ?? []).some((h) => h.name === 'souls:form-move' && h.node === pageKey(meA))), 10_000);
+  assert.equal((await answered(A, wave.sent.sequence, 30_000, true)).answer, 1, "(a) the wave ends with its receipt");
+  const onA = (name) => v1.parts.slice(fromPart).flatMap((p) => p.happened ?? []).find((h) => h.name === name && h.node === pageKey(meA));
+  const waved = await waitFor("the wave's run in the public stream", () => (onA('souls:form-started') && onA('souls:form-ended')) || v1.errors.length, 10_000);
+  assert.deepEqual(v1.errors, []);
+  assert.ok(waved && onA('souls:form-ended').at > onA('souls:form-started').at, `(a) the wave's run on A's body starts, then ends: ${JSON.stringify([onA('souls:form-started'), onA('souls:form-ended')])}`);
 
   // (a) Body motion: positions change on the walk, and the sit hands the body off to the bench's slot.
   const a = pageKey(meA), benchKey = pageKey(bench.id);
