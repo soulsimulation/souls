@@ -10,12 +10,18 @@
 //
 // Each 200 carries a strong ETag, the SHA-256 of the bytes, which the reader tool checks.
 //
+// An immutable file is read once and its one buffer is shared by every request for it (#4018: a join wave of 250
+// viewers, each with its own copy of a 9 MB baseline, took the origin past its unit's 256 MB). Requests in flight
+// share one read; the newest `cacheBytes` (ORIGIN_CACHE_MB, default 64) stay held after it, and a buffer a slow
+// response still holds is found again. Each request checks the file's inode, size and modification time, so a file
+// removed or replaced on disk answers as it does on disk. The pointer is read afresh for every request.
+//
 // The site's own pages (/changelog, /changelog.md, /v1/feed, /ops; O23, #3324) are answered first, by site.mjs, from
 // the page's files and the release's news (SOULS_WEB, SOULS_DATA); every other path is a stream file as above.
 // Usage: node origin.mjs <dir> [port] [host]. Prints `origin <port>`; on SIGTERM or SIGINT prints `stats {json}`
 // (requests by kind, requests per part path, processor seconds) and exits.
 import { createHash } from 'node:crypto';
-import { readFile, rename, writeFile } from 'node:fs/promises';
+import { readFile, rename, stat, writeFile } from 'node:fs/promises';
 import { createServer } from 'node:http';
 import { basename, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -34,11 +40,64 @@ export function kindOf(path) {
   return 'immutable';
 }
 
-/** An origin over `dir`, with the site's pages from `site` ({web, data}; site.mjs). `stats` counts what it served. */
-export function createOrigin(dir, site = {}) {
+/**
+ * Immutable files shared by path: `get(file)` gives `{ body, etag }` for the file as it is on disk now, reading it
+ * only when no request in flight, no held buffer and no buffer a response still holds has that version (inode,
+ * size, modification time). `held` is the newest buffers up to `cacheBytes`; `live` finds any other still in use.
+ * `stats.reads` counts reads from disk.
+ */
+export function sharedFiles(cacheBytes, stats = {}) {
+  const held = new Map(); // file -> entry, oldest first
+  const live = new Map(); // file -> { version, etag, ref: WeakRef(body) }
+  const reading = new Map(); // file -> { version, promise }
+  const gone = new FinalizationRegistry(({ file, ref }) => { if (live.get(file)?.ref === ref) live.delete(file); });
+  let heldBytes = 0;
+  stats.reads = 0;
+  const hold = (file, e) => {
+    const old = held.get(file);
+    if (old) { held.delete(file); heldBytes -= old.body.length; }
+    if (e.body.length > cacheBytes) return;
+    held.set(file, e);
+    heldBytes += e.body.length;
+    for (const [f, o] of held) {
+      if (heldBytes <= cacheBytes) break;
+      held.delete(f);
+      heldBytes -= o.body.length;
+    }
+  };
+  return async (file) => {
+    const s = await stat(file);
+    if (!s.isFile()) throw new Error('not a file');
+    const version = `${s.ino}:${s.size}:${s.mtimeMs}`;
+    let e = held.get(file);
+    if (e?.version === version) { hold(file, e); return e; }
+    const l = live.get(file), body = l?.version === version ? l.ref.deref() : undefined;
+    if (body) { e = { version, etag: l.etag, body }; hold(file, e); return e; }
+    let r = reading.get(file);
+    if (r?.version !== version) {
+      r = { version, promise: readFile(file).then((b) => {
+        stats.reads++;
+        const n = { version, body: b, etag: `"${createHash('sha256').update(b).digest('hex')}"` };
+        const ref = new WeakRef(b);
+        live.set(file, { version, etag: n.etag, ref });
+        gone.register(b, { file, ref });
+        hold(file, n);
+        return n;
+      }).finally(() => { if (reading.get(file) === r) reading.delete(file); }) };
+      reading.set(file, r);
+    }
+    return r.promise;
+  };
+}
+
+/**
+ * An origin over `dir`, with the site's pages from `site` ({web, data}; site.mjs). `stats` counts what it served.
+ * `cacheBytes` bounds the immutable buffers held after their requests end (sharedFiles).
+ */
+export function createOrigin(dir, site = {}, { cacheBytes = Number(process.env.ORIGIN_CACHE_MB ?? 64) * 2 ** 20 } = {}) {
   const root = resolve(dir), pages = siteRoutes(site), worlds = worldRoutes(site.worldRoutes);
   const stats = { pointer: 0, immutable: 0, miss: 0, perPath: new Map(), bytes: {} }; // bytes: served, by first segment (O11)
-  const etags = new Map();
+  const shared = sharedFiles(cacheBytes, stats);
   const server = createServer(async (req, res) => {
     const miss = () => {
       stats.miss++;
@@ -63,20 +122,19 @@ export function createOrigin(dir, site = {}) {
     if (!file.startsWith(root + sep)) return miss();
     const kind = kindOf(file);
     if (!kind) return miss();
-    let body;
+    let body, etag;
     try {
-      body = await readFile(file);
+      if (kind === 'immutable') ({ body, etag } = await shared(file));
+      else {
+        body = await readFile(file);
+        etag = `"${createHash('sha256').update(body).digest('hex')}"`;
+      }
     } catch {
       return miss();
     }
     stats[kind]++;
     stats.perPath.set(rel, (stats.perPath.get(rel) ?? 0) + 1);
     if (req.method === 'GET') stats.bytes[rel.split('/')[0]] = (stats.bytes[rel.split('/')[0]] ?? 0) + body.length;
-    let etag = kind === 'immutable' ? etags.get(file) : undefined;
-    if (!etag) {
-      etag = `"${createHash('sha256').update(body).digest('hex')}"`;
-      if (kind === 'immutable') etags.set(file, etag);
-    }
     res.writeHead(200, {
       'content-type': 'application/octet-stream',
       'content-length': body.length,
