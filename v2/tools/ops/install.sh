@@ -223,6 +223,15 @@ SOULS_OPS_DIRECTORY=http://127.0.0.1:$DIRECTORY_PORT"
   done
   ensure_dir "$DROPIN" 755 root root "tree $DROPIN"
   ensure_file "$from/units/worldd-install.conf" "$DROPIN/10-install.conf" 644 root root
+  # Per-world limits: each world units/world-limits.json lists and this machine has placed gets
+  # worldd@<world>.service.d/limits.conf (world-limits.mjs; a world not listed keeps the unit's own).
+  local l limits
+  limits=$(node "$from/ops/world-limits.mjs" plan --config "$from/units/world-limits.json" --root "$R")
+  if [ -n "$limits" ]; then
+    [ "$MODE" = plan ] || node "$from/ops/world-limits.mjs" apply --config "$from/units/world-limits.json" > /dev/null
+    while IFS= read -r l; do act "$l" true; done <<< "$limits"
+    UNITS_CHANGED=1
+  fi
   if [ "$UNITS_CHANGED" = 1 ]; then act "systemctl daemon-reload" systemctl daemon-reload; fi
 }
 
@@ -401,7 +410,7 @@ bundle() {
   cp "$HERE/../../../tools/world-launcher/owner-overview-data.mjs" "$out/origin/"
   cp -R "$page" "$out/web"
   mkdir -p "$out/ops/proxy"
-  cp "$HERE/place-created-world.mjs" "$HERE/archive-world.mjs" "$HERE/place-world.sh" "$out/ops/"
+  cp "$HERE/place-created-world.mjs" "$HERE/archive-world.mjs" "$HERE/place-world.sh" "$HERE/world-limits.mjs" "$out/ops/"
   cp "$HERE/proxy/route-config.mjs" "$HERE/proxy/routes.mjs" "$out/ops/proxy/"
   if [ -n "${4:-}" ]; then cp -R "$4" "$out/templates"; fi
   rm -rf "$out/client"
