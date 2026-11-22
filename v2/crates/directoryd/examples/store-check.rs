@@ -53,13 +53,17 @@ fn shape(e: &str) -> String {
     )
 }
 
-/// One step's outcome: `ok` or the refusal's name and the answer's status, never its key.
+/// One step's outcome: `ok` or the refusal's name and why, with the key and any word naming the store cut out.
 fn outcome<T>(r: &R<T>) -> String {
     match r {
         Ok(_) => "ok".to_owned(),
         Err(e) => {
-            let code = e.detail.rsplit(": ").next().filter(|d| d.starts_with("HTTP"));
-            format!("refused {} ({})", e.name, code.unwrap_or("-"))
+            let why = e.detail.split_once(": ").map_or("-", |(_, why)| why);
+            let why: Vec<&str> = why
+                .split_whitespace()
+                .map(|w| if w.contains('.') || w.contains('/') { "<cut>" } else { w })
+                .collect();
+            format!("refused {} ({})", e.name, why.join(" "))
         }
     }
 }
@@ -108,13 +112,14 @@ fn main() {
     let read = store.get(&key);
     step("get", outcome(&read), true);
     let read = read.ok().flatten();
+    if let Ok(c) = &created {
+        println!("etag from put: {}", shape(c));
+    }
+    if let Some(o) = &read {
+        println!("etag from get: {}", shape(&o.etag));
+    }
     if let (Ok(c), Some(o)) = (&created, &read) {
-        println!(
-            "etag from put: {}; from get: {}; same: {}",
-            shape(c),
-            shape(&o.etag),
-            *c == o.etag
-        );
+        println!("same: {}", *c == o.etag);
     }
     let etag = read.map(|o| o.etag).unwrap_or_default();
     let replaced = store.put(&key, b"two", When::Is(&etag));
