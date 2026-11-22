@@ -87,7 +87,7 @@
 // The process reads the wall clock once for the stream's anchor (V1 rule 5); the engine never does.
 #![allow(clippy::disallowed_methods)]
 
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::os::unix::fs::PermissionsExt;
 use std::os::unix::net::UnixListener;
 use std::path::{Path, PathBuf};
@@ -406,12 +406,14 @@ fn with_punts(facts: &str) -> R<String> {
     Ok(f.to_json())
 }
 
-/// The facts with a kind for each entry kind a form makes (a `create`) that the facts do not already name (#3703): a
-/// blank notice the notice board gives, made in a Soul's hand. A made thing's kind must be pinned in the world's header
-/// like any other; with no thing of it in the facts it would not be. The same entries give the same kinds.
-fn with_made(facts: &str, entries: &[(String, Json)]) -> R<String> {
+/// The facts with a kind for each entry kind the facts do not already name, so a creator can place a thing of any
+/// kind the world has an entry for, not only of the kinds its seeded things use (#1960). A thing's kind must be pinned
+/// in the world's header to be placed or made, and a seeded world pins only the kinds of its things. Each added kind
+/// is a point thing with no mesh (as #3703's made notice is, by the same ref and hash), so the same entries give the
+/// same kinds and every start of the world builds the same header.
+fn with_entry_kinds(facts: &str, entries: &[(String, Json)]) -> R<String> {
     let mut f = json::parse(facts).map_err(|e| format!("the facts: {e:?}"))?;
-    let named: BTreeSet<String> = f
+    let named: std::collections::BTreeSet<String> = f
         .get("kinds")
         .and_then(Json::arr)
         .unwrap_or(&[])
@@ -422,24 +424,12 @@ fn with_made(facts: &str, entries: &[(String, Json)]) -> R<String> {
                 .map(import_eden::kind_name)
         })
         .collect();
-    let known: BTreeSet<&str> = entries.iter().map(|(k, _)| k.as_str()).collect();
-    let made: BTreeSet<String> = entries
+    let add: Vec<Json> = entries
         .iter()
-        .flat_map(|(_, e)| e.get("forms").and_then(Json::obj).unwrap_or(&[]))
-        .flat_map(|(_, f)| f.get("effects").and_then(Json::arr).unwrap_or(&[]))
-        .filter(|e| e.get("change").and_then(Json::str) == Some("create"))
-        .filter_map(|e| e.get("kind").and_then(Json::str))
-        .filter(|k| known.contains(k) && !named.contains(*k))
-        .map(str::to_owned)
-        .collect();
-    if made.is_empty() {
-        return Ok(facts.to_owned());
-    }
-    let Json::Obj(top) = &mut f else {
-        return Err("the facts are not an object".into());
-    };
-    let add: Vec<Json> = made
-        .iter()
+        .map(|(k, _)| k.as_str())
+        .filter(|k| !named.contains(*k) && Name::new(k).is_some())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
         .map(|k| {
             Json::Obj(
                 [
@@ -461,9 +451,119 @@ fn with_made(facts: &str, entries: &[(String, Json)]) -> R<String> {
             )
         })
         .collect();
+    if add.is_empty() {
+        return Ok(facts.to_owned());
+    }
+    let Json::Obj(top) = &mut f else {
+        return Err("the facts are not an object".into());
+    };
     match top.iter_mut().find(|(k, _)| k == "kinds") {
         Some((_, Json::Arr(a))) => a.extend(add),
         _ => return Err("the facts have no 'kinds' list".into()),
+    }
+    Ok(f.to_json())
+}
+
+/// The facts with the courses of the rides `entries` declare (#3691): each thing on the ground whose kind's entry has a
+/// `ride` that flies a loop from its stop (`sim::courses::rides`, read from the ride's data, never its kind's name) gets
+/// its course, over the terrain beneath it. The `k`th such thing in the facts' order starts its lap `k` minutes in, so
+/// rides that stand together do not fly together. The same facts and entries give the same courses at every serve.
+fn with_rides(facts: &str, entries: &[(String, Json)]) -> R<String> {
+    let rides: BTreeMap<&str, sim::courses::rides::Ride> = entries
+        .iter()
+        .filter_map(|(k, e)| Some((k.as_str(), sim::courses::rides::Ride::of(e)?)))
+        .filter(|(_, r)| r.loops_aloft())
+        .collect();
+    if rides.is_empty() {
+        return Ok(facts.to_owned());
+    }
+    let im = import_eden::load(facts)?;
+    let Some(&ground) = im.nodes.get("ground") else {
+        return Ok(facts.to_owned());
+    };
+    let terrain = sim::ground::Terrain::of(&im.tree, ground)?;
+    let mut f = json::parse(facts).map_err(|e| format!("the facts: {e:?}"))?;
+    let Json::Obj(top) = &mut f else {
+        return Err("the facts are not an object".into());
+    };
+    // A kind's name as the entries name it, by its def's ref.
+    let names: BTreeMap<String, String> = top
+        .iter()
+        .find(|(k, _)| k == "kinds")
+        .and_then(|(_, v)| v.arr())
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|k| {
+            Some((
+                k.get("ref")?.str()?.to_owned(),
+                import_eden::kind_name(k.get("name")?.str()?),
+            ))
+        })
+        .collect();
+    let int = |n: i64| Json::Int(i128::from(n));
+    let num = |v: Option<&Json>| match v {
+        Some(Json::Int(n)) => i64::try_from(*n).ok(),
+        _ => None,
+    };
+    let Some((_, Json::Arr(things))) = top.iter_mut().find(|(k, _)| k == "things") else {
+        return Err("the facts have no 'things' list".into());
+    };
+    let mut k = 0;
+    for t in things.iter_mut() {
+        let on_ground = matches!(t.get("parent"), None | Some(Json::Null));
+        let Some(ride) = t
+            .get("def")
+            .and_then(Json::str)
+            .and_then(|d| names.get(d))
+            .and_then(|n| rides.get(n.as_str()))
+        else {
+            continue;
+        };
+        let Some([x, y, z]) = t
+            .get("world")
+            .and_then(Json::arr)
+            .and_then(|w| Some([num(w.first())?, num(w.get(1))?, num(w.get(2))?]))
+        else {
+            continue;
+        };
+        if !on_ground || t.get("course").is_some() {
+            continue;
+        }
+        let home = Vec3::new(x * 1000, y * 1000, z * 1000);
+        let t0 = k * 60_000_000;
+        let Some(c) = sim::courses::rides::course(
+            ride,
+            home,
+            |x, z| terrain.as_ref().and_then(|g| g.height_at(x, z)),
+            t0,
+        ) else {
+            continue;
+        };
+        k += 1;
+        println!(
+            "ride: {} at {:.3},{:.3} m, loop {} us from {} us",
+            t.get("name").and_then(Json::str).unwrap_or("?"),
+            home.x as f64 / 1e6,
+            home.z as f64 / 1e6,
+            c.load().map_or(0, |t| t.period),
+            c.t0
+        );
+        let stations = c
+            .stations
+            .iter()
+            .map(|s| Json::Arr(vec![int(s.at.x), int(s.at.y), int(s.at.z), int(s.dwell)]))
+            .collect();
+        let Json::Obj(kv) = t else { continue };
+        kv.push((
+            "course".to_owned(),
+            Json::Obj(vec![
+                ("stations".to_owned(), Json::Arr(stations)),
+                ("shape".to_owned(), int(1)),
+                ("speed".to_owned(), int(c.speed)),
+                ("t0".to_owned(), int(c.t0)),
+                ("within".to_owned(), int(c.within)),
+            ]),
+        ));
     }
     Ok(f.to_json())
 }
@@ -472,7 +572,7 @@ fn with_made(facts: &str, entries: &[(String, Json)]) -> R<String> {
 const PUNT_REF: &str = "core-rowing-punt@1";
 
 fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
-    let facts = &with_made(&with_punts(facts)?, entries)?;
+    let facts = &with_entry_kinds(&with_rides(&with_punts(facts)?, entries)?, entries)?;
     let mut im = import_eden::load(facts)?;
     stamp("facts");
     for (k, id) in (0..).map_while(|k| Some((k, *im.nodes.get(&format!("e_punt{k}"))?))) {
@@ -2161,6 +2261,7 @@ fn serve(args: &[String]) -> R<()> {
     stamp("body classes");
     let (places, things, all, left, moved) = places(&mut town, &kinds);
     stamp("places to sit placed");
+    let closed_kinds = worldd::closed::Closed::of(&kinds);
     println!(
         "places to sit or lie: {} registered on {} things; {all} body slots declared; {left} with no floor; {moved} stand points \
          moved to clear ground",
@@ -2217,6 +2318,7 @@ fn serve(args: &[String]) -> R<()> {
     imported_births(&dir, initial.header(), &catalogue, &mut born)?;
     let mut cfg = Config::new(built.header.lineage, EPOCH);
     cfg.public_names = Arc::clone(&built.public_names);
+    cfg.closed = closed_kinds.clone();
     let every = arg(args, "--checkpoint-every").map_or(Ok(EVERY), |n| {
         n.parse::<u64>().map_err(|_| "--checkpoint-every <bytes>")
     })?;
@@ -2238,6 +2340,7 @@ fn serve(args: &[String]) -> R<()> {
     // Gateway subscriptions have their own off-clock tier, apart from the filesystem stream below. Restore its
     // body, ownership and activity membership indexes before the answers thread can hand it any live part.
     let mut hub = worldd::views::subscription::Hub::with_words(text);
+    hub.closed(&closed_kinds);
     hub.seed(resumed.as_ref().map_or(initial.tree(), |(at, _)| at.tree()));
     let feed = worldd::views::served::start_with(hub).map_err(refusal)?;
     for bytes in found.after(base_record) {
@@ -3485,6 +3588,76 @@ mod tests {
         assert!(cloned.iter().any(|a| !a.contains("None None")));
         assert_eq!(cloned, assembled);
         assert_eq!(ask(&mut town), assembled);
+    }
+
+    /// #1960: a creator places a thing of a kind the world has an entry for but no seeded thing of. Without the
+    /// entry, the kind is not pinned and the place is refused `edit.kind-unknown`; with it, the place commits.
+    #[test]
+    fn a_creator_places_an_entry_kind_no_seeded_thing_uses() {
+        use replica::edit::{Edit, Op, Ref, Spot, World, check};
+        use replica::pose::{Quat, Support};
+        let facts = testworld::generate(1, 0).expect("test world").text;
+        let entry = || {
+            vec![(
+                "testworld:planter".to_owned(),
+                replica::rules::json::parse(r#"{"kind":"testworld:planter"}"#).expect("an entry"),
+            )]
+        };
+        let attempt = |entries: &[(String, Json)]| {
+            let built = build(&facts, entries).expect("builds");
+            let pinned = built
+                .rules
+                .kinds
+                .keys()
+                .find(|k| plain(k) == "testworld:planter")
+                .cloned();
+            let start = Replica::start(built.header.stored()).expect("a replica");
+            let mut live = start.frozen();
+            live.apply(&replica::effects::Part::read(&built.part).expect("the part"))
+                .expect("applies");
+            let creator = Id::new(Scope([0xc0; 16]), 1).expect("an id");
+            let world = World {
+                creator,
+                kinds: built.rules.kinds.clone(),
+            };
+            let kind = Name::new(
+                pinned
+                    .as_deref()
+                    .unwrap_or(&format!("testworld:planter@1220{}", "00".repeat(32))),
+            )
+            .expect("a name");
+            let edit = Edit {
+                intent: Id::new(Scope([0x11; 16]), 1).expect("an id"),
+                actor: replica::effects::Actor::Creator(creator),
+                planned: live.version(),
+                ops: vec![Op::Place {
+                    name: 0,
+                    kind,
+                    parent: Ref::Node(built.ground),
+                    at: Spot {
+                        slot: None,
+                        position: Vec3::new(0, 0, 0),
+                        orientation: Quat::IDENTITY,
+                        support: Support::None,
+                    },
+                    audience: Audience::Everyone,
+                    fields: BTreeMap::new(),
+                }],
+                claim: None,
+            };
+            (pinned.is_some(), check(edit, &live, &world).map(|_| ()))
+        };
+        let (pinned, without) = attempt(&[]);
+        assert!(!pinned, "the seeded test world has no planter");
+        assert_eq!(without.expect_err("refused").name, "edit.kind-unknown");
+        let (pinned, with) = attempt(&entry());
+        assert!(pinned, "the entry's kind is pinned");
+        with.expect("the place commits");
+        // The same entries give the same header: every start of the world agrees.
+        assert_eq!(
+            build(&facts, &entry()).unwrap().header.hash(),
+            build(&facts, &entry()).unwrap().header.hash()
+        );
     }
 
     #[test]

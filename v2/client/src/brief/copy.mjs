@@ -1,12 +1,15 @@
 // The copy as rows (Engine v2 R7, #2701): the daemon's copy of its scope (R5's `Copy`, in WASM memory) read record by
 // record from its roots down, each record decoded once by its hash. A row is a node: its id, its name, its kind, its
 // parent and the path of names above it, its text quoted, and `own`, its record without its children's hashes, so
-// that two versions of a node compare equal when only something below it changed. A row never carries a position.
+// that two versions of a node compare equal when only something below it changed. A row carries its pose as the
+// record holds it (#3851: body motion reaches the copy, #3799): `pos`, µm in its parent's frame, and `rot`, a quaternion
+// [w, x, y, z]; a moving node's is where its last sample put it.
 //
 // The records are CBOR in T0's profile (`v2/docs/encoding.md`): unsigned and negative integers, bytes, text, arrays,
 // maps and the simple values; this reader takes those and nothing else.
 
 import { createHash } from 'node:crypto';
+import { F_HOURS, hoursText } from '../schedule/hours.mjs';
 
 const SIMPLE = { 20: false, 21: true, 22: null };
 
@@ -182,10 +185,35 @@ export function rowsOf(copy) {
     const of = (m.get(9) ?? []).map(([, l]) => l).find((l) => l instanceof Map && plainKind(l.get(1)) === 'souls:body-of');
     // #3603: a thing on a course (replica's F_COURSE, field 80) moves by itself; a rider in it may steer it.
     const moving = fields.has(F_COURSE) || fields.has(BigInt(F_COURSE));
-    rows.set(id, { id, name, kind, ...(entry !== kind ? { entry } : {}), parent: m.has(3) ? idText(m.get(3)) : null, path, children: children.length, ...(text.length ? { text } : {}), ...(of ? { soul: idText(of.get(2)[1]) } : {}), ...(moving ? { moving: true } : {}), ...(aliases.length ? { aliases } : {}), own: d.own });
+    // #3699: a place's opening hours (replica's F_HOURS, field 81), as its creator wrote them.
+    const hours = hoursText(fields.get(F_HOURS) ?? fields.get(BigInt(F_HOURS)));
+    const pose = m.get(7) instanceof Map ? m.get(7) : m.get(8) instanceof Map && m.get(8).get(5) instanceof Map ? m.get(8).get(5) : null;
+    const at = pose && Array.isArray(pose.get(2)) ? { pos: pose.get(2).map(Number), ...(Array.isArray(pose.get(3)) ? { rot: pose.get(3).map(Number) } : {}) } : {};
+    rows.set(id, { id, name, kind, ...(entry !== kind ? { entry } : {}), parent: m.has(3) ? idText(m.get(3)) : null, path, children: children.length, ...at, ...(text.length ? { text } : {}), ...(of ? { soul: idText(of.get(2)[1]) } : {}), ...(moving ? { moving: true } : {}), ...(hours ? { hours } : {}), ...(aliases.length ? { aliases } : {}), own: d.own });
     for (const c of children) todo.push([c, [...path, name]]);
   }
   return rows;
+}
+
+/**
+ * Where each node stands in its parent, for the creator (#3694: placing by relation): `{ at: [x, y, z] mm, slot }`
+ * by id, from each record's pose (field 7, its position in µm) and slot (field 4). Rows never carry this; only the
+ * creator's describe does.
+ */
+export function posesOf(copy) {
+  const out = new Map();
+  const todo = Object.values(JSON.parse(copy.roots()));
+  while (todo.length) {
+    const d = read(copy, todo.pop());
+    if (!d) continue;
+    const { m } = d, pose = m.get(7), p = pose instanceof Map ? pose.get(2) : null;
+    out.set(idText(m.get(1)), {
+      ...(Array.isArray(p) ? { at: p.map((n) => Math.round(Number(n) / 1000)) } : {}),
+      ...(m.has(4) ? { slot: Number(m.get(4)) } : {}),
+    });
+    todo.push(...(m.get(10) ?? []).map(hex));
+  }
+  return out;
 }
 
 /** What changed between two sets of rows: the names added, removed or changed in their own record, in name order. */

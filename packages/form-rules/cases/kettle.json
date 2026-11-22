@@ -1,7 +1,37 @@
 {
   "format": "souls-form-cases/1",
-  "about": "eden:kettle. Its water is an amount in grams, 0 to 1700. Its fill form moves water out of a tap until the kettle is full, so a need for water names fill as its fix, and a need for an empty kettle names pour.",
+  "about": "eden:kettle. Its water is an amount in grams, 0 to 1700. Its fill form moves water out of a sink until the kettle is full, so a need for water names fill as its fix, and a need for an empty kettle names pour.",
   "cases": [
+    {
+      "name": "take_every_need_met",
+      "act": { "this": "k1", "form": "take" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "k1"] },
+          "k1": { "kind": "eden:kettle", "fields": { "water": 0 } },
+          "b1": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "yes" }
+    },
+    {
+      "name": "take_hands_full",
+      "act": { "this": "k1", "form": "take" },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "k1"] },
+          "k1": { "kind": "eden:kettle", "fields": { "water": 0 } },
+          "c1": { "kind": "eden:cup" },
+          "c2": { "kind": "eden:cup" },
+          "b1": { "hands": { "left": "c1", "right": "c2" } }
+        }
+      },
+      "asker": { "sees": ["public"] },
+      "expect": { "verdict": "no", "reason": "no_free_hand", "need": 0 }
+    },
     {
       "name": "switch_on_every_need_met",
       "act": { "this": "k1", "form": "switch_on" },
