@@ -59,8 +59,10 @@ const kids = (p) => { try { return fs.readFileSync(`/proc/${p}/task/${p}/childre
 const tree = (p) => [p, ...kids(p).flatMap(tree)];
 const rss = (p) => { try { return +fs.readFileSync(`/proc/${p}/status`, 'utf8').match(/VmRSS:\s+(\d+)/)[1]; } catch { return 0; } };
 const sum = (f, p) => tree(p).reduce((s, q) => s + (f(q) || 0), 0);
+// The world's threads by name, their processor seconds summed: which one a profile is bound by.
+const threads = (p) => { const o = {}; try { for (const t of fs.readdirSync(`/proc/${p}/task`)) { try { const st = fs.readFileSync(`/proc/${p}/task/${t}/stat`, 'utf8'); const name = st.slice(st.indexOf('(') + 1, st.lastIndexOf(')')); const f = st.slice(st.lastIndexOf(')') + 2).split(' '); o[name] = (o[name] ?? 0) + (+f[11] + +f[12]) / 100; } catch {} } } catch {} return o; };
 setInterval(() => { let h = null; try { h = JSON.parse(fs.readFileSync(wd + '/health.json', 'utf8')); } catch {}
-  fs.appendFileSync(out, JSON.stringify({ t: Date.now() / 1000, wcpu: cpu(wp), gcpu: cpu(gp), ocpu: sum(cpu, op), wrss: rss(wp), grss: rss(gp), orss: sum(rss, op), h }) + '\n'); }, 5000);
+  fs.appendFileSync(out, JSON.stringify({ t: Date.now() / 1000, wcpu: cpu(wp), gcpu: cpu(gp), ocpu: sum(cpu, op), wrss: rss(wp), grss: rss(gp), orss: sum(rss, op), wthreads: threads(wp), gthreads: threads(gp), h }) + '\n'); }, 5000);
 JS
 node "$D/sampler.cjs" "$WP" "$GP" "$OP" "$W" "$D/samples.jsonl" &
 SP=$!

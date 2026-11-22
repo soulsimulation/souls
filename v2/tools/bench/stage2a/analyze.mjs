@@ -41,6 +41,7 @@ export function analyze(D) {
     tick: { p50Us: w2.h.ticks.p50_us, p99Us: w2.h.ticks.p99_us, maxUs: w2.h.ticks.max_us, meanUs: Math.round(meanWin(w1.h.ticks, w2.h.ticks) ?? 0), count: dCount, over: dOver, onTimeShare: dCount ? +(1 - dOver / dCount).toFixed(4) : null },
     phases, stuck: rep.stuck, refusals, errors: rep.perMinute.reduce((e, m) => { for (const [k, x] of Object.entries(m.errors)) e[k] = (e[k] ?? 0) + x; return e; }, {}),
     cpu: { world: cores('wcpu'), gateway: cores('gcpu'), origin: cores('ocpu'), worldMb: mb('wrss'), gatewayMb: mb('grss'), originMb: mb('orss') },
+    threads: Object.fromEntries(['wthreads', 'gthreads'].map((k) => [k === 'wthreads' ? 'world' : 'gateway', Object.entries(w2[k] ?? {}).map(([n, c]) => [n, +((c - (w1[k]?.[n] ?? 0)) / dt).toFixed(2)]).filter(([, c]) => c >= 0.05).sort((a, b) => b[1] - a[1]).slice(0, 8)])),
     driverCores: rep.driverCores, loadavgBefore: fs.existsSync(`${D}/loadavg.before`) ? fs.readFileSync(`${D}/loadavg.before`, 'utf8').trim() : null,
   };
   out.bar = {
@@ -68,6 +69,8 @@ export function tables(rows, label = '') {
   const keys = [...new Set(rows.flatMap((r) => Object.keys(r.phases)))];
   t.push(`| Rung | ${keys.join(' | ')} |`, `|---|${keys.map(() => '---').join('|')}|`);
   for (const r of rows) t.push(`| ${r.rung} | ${keys.map((k) => (r.phases[k] ? `${r.phases[k].meanUs} (${r.phases[k].p99Us})` : '-')).join(' | ')} |`);
+  t.push('', '**Busiest threads** (cores over the load window):', '');
+  for (const r of rows) if (r.threads?.world?.length) t.push(`- ${r.rung}: world ${r.threads.world.map(([n, c]) => `${n} ${c}`).join(', ')}; gateway ${r.threads.gateway.map(([n, c]) => `${n} ${c}`).join(', ')}`);
   t.push('', '**Refusals by name** (verb and reason):', '');
   for (const r of rows) t.push(`- ${r.rung}: ${Object.entries(r.refusals).sort((x, y) => y[1] - x[1]).slice(0, 8).map(([k, n]) => `${k} ${n}`).join('; ') || 'none'}`);
   return t.join('\n');
