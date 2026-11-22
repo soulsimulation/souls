@@ -109,9 +109,10 @@ fn a_small_world_loads_through_commit_with_its_rooms_doorways_windows_stairs_and
     let floor = |k: &str| t.node(t.handle(im.nodes[k]).unwrap()).unwrap();
     assert_eq!(
         floor("e_house/floor-1").fields().get(&F_MATERIALS),
-        Some(&Value::Array(vec![Value::Text(
-            Name::new("eden:wood").unwrap()
-        )]))
+        Some(&Value::Array(vec![Value::Array(vec![
+            Value::Uint(0),
+            Value::Text(Name::new("eden:wood").unwrap())
+        ])]))
     );
     assert_eq!(floor("e_house/floor-0").fields().get(&F_MATERIALS), None);
 

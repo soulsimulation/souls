@@ -682,12 +682,11 @@ pub fn load(text: &str) -> R<Import> {
             if !surfaces.is_empty() {
                 ff.insert(F_SURFACES, Value::Array(surfaces));
             }
-            if materials.iter().any(Option::is_some) {
-                let none = Name::new("").ok_or("an empty name")?;
-                let texts = materials
-                    .into_iter()
-                    .map(|m| Value::Text(m.unwrap_or_else(|| none.clone())));
-                ff.insert(F_MATERIALS, Value::Array(texts.collect()));
+            let materials: Vec<Value> = (materials.into_iter().enumerate())
+                .filter_map(|(n, m)| Some(Value::Array(vec![i(n as i64), Value::Text(m?)])))
+                .collect();
+            if !materials.is_empty() {
+                ff.insert(F_MATERIALS, Value::Array(materials));
             }
             b.add(
                 &format!("{id}/floor-{lv}"),

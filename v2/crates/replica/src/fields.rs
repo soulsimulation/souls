@@ -34,8 +34,8 @@ pub struct Reserved {
 pub const ENTRY_FIELDS: std::ops::Range<u64> = 28..80;
 /// The first number of the block new engine fields take.
 pub const ENGINE_THING_FIELDS: u64 = 100;
-/// A floor's surface materials (#3965): `[text …]`, one `eden:<material>` (`eden:cobble`, `eden:gravel` …) per surface
-/// in its `F_SURFACES` order, empty text for a surface with none; written by `import-eden` when any surface has one.
+/// A floor's surface materials (#3965): `[[n, eden:<material>] …]` (`eden:cobble`, `eden:gravel` …), `n` the surface's
+/// place in its `F_SURFACES` from 0; written by `import-eden` for the surfaces that name one.
 pub const F_MATERIALS: u64 = 102;
 
 const fn r(n: u64, name: &'static str, on: On) -> Reserved {

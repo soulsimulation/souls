@@ -77,7 +77,10 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   // #3965: a path's centre line and width (fields 16, 17) and a floor's surface materials (`replica::fields::F_MATERIALS`).
   if (Array.isArray(f.get(16))) rec.line = rows(f.get(16));
   if (f.has(17)) rec.lineWidth = num(f.get(17));
-  if (Array.isArray(f.get(102))) rec.materials = (f.get(102) as unknown[]).map((m) => (typeof m === 'string' ? m.split(':').pop()! : ''));
+  if (Array.isArray(f.get(102))) {
+    rec.materials = [];
+    for (const r of f.get(102) as unknown[][]) if (Array.isArray(r) && typeof r[1] === 'string') rec.materials[num(r[0])] = r[1].split(':').pop()!;
+  }
   if (f.has(23)) rec.scale = num(f.get(23));
   if (f.has(24)) rec.tileSize = num(f.get(24));
   if (f.has(25)) rec.tiles = (f.get(25) as unknown[][]).map((t) => [num(t[0]), num(t[1]), t[2] as Uint8Array, t[3] as Uint8Array]);
