@@ -12,7 +12,7 @@
 #                                               runs it on another machine through `$INSTALL_SSH <target> <command>`
 #
 # What it makes: the unprivileged user souls; the programs in /usr/local/lib/souls (supervisor, worldd, gatewayd,
-# directoryd, deploy, gateway-upgrade, import-accounts, import-world, publish-template, the origin and the page's files); data in
+# directoryd, register-world, deploy, gateway-upgrade, import-accounts, import-world, publish-template, the origin and the page's files); data in
 # /var/lib/souls; settings in /etc/souls (751), the secrets file root-owned; the units souls.slice, worldd@ (with its drop-in), souls-gateway@,
 # souls-directory and souls-origin.
 # Carried over from today's installer: idempotent, and it starts, enables and restarts nothing. It never reads or
@@ -28,7 +28,7 @@ DATA=/var/lib/souls
 ETC=/etc/souls
 UNITS=/etc/systemd/system
 STATE=$ETC/install.state
-PROGRAMS=(supervisor worldd gatewayd directoryd deploy gateway-upgrade import-accounts import-world publish-template)
+PROGRAMS=(supervisor worldd gatewayd directoryd register-world deploy gateway-upgrade import-accounts import-world publish-template)
 # A program's cargo binary: the `templates` crate's is installed as publish-template, since $LIB/templates is the
 # catalogue it writes (W3b's placement.json `templates`).
 built() { if [ "$1" = publish-template ]; then echo templates; else echo "$1"; fi; }
