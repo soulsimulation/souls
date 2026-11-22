@@ -2528,18 +2528,22 @@ impl<'a> View<'a> {
         }
     }
 
-    /// Thing `thing`'s footprint `corners` (its own frame, [`crate::spots::footprint`]) and its middle carried onto
-    /// the floor a body stands on ([`View::on_floor`]): the floor, the corners and the middle in its frame. `None`
-    /// when they do not all land on one floor.
+    /// A thing's footprint `corners` (its own frame, [`crate::spots::footprint`]) and its middle, the thing placed at
+    /// `at` turned by `turn` in node `parent`'s frame (its place in the world's tree: a loose thing need not be in this
+    /// view's), carried onto the floor a body stands on ([`View::on_floor`]): the floor, the corners and the middle in
+    /// its frame. `None` when they do not all land on one floor.
     pub fn footprint_on_floor(
         &self,
-        thing: Id,
+        parent: Id,
+        at: Vec3,
+        turn: Quat,
         corners: &[Vec3; 4],
     ) -> Option<(Id, [Vec3; 4], Vec3)> {
-        let (floor, middle, _) = self.on_floor(thing, Vec3::ZERO)?;
+        let placed = |c: Vec3| at.plus(turn.rotate(c).ok()?).ok();
+        let (floor, middle, _) = self.on_floor(parent, at)?;
         let mut ring = [Vec3::ZERO; 4];
         for (r, c) in ring.iter_mut().zip(corners) {
-            let (f, p, _) = self.on_floor(thing, *c)?;
+            let (f, p, _) = self.on_floor(parent, placed(*c)?)?;
             if f != floor {
                 return None;
             }

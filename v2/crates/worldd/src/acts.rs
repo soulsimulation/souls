@@ -807,8 +807,10 @@ impl Sight<'_> {
             None => reach,
         };
         dbg(&format!("footprint {corners:?} on {on} reach {reach}"));
-        let (floor, ring, middle) =
-            self.with_view(body, |v| v.footprint_on_floor(thing, &corners))??;
+        let place = n.place()?;
+        let (floor, ring, middle) = self.with_view(body, |v| {
+            v.footprint_on_floor(node, place.position, place.orientation, &corners)
+        })??;
         dbg(&format!("floor {floor:?} ring {ring:?}"));
         Some((floor, ring, middle, on, reach))
     }

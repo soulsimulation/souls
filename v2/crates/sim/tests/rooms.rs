@@ -157,7 +157,16 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
         let on = entry.is_some_and(walkable);
         let shape = entry
             .and_then(footprint)
-            .and_then(|(corners, _)| town.view().footprint_on_floor(id, &corners))
+            .and_then(|(corners, _)| {
+                let n = tree.node(tree.handle(id)?)?;
+                let place = n.place()?;
+                town.view().footprint_on_floor(
+                    n.parent()?,
+                    place.position,
+                    place.orientation,
+                    &corners,
+                )
+            })
             .filter(|(f, ..)| *f == floor);
         let (pocket, form, foot, walk, diag) = town.with_ground(|_, g| {
             let pocket =
