@@ -83,3 +83,10 @@ export function cdnRuleExpression() {
   const not = CDN_CACHE_RULE.never.map((x) => `not http.request.uri.path contains "${x}"`).join(' and ');
   return `http.host eq "${CDN_CACHE_RULE.host}" and ((${any(CDN_CACHE_RULE.api)}) or ((${any(CDN_CACHE_RULE.files)}) and ${not}))`;
 }
+
+// The stream hostname (#4159): the eden.art zone is on Cloudflare and soul.game is not, so a world's stream is served to
+// viewers from stream.eden.art (v2/tools/ops/proxy/stream-eden-art.caddy), which answers only /s/* and a no-store 404.
+// Its rule is the host alone: everything it answers is a stream file whose Cache-Control decides. The page's
+// STREAM_ORIGIN (v2/web/src/source/address.ts) names the same host; docs/operations/cdn.md carries the expression.
+export const STREAM_HOST = 'stream.eden.art';
+export const streamRuleExpression = () => `(http.host eq "${STREAM_HOST}")`;

@@ -6,7 +6,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { cdnCacheEligible, cdnRuleExpression, originCacheClass, originCacheProblem } from './origin-cache.mjs';
+import { cdnCacheEligible, cdnRuleExpression, originCacheClass, originCacheProblem, STREAM_HOST, streamRuleExpression } from './origin-cache.mjs';
 import { checkSoulGame } from '../world-launcher/deploy/caddy/check-soul-game.mjs';
 import { EDGE_SNAPSHOT_CACHE } from '../../apps/server/src/edge-snapshot.ts';
 
@@ -184,4 +184,12 @@ test('#4159 A2: through a stand-in CDN from the rule and the real viewers\' orig
     const q = await get('/s/eden/pointer?x=1'), q2 = await get('/s/eden/pointer?x=1');
     assert.deepEqual([q.status, q.cf, q2.cf], [404, 'BYPASS', 'BYPASS'], 'a query string is a no-store 404, never kept');
   } finally { cdn.close(); origin.close(); rmSync(dir, { recursive: true, force: true }); }
+});
+
+test('#4159: the stream hostname is one name everywhere: the rule in cdn.md, the page\'s STREAM_ORIGIN, the Caddy site', () => {
+  const read = (p) => readFileSync(new URL(p, import.meta.url), 'utf8'), host = STREAM_HOST.replaceAll('.', '\\.');
+  assert.equal(streamRuleExpression(), '(http.host eq "stream.eden.art")');
+  assert.ok(read('../../docs/operations/cdn.md').includes('\n' + streamRuleExpression() + '\n'), 'cdn.md does not carry streamRuleExpression()');
+  assert.match(read('../../v2/web/src/source/address.ts'), new RegExp(`STREAM_ORIGIN = 'https://${host}'`));
+  assert.match(read('../../v2/tools/ops/proxy/stream-eden-art.caddy'), new RegExp(`^https://${host} \\{$`, 'm'));
 });

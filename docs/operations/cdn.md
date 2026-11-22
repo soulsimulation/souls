@@ -205,14 +205,88 @@ The god folder may name either allowed site with `/w/<slug>/` or `/worlds/w/<slu
 **Rollback:** delete the route. Clients get a 404 from the bucket and fall back to the origin. Objects under `w/` are
 inert and may stay.
 
+## The stream hostname
+
+A world's live stream and history (`/s/*`) reach viewers through `https://stream.eden.art` (#4159; Gene's choice on
+#1960). The `eden.art` zone is on Cloudflare, so the CDN keeps each stream file and asks the production host for it
+about once per edge, whatever the number of viewers. Pages, sign-in, agents and sockets stay on `soul.game`.
+
+| Part | Where |
+|---|---|
+| The site: `/s/*` to the viewers' origin, anything else a `no-store` 404 | `v2/tools/ops/proxy/stream-eden-art.caddy`, installed as `/etc/caddy/sites/stream-eden-art.caddy` |
+| Stream answers carry `Access-Control-Allow-Origin: *` (public bytes, plain GETs, no credentials) | `v2/tools/origin/origin.mjs` |
+| The bootstrap names the host (`streamOrigin`) only while the origin's `SOULS_STREAM_ORIGIN=https://stream.eden.art` is set | `v2/tools/origin/world-routes.mjs`, `/etc/souls/origin.env` |
+| The page reads stream and history from that one host and refuses any other | `STREAM_ORIGIN` in `v2/web/src/source/address.ts`, `v2/web/src/history/page.ts` |
+| The cache rule's expression (`streamRuleExpression()`; the test checks this page carries it) | `tools/cdn/origin-cache.mjs` |
+
+The rule, in the `eden.art` zone:
+
+```
+(http.host eq "stream.eden.art")
+```
+
+| Setting | Value |
+|---|---|
+| Cache eligibility | Eligible for cache |
+| Edge TTL | Use cache-control header if present, bypass cache if not |
+| Browser TTL | Respect origin TTL |
+| Cache key | The default |
+| Place at | Last, so no broader `eden.art` rule overrides it |
+
+The DNS record: type `CNAME`, name `stream`, target `soul.game`, proxied. The CDN then follows `soul.game`'s own
+address and asks the production host with the name `stream.eden.art`, which the site file answers.
+
+**Order.** Install the site file (a release step), then the record and the rule, then the checks below; set
+`SOULS_STREAM_ORIGIN` and restart the origin only after they pass, since from then on every page reads the stream there.
+
+**Checks**, from any machine. Anything outside `/s/` must be the site's own 404:
+
+```bash
+curl -s -o /dev/null -D - -w 'status: %{http_code}\n' https://stream.eden.art/s/check-4159 | grep -iE '^(status|server|cache-control|access-control-allow-origin|cf-cache-status):' | sort
+```
+
+```
+access-control-allow-origin: *
+cache-control: no-store
+cf-cache-status: BYPASS
+server: cloudflare
+status: 404
+```
+
+`cf-cache-status: DYNAMIC` instead of `BYPASS` means the rule is missing; `status: 403` with `cf-mitigated` means a
+bot or challenge setting is stopping readers and must be turned off for this host. Then, on the production host, the
+pointer of a world's stream twice (the second read is a `HIT` with `age` 0 or 1):
+
+```bash
+S=$(node -pe 'JSON.parse(require("fs").readFileSync("/var/lib/souls/routes/worlds.json","utf8")).worlds.eden.stream')
+for i in 1 2; do curl -s -o /dev/null -D - "https://stream.eden.art${S}pointer" | grep -iE '^(cf-cache-status|age|cache-control):'; done
+```
+
+**Rollback:** remove `SOULS_STREAM_ORIGIN` from `/etc/souls/origin.env` and restart the origin (pages read from
+`soul.game` again at their next load), then delete the `stream` record and the rule.
+
+**Watching for a Cloudflare limit.** The CDN terms let Cloudflare limit a non-Enterprise zone that serves "a
+disproportionate percentage of … large files" without its paid services; the words are not defined, and Cloudflare
+says it gives notice. What that would look like, in the order it would show:
+
+- an email to the account's owner, and a notice in the dashboard (Gene's);
+- `cf-cache-status` on stream reads turning `DYNAMIC` or `BYPASS` where it was `HIT`, while the origin's
+  `ORIGIN_STATS` requests and bytes per second climb back towards one request per viewer read (the dashboard's
+  Caching analytics for `stream.eden.art` showing its served-by-cache share falling);
+- `403` or `429` answers on `stream.eden.art`, often with a `cf-mitigated` header or a Cloudflare error page.
+
+The immediate fallback is the rollback above: viewers read from the origin again, at its old limit. The lasting
+fallback is a separate domain on Cloudflare with the same record, rule and site file under its name; the page's
+`STREAM_ORIGIN` and the origin's `SOULS_STREAM_ORIGIN` then name it (a one-line page change and a release).
+
 ## The site behind the CDN
 
 **Status (checked from outside on 22 Nov 2026): `soul.game` is not behind the CDN.** Its nameservers are the
 registrar's (Porkbun), its A record points straight at the production host, and answers carry `via: 1.1 Caddy` with
 no `cf-ray`. The `eden.art` zone is on Cloudflare (`assets.eden.art`, `sim.eden.art`). Everything below, the cache
 rule included, is the prepared design for when the `soul.game` zone is moved to Cloudflare; none of it is live, and
-the hands-on steps start with adding that zone. The choice between doing that and serving the stream from a hostname in
-`eden.art` is on #4159.
+the hands-on steps start with adding that zone. The stream does not wait for it: it is served from
+[the stream hostname](#the-stream-hostname).
 
 The launcher and the worlds key every per-address limit on the first `X-Forwarded-For` entry. With the site record
 proxied, Caddy's default would keep what the CDN sent and append, and the CDN appends to whatever the visitor sent, so

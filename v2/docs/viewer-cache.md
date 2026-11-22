@@ -30,7 +30,8 @@ price are the owner's (C4 on #2636).
    | The pointer (`<stream>/pointer`) | 200 | `public, max-age=1, no-transform` |
    | Anything not there, a temporary file (`*.tmp`), a URL with a query string, a path outside the directory | 404 | `no-store` |
 
-   Every 200 is `application/octet-stream` with a strong `ETag`: the SHA-256 of its bytes, in hex.
+   Every 200 is `application/octet-stream` with a strong `ETag`: the SHA-256 of its bytes, in hex. Each of the three carries
+   `Access-Control-Allow-Origin: *` (#4159).
 3. **The pointer's max-age is half a period, rounded up to a whole second.** `max-age` takes whole seconds
    (RFC 9111), and half of V1's 0.5 s period rounds down to 0, which would send every pointer read to the origin. One
    second is the shortest that keeps the origin's pointer reads per cache node at about one a second whatever the
@@ -86,10 +87,12 @@ node about one origin request a second.
 The owner's alternative to a CDN is two or three unmetered machines running nginx with the settings above (Fact 2:
 Hetzner's ports). The stand-in below proves the rules, not nginx: nginx was not run here.
 
-**On soul.game** the stream is `/s/*`, which Caddy hands to this origin. soul.game is not behind a CDN yet (checked
-22 Nov 2026), so every viewer's request reaches this origin. `CDN_CACHE_RULE` in `tools/cdn/origin-cache.mjs` lists
-`/s/*` for when it is ([docs/operations/cdn.md](../../docs/operations/cdn.md#the-site-behind-the-cdn)); the other way,
-a stream hostname in the `eden.art` zone, is compared on #4159.
+**On soul.game** the stream is `/s/*`, which Caddy hands to this origin; soul.game is not behind a CDN (checked 22 Nov
+2026). The CDN path is **`https://stream.eden.art/s/*`** (#4159): a hostname in the `eden.art` zone, which is on
+Cloudflare, with its own Caddy site in front of this origin and a cache rule for the host. The bootstrap names it
+(`streamOrigin`, from `SOULS_STREAM_ORIGIN`) and the page reads stream and history there, from that one host only.
+Every stream answer carries `Access-Control-Allow-Origin: *` so it can. Steps, checks, rollback and what a Cloudflare
+limit would look like: [docs/operations/cdn.md](../../docs/operations/cdn.md#the-stream-hostname).
 
 ## Tools
 
