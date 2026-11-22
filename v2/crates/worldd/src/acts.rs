@@ -414,9 +414,18 @@ impl Sight<'_> {
     /// walks, at step `step`, to point `at` of node `node`'s frame, a point its entry names as an `areas` entry of a
     /// thing on `node` that has floors: the area is the thing's room of that name, on that room's floor (a lantern room
     /// four floors up, whatever height the kind's area gives), else the thing's only floor; the point is carried into
-    /// the floor's frame (the thing's), at the room's height. `Some(None)` when the thing has floors and none is the
-    /// area's; `None` for any other walk, planned as before. No floor is chosen by nearness.
-    fn area_floor(&self, body: Id, step: usize, node: Id, at: Vec3) -> Option<Option<(Id, Vec3)>> {
+    /// the floor's frame (the thing's), at the room's height. An area that is no room is on the thing's floor where a
+    /// body may stand within `reach` of it, the nearest such in height; with none, it is off the thing's floors (a
+    /// house's back garden, a bridge's ends) and planned as any other point, on the open ground under it, as today's
+    /// game walks to an area by its centre. `None` for any other walk, planned as before.
+    fn area_floor(
+        &self,
+        body: Id,
+        step: usize,
+        node: Id,
+        at: Vec3,
+        reach: i64,
+    ) -> Option<(Id, Vec3)> {
         use import_eden::{F_ORIGIN, FLOOR, ROOM};
         let &(at_step, thing, ref point) = self.walks.get(&body)?;
         if at_step != step {
@@ -458,18 +467,25 @@ impl Sight<'_> {
                 })
                 .map(|r| (f.id(), r.place().map(|p| p.position.y)))
         });
-        let (floor, y) = match room {
-            Some((floor, y)) => (floor, y),
-            None if floors.len() == 1 => (floors[0].id(), None),
-            None => return Some(None),
-        };
         let [w, x, yq, z] = place.orientation.parts();
         let back = replica::pose::Quat::new(w, -x, -yq, -z).ok()?;
         let local = back.rotate(at.minus(place.position).ok()?).ok()?;
-        Some(Some((
-            floor,
-            Vec3::new(local.x, y.unwrap_or(local.y), local.z),
-        )))
+        if let Some((floor, y)) = room {
+            return Some((floor, Vec3::new(local.x, y.unwrap_or(local.y), local.z)));
+        }
+        let floor = self
+            .with_view(body, |v| {
+                floors
+                    .iter()
+                    .filter(|f| v.stand_near(f.id(), local, reach, None).is_some())
+                    .min_by_key(|f| {
+                        let y = f.place().map_or(0, |p| p.position.y);
+                        (y - local.y).abs()
+                    })
+                    .map(|f| f.id())
+            })
+            .flatten()?;
+        Some((floor, local))
     }
 }
 
@@ -548,12 +564,9 @@ impl Geometry for Sight<'_> {
             Some(&(at_step, floor, stand)) if at_step == step => (floor, stand),
             _ => (node, at),
         };
-        let (node, at) = match self.area_floor(body, step, node, at) {
-            Some(Some(on)) => on,
-            // A building's area with no room or floor of its own to stand on: no way there, the body where it is.
-            Some(None) => return WalkPlan::Legs(Vec::new()),
-            None => (node, at),
-        };
+        let (node, at) = self
+            .area_floor(body, step, node, at, reach)
+            .unwrap_or((node, at));
         // An approach to a move's point (#3688): a point of a thing on a building with floors (an inner door) is on
         // the building's floor nearest its height, so the walk goes in to it, and once in through a link the runner
         // approaches again from that floor; on the floor the body stands on, it is aimed short of the point, on the
