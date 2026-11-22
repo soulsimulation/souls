@@ -207,6 +207,13 @@ inert and may stay.
 
 ## The site behind the CDN
 
+**Status (checked from outside on 22 Nov 2026): `soul.game` is not behind the CDN.** Its nameservers are the
+registrar's (Porkbun), its A record points straight at the production host, and answers carry `via: 1.1 Caddy` with
+no `cf-ray`. The `eden.art` zone is on Cloudflare (`assets.eden.art`, `sim.eden.art`). Everything below, the cache
+rule included, is the prepared design for when the `soul.game` zone is moved to Cloudflare; none of it is live, and
+the hands-on steps start with adding that zone. The choice between doing that and serving the stream from a hostname in
+`eden.art` is on #4159.
+
 The launcher and the worlds key every per-address limit on the first `X-Forwarded-For` entry. With the site record
 proxied, Caddy's default would keep what the CDN sent and append, and the CDN appends to whatever the visitor sent, so
 the first entry would be the visitor's own text; and without trusted-proxy settings every viewer would come from a
@@ -251,7 +258,7 @@ second a `HIT`; the snapshot under a stale key is `no-store` and never a hit). I
 
 A CDN caches by file extension by default and never JSON or extension-less paths, so the content-addressed parts,
 profile photos and the snapshot would read `DYNAMIC`, and the release's `cdn-walk` fails any hashed or release-stable
-response that does (`tools/cdn/origin-cache.mjs`). One cache rule in the `soul.game` zone fixes that. Its paths are
+response that does (`tools/cdn/origin-cache.mjs`). One cache rule in the `soul.game` zone (once there is one; see the status above) fixes that. Its paths are
 `CDN_CACHE_RULE` in `origin-cache.mjs`, derived from the same classes the release checks plus the keyed snapshot; the
 test checks that this page carries `cdnRuleExpression()` exactly:
 
@@ -274,11 +281,11 @@ on an eligible path is never kept. No path that can answer per user is eligible:
 `/v1/` or `/__sim/`, and the three API reads are public by design (moderation-filtered, no auth read). The page,
 `/v1/config` and the world list stay outside it.
 
-A world's public stream, `/s/*` (#4159), is in the rule: Caddy hands it to the viewers' origin, which answers a part,
+A world's public stream, `/s/*` (#4159), is in the rule. Today every viewer's request reaches the origin, since the site is not behind the CDN: Caddy hands it to the viewers' origin, which answers a part,
 a baseline or a bundle header `public, max-age=31536000, immutable, no-transform`, the pointer (and a history's
 `live`) `public, max-age=1, no-transform`, and anything not yet written or asked with a query string a `no-store`
-404 ([viewer cache](../../v2/docs/viewer-cache.md)). The edge then fetches each file once and the pointer about once a
-second, whatever the number of viewers; without the rule every viewer's six requests a second reach the origin. The
+404 ([viewer cache](../../v2/docs/viewer-cache.md)). Behind the CDN with the rule, the edge fetches each file once and the
+pointer about once a second, whatever the number of viewers; without it every viewer's six requests a second reach the origin. The
 origin's other routes that `/s/*` also reaches answer `no-store` or `private`, so none is kept. The answers set no
 cookie and the page reads them from its own origin, so no CORS header is needed. Add no rule that bypasses everything else: other paths keep the CDN's
 default, which also respects the origin's headers.

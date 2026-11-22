@@ -86,10 +86,10 @@ node about one origin request a second.
 The owner's alternative to a CDN is two or three unmetered machines running nginx with the settings above (Fact 2:
 Hetzner's ports). The stand-in below proves the rules, not nginx: nginx was not run here.
 
-**On soul.game** the stream is `/s/*`, which Caddy hands to this origin, and the CDN keeps it only because `/s/*` is
-in the zone's cache rule (`CDN_CACHE_RULE` in `tools/cdn/origin-cache.mjs`, applied by hand as
-[docs/operations/cdn.md](../../docs/operations/cdn.md#the-cache-rule) says; #4159). Without it the CDN passes every
-viewer's request to the origin.
+**On soul.game** the stream is `/s/*`, which Caddy hands to this origin. soul.game is not behind a CDN yet (checked
+22 Nov 2026), so every viewer's request reaches this origin. `CDN_CACHE_RULE` in `tools/cdn/origin-cache.mjs` lists
+`/s/*` for when it is ([docs/operations/cdn.md](../../docs/operations/cdn.md#the-site-behind-the-cdn)); the other way,
+a stream hostname in the `eden.art` zone, is compared on #4159.
 
 ## Tools
 
