@@ -7,6 +7,7 @@ use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use replica::encode::to_hex;
 use ring::digest;
@@ -16,10 +17,14 @@ pub const KEY_ID: &str = "stand-in-key";
 
 type Objects = Arc<Mutex<BTreeMap<String, (String, Vec<u8>)>>>;
 
+/// How many reads are still to be held, and for how long each ([`StandIn::stall_reads`]).
+type Stalls = Arc<Mutex<(usize, Duration)>>;
+
 /// A running stand-in. Its address is [`StandIn::url`]; its threads end with the test process.
 pub struct StandIn {
     port: u16,
     objects: Objects,
+    stalls: Stalls,
 }
 
 impl StandIn {
@@ -28,14 +33,27 @@ impl StandIn {
         let listener = TcpListener::bind("127.0.0.1:0")?;
         let port = listener.local_addr()?.port();
         let objects: Objects = Arc::default();
-        let shared = objects.clone();
+        let stalls: Stalls = Arc::default();
+        let (shared, held) = (objects.clone(), stalls.clone());
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
-                let objects = shared.clone();
-                std::thread::spawn(move || serve(stream, &objects, page.max(1)));
+                let (objects, stalls) = (shared.clone(), held.clone());
+                std::thread::spawn(move || serve(stream, &objects, &stalls, page.max(1)));
             }
         });
-        Ok(StandIn { port, objects })
+        Ok(StandIn {
+            port,
+            objects,
+            stalls,
+        })
+    }
+
+    /// Holds the next `n` reads (GETs: an object or a listing page) for `wait` each before answering them, as a slow
+    /// bucket does: past the client's timeout, the client counts the store out of reach (#1960).
+    pub fn stall_reads(&self, n: usize, wait: Duration) {
+        if let Ok(mut s) = self.stalls.lock() {
+            *s = (n, wait);
+        }
     }
 
     /// The bucket's URL in the offsite form: `s3:http://127.0.0.1:<port>/<bucket>[/<prefix>]`.
@@ -53,7 +71,7 @@ impl StandIn {
 }
 
 /// Answers one connection's requests until it closes.
-fn serve(stream: TcpStream, objects: &Objects, page: usize) {
+fn serve(stream: TcpStream, objects: &Objects, stalls: &Stalls, page: usize) {
     let Ok(mut out) = stream.try_clone() else {
         return;
     };
@@ -87,6 +105,17 @@ fn serve(stream: TcpStream, objects: &Objects, page: usize) {
         }
         let mut parts = line.split_whitespace();
         let (method, target) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
+        if method == "GET" {
+            let hold = stalls.lock().ok().and_then(|mut s| {
+                (s.0 > 0).then(|| {
+                    s.0 -= 1;
+                    s.1
+                })
+            });
+            if let Some(wait) = hold {
+                std::thread::sleep(wait);
+            }
+        }
         let (code, etag, answer) = answer(method, target, &head, &body, objects, page);
         let mut res = format!("HTTP/1.1 {code} X\r\ncontent-length: {}\r\n", answer.len());
         if let Some(e) = etag {
