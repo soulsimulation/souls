@@ -2508,6 +2508,21 @@ impl<'a> View<'a> {
         from: Option<&Body>,
         door: Option<Id>,
     ) -> Option<Vec3> {
+        self.stand_near_shape(node, at, None, reach, from, door)
+    }
+
+    /// [`View::stand_near_door`] for a thing whose footprint is `ring` (#4072: its corners in `node`'s frame, `at`
+    /// its middle, and whether the walk ends on it): within `reach` of its outline, or on it
+    /// ([`crate::spots::within_footprint`]); with no ring, of `at`.
+    pub fn stand_near_shape(
+        &self,
+        node: Id,
+        at: Vec3,
+        ring: Option<(&[Vec3], bool)>,
+        reach: i64,
+        from: Option<&Body>,
+        door: Option<Id>,
+    ) -> Option<Vec3> {
         let from = from.map(|b| (node_of(b), b.pose.position));
         let mut scratch = self.scratch.borrow_mut();
         let (tree, surfaces, buildings, ground) =
@@ -2521,7 +2536,36 @@ impl<'a> View<'a> {
             boxes: OnceCell::new(),
             door,
         };
-        crate::spots::within(&mut g, Target::new(node, at), reach, from)
+        match ring {
+            Some((ring, on)) => {
+                crate::spots::within_footprint(&mut g, Target::new(node, at), ring, on, reach, from)
+            }
+            None => crate::spots::within(&mut g, Target::new(node, at), reach, from),
+        }
+    }
+
+    /// A thing's footprint `corners` (its own frame, [`crate::spots::footprint`]) and its middle, the thing placed at
+    /// `at` turned by `turn` in node `parent`'s frame (its place in the world's tree: a loose thing need not be in this
+    /// view's), carried onto the floor a body stands on ([`View::on_floor`]): the floor, the corners and the middle in
+    /// its frame. `None` when they do not all land on one floor.
+    pub fn footprint_on_floor(
+        &self,
+        parent: Id,
+        at: Vec3,
+        turn: Quat,
+        corners: &[Vec3; 4],
+    ) -> Option<(Id, [Vec3; 4], Vec3)> {
+        let placed = |c: Vec3| at.plus(turn.rotate(c).ok()?).ok();
+        let (floor, middle, _) = self.on_floor(parent, at)?;
+        let mut ring = [Vec3::ZERO; 4];
+        for (r, c) in ring.iter_mut().zip(corners) {
+            let (f, p, _) = self.on_floor(parent, placed(*c)?)?;
+            if f != floor {
+                return None;
+            }
+            *r = p;
+        }
+        Some((floor, ring, middle))
     }
 
     /// The legs a form's walk takes from where `body` stands to `goal` (µm, `node`'s frame), across the links on the
