@@ -1,0 +1,6086 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "Every one of32 literal phase transitions accepts its index and refuses each unmet state, hand and reach need.",
+  "cases": [
+    {
+      "name": "forward_00_accepted",
+      "act": {
+        "this": "c1",
+        "form": "forward_00"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_00_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "forward_00"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "forward_00_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "forward_00"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "forward_00_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "forward_00"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "forward_01_accepted",
+      "act": {
+        "this": "c1",
+        "form": "forward_01"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_01_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "forward_01"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "forward_01_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "forward_01"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "forward_01_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "forward_01"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "forward_02_accepted",
+      "act": {
+        "this": "c1",
+        "form": "forward_02"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_02_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "forward_02"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "forward_02_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "forward_02"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "forward_02_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "forward_02"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "forward_03_accepted",
+      "act": {
+        "this": "c1",
+        "form": "forward_03"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_03_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "forward_03"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 4
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "forward_03_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "forward_03"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "forward_03_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "forward_03"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "forward_04_accepted",
+      "act": {
+        "this": "c1",
+        "form": "forward_04"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 4
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_04_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "forward_04"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "forward_04_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "forward_04"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 4
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "forward_04_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "forward_04"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 4
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "forward_05_accepted",
+      "act": {
+        "this": "c1",
+        "form": "forward_05"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_05_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "forward_05"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 6
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "forward_05_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "forward_05"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "forward_05_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "forward_05"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "forward_06_accepted",
+      "act": {
+        "this": "c1",
+        "form": "forward_06"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 6
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_06_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "forward_06"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 7
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "forward_06_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "forward_06"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 6
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "forward_06_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "forward_06"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 6
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "forward_07_accepted",
+      "act": {
+        "this": "c1",
+        "form": "forward_07"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 7
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_07_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "forward_07"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 8
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "forward_07_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "forward_07"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 7
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "forward_07_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "forward_07"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 7
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "forward_08_accepted",
+      "act": {
+        "this": "c1",
+        "form": "forward_08"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 8
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_08_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "forward_08"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 9
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "forward_08_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "forward_08"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 8
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "forward_08_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "forward_08"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 8
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "forward_09_accepted",
+      "act": {
+        "this": "c1",
+        "form": "forward_09"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 9
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_09_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "forward_09"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 10
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "forward_09_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "forward_09"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 9
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "forward_09_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "forward_09"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 9
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "forward_10_accepted",
+      "act": {
+        "this": "c1",
+        "form": "forward_10"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 10
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_10_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "forward_10"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 11
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "forward_10_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "forward_10"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 10
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "forward_10_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "forward_10"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 10
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "forward_11_accepted",
+      "act": {
+        "this": "c1",
+        "form": "forward_11"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 11
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_11_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "forward_11"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 12
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "forward_11_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "forward_11"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 11
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "forward_11_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "forward_11"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 11
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "forward_12_accepted",
+      "act": {
+        "this": "c1",
+        "form": "forward_12"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 12
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_12_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "forward_12"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 13
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "forward_12_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "forward_12"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 12
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "forward_12_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "forward_12"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 12
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "forward_13_accepted",
+      "act": {
+        "this": "c1",
+        "form": "forward_13"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 13
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_13_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "forward_13"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 14
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "forward_13_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "forward_13"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 13
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "forward_13_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "forward_13"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 13
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "forward_14_accepted",
+      "act": {
+        "this": "c1",
+        "form": "forward_14"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 14
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_14_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "forward_14"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 15
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "forward_14_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "forward_14"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 14
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "forward_14_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "forward_14"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 14
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "forward_15_accepted",
+      "act": {
+        "this": "c1",
+        "form": "forward_15"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 15
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "forward_15_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "forward_15"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "forward_15_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "forward_15"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 15
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "forward_15_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "forward_15"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 15
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "backward_00_accepted",
+      "act": {
+        "this": "c1",
+        "form": "backward_00"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "backward_00_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "backward_00"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "backward_00_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "backward_00"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "backward_00_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "backward_00"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "backward_01_accepted",
+      "act": {
+        "this": "c1",
+        "form": "backward_01"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "backward_01_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "backward_01"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "backward_01_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "backward_01"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "backward_01_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "backward_01"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "backward_02_accepted",
+      "act": {
+        "this": "c1",
+        "form": "backward_02"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "backward_02_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "backward_02"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "backward_02_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "backward_02"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "backward_02_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "backward_02"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "backward_03_accepted",
+      "act": {
+        "this": "c1",
+        "form": "backward_03"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "backward_03_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "backward_03"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 4
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "backward_03_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "backward_03"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "backward_03_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "backward_03"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "backward_04_accepted",
+      "act": {
+        "this": "c1",
+        "form": "backward_04"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 4
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "backward_04_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "backward_04"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "backward_04_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "backward_04"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 4
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "backward_04_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "backward_04"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 4
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "backward_05_accepted",
+      "act": {
+        "this": "c1",
+        "form": "backward_05"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "backward_05_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "backward_05"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 6
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "backward_05_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "backward_05"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "backward_05_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "backward_05"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "backward_06_accepted",
+      "act": {
+        "this": "c1",
+        "form": "backward_06"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 6
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "backward_06_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "backward_06"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 7
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "backward_06_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "backward_06"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 6
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "backward_06_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "backward_06"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 6
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "backward_07_accepted",
+      "act": {
+        "this": "c1",
+        "form": "backward_07"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 7
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "backward_07_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "backward_07"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 8
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "backward_07_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "backward_07"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 7
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "backward_07_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "backward_07"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 7
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "backward_08_accepted",
+      "act": {
+        "this": "c1",
+        "form": "backward_08"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 8
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "backward_08_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "backward_08"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 9
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "backward_08_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "backward_08"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 8
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "backward_08_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "backward_08"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 8
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "backward_09_accepted",
+      "act": {
+        "this": "c1",
+        "form": "backward_09"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 9
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "backward_09_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "backward_09"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 10
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "backward_09_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "backward_09"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 9
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "backward_09_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "backward_09"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 9
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "backward_10_accepted",
+      "act": {
+        "this": "c1",
+        "form": "backward_10"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 10
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "backward_10_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "backward_10"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 11
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "backward_10_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "backward_10"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 10
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "backward_10_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "backward_10"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 10
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "backward_11_accepted",
+      "act": {
+        "this": "c1",
+        "form": "backward_11"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 11
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "backward_11_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "backward_11"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 12
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "backward_11_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "backward_11"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 11
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "backward_11_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "backward_11"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 11
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "backward_12_accepted",
+      "act": {
+        "this": "c1",
+        "form": "backward_12"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 12
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "backward_12_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "backward_12"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 13
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "backward_12_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "backward_12"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 12
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "backward_12_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "backward_12"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 12
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "backward_13_accepted",
+      "act": {
+        "this": "c1",
+        "form": "backward_13"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 13
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "backward_13_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "backward_13"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 14
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "backward_13_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "backward_13"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 13
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "backward_13_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "backward_13"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 13
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "backward_14_accepted",
+      "act": {
+        "this": "c1",
+        "form": "backward_14"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 14
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "backward_14_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "backward_14"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 15
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "backward_14_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "backward_14"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 14
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "backward_14_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "backward_14"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 14
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "backward_15_accepted",
+      "act": {
+        "this": "c1",
+        "form": "backward_15"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 15
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "backward_15_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "backward_15"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "backward_15_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "backward_15"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 15
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "backward_15_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "backward_15"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 15
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    }
+  ]
+}

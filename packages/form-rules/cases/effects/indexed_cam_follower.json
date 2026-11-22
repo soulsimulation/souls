@@ -1,0 +1,1004 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Both full phase cycles, wraps and immediate reversal; generic harness replays every receipt for idempotence. One phase drives both picture roles.",
+  "cases": [
+    {
+      "name": "indexed_cam_full_cycles_wraps_and_reversal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:indexed_cam_follower",
+            "fields": {
+              "phase": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              200,
+              1200,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "c1",
+            "form": "forward_00"
+          },
+          "receipt": "cam0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "forward_01"
+          },
+          "receipt": "cam1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "forward_02"
+          },
+          "receipt": "cam2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "forward_03"
+          },
+          "receipt": "cam3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 4
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "forward_04"
+          },
+          "receipt": "cam4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 5
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "forward_05"
+          },
+          "receipt": "cam5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 6
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "forward_06"
+          },
+          "receipt": "cam6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 7
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "forward_07"
+          },
+          "receipt": "cam7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 8
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "forward_08"
+          },
+          "receipt": "cam8",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 9
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "forward_09"
+          },
+          "receipt": "cam9",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 10
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "forward_10"
+          },
+          "receipt": "cam10",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 11
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "forward_11"
+          },
+          "receipt": "cam11",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 12
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "forward_12"
+          },
+          "receipt": "cam12",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 13
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "forward_13"
+          },
+          "receipt": "cam13",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 14
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "forward_14"
+          },
+          "receipt": "cam14",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 15
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "forward_15"
+          },
+          "receipt": "cam15",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "backward_00"
+          },
+          "receipt": "cam16",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 15
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "backward_15"
+          },
+          "receipt": "cam17",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 14
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "backward_14"
+          },
+          "receipt": "cam18",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 13
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "backward_13"
+          },
+          "receipt": "cam19",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 12
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "backward_12"
+          },
+          "receipt": "cam20",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 11
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "backward_11"
+          },
+          "receipt": "cam21",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 10
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "backward_10"
+          },
+          "receipt": "cam22",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 9
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "backward_09"
+          },
+          "receipt": "cam23",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 8
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "backward_08"
+          },
+          "receipt": "cam24",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 7
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "backward_07"
+          },
+          "receipt": "cam25",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 6
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "backward_06"
+          },
+          "receipt": "cam26",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 5
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "backward_05"
+          },
+          "receipt": "cam27",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 4
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "backward_04"
+          },
+          "receipt": "cam28",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "backward_03"
+          },
+          "receipt": "cam29",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "backward_02"
+          },
+          "receipt": "cam30",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "backward_01"
+          },
+          "receipt": "cam31",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "forward_00"
+          },
+          "receipt": "cam32",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "backward_01"
+          },
+          "receipt": "cam33",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "c1": {
+          "kind": "eden:indexed_cam_follower",
+          "fields": {
+            "phase": 0
+          }
+        }
+      }
+    }
+  ]
+}
