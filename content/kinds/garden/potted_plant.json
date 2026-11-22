@@ -9,7 +9,7 @@
       "unit": "mg",
       "default": {
         "value": 4000000,
-        "per_s": -5,
+        "per_s": -15,
         "set_us": 0
       },
       "min": 0,
@@ -138,7 +138,7 @@
           "change": "set",
           "field": "water",
           "to": 4000000,
-          "rate": -5,
+          "rate": -15,
           "event": "watered"
         },
         {
