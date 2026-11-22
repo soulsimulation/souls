@@ -8,7 +8,7 @@
     "handlebar": {"role":"grip","at_mm":[0,950,420]}
   },
   "slots": {
-    "saddle": {"admits":"body","posture":"sit","most":1,"at_mm":[0,850,-200],"stand":"left_side","board_mm":5000},
+    "saddle": {"admits":"body","posture":"sit","most":1,"at_mm":[0,850,-200],"stand":"left_side"},
     "basket": {"admits":"thing","most":3,"at_mm":[0,900,620],"fits_mm":[380,160,300]}
   },
   "geometry": {"bounds_mm":[550,1100,1800]},

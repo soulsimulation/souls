@@ -1406,6 +1406,46 @@ fn c22_a2_the_desks_write_ends_done() {
     act_at("74.0,-1.0", "e_0f7fb44b", "eden:write", "c22a2").expect("written, done");
 }
 
+/// #1960 seat approach: a boat afloat is boarded from the bank. Its seat's stand point is on the water, with no ground
+/// within a form's reach of it; the seat's `board_mm` lets the world move it to the nearest clear ground within that of
+/// the seat, from which the straight step onto the seat crosses no other solid (`worldd::seats`). Born on the bank, a
+/// Soul rides the boat (a walk to that point, then the sit), rises, and is set down on that ground, the bank.
+fn boards_from_the_bank_and_rises_onto_it(at: &str, today: &str, tag: &str, bank: f64) {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let (served, mut soul, dir) = serve(&facts, at, tag, im.nodes["world"].scope());
+    let rode = soul.act("eden:ride", Some(im.nodes[today]), BTreeMap::new());
+    println!("ride {today}: {rode:?}");
+    let seated = track(&dir).last().map(|b| (b.2, b.3));
+    let rose = soul.act("eden:rise", None, BTreeMap::new());
+    println!("rise: {rose:?}");
+    let off = track(&dir).last().map(|b| (b.2, b.3));
+    println!("in the seat at {seated:?} m; off it at {off:?} m");
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    rode.expect("boarded from the bank, done");
+    rose.expect("rose");
+    let (x, _) = off.expect("the body's track");
+    assert!(
+        x <= bank,
+        "set down on the bank (x <= {bank} m), at {off:?}"
+    );
+}
+
+/// The canal's canoe (today's e_21e423f2, at (136.5, 42.0) m): its bank is 3.5 m west of its back seat.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn a_soul_boards_the_canoe_from_the_bank_and_gets_off_onto_it() {
+    boards_from_the_bank_and_rises_onto_it("132.5,42.0", "e_21e423f2", "seatcanoe", 133.2);
+}
+
+/// The harbour's first rowing boat (today's e_4b754b5c, at (16.0, 166.0) m): its quay is 3.6 m west of its oars.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn a_soul_boards_the_rowing_boat_from_the_quay_and_gets_off_onto_it() {
+    boards_from_the_bank_and_rises_onto_it("11.5,167.0", "e_4b754b5c", "seatrow", 12.7);
+}
+
 /// C22 sweep follow-up: a walk before a sit goes to the seat's own stand point, as the world's places hold it, not
 /// the entry's. The narrowboat's (today's e_13a2e4cf) `towpath` point is on the water by its hull, so no place within
 /// a sit's reach of it can be stood on; `worldd serve` moves the stern's stand point onto the bank, and `ride` (a walk
@@ -1491,53 +1531,6 @@ fn sweep() -> (BTreeMap<String, Vec<String>>, Vec<String>) {
     // The seats, as `worldd serve` registers them (`worldd::seats::places`).
     let (seats, ..) = worldd::seats::places(&mut bodies.town, &found);
     for place in seats {
-        if std::env::var("SEAT_DIAG").is_ok()
-            && bodies
-                .town
-                .tree
-                .handle(place.thing)
-                .and_then(|h| bodies.town.tree.node(h))
-                .is_some_and(|n| {
-                    ["bicycle", "canoe", "rowing_boat"]
-                        .iter()
-                        .any(|k| n.kind().as_str().contains(k))
-                })
-        {
-            let stand = place.stand().unwrap();
-            let gap = sim::spots::flat(stand, place.point);
-            let st = Vec3::new(stand.x, place.point.y - place.place.height, stand.z);
-            let dry = bodies.town.map.spot(place.floor, st).is_some();
-            let near = bodies.town.view().stand_near(place.floor, st, 1, None);
-            let t = &bodies.town.tree;
-            let any = t
-                .handle(place.thing)
-                .and_then(|h| t.node(h))
-                .and_then(|n| n.parent())
-                .and_then(|p| t.handle(p))
-                .and_then(|h| t.node(h))
-                .map(|n| {
-                    format!(
-                        "{} {} slot at ({}, {})",
-                        n.kind().as_str(),
-                        show(n.id()),
-                        place.point.x,
-                        place.point.z
-                    )
-                });
-            println!(
-                "SEAT  floor {} at ({}, {}) dry {dry} near1 {near:?} parent {any:?}",
-                show(place.floor),
-                st.x,
-                st.z
-            );
-            println!(
-                "SEAT {} slot {} stand {:?} -> {} um from the slot",
-                show(place.thing),
-                place.place.slot,
-                place.place.stand,
-                gap
-            );
-        }
         let _ = bodies.add_place(place);
     }
     let family = {
@@ -3760,4 +3753,13 @@ fn i3691_the_balloons_fly_their_loops_and_a_soul_rides_one() {
     );
     let h = out.expect("and out of it");
     assert_eq!(h.pose.frame.node, im.nodes["ground"], "out onto the ground");
+}
+
+#[test]
+#[ignore = "tmp"]
+fn tmp_bikes() {
+    let a = act_at("52.4,1.6", "e_a23bb167", "eden:ride", "tmpb1");
+    let b = act_at("100.6,12.0", "e_0a888a23", "eden:ride", "tmpb6");
+    let c = act_at("93.0,34.5", "e_7c88b724", "eden:ride", "tmpb8");
+    println!("TMPBIKES {a:?} | {b:?} | {c:?}");
 }

@@ -168,15 +168,15 @@ const BOARD_STEP: i64 = 50_000;
 /// solid's half diagonal (a solid larger than this reaching across from afar is not one of a seat's neighbours).
 const BOARD_NEAR: i64 = 10_000_000;
 
-/// A standing body's span above its ground, µm (today's `STEP` and standard height): a solid wholly below the step or
-/// above the head is stepped over or passed under.
-const BODY_SPAN: (i64, i64) = (300_000, 1_750_000);
+/// A standing body's span above its ground, µm (today's sit slide: its `STEP` and the standard height): a solid wholly
+/// below the step or above the head is stepped over or passed under.
+const BODY_SPAN: (i64, i64) = (220_000, 1_750_000);
 
 /// Where a body gets onto a seat whose stand point `stand` no body can stand on or near (a boat's side afloat, #1960):
 /// the nearest clear ground to the seat's slot `slot` (µm, `floor`'s frame, at the stand point's height) within the
 /// slot's boarding reach `board`, on [`sim::spots::within`]'s rings round the slot; out of every doorway and stair
 /// (`passage`); from which the straight step onto the slot crosses no solid of `near` (the floor's solids round it)
-/// that is not the thing's own (`own`), each grown by a standard body's radius, between a step and a body's height
+/// that is not the thing's own (`own`), each grown by half a standard body's radius, between a step and a body's height
 /// above the stand point's ground, as today's sit slide does (`slotTransitionIssue`). On a ring, the place nearest the
 /// entry's stand point wins, so a boat is boarded from the side its entry names; ties by place. `None` when none is.
 fn board_from(
@@ -189,7 +189,8 @@ fn board_from(
     passage: &dyn Fn(Vec3) -> bool,
 ) -> Option<Vec3> {
     let pitch = sim::spots::REACH_PITCH;
-    let grow = replica::kinds::sizes::Size::Standard.radius_mm() * 1000;
+    // Half a standard body's radius, as today's sit slide grows a solid (`TRANSITION_BODY`).
+    let grow = replica::kinds::sizes::Size::Standard.radius_mm() * 1000 / 2;
     let crossed = |p: Vec3| {
         let n = (sim::spots::flat(p, slot) / BOARD_STEP).max(1);
         (0..=n).all(|k| {
@@ -199,15 +200,8 @@ fn board_from(
                 p.z + (slot.z - p.z) * k / n,
             );
             let spans = |s: &&Solid| s.y1 > slot.y + BODY_SPAN.0 && s.y0 < slot.y + BODY_SPAN.1;
-            let hit = near
-                .iter()
-                .filter(spans)
-                .find(|s| within_solid(s, at, grow));
-            if diag(slot) && hit.is_some() && !own.iter().any(|s| within_solid(s, at, grow)) {
-                eprintln!("  blocked at ({}, {}) by {:?}", at.x, at.z, hit);
-                return false;
-            }
-            hit.is_none() || own.iter().any(|s| within_solid(s, at, grow))
+            !near.iter().filter(spans).any(|s| within_solid(s, at, grow))
+                || own.iter().any(|s| within_solid(s, at, grow))
         })
     };
     for ring in 1..=board / pitch {
@@ -228,15 +222,6 @@ fn board_from(
                 continue;
             };
             let gap = sim::spots::flat(p, stand);
-            if diag(slot) && k % 7 == 0 {
-                eprintln!(
-                    "BOARD ring {ring} k {k} p ({}, {}) passage {} crossed {}",
-                    p.x,
-                    p.z,
-                    passage(p),
-                    crossed(p)
-                );
-            }
             if sim::spots::flat(p, slot) <= board
                 && best.is_none_or(|b| gap < b.0)
                 && !passage(p)
@@ -281,12 +266,4 @@ fn signed_area(s: &Solid) -> i128 {
             i128::from(a[0]) * i128::from(b[1]) - i128::from(b[0]) * i128::from(a[1])
         })
         .sum()
-}
-
-fn diag(slot: Vec3) -> bool {
-    let Ok(v) = std::env::var("SEAT_DIAG_AT") else {
-        return false;
-    };
-    let xz: Vec<i64> = v.split(',').filter_map(|t| t.parse().ok()).collect();
-    (slot.x - xz[0] * 1000).abs() < 300_000 && (slot.z - xz[1] * 1000).abs() < 300_000
 }
