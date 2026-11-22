@@ -86,7 +86,7 @@ impl Gen {
         // A large field now and then, when asked: its node's record up to its children is kept (`Tree::head`).
         if self.big && self.rng.below(8) == 0 {
             let n = 4_096 + self.rng.below(2_048);
-            return Value::Bytes((0..n).map(|_| self.rng.next() as u8).collect());
+            return Value::Bytes(vec![self.rng.next() as u8; n]);
         }
         match self.rng.below(3) {
             0 => Value::Uint(self.rng.next() >> 20),
