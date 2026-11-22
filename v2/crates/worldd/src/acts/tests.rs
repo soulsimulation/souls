@@ -176,6 +176,7 @@ fn same_ground_form_walk_keeps_the_planned_doorway_links() {
         walks: BTreeMap::new(),
         approaches: Default::default(),
         sit_walks: BTreeMap::new(),
+        goals: BTreeSet::new(),
         planning: &planning,
         map: Arc::clone(&map),
     };
@@ -367,6 +368,7 @@ fn c34_a_named_area_resolves_onto_its_rooms_floor_not_by_nearness() {
         walks: BTreeMap::from([(id, (2, building, Name::new(point).unwrap()))]),
         approaches: Default::default(),
         sit_walks: BTreeMap::new(),
+        goals: BTreeSet::new(),
         planning: &planning,
         map: Arc::new(Versions::default()),
     };
@@ -400,6 +402,122 @@ fn c34_a_named_area_resolves_onto_its_rooms_floor_not_by_nearness() {
         sight("r1a").area_floor(id, 3, ground, at),
         None,
         "another step: as before"
+    );
+}
+
+/// C22 sweep: a land feature drawn in the world's frame (placed at its parent's origin) has its entry's points laid on
+/// its own line or outline: a bridge's ends at its path's ends, a pond's shore round its own water, not round the
+/// world's origin.
+#[test]
+fn an_entrys_points_are_laid_on_a_world_drawn_line_or_outline() {
+    let m = 1_000_000;
+    let bounds = Vec3::new(10 * m, 3 * m, 4 * m);
+    // A line 20 m along x from (100, 50) m: the entry's ends at ±5 m reach its ends; 1 m across is 1 m to its left.
+    let line = [[100 * m, 50 * m], [120 * m, 50 * m]];
+    assert_eq!(
+        on_line(Vec3::new(-5 * m, 0, 0), bounds, &line),
+        Some(Vec3::new(100 * m, 0, 50 * m))
+    );
+    assert_eq!(
+        on_line(Vec3::new(5 * m, 1_400_000, m), bounds, &line),
+        Some(Vec3::new(120 * m, 1_400_000, 51 * m))
+    );
+    // Turned a quarter: along z.
+    let up = [[0, 0], [0, 20 * m]];
+    assert_eq!(
+        on_line(Vec3::new(5 * m, 0, m), bounds, &up),
+        Some(Vec3::new(-m, 0, 20 * m))
+    );
+    assert_eq!(on_line(Vec3::ZERO, bounds, &[[m, m], [m, m]]), None);
+    // An outline 20 m by 8 m round (-6, 112) m: a pond's shore point 19 m out of its 36 m bounds lands just past its
+    // own bank, 10.56 m from its middle.
+    let pond = Vec3::new(36 * m, 6 * m, 36 * m);
+    let outline = [
+        [-16 * m, 108 * m],
+        [4 * m, 108 * m],
+        [4 * m, 116 * m],
+        [-16 * m, 116 * m],
+    ];
+    assert_eq!(
+        on_outline(Vec3::new(19 * m, 0, 0), pond, &outline),
+        Some(Vec3::new(-6 * m + 10_555_555, 0, 112 * m))
+    );
+    assert_eq!(
+        on_outline(Vec3::new(0, 0, -19 * m), pond, &outline),
+        Some(Vec3::new(-6 * m, 0, 112 * m - 4_222_222))
+    );
+}
+
+/// The same through the world's walk: the test world's square (an area drawn in the world's frame) has a walk to its
+/// entry's point laid on its outline; another step, or a thing not drawn in the world's frame, is planned as before.
+#[test]
+fn a_walk_to_a_world_drawn_things_point_is_laid_on_its_outline() {
+    let generated = testworld::generate(1, 0).unwrap();
+    let imported = import_eden::load(&generated.text).unwrap();
+    let ground = imported.nodes["ground"];
+    let square = imported.nodes["square"];
+    let tree = &imported.tree;
+    let n = tree.node(tree.handle(square).unwrap()).unwrap();
+    let kind = plain(n.kind()).to_owned();
+    let Some(replica::encode::Value::Array(rows)) = n.fields().get(&import_eden::F_OUTLINE) else {
+        panic!("the square's outline");
+    };
+    let xs: Vec<i64> = rows
+        .iter()
+        .filter_map(|r| match r {
+            replica::encode::Value::Array(c) => int_of(&c[0]),
+            _ => None,
+        })
+        .collect();
+    let (x0, x1) = (*xs.iter().min().unwrap(), *xs.iter().max().unwrap());
+    let kinds = replica::rules::json::parse(&format!(
+        r#"{{ "{kind}": {{ "geometry": {{ "bounds_mm": [10000, 100, 10000] }},
+          "areas": {{ "east": {{ "at_mm": [5000, 0, 0] }} }} }} }}"#
+    ))
+    .unwrap();
+    let id = Id::new(Scope([0xca; 16]), 1).unwrap();
+    let toward = BTreeMap::new();
+    let planning = RefCell::new(Planning::default());
+    let sight = |thing: Id, point: &str| Sight {
+        bodies: BTreeMap::new(),
+        carrying: BTreeSet::new(),
+        tree,
+        split: None,
+        builds: BTreeMap::new(),
+        kind: Name::new("souls:body").unwrap(),
+        kinds: &kinds,
+        toward: &toward,
+        asked: RefCell::new(BTreeMap::new()),
+        context: BTreeMap::new(),
+        walks: BTreeMap::from([(id, (0, thing, Name::new(point).unwrap()))]),
+        sit_walks: BTreeMap::new(),
+        approaches: Default::default(),
+        goals: BTreeSet::new(),
+        planning: &planning,
+        map: Arc::new(Versions::default()),
+    };
+    let on = sight(square, "east")
+        .on_shape(id, 0, ground)
+        .expect("laid on the outline");
+    assert_eq!(
+        on.x,
+        x1 * 1000,
+        "the east area at the outline's east edge ({x0}..{x1} mm)"
+    );
+    assert_eq!(
+        sight(square, "east").on_shape(id, 1, ground),
+        None,
+        "another step"
+    );
+    assert_eq!(
+        sight(square, "west").on_shape(id, 0, ground),
+        None,
+        "no such point"
+    );
+    assert_eq!(
+        sight(imported.nodes["ring"], "east").on_shape(id, 0, ground),
+        None,
+        "placed off the origin"
     );
 }
 

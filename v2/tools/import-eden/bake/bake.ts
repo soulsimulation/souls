@@ -6,7 +6,11 @@
 // `souls/model/1`, then the bytes, SHA-256, written `1220` and 64 hex digits. Files are only added.
 //
 //   node v2/tools/import-eden/bake/bake.ts [--seed <s>] [--out <dir>] [--template <file>] [--write-records]
-//   (from the repository root, after `pnpm install`)
+//   node v2/tools/import-eden/bake/bake.ts --backup <sim.db> [--world <id>] [--map <map.json>] [--out <dir>]
+//   (from the repository root, after `pnpm install` and `pnpm assets:pull`)
+//
+// `--backup` takes a live world's model from a backup of its database, as export/export.ts `--backup` does, so the
+// `things` table is keyed by the same ids as the facts' `origin`: bake a world from the same backup its facts came from.
 //
 // Writes, under <out> (default .local/import-eden/models): `worlds/models/<hash>.glb` (the tree that
 // `tools/cdn/publish.mjs --dry-run --root <out>` inventories) and `models.json` (every kind: its model or the reason it
@@ -47,13 +51,15 @@ const meshFiles = (dir: string): string[] => readdirSync(dir, { withFileTypes: t
 const loadErrors: Record<string, string> = {};
 for (const f of meshFiles(WEB)) { try { await import(pathToFileURL(join(process.cwd(), f)).href); } catch (e) { loadErrors[relative(WEB, f)] = String(e).slice(0, 200); } }
 
-// --- Replay (as export/export.ts) ------------------------------------------------------------------------------------
-const tpl = JSON.parse(readFileSync(TEMPLATE, 'utf8'));
+// --- Replay (as export/export.ts), or a live world's backup (export.ts --backup) -------------------------------------
 // A template's mesh things name core assets by hash (the Mars campus does); resolve them as the server does (export.ts).
-const { coreAssets } = await import('../../import-world/export/backup.ts');
-const core = coreAssets();
-const m = new WorldModel({ constants: { ground: 'land', extent: 1000, ...tpl.constants }, seed: SEED, assets: (sha) => core[sha] });
-m.library = coreLibrary();
+const backup = await import('../../import-world/export/backup.ts');
+const core = backup.coreAssets();
+const BACKUP = arg('--backup', '');
+const live = BACKUP ? backup.fromBackup(BACKUP, arg('--world', ''), arg('--map', 'content/worlds/eden/map.json')) : null;
+const tpl = live ? { batches: [] } : JSON.parse(readFileSync(TEMPLATE, 'utf8'));
+const m = live?.m ?? new WorldModel({ constants: { ground: 'land', extent: 1000, ...tpl.constants }, seed: SEED, assets: (sha) => core[sha] });
+if (!live) m.library = coreLibrary();
 let tick = 1;
 const apply = (batch: unknown, what: string) => { const r = applyBatch(m, batch, 'genesis', tick++, { trusted: true }); if (!r.result.accepted) throw new Error(`${what} refused: ${JSON.stringify(r.result).slice(0, 600)}`); };
 if (tpl.state) apply({ ops: [{ op: 'world', state: tpl.state }], group: 'genesis' }, 'state');
@@ -187,7 +193,7 @@ type KindRow = { kind: string; ref: string; hash: string; things: number; builde
 const kinds = new Map<string, KindRow>();
 const models = new Map<string, { hash: string; bytes: number; tris: number; parts: number; effects: number; roles: string[]; kind: string; key: string; sha256: string; source?: string }>();
 const keyed = new Map<string, string>(); // kind ref + key -> model hash
-const thingModels: Record<string, string> = {}; // today's thing id -> its model's hash (V8 #2718: the page's table)
+const thingModels: Record<string, string> = {}; // today's thing id (the facts' `origin`) -> its model's hash (V8 #2718: the page's table)
 mkdirSync(join(OUT, 'worlds/models'), { recursive: true });
 let built = 0;
 for (const e of [...m.entities.values()].sort((a, b) => a.id.localeCompare(b.id))) {
@@ -259,7 +265,8 @@ for (const r of kinds.values()) {
 }
 const rows = [...kinds.values()].sort((a, b) => a.ref.localeCompare(b.ref));
 const summary = {
-  template: TEMPLATE, templateSha256: sha256(readFileSync(TEMPLATE)), label: LABEL, things: m.entities.size,
+  ...(live ? { world: live.head.world, backup: live.head.backup } : { template: TEMPLATE, templateSha256: sha256(readFileSync(TEMPLATE)) }),
+  label: LABEL, things: m.entities.size, thingsWithModel: Object.keys(thingModels).length,
   kinds: rows.length, kindsWithModel: rows.filter((r) => Object.keys(r.models).length).length,
   kindsStored: rows.filter((r) => r.stored).length, kindsListed: rows.filter((r) => r.reason).length,
   models: models.size, modelBytes: [...models.values()].reduce((n, x) => n + x.bytes, 0), triangles: [...models.values()].reduce((n, x) => n + x.tris, 0),
