@@ -751,6 +751,85 @@ fn o3c_a2_a3_ships_history_to_an_s3_bucket_across_three_kills() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
+/// #1960: a restart whose first reads of an S3 bucket go unanswered past the client's timeout tries them again and
+/// starts; with the bucket out of reach for good it still ends, with the store's refusal, in bounded time.
+// A real process on the real clock: the stalls and the bound are real time.
+#[allow(clippy::disallowed_methods)]
+#[test]
+fn i1960_a_world_starts_through_slow_store_reads_and_ends_on_an_unreachable_store() {
+    use directoryd::directory::stand_in::{KEY_ID, StandIn};
+    use std::ffi::OsStr;
+    let d = scratch("i1960");
+    let (dir, ..) = seeded(&d);
+    let socket = d.join("s");
+    let env = [
+        ("AWS_ACCESS_KEY_ID", KEY_ID),
+        ("AWS_SECRET_ACCESS_KEY", "stand-in-secret"),
+    ];
+    let s = StandIn::start(1000).expect("a stand-in");
+    let spec = format!("{}/i1960", s.url("souls"));
+    let more = |spec: &str| {
+        [
+            OsStr::new("--store").to_owned(),
+            OsStr::new(spec).to_owned(),
+            OsStr::new("--machine").to_owned(),
+            OsStr::new("test-machine").to_owned(),
+        ]
+    };
+    let args = more(&spec);
+    let args: Vec<&OsStr> = args.iter().map(|a| a.as_os_str()).collect();
+    // The first start claims the world and writes its history's first objects.
+    let w = serve_env(&dir, &socket, &args, &env);
+    w.line("listening");
+    w.kill();
+
+    // The restart: its first two reads of the history's header (the archiver's, as production's counts read was) each
+    // go unanswered for 6 s, past the client's 5 s.
+    s.stall_reads(2, Duration::from_secs(6), "/header");
+    let begun = Instant::now();
+    let w = serve_env(&dir, &socket, &args, &env);
+    w.line("listening");
+    let took = begun.elapsed();
+    let retried: Vec<String> = w
+        .all
+        .lock()
+        .map(|l| l.clone())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|l| l.starts_with("store: ") && l.contains("out of reach"))
+        .collect();
+    println!("restart through 2 stalled reads in {took:?}: {retried:?}");
+    assert_eq!(retried.len(), 2, "the stalled read tried again twice");
+    assert!(
+        retried.iter().all(|l| l.contains("/header: timeout")),
+        "{retried:?}"
+    );
+    w.kill();
+
+    // The bucket gone: nothing listens at its address. Four tries of the first read, then the refusal.
+    let gone = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
+    let port = gone.local_addr().expect("its address").port();
+    drop(gone);
+    let args = more(&format!("s3:http://127.0.0.1:{port}/souls/i1960"));
+    let args: Vec<&OsStr> = args.iter().map(|a| a.as_os_str()).collect();
+    let begun = Instant::now();
+    let mut w = serve_env(&dir, &socket, &args, &env);
+    let ended = w.line("worldd serve: ");
+    let status = w.child.wait().expect("it ends");
+    let took = begun.elapsed();
+    println!("unreachable: {ended} after {took:?}");
+    assert!(!status.success());
+    assert!(
+        ended.starts_with("worldd serve: store-unreachable: "),
+        "{ended}"
+    );
+    assert!(
+        took >= Duration::from_secs(14) && took < Duration::from_secs(60),
+        "four tries over the waits, bounded: {took:?}"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
 /// O3b's kill test over the store `spec` names, with `env` set for the world: every line the world printed.
 // A real process on the real clock: the waits for shipping are real time.
 #[allow(clippy::disallowed_methods)]

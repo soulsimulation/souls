@@ -121,7 +121,7 @@ use sim::log::{FileStore, Log};
 use sim::recorder;
 use sim::slots::PlaceAt;
 use sim::walk::town::Town;
-use supervisor::bucket::Under;
+use supervisor::bucket::{Patient, Under, patiently};
 use worldd::answers::{self, Config, Join};
 use worldd::bodies::{Bodies, Placed};
 use worldd::buildsafe::Creator;
@@ -1294,7 +1294,8 @@ fn bodies(
     Ok(b)
 }
 
-type Bucket = Shared<supervisor::bucket::Bucket>;
+/// The world's store; its reads at the start are made [`patiently`] (#1960).
+type Bucket = Shared<Patient<supervisor::bucket::Bucket>>;
 
 /// Public navigation only: the same restored header/root as the live writer, beside the history export.
 fn public_history_live(dir: &Path, name: &str, header: &Header, key: &Key) -> R<()> {
@@ -1584,7 +1585,8 @@ fn archiving(
     closed: impl Fn(u64) + Send + 'static,
 ) -> std::thread::JoinHandle<Result<(), Refusal>> {
     std::thread::spawn(move || {
-        let mut a = open()?;
+        // A fork's open is the world's start too: its reads are patient (#1960).
+        let mut a = patiently(open)?;
         // How far its closed objects reach, for the log's compactor (#3837).
         let publish = |a: &Archiver<Again>| closed(a.durable_cursor());
         publish(&a);
@@ -1789,10 +1791,10 @@ fn off_machine(
         text,
     } = source;
     let (first, records) = (recovered.first, recovered.records.as_slice());
-    let store: Bucket = Shared(Arc::new(
+    let store: Bucket = Shared(Arc::new(Patient::new(
         supervisor::bucket::Bucket::from_spec(spec).map_err(refusal)?,
-    ));
-    println!("store: {}", store.0.what());
+    )));
+    println!("store: {}", store.0.store.what());
     let prefix = format!("h/{name}/{}/", to_hex(&built.header.lineage.0));
     let fork_base = checkpoint
         .map(|newest| fork_archive_base(&store, &prefix, dir, &built.header, newest, recovered))
@@ -1927,12 +1929,12 @@ fn off_machine(
 /// each [`CREATOR_EVERY`] on a thread of its own: a change replaces it (there is never more than one), and a failed
 /// read keeps the last.
 fn creator(spec: &str, built: &Built) -> R<Arc<Creator>> {
-    let store = supervisor::bucket::Bucket::from_spec(spec).map_err(refusal)?;
+    let store = Patient::new(supervisor::bucket::Bucket::from_spec(spec).map_err(refusal)?);
     let (lineage, zone) = (built.header.lineage.0, built.header.zone);
     let read = Arc::new(move || directory_creator_of(&store, &lineage, zone));
     let admission = Arc::clone(&read);
     let creator = Arc::new(Creator::with_reader(
-        read().map_err(refusal)?,
+        patiently(|| read()).map_err(refusal)?,
         Arc::new(move || admission().ok().flatten()),
     ));
     let say = |c: Option<Id>| c.map_or_else(|| "none".to_owned(), principal_text);
@@ -2200,21 +2202,25 @@ fn serve(args: &[String]) -> R<()> {
                 .cloned()
                 .or_else(|| std::env::var("WORLDD_MACHINE").ok())
                 .unwrap_or_else(|| "local".to_owned());
-            Some(off_machine(
-                spec,
-                &machine,
-                &built,
-                &name,
-                &dir,
-                SourceContext {
-                    recovered: &found,
-                    parts_from: sim::log::compact::read_cut(&log_path)
-                        .map_err(refusal)?
-                        .map_or(0, |c| c.note),
-                    checkpoint: checkpoint.as_deref(),
-                    text: Arc::clone(&text),
-                },
-            )?)
+            let parts_from = sim::log::compact::read_cut(&log_path)
+                .map_err(refusal)?
+                .map_or(0, |c| c.note);
+            // The start's reads of the store are patient: one slow answer does not end the world (#1960).
+            Some(patiently(|| {
+                off_machine(
+                    spec,
+                    &machine,
+                    &built,
+                    &name,
+                    &dir,
+                    SourceContext {
+                        recovered: &found,
+                        parts_from,
+                        checkpoint: checkpoint.as_deref(),
+                        text: Arc::clone(&text),
+                    },
+                )
+            })?)
         }
         None => None,
     };
@@ -2320,14 +2326,18 @@ fn serve(args: &[String]) -> R<()> {
         level: Level::Full,
         audience: Audience::Everyone,
     };
-    let stream_store = supervisor::bucket::Bucket::from_spec(
-        bucket
-            .as_deref()
-            .map(str::to_owned)
-            .unwrap_or_else(|| format!("folder:{}", dir.join(".stream-recovery-store").display()))
-            .as_str(),
-    )
-    .map_err(refusal)?;
+    let stream_store = Patient::new(
+        supervisor::bucket::Bucket::from_spec(
+            bucket
+                .as_deref()
+                .map(str::to_owned)
+                .unwrap_or_else(|| {
+                    format!("folder:{}", dir.join(".stream-recovery-store").display())
+                })
+                .as_str(),
+        )
+        .map_err(refusal)?,
+    );
     if let Some(seed) = stream_mapping {
         println!(
             "stream: initial mapping from durable record {} effect {}",
@@ -2453,7 +2463,8 @@ fn serve(args: &[String]) -> R<()> {
                     clock_seed: stream_clock,
                     history: Some(&*stream_found),
                 };
-                let mut writer = view_out::PublicWriter::open(start, stream_store)?;
+                // Its recovery reads are the world's start: patient (#1960).
+                let mut writer = patiently(|| view_out::PublicWriter::open(start, stream_store))?;
                 // Both the pointer and placement bootstrap resolve the existing strict public history export.
                 let history = "history/";
                 let pointer = format!(
@@ -2958,13 +2969,13 @@ mod tests {
             Header::read(&fixture_bytes(replica::effects::FIXTURE_HEADER).unwrap()).unwrap();
         let dir = std::env::temp_dir().join(format!("w3c-export-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let bucket = Shared(Arc::new(
+        let bucket = Shared(Arc::new(Patient::new(
             supervisor::bucket::Bucket::parse(
                 &format!("folder:{}", dir.join("store").display()),
                 |_| String::new(),
             )
             .unwrap(),
-        ));
+        )));
         let public = dir.join("public");
         let adapter = Again {
             store: Under {
