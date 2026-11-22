@@ -42,7 +42,7 @@ test('three synthetic looks resolve and colour as today', () => {
 });
 
 test('a look the def refuses is refused', () => {
-  for (const bad of [{ hat: 'crown' }, { height: 2 }, { skin: 'red' }, { skin: '#ABCDEF' }, { wings: 'two' }, [], null, 'casual']) assert.throws(() => checkLook(bad), undefined, JSON.stringify(bad));
+  for (const bad of [{ hat: 'crown' }, { height: 2 }, { skin: 'red' }, { skin: '#ABCDEF' }, { wings: 'two' }, [], null, 'casual']) assert.throws(() => checkLook(bad), Error, JSON.stringify(bad));
   assert.deepEqual(resolveLook({}).preset, 'none');
 });
 

@@ -5,6 +5,7 @@ import { join, resolve } from 'node:path';
 import type { Plugin } from 'vite';
 import { FLOATER_MODELS } from '../../mars/viewer/engine/bodies/models.ts';
 import { CREATURE_IDS } from '../../mars/viewer/engine/bodies/creatures.ts';
+import { KIT_SHA256, kitFiles } from './src/crowd/humanoid/kit-pin.ts';
 export const BODY_SOURCE_FILES = [
   'v2/web/body-assets.ts', 'v2/tools/import-body/presets.ts', 'v2/tools/import-body/import-body.ts', 'v2/tools/import-body/decode-draco.ts',
   'v2/web/src/crowd/bake.ts', 'v2/web/src/crowd/lod.ts', 'mars/viewer/app/engine-view/creatures.ts',
@@ -15,6 +16,7 @@ export const BODY_SOURCE_FILES = [
   'tools/body-authoring/robot/author.mjs', 'tools/body-authoring/monster/author.mjs',
   'tools/body-authoring/ghost/author.mjs', 'tools/body-authoring/centaur/author.mjs',
   'worlds/littlemartians/characters/manifest.json', 'tools/assets/manifest.json',
+  'v2/web/src/crowd/humanoid/kit-pin.ts', 'mars/viewer/public/modular/humanoid/kit.json',
 ];
 const sha = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 const defaults = ['animated-casual.mesh.glb', 'animated-punk.mesh.glb', 'animated-woman.mesh.glb', 'clips-ual.glb', 'clips-ual-woman.glb'];
@@ -65,7 +67,24 @@ export function bodyAssetFiles(root: string, repo = resolve(import.meta.dirname,
   }
   const required = [...FLOATER_MODELS.map((m) => m.id), 'pip', 'monster', 'ghost', 'centaur', ...CREATURE_IDS];
   if (seen.size !== required.length || required.some((name) => !seen.has(name))) throw Error('body.assets-presets');
-  return [...files].map(([path, bytes]) => ({ path, bytes }));
+  return [...files].map(([path, bytes]) => ({ path, bytes })).concat(humanoidKitFiles(folder));
+}
+
+/** The humanoid kit (#3998) under the prepared `humanoid/`: kit.json at its pin, then every file it lists at its hash. */
+export function humanoidKitFiles(folder: string, pin = KIT_SHA256): { path: string; bytes: Buffer }[] {
+  for (const dir of ['humanoid', 'humanoid/parts']) {
+    const info = lstatSync(join(folder, dir), { throwIfNoEntry: false });
+    if (!info?.isDirectory() || info.isSymbolicLink()) throw Error('body.humanoid-kit-missing');
+  }
+  const read = (path: string, sha256: string) => {
+    const info = lstatSync(join(folder, path), { throwIfNoEntry: false });
+    if (!info?.isFile() || info.isSymbolicLink()) throw Error('body.humanoid-kit-missing');
+    const bytes = readFileSync(join(folder, path));
+    if (sha(bytes) !== sha256) throw Error('body.humanoid-kit-hash');
+    return { path, bytes };
+  };
+  const kit = read('humanoid/kit.json', pin);
+  return [kit, ...kitFiles(JSON.parse(kit.bytes.toString('utf8'))).map((f) => read('humanoid/' + f.file, f.sha256))];
 }
 
 export function bodyAssets(root: string | undefined): Plugin {

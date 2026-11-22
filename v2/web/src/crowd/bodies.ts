@@ -9,6 +9,7 @@ import { Crowd } from './crowd.ts';
 import { ArrivalLights } from './arrival.ts';
 import { HumanoidKit } from './humanoid/compose.ts';
 import { LOOK_PREFIX } from './humanoid/field.ts';
+import { KIT_SHA256 } from './humanoid/kit-pin.ts';
 
 /** The body files of today's people (character-wire.ts's names) and the clips baked for each. */
 export const BODIES: [string, string, string][] = [
@@ -23,8 +24,8 @@ export const WALK_STRIDE = 1.3;
 const FULL_WALK = 0.9;
 
 /** The crowd with the three body files from `base` (a directory URL); humanoid looks (#3998) compose from the kit at
- *  `kit`. */
-export async function loadCrowd(base: string, capacity = 1024, kit = new HumanoidKit(base + 'humanoid/')): Promise<Crowd> {
+ *  `kit`, by default the one published beside them, its kit.json at the pinned hash. */
+export async function loadCrowd(base: string, capacity = 1024, kit = new HumanoidKit(base + 'humanoid/', { kitHash: KIT_SHA256 })): Promise<Crowd> {
   const crowd = new Crowd(await Promise.all(BODIES.map(([name, mesh, clips]) => loadModel(name, base + mesh, base + clips, CLIPS))), capacity);
   const response = await fetch(base + 'bodies.json');
   if (!response.ok) throw new Error('body.catalogue-unavailable');

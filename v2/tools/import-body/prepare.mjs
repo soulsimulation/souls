@@ -4,10 +4,13 @@ import { spawnSync } from 'node:child_process';
 import { lstatSync, mkdirSync, readFileSync, readlinkSync, symlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { kitFiles } from '../../web/src/crowd/humanoid/kit-pin.ts';
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../../..');
 const inputs = [
   ...['verdelis.glb', 'kalama.glb', 'kweku.glb', 'mycos.glb', 'ada.glb', 'shuijing.glb', 'nyx.glb', 'kin/green-patterns-blue.glb', 'kin/chebel.glb', 'kin/colors-lemuet.glb', 'kin/crystal-freeman.glb', 'kin/dark-blue.glb', 'kin/green-brains-out.glb'].map((name) => 'worlds/littlemartians/characters/' + name),
   ...['animated-casual.glb', 'animated-casual.mesh.glb', 'animated-punk.mesh.glb', 'animated-woman.mesh.glb', 'clips-ual.glb', 'clips-ual-woman.glb'].map((name) => 'mars/viewer/public/modular/environment/' + name),
+  // #3998: the humanoid kit's files, as kit.json lists them (kit.json itself is in git).
+  ...kitFiles(JSON.parse(readFileSync(join(repo, 'mars/viewer/public/modular/humanoid/kit.json'), 'utf8'))).map((f) => 'mars/viewer/public/modular/humanoid/' + f.file),
 ];
 /** Fixed existing dependencies for the released renderer's source/type closure; no package install. */
 export function prepareDependencies() {

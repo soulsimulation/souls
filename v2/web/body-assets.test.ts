@@ -3,7 +3,8 @@ import { createHash } from 'node:crypto';
 import { cpSync, mkdirSync, mkdtempSync, readFileSync, rmSync, symlinkSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { test } from 'node:test';
-import { bodyAssetFiles } from './body-assets.ts';
+import { bodyAssetFiles, humanoidKitFiles } from './body-assets.ts';
+import { KIT_SHA256, kitFiles } from './src/crowd/humanoid/kit-pin.ts';
 const repo = resolve(import.meta.dirname, '../..');
 const digest = (bytes: Uint8Array) => createHash('sha256').update(bytes).digest('hex');
 
@@ -40,5 +41,36 @@ test('prepared publication carries every pinned preset and refuses modified, mis
     const entry = reset.files.find((f: { path: string }) => f.path === 'bodies.json'); entry.sha256 = digest(bytes); entry.bytes = bytes.length;
     writeFileSync(join(tmp, 'body-assets.json'), JSON.stringify(reset));
     assert.throws(() => bodyAssetFiles(tmp), /body.assets-presets/);
+  } finally { rmSync(tmp, { recursive: true }); }
+});
+
+test('#3998: the humanoid kit is published at its pin, every file at kit.json\'s hash, and refused otherwise', () => {
+  const kitBytes = readFileSync(join(repo, 'mars/viewer/public/modular/humanoid/kit.json'));
+  assert.equal(digest(kitBytes), KIT_SHA256, 'the pin is the checked-in kit.json');
+  const listed = kitFiles(JSON.parse(kitBytes.toString('utf8')));
+  assert.equal(listed.length, new Set(listed.map((f) => f.file)).size);
+  assert.ok(listed.some((f) => f.file === 'rig-masc.glb') && listed.some((f) => f.file.startsWith('parts/')));
+  const prepared = process.env.B15_BODY_ASSETS;
+  if (prepared) {
+    const published = bodyAssetFiles(prepared).filter((f) => f.path.startsWith('humanoid/'));
+    assert.equal(published.length, listed.length + 1, 'kit.json and every file it lists');
+  }
+  // A synthetic kit: one rig, one part.
+  const scratch = join(repo, '.local/3998'); mkdirSync(scratch, { recursive: true });
+  const tmp = mkdtempSync(join(scratch, 'kit-test-'));
+  try {
+    assert.throws(() => humanoidKitFiles(tmp), /body.humanoid-kit-missing/);
+    mkdirSync(join(tmp, 'humanoid/parts'), { recursive: true });
+    const rig = Buffer.from('rig'), part = Buffer.from('part');
+    const kit = Buffer.from(JSON.stringify({ frames: { masc: { rig: 'rig-masc.glb', sha256: digest(rig) } }, parts: { top: { shirt: { files: { masc: { file: 'parts/top-shirt.masc.glb', sha256: digest(part) } } } } } }));
+    writeFileSync(join(tmp, 'humanoid/kit.json'), kit);
+    writeFileSync(join(tmp, 'humanoid/rig-masc.glb'), rig);
+    writeFileSync(join(tmp, 'humanoid/parts/top-shirt.masc.glb'), part);
+    assert.throws(() => humanoidKitFiles(tmp), /body.humanoid-kit-hash/, 'a kit.json other than the pinned one');
+    assert.deepEqual(humanoidKitFiles(tmp, digest(kit)).map((f) => f.path), ['humanoid/kit.json', 'humanoid/rig-masc.glb', 'humanoid/parts/top-shirt.masc.glb']);
+    writeFileSync(join(tmp, 'humanoid/parts/top-shirt.masc.glb'), Buffer.from('changed'));
+    assert.throws(() => humanoidKitFiles(tmp, digest(kit)), /body.humanoid-kit-hash/, 'a part not at its hash');
+    rmSync(join(tmp, 'humanoid/parts/top-shirt.masc.glb')); symlinkSync(join(tmp, 'humanoid/rig-masc.glb'), join(tmp, 'humanoid/parts/top-shirt.masc.glb'));
+    assert.throws(() => humanoidKitFiles(tmp, digest(kit)), /body.humanoid-kit-missing/, 'a linked part');
   } finally { rmSync(tmp, { recursive: true }); }
 });

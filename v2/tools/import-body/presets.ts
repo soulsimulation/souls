@@ -18,7 +18,8 @@ import { PIP_PRESET } from '../../../apps/server/src/edge/body/pip.ts';
 import { MONSTER_PRESET, GHOST_PRESET, CENTAUR_PRESET } from '../../../apps/server/src/edge/body/shared-bodies.ts';
 import { HUMANOID2_DEF } from '../../../packages/world-compiler/src/core-kit/humanoid2.ts';
 import { sha256Hex, stableStringify } from '../../../packages/world-compiler/src/hash.ts';
-import { BODY_SOURCE_FILES } from '../../web/body-assets.ts';
+import { BODY_SOURCE_FILES, humanoidKitFiles } from '../../web/body-assets.ts';
+import { KIT_SHA256, kitFiles } from '../../web/src/crowd/humanoid/kit-pin.ts';
 import { bakeCreature, encodeBaked } from '../../web/src/crowd/bake.ts';
 import { decodeBaked } from '../../web/src/crowd/bake.ts';
 import { decoderBytes } from './decode-draco.ts';
@@ -121,6 +122,15 @@ export async function importPresets(out: string, media = REPO) {
     }
     mkdirSync(join(out, 'decoder'), { recursive: true });
     for (const [name, bytes] of Object.entries(decoderBytes())) writeFileSync(join(out, 'decoder', name), bytes);
+    // #3998: the humanoid kit the page draws looks from, kit.json at its pin and each file at kit.json's hash. Its own
+    // manifest is kit.json, so it stays out of body-assets.json's files.
+    stage = 'humanoid-kit';
+    const kitDir = 'mars/viewer/public/modular/humanoid/', kit = readFileSync(join(REPO, kitDir, 'kit.json'));
+    if (sha(kit) !== KIT_SHA256) throw Error('body.humanoid-kit-hash');
+    mkdirSync(join(out, 'humanoid/parts'), { recursive: true });
+    writeFileSync(join(out, 'humanoid/kit.json'), kit);
+    for (const f of kitFiles(JSON.parse(kit.toString('utf8')))) copyFileSync(join(media, kitDir, f.file), join(out, 'humanoid', f.file));
+    humanoidKitFiles(out);
     const paths = readdirSync(out).filter((name) => /\.(diag|json|glb)$/.test(name) && name !== 'body-assets.json');
     paths.push(...readdirSync(join(out, 'models')).map((name) => 'models/' + name), ...Object.keys(decoderBytes()).map((name) => 'decoder/' + name));
     const files = paths.sort().map((path) => { const bytes = readFileSync(join(out, path)); return { path, bytes: bytes.length, sha256: sha(bytes) }; });

@@ -640,6 +640,13 @@ pub fn notice_key(soul: Id) -> Vec<u8> {
     k.extend(encode(&soul.to_value()).unwrap_or_default());
     k
 }
+
+/// The key the operator's look for `soul` is numbered under (#3998), apart from [`notice_key`]'s.
+pub fn look_key(soul: Id) -> Vec<u8> {
+    let mut k = b"looks:".to_vec();
+    k.extend(encode(&soul.to_value()).unwrap_or_default());
+    k
+}
 /// The link from a body to its Soul (K10).
 const BODY_OF: &str = "souls:body-of";
 
@@ -1588,6 +1595,9 @@ impl Clock {
         if intent.verb.as_str() == skills::wear::VERB {
             return self.wear(&intent, key, (reply, stamps), now);
         }
+        if intent.verb.as_str() == skills::wear::LOOK_VERB {
+            return self.look(&intent, key, (reply, stamps), now);
+        }
         let mut value = intent.to_value();
         keep_arg_names(&mut value);
         // Every text the intent would be logged with must be a name the log's reader takes (#3765). A malformed word
@@ -2405,6 +2415,65 @@ impl Clock {
         }
     }
 
+    /// #3998: a Soul's look put on its default body, one write of [`skills::wear::LOOK`] by the body, answered with a
+    /// receipt after its tick's sync, as a describe is. Refused `look.wears-body` while it wears a hash, `look.worn`
+    /// when it already carries these params, `look.malformed` for anything but one JSON object of at most 2 KiB.
+    fn look(
+        &mut self,
+        intent: &Intent,
+        key: Vec<u8>,
+        (reply, stamps): (Reply, Stamps),
+        now: Micros,
+    ) {
+        let (actor, sequence) = (intent.actor, intent.sequence);
+        let value = intent.to_value();
+        let written = (|| {
+            let params = skills::wear::look_params(&intent.parameters)?;
+            if expired(intent.expiry, now) {
+                return Err("intent.expired");
+            }
+            let body = self.body_of(intent)?;
+            let tree = self.replica.tree();
+            let node = tree.handle(body).and_then(|h| tree.node(h));
+            match skills::wear::look(node.ok_or("intent.no-body")?.fields(), params) {
+                skills::wear::Look::WearsBody => return Err("look.wears-body"),
+                skills::wear::Look::Worn => return Err("look.worn"),
+                skills::wear::Look::Write => {}
+            }
+            let id = Id::new(self.lineage, self.next_intent).ok_or("intent.ids-exhausted")?;
+            let env = words::envelope(self.replica.version(), now, id, actor, body);
+            let effect = Effect {
+                envelope: Envelope {
+                    audience: Audience::Everyone,
+                    ..env
+                },
+                body: Body::Changes(vec![ChangeRec {
+                    change: skills::wear::look_change(body, params),
+                    rest: Rest::new(),
+                }]),
+                events: None,
+                rest: Rest::new(),
+            };
+            self.write_all(vec![effect]).map_err(|r| r.name)?;
+            Ok(id)
+        })();
+        let a = match written {
+            Ok(id) => {
+                self.next_intent += 1;
+                Answer::Receipt {
+                    actor,
+                    sequence,
+                    intent: id,
+                    entries: self.receipts.entries(id).to_vec(),
+                    names: BTreeMap::new(),
+                }
+            }
+            Err(r) => self.refusal(actor, sequence, r),
+        };
+        let id = written.ok();
+        self.answered(key, sequence, id, Some(value), &a, (vec![reply], stamps));
+    }
+
     /// B15's existing hash-only record, checked off-clock and committed without mutating refused actors.
     fn wear(
         &mut self,
@@ -2688,63 +2757,106 @@ impl Clock {
         if self.life.is_none() {
             return;
         }
+        // #3998: the operator's looks, counted as this world judges them: written, the body wears a hash, already worn.
+        let mut looks = [0usize; 3];
         for soul in told {
-            let (verb, parameters) = if d.retired.contains(&soul) {
-                (LEAVE, BTreeMap::new())
-            } else if let Some(w) = d.words.get(&soul) {
-                let said = |n: &Option<Vec<u8>>| {
-                    n.as_ref().map(|b| {
-                        Value::Map(BTreeMap::from([(words::WORDS, Value::Bytes(b.clone()))]))
-                    })
-                };
-                let p: BTreeMap<u64, Value> = [(1, said(&w.name)), (2, said(&w.description))]
-                    .into_iter()
-                    .filter_map(|(k, v)| Some((k, v?)))
-                    .collect();
-                (DESCRIBE, p)
+            let mut notices = Vec::new();
+            if d.retired.contains(&soul) {
+                notices.push((LEAVE, BTreeMap::new()));
             } else {
-                continue;
-            };
-            let Some(verb) = Name::new(verb) else {
-                continue;
-            };
-            let mut intent = Intent {
-                actor: Actor::Soul(soul),
-                verb,
-                target: None,
-                parameters,
-                sequence: 0,
-                basis: self.version(),
-                expiry: now.saturating_add(self.deadline),
-                resources: Vec::new(),
-                fallbacks: Vec::new(),
-                replaces: None,
-                body: None,
-                reflex: false,
-            };
-            // Only a Soul with a body here (its link after a restart included); the directory never births one.
-            if self.unborn(&intent).is_some() {
-                continue;
-            }
-            if intent.verb.as_str() == DESCRIBE {
-                let body = self.life.as_ref().and_then(|l| l.life.body_of(soul));
-                if intent.parameters.is_empty()
-                    || body.is_some_and(|b| self.says(b, &d.words[&soul]))
-                {
-                    continue;
+                if let Some(w) = d.words.get(&soul) {
+                    let said = |n: &Option<Vec<u8>>| {
+                        n.as_ref().map(|b| {
+                            Value::Map(BTreeMap::from([(words::WORDS, Value::Bytes(b.clone()))]))
+                        })
+                    };
+                    let p: BTreeMap<u64, Value> = [(1, said(&w.name)), (2, said(&w.description))]
+                        .into_iter()
+                        .filter_map(|(k, v)| Some((k, v?)))
+                        .collect();
+                    notices.push((DESCRIBE, p));
+                }
+                if let Some(look) = d.looks.get(&soul) {
+                    let p = BTreeMap::from([(1, Value::Bytes(look.clone()))]);
+                    notices.push((skills::wear::LOOK_VERB, p));
                 }
             }
-            let key = notice_key(soul);
-            intent.sequence = self
-                .sequences
-                .kept()
-                .find(|(k, _, _)| *k == key.as_slice())
-                .map_or(1, |(_, last, _)| last + 1);
-            let Ok(bytes) = encode(&intent.to_value()) else {
-                continue;
-            };
-            self.arrival_as(&bytes, Some(key), reply.clone(), Stamps::default(), now);
+            for (verb, parameters) in notices {
+                match self.notice(soul, verb, parameters, &d, &reply, now) {
+                    Some(skills::wear::Look::Write) => looks[0] += 1,
+                    Some(skills::wear::Look::WearsBody) => looks[1] += 1,
+                    Some(skills::wear::Look::Worn) => looks[2] += 1,
+                    None => {}
+                }
+            }
         }
+        if looks.iter().any(|n| *n > 0) {
+            let [written, wears, worn] = looks;
+            eprintln!(
+                "worldd: looks (#3998): {written} written, {wears} skipped (the body wears a hash), {worn} already worn"
+            );
+        }
+    }
+
+    /// One of the directory's notices for `soul` (a leave, a describe or a look), sent as its own intent unless it
+    /// has no body here or its body already agrees. A look is judged here (`skills::wear::look`) and handed back.
+    fn notice(
+        &mut self,
+        soul: Id,
+        verb: &str,
+        parameters: BTreeMap<u64, Value>,
+        d: &Directory,
+        reply: &Reply,
+        now: Micros,
+    ) -> Option<skills::wear::Look> {
+        let verb = Name::new(verb)?;
+        let mut intent = Intent {
+            actor: Actor::Soul(soul),
+            verb,
+            target: None,
+            parameters,
+            sequence: 0,
+            basis: self.version(),
+            expiry: now.saturating_add(self.deadline),
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+            reflex: false,
+        };
+        // Only a Soul with a body here (its link after a restart included); the directory never births one.
+        if self.unborn(&intent).is_some() {
+            return None;
+        }
+        let body = self.life.as_ref().and_then(|l| l.life.body_of(soul));
+        if intent.verb.as_str() == DESCRIBE
+            && (intent.parameters.is_empty() || body.is_some_and(|b| self.says(b, &d.words[&soul])))
+        {
+            return None;
+        }
+        // A look keeps a key of its own, so a describe and a look on one tick never take the same sequence.
+        let (key, judged) = if intent.verb.as_str() == skills::wear::LOOK_VERB {
+            let tree = self.replica.tree();
+            let node = body
+                .and_then(|b| tree.handle(b))
+                .and_then(|h| tree.node(h))?;
+            let params = skills::wear::look_params(&intent.parameters).ok()?;
+            let look = skills::wear::look(node.fields(), params);
+            if look != skills::wear::Look::Write {
+                return Some(look);
+            }
+            (look_key(soul), Some(look))
+        } else {
+            (notice_key(soul), None)
+        };
+        intent.sequence = self
+            .sequences
+            .kept()
+            .find(|(k, _, _)| *k == key.as_slice())
+            .map_or(1, |(_, last, _)| last + 1);
+        let bytes = encode(&intent.to_value()).ok()?;
+        self.arrival_as(&bytes, Some(key), reply.clone(), Stamps::default(), now);
+        judged
     }
 
     /// Whether `body`'s public name and description already read as the saved words `w` (a word not saved agrees).

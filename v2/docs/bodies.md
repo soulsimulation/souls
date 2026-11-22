@@ -242,8 +242,22 @@ A humanoid look made in today's editor (core/humanoid@2 params: hair, skin, top,
 the body node's field 33, the params as UTF-8 JSON (at most 2 KiB; #3998). Both workers carry it; while field32 is
 absent the page composes the look from the humanoid kit (`crowd/humanoid/`, today's composition ported, every kit file
 checked against `kit.json`'s hash) and bakes it into the crowd as one model per distinct look. It is a costume: the
-default person stands in while it loads or if it cannot be drawn, and a worn hash always wins. Nothing writes field
-33 yet; the migration from `legacy_looks_v1` is the next slice.
+default person stands in while it loads or if it cannot be drawn, and a worn hash always wins.
+
+Field 33 is engine-reserved on bodies (`skills::wear::LOOK`, in `replica::fields`). It is written only by the Soul's
+own `life:look` (parameter 1: the params' bytes, one JSON object of at most 2 KiB), one `Change::Set` by the body,
+refused `look.wears-body` while field32 holds a hash, `look.worn` when it already carries those bytes and
+`look.malformed` otherwise. The operator's one-time migration, `node v2/tools/ops/migrate-looks.mjs --accounts
+<accounts.sqlite> --out <world folder>/tokens.souls.looks` (one `--out` per world; the file sits beside the directory's
+Souls file the world reads), turns each valid `custom-humanoid` row of `legacy_looks_v1` into a `look <grant> <params
+hex>` line and prints counts only (rows, invalid, valid). The world reads that file with the directory's (W11b) and,
+at its next tick and at each later birth, gives each Soul with a body there its look as its own `life:look`, printing
+`looks (#3998): <n> written, <n> skipped (the body wears a hash), <n> already worn`. Running it again changes nothing.
+
+The humanoid kit is part of the prepared body assets: `presets.ts` copies `kit.json` (pinned by sha256 in
+`v2/web/src/crowd/humanoid/kit-pin.ts`) and every file it lists into `<prepared>/humanoid/`, `prepare.mjs` pulls those
+files with the other released inputs, and the page build publishes them as `assets/bodies/humanoid/`, each checked
+against its hash; the page checks `kit.json` against the same pin.
 
 The page build accepts the explicit prepared directory as `V2_BODY_ASSETS`. Its fixed manifest validates regular
 files, source pins and the complete catalogue/model/default/decoder closure before publishing `assets/bodies/`.

@@ -11,8 +11,14 @@
 //!
 //! - `retired <grant>`: the Soul was retired.
 //! - `words <grant> <name hex> <description hex>`: its saved words as UTF-8 in hex, `-` for one not saved.
+//! - `look <grant> <params hex>`: its humanoid look's params (#3998), given to its body as its own `life:look` while
+//!   the body wears no hash and does not already carry them (`skills::wear::look`).
 //!
 //! A grant is the Soul's, `soul-<scope hex>-<counter>`, as the tokens file names it.
+//!
+//! **The operator's looks** (#3998): beside the Souls file, `<Souls file>.looks` holds `look` lines the operator's
+//! one-time migration wrote (`v2/tools/ops/migrate-looks.mjs`, from the account store's `legacy_looks_v1`). The world
+//! reads the two as one ([`watch`]); the directory rewrites only its own.
 
 use std::collections::{BTreeMap, BTreeSet};
 use std::path::{Path, PathBuf};
@@ -36,6 +42,8 @@ pub struct Words {
 pub struct Directory {
     pub retired: BTreeSet<Id>,
     pub words: BTreeMap<Id, Words>,
+    /// Each Soul's humanoid look, its params' bytes.
+    pub looks: BTreeMap<Id, Vec<u8>>,
 }
 
 impl Directory {
@@ -56,6 +64,11 @@ impl Directory {
                     let (name, description) = (w(), w());
                     d.words.insert(s, Words { name, description });
                 }
+                (Some("look"), Some(s)) => {
+                    if let Some(params) = parts.next().and_then(|h| from_hex(h).ok()) {
+                        d.looks.insert(s, params);
+                    }
+                }
                 _ => {}
             }
         }
@@ -64,8 +77,19 @@ impl Directory {
 
     /// Every Soul the file names.
     pub fn souls(&self) -> impl Iterator<Item = Id> + '_ {
-        self.retired.iter().chain(self.words.keys()).copied()
+        self.retired
+            .iter()
+            .chain(self.words.keys())
+            .chain(self.looks.keys())
+            .copied()
     }
+}
+
+/// The operator's looks file beside the Souls file `souls`: its name with `.looks` added.
+pub fn looks_beside(souls: &Path) -> PathBuf {
+    let mut name = souls.file_name().unwrap_or_default().to_os_string();
+    name.push(".looks");
+    souls.with_file_name(name)
 }
 
 /// A Soul's id from its grant, `soul-<scope hex>-<counter>`.
@@ -86,14 +110,21 @@ pub fn beside(tokens: &Path) -> PathBuf {
 /// How often the file is looked at again.
 const EVERY: Duration = Duration::from_secs(1);
 
-/// Hands the file at `path` to the world on `events` now, before this returns, when it is there (so it comes before
-/// any intent served after), and again from a thread of its own each time it changes, with `answers` where the
-/// world's answers to it go. The thread ends once the world has stopped.
+/// Hands the file at `path` (with the operator's looks beside it, [`looks_beside`]) to the world on `events` now,
+/// before this returns, when it is there (so it comes before any intent served after), and again from a thread of
+/// its own each time either changes, with `answers` where the world's answers to it go. The thread ends once the
+/// world has stopped.
 pub fn watch(path: PathBuf, events: Sender<Event>, answers: Reply) {
+    let looks = looks_beside(&path);
     let send = move |last: &mut Option<String>| {
-        let Ok(text) = std::fs::read_to_string(&path) else {
+        let (souls, looks) = (
+            std::fs::read_to_string(&path),
+            std::fs::read_to_string(&looks),
+        );
+        if souls.is_err() && looks.is_err() {
             return true;
-        };
+        }
+        let text = souls.unwrap_or_default() + "\n" + &looks.unwrap_or_default();
         if last.as_deref() == Some(text.as_str()) {
             return true;
         }

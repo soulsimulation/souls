@@ -951,3 +951,51 @@ fn r21_joined_principal_private_turn_uses_body_and_rejects_nonmember() {
     }
     run.stop();
 }
+
+// #3998: the operator's look (`look` lines beside the directory's file) reaches a default body as the Soul's own
+// `life:look`, one write of field 33; told again, the world writes nothing. A Soul's own malformed look, or the look
+// it already wears, is refused by name.
+#[test]
+fn looks_reach_a_default_body_as_its_own_look_once() {
+    let (run, mut a, _) = serve("looks");
+    a.act(JOIN, None, p(&[(1, words("Ada"))]))
+        .expect("Ada joins");
+    let body = run.body_of(ada()).expect("born");
+    let params = br##"{"frame":"fem","hair":"bob","skin":"#a0785a"}"##;
+    let file = format!(
+        "look {} {}\n",
+        grant(ada()),
+        replica::encode::to_hex(params)
+    );
+    let receipt = told(&tell(&run, &file));
+    println!("#3998 the look: {receipt}");
+    assert!(receipt.starts_with("receipt"), "{receipt}");
+    let effects = entries_of(&run, &receipt);
+    assert_eq!(effects.len(), 1, "one effect: the look");
+    assert_eq!(
+        effects[0].envelope.actor,
+        Actor::Soul(ada()),
+        "the Soul's own"
+    );
+    let r = run.replay();
+    let t = r.tree();
+    let n = t.node(t.handle(body).expect("the body")).expect("the body");
+    assert_eq!(
+        n.fields().get(&skills::wear::LOOK),
+        Some(&Value::Bytes(params.to_vec()))
+    );
+    assert!(n.fields().get(&skills::wear::BODY).is_none());
+    // The same file again changes nothing: the body already wears the look.
+    let again = tell(&run, &file);
+    assert!(again.recv_timeout(Duration::from_millis(500)).is_err());
+    let look = |b: &[u8]| p(&[(1, Value::Bytes(b.to_vec()))]);
+    assert_eq!(
+        a.act(skills::wear::LOOK_VERB, None, look(b"[1]")),
+        Err("look.malformed".to_owned())
+    );
+    assert_eq!(
+        a.act(skills::wear::LOOK_VERB, None, look(params)),
+        Err("look.worn".to_owned())
+    );
+    run.stop();
+}
