@@ -71,7 +71,6 @@ pub fn register(
         }
         out.push(place);
     }
-    drop(view);
     // Each boarded seat's solids, in its floor's frame: the thing's own, and every solid on its floor near enough to lie
     // across a boarding step (the floor's own, read once per floor).
     let mut on_floor: std::collections::BTreeMap<Id, Vec<Solid>> = Default::default();
@@ -117,7 +116,6 @@ pub fn register(
             moved += 1;
         }
     }
-    drop(view);
     let left = found.len() - out.len();
     let mut things: Vec<Id> = out.iter().map(|p| p.thing).collect();
     things.dedup();
