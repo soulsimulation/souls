@@ -1,0 +1,2541 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Literal maximal pours conserve A+B; fill/empty deliberately change it. Whole level/feedback effects and six-action solution/reset; saved fixtures are not native cancellation proof.",
+  "cases": [
+    {
+      "name": "fill_jug_a_atomic_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 2,
+              "jug_b": 4,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "fill_jug_a"
+          },
+          "receipt": "fill_jug_a",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_a",
+                "n": 28,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:level_changed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:measuring_jug_puzzle",
+          "fields": {
+            "jug_a": 3,
+            "jug_b": 4,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "empty_jug_a_atomic_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 1,
+              "jug_b": 4,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "empty_jug_a"
+          },
+          "receipt": "empty_jug_a",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_a",
+                "n": 28,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:level_changed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:measuring_jug_puzzle",
+          "fields": {
+            "jug_a": 0,
+            "jug_b": 4,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "fill_jug_b_atomic_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 2,
+              "jug_b": 4,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "fill_jug_b"
+          },
+          "receipt": "fill_jug_b",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_b",
+                "n": 29,
+                "to": 5
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:level_changed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:measuring_jug_puzzle",
+          "fields": {
+            "jug_a": 2,
+            "jug_b": 5,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "empty_jug_b_atomic_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 2,
+              "jug_b": 1,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "empty_jug_b"
+          },
+          "receipt": "empty_jug_b",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_b",
+                "n": 29,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:level_changed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:measuring_jug_puzzle",
+          "fields": {
+            "jug_a": 2,
+            "jug_b": 0,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "pour_b_to_a_0_1_atomic_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 1,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "pour_b_to_a_0_1"
+          },
+          "receipt": "pour_b_to_a_0_1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_a",
+                "n": 28,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_b",
+                "n": 29,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:measuring_jug_puzzle",
+          "fields": {
+            "jug_a": 1,
+            "jug_b": 0,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "pour_b_to_a_0_2_atomic_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 2,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "pour_b_to_a_0_2"
+          },
+          "receipt": "pour_b_to_a_0_2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_a",
+                "n": 28,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_b",
+                "n": 29,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:measuring_jug_puzzle",
+          "fields": {
+            "jug_a": 2,
+            "jug_b": 0,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "pour_b_to_a_0_3_atomic_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 3,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "pour_b_to_a_0_3"
+          },
+          "receipt": "pour_b_to_a_0_3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_a",
+                "n": 28,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_b",
+                "n": 29,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:measuring_jug_puzzle",
+          "fields": {
+            "jug_a": 3,
+            "jug_b": 0,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "pour_b_to_a_0_4_atomic_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 4,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "pour_b_to_a_0_4"
+          },
+          "receipt": "pour_b_to_a_0_4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_a",
+                "n": 28,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_b",
+                "n": 29,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:measuring_jug_puzzle",
+          "fields": {
+            "jug_a": 3,
+            "jug_b": 1,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "pour_b_to_a_0_5_atomic_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 5,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "pour_b_to_a_0_5"
+          },
+          "receipt": "pour_b_to_a_0_5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_a",
+                "n": 28,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_b",
+                "n": 29,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:measuring_jug_puzzle",
+          "fields": {
+            "jug_a": 3,
+            "jug_b": 2,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "pour_a_to_b_1_0_atomic_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 1,
+              "jug_b": 0,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "pour_a_to_b_1_0"
+          },
+          "receipt": "pour_a_to_b_1_0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_a",
+                "n": 28,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_b",
+                "n": 29,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:measuring_jug_puzzle",
+          "fields": {
+            "jug_a": 0,
+            "jug_b": 1,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "pour_b_to_a_1_5_atomic_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 1,
+              "jug_b": 5,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "pour_b_to_a_1_5"
+          },
+          "receipt": "pour_b_to_a_1_5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_a",
+                "n": 28,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_b",
+                "n": 29,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:measuring_jug_puzzle",
+          "fields": {
+            "jug_a": 3,
+            "jug_b": 3,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "pour_a_to_b_2_0_atomic_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 2,
+              "jug_b": 0,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "pour_a_to_b_2_0"
+          },
+          "receipt": "pour_a_to_b_2_0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_a",
+                "n": 28,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_b",
+                "n": 29,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:measuring_jug_puzzle",
+          "fields": {
+            "jug_a": 0,
+            "jug_b": 2,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "pour_b_to_a_2_5_atomic_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 2,
+              "jug_b": 5,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "pour_b_to_a_2_5"
+          },
+          "receipt": "pour_b_to_a_2_5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_a",
+                "n": 28,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_b",
+                "n": 29,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:measuring_jug_puzzle",
+          "fields": {
+            "jug_a": 3,
+            "jug_b": 4,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "pour_a_to_b_3_0_atomic_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 3,
+              "jug_b": 0,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "pour_a_to_b_3_0"
+          },
+          "receipt": "pour_a_to_b_3_0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_a",
+                "n": 28,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_b",
+                "n": 29,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:measuring_jug_puzzle",
+          "fields": {
+            "jug_a": 0,
+            "jug_b": 3,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "pour_a_to_b_3_1_atomic_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 3,
+              "jug_b": 1,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "pour_a_to_b_3_1"
+          },
+          "receipt": "pour_a_to_b_3_1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_a",
+                "n": 28,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_b",
+                "n": 29,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:measuring_jug_puzzle",
+          "fields": {
+            "jug_a": 0,
+            "jug_b": 4,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "pour_a_to_b_3_2_atomic_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 3,
+              "jug_b": 2,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "pour_a_to_b_3_2"
+          },
+          "receipt": "pour_a_to_b_3_2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_a",
+                "n": 28,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_b",
+                "n": 29,
+                "to": 5
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:measuring_jug_puzzle",
+          "fields": {
+            "jug_a": 0,
+            "jug_b": 5,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "pour_a_to_b_3_3_atomic_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 3,
+              "jug_b": 3,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "pour_a_to_b_3_3"
+          },
+          "receipt": "pour_a_to_b_3_3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_a",
+                "n": 28,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_b",
+                "n": 29,
+                "to": 5
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:measuring_jug_puzzle",
+          "fields": {
+            "jug_a": 1,
+            "jug_b": 5,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "pour_a_to_b_3_4_atomic_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 3,
+              "jug_b": 4,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "pour_a_to_b_3_4"
+          },
+          "receipt": "pour_a_to_b_3_4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_a",
+                "n": 28,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_b",
+                "n": 29,
+                "to": 5
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:measuring_jug_puzzle",
+          "fields": {
+            "jug_a": 2,
+            "jug_b": 5,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "reset_atomic_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 3,
+              "jug_b": 4,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "reset"
+          },
+          "receipt": "reset",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_a",
+                "n": 28,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_b",
+                "n": 29,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:levels_reset",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:levels_reset",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:measuring_jug_puzzle",
+          "fields": {
+            "jug_a": 0,
+            "jug_b": 0,
+            "claimed": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "claim_solved_atomic_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 2,
+              "jug_b": 4,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "claim_solved"
+          },
+          "receipt": "claim_solved",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 30,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:puzzle_claimed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:measuring_jug_puzzle",
+          "fields": {
+            "jug_a": 2,
+            "jug_b": 4,
+            "claimed": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "shortest_solution_claim_measure_clears_and_reset",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 0,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "fill_jug_b"
+          },
+          "receipt": "journey0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_b",
+                "n": 29,
+                "to": 5
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:level_changed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "pour_b_to_a_0_5"
+          },
+          "receipt": "journey1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_a",
+                "n": 28,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_b",
+                "n": 29,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "empty_jug_a"
+          },
+          "receipt": "journey2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_a",
+                "n": 28,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:level_changed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "pour_b_to_a_0_2"
+          },
+          "receipt": "journey3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_a",
+                "n": 28,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_b",
+                "n": 29,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "fill_jug_b"
+          },
+          "receipt": "journey4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_b",
+                "n": 29,
+                "to": 5
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:level_changed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "pour_b_to_a_2_5"
+          },
+          "receipt": "journey5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_a",
+                "n": 28,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_b",
+                "n": 29,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:maximal_pour_completed",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "claim_solved"
+          },
+          "receipt": "journey6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 30,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:puzzle_claimed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "empty_jug_b"
+          },
+          "receipt": "journey7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_b",
+                "n": 29,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:level_changed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "reset"
+          },
+          "receipt": "journey8",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_a",
+                "n": 28,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "jug_b",
+                "n": 29,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "claimed",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:levels_reset",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:levels_reset",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:feedback_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:measuring_jug_puzzle",
+          "fields": {
+            "jug_a": 0,
+            "jug_b": 0,
+            "claimed": 0
+          }
+        }
+      }
+    }
+  ]
+}

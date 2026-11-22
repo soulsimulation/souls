@@ -1,0 +1,4666 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "All20 forms and every need: capacities, unavailable/no-transfer exact pours, hands, reach and claims.",
+  "cases": [
+    {
+      "name": "fill_jug_a_ready",
+      "act": {
+        "this": "p1",
+        "form": "fill_jug_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 2,
+              "jug_b": 4,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "fill_jug_a_need_0",
+      "act": {
+        "this": "p1",
+        "form": "fill_jug_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 3,
+              "jug_b": 4,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "fill_jug_a_need_1",
+      "act": {
+        "this": "p1",
+        "form": "fill_jug_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 2,
+              "jug_b": 4,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "fill_jug_a_need_2",
+      "act": {
+        "this": "p1",
+        "form": "fill_jug_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 2,
+              "jug_b": 4,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "empty_jug_a_ready",
+      "act": {
+        "this": "p1",
+        "form": "empty_jug_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 1,
+              "jug_b": 4,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "empty_jug_a_need_0",
+      "act": {
+        "this": "p1",
+        "form": "empty_jug_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 4,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "empty_jug_a_need_1",
+      "act": {
+        "this": "p1",
+        "form": "empty_jug_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 1,
+              "jug_b": 4,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "empty_jug_a_need_2",
+      "act": {
+        "this": "p1",
+        "form": "empty_jug_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 1,
+              "jug_b": 4,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "fill_jug_b_ready",
+      "act": {
+        "this": "p1",
+        "form": "fill_jug_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 2,
+              "jug_b": 4,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "fill_jug_b_need_0",
+      "act": {
+        "this": "p1",
+        "form": "fill_jug_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 2,
+              "jug_b": 5,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "fill_jug_b_need_1",
+      "act": {
+        "this": "p1",
+        "form": "fill_jug_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 2,
+              "jug_b": 4,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "fill_jug_b_need_2",
+      "act": {
+        "this": "p1",
+        "form": "fill_jug_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 2,
+              "jug_b": 4,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "empty_jug_b_ready",
+      "act": {
+        "this": "p1",
+        "form": "empty_jug_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 2,
+              "jug_b": 1,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "empty_jug_b_need_0",
+      "act": {
+        "this": "p1",
+        "form": "empty_jug_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 2,
+              "jug_b": 0,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "empty_jug_b_need_1",
+      "act": {
+        "this": "p1",
+        "form": "empty_jug_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 2,
+              "jug_b": 1,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "empty_jug_b_need_2",
+      "act": {
+        "this": "p1",
+        "form": "empty_jug_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 2,
+              "jug_b": 1,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "pour_b_to_a_0_1_ready",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_0_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 1,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "pour_b_to_a_0_1_need_0",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_0_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 1,
+              "jug_b": 1,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "pour_b_to_a_0_1_need_1",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_0_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 0,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "pour_b_to_a_0_1_need_2",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_0_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 1,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "pour_b_to_a_0_1_need_3",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_0_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 1,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "pour_b_to_a_0_2_ready",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_0_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 2,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "pour_b_to_a_0_2_need_0",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_0_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 1,
+              "jug_b": 2,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "pour_b_to_a_0_2_need_1",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_0_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 0,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "pour_b_to_a_0_2_need_2",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_0_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 2,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "pour_b_to_a_0_2_need_3",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_0_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 2,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "pour_b_to_a_0_3_ready",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_0_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 3,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "pour_b_to_a_0_3_need_0",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_0_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 1,
+              "jug_b": 3,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "pour_b_to_a_0_3_need_1",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_0_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 0,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "pour_b_to_a_0_3_need_2",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_0_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 3,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "pour_b_to_a_0_3_need_3",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_0_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 3,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "pour_b_to_a_0_4_ready",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_0_4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 4,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "pour_b_to_a_0_4_need_0",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_0_4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 1,
+              "jug_b": 4,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "pour_b_to_a_0_4_need_1",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_0_4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 0,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "pour_b_to_a_0_4_need_2",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_0_4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 4,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "pour_b_to_a_0_4_need_3",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_0_4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 4,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "pour_b_to_a_0_5_ready",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_0_5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 5,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "pour_b_to_a_0_5_need_0",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_0_5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 1,
+              "jug_b": 5,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "pour_b_to_a_0_5_need_1",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_0_5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 0,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "pour_b_to_a_0_5_need_2",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_0_5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 5,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "pour_b_to_a_0_5_need_3",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_0_5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 5,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "pour_a_to_b_1_0_ready",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_1_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 1,
+              "jug_b": 0,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "pour_a_to_b_1_0_need_0",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_1_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 0,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "pour_a_to_b_1_0_need_1",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_1_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 1,
+              "jug_b": 1,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "pour_a_to_b_1_0_need_2",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_1_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 1,
+              "jug_b": 0,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "pour_a_to_b_1_0_need_3",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_1_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 1,
+              "jug_b": 0,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "pour_b_to_a_1_5_ready",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_1_5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 1,
+              "jug_b": 5,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "pour_b_to_a_1_5_need_0",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_1_5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 5,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "pour_b_to_a_1_5_need_1",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_1_5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 1,
+              "jug_b": 0,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "pour_b_to_a_1_5_need_2",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_1_5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 1,
+              "jug_b": 5,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "pour_b_to_a_1_5_need_3",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_1_5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 1,
+              "jug_b": 5,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "pour_a_to_b_2_0_ready",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_2_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 2,
+              "jug_b": 0,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "pour_a_to_b_2_0_need_0",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_2_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 0,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "pour_a_to_b_2_0_need_1",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_2_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 2,
+              "jug_b": 1,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "pour_a_to_b_2_0_need_2",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_2_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 2,
+              "jug_b": 0,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "pour_a_to_b_2_0_need_3",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_2_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 2,
+              "jug_b": 0,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "pour_b_to_a_2_5_ready",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_2_5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 2,
+              "jug_b": 5,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "pour_b_to_a_2_5_need_0",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_2_5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 5,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "pour_b_to_a_2_5_need_1",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_2_5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 2,
+              "jug_b": 0,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "pour_b_to_a_2_5_need_2",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_2_5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 2,
+              "jug_b": 5,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "pour_b_to_a_2_5_need_3",
+      "act": {
+        "this": "p1",
+        "form": "pour_b_to_a_2_5"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 2,
+              "jug_b": 5,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "pour_a_to_b_3_0_ready",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_3_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 3,
+              "jug_b": 0,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "pour_a_to_b_3_0_need_0",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_3_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 0,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "pour_a_to_b_3_0_need_1",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_3_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 3,
+              "jug_b": 1,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "pour_a_to_b_3_0_need_2",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_3_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 3,
+              "jug_b": 0,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "pour_a_to_b_3_0_need_3",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_3_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 3,
+              "jug_b": 0,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "pour_a_to_b_3_1_ready",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_3_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 3,
+              "jug_b": 1,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "pour_a_to_b_3_1_need_0",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_3_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 1,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "pour_a_to_b_3_1_need_1",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_3_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 3,
+              "jug_b": 0,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "pour_a_to_b_3_1_need_2",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_3_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 3,
+              "jug_b": 1,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "pour_a_to_b_3_1_need_3",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_3_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 3,
+              "jug_b": 1,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "pour_a_to_b_3_2_ready",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_3_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 3,
+              "jug_b": 2,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "pour_a_to_b_3_2_need_0",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_3_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 2,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "pour_a_to_b_3_2_need_1",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_3_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 3,
+              "jug_b": 0,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "pour_a_to_b_3_2_need_2",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_3_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 3,
+              "jug_b": 2,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "pour_a_to_b_3_2_need_3",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_3_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 3,
+              "jug_b": 2,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "pour_a_to_b_3_3_ready",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_3_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 3,
+              "jug_b": 3,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "pour_a_to_b_3_3_need_0",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_3_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 3,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "pour_a_to_b_3_3_need_1",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_3_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 3,
+              "jug_b": 0,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "pour_a_to_b_3_3_need_2",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_3_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 3,
+              "jug_b": 3,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "pour_a_to_b_3_3_need_3",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_3_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 3,
+              "jug_b": 3,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "pour_a_to_b_3_4_ready",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_3_4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 3,
+              "jug_b": 4,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "pour_a_to_b_3_4_need_0",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_3_4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 0,
+              "jug_b": 4,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "pour_a_to_b_3_4_need_1",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_3_4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 3,
+              "jug_b": 0,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "pour_a_to_b_3_4_need_2",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_3_4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 3,
+              "jug_b": 4,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "pour_a_to_b_3_4_need_3",
+      "act": {
+        "this": "p1",
+        "form": "pour_a_to_b_3_4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 3,
+              "jug_b": 4,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "reset_ready",
+      "act": {
+        "this": "p1",
+        "form": "reset"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 3,
+              "jug_b": 4,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "reset_need_0",
+      "act": {
+        "this": "p1",
+        "form": "reset"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 3,
+              "jug_b": 4,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "reset_need_1",
+      "act": {
+        "this": "p1",
+        "form": "reset"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 3,
+              "jug_b": 4,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "claim_solved_ready",
+      "act": {
+        "this": "p1",
+        "form": "claim_solved"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 2,
+              "jug_b": 4,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "claim_solved_need_0",
+      "act": {
+        "this": "p1",
+        "form": "claim_solved"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 2,
+              "jug_b": 0,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "claim_solved_need_1",
+      "act": {
+        "this": "p1",
+        "form": "claim_solved"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 2,
+              "jug_b": 4,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "claim_solved_need_2",
+      "act": {
+        "this": "p1",
+        "form": "claim_solved"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 2,
+              "jug_b": 4,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "claim_solved_need_3",
+      "act": {
+        "this": "p1",
+        "form": "claim_solved"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:measuring_jug_puzzle",
+            "fields": {
+              "jug_a": 2,
+              "jug_b": 4,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    }
+  ]
+}
