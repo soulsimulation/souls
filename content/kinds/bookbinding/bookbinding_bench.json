@@ -810,7 +810,7 @@
     }
   },
   "text": {
-    "card": "A bookbinding bench with two paper sets, six thread lengths and two cover pairs. Collate, pierce, sew three passes, then case a blank volume onto the output tray.",
+    "card": "Collate, pierce, sew and case two blank books from finite supplied materials.",
     "no_paper": "No supplied paper set remains.",
     "collate_first": "Collate the paper signatures first.",
     "already_pierced": "The gathered spine is already pierced.",

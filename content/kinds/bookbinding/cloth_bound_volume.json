@@ -141,7 +141,7 @@
     }
   },
   "text": {
-    "card": "A blank cloth-bound volume manufactured at a binding bench. Its paper, three sewn thread lengths and cover pair were supplied there. Carry it or set it down; no text-editing action is added.",
+    "card": "A portable blank cloth-bound book made at a binding bench.",
     "bookbinding": "bookbinding",
     "bound_book": "bound book",
     "blank_book": "blank book"
