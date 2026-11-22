@@ -158,6 +158,11 @@ impl Life {
         self.embodied.get(&soul).map(|e| e.0)
     }
 
+    /// Each embodied Soul and its body here, in id order.
+    pub fn embodied(&self) -> impl Iterator<Item = (Id, Id)> + '_ {
+        self.embodied.iter().map(|(soul, e)| (*soul, e.0))
+    }
+
     /// The link from `soul`'s body to it, if it is embodied.
     pub fn link_of(&self, soul: Id) -> Option<Id> {
         self.embodied.get(&soul).map(|e| e.1)

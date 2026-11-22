@@ -6,7 +6,11 @@
 // `souls/model/1`, then the bytes, SHA-256, written `1220` and 64 hex digits. Files are only added.
 //
 //   node v2/tools/import-eden/bake/bake.ts [--seed <s>] [--out <dir>] [--template <file>] [--write-records]
-//   (from the repository root, after `pnpm install`)
+//   node v2/tools/import-eden/bake/bake.ts --backup <sim.db> [--world <id>] [--map <map.json>] [--out <dir>]
+//   (from the repository root, after `pnpm install` and `pnpm assets:pull`)
+//
+// `--backup` takes a live world's model from a backup of its database, as export/export.ts `--backup` does, so the
+// `things` table is keyed by the same ids as the facts' `origin`: bake a world from the same backup its facts came from.
 //
 // Writes, under <out> (default .local/import-eden/models): `worlds/models/<hash>.glb` (the tree that
 // `tools/cdn/publish.mjs --dry-run --root <out>` inventories) and `models.json` (every kind: its model or the reason it
@@ -47,10 +51,15 @@ const meshFiles = (dir: string): string[] => readdirSync(dir, { withFileTypes: t
 const loadErrors: Record<string, string> = {};
 for (const f of meshFiles(WEB)) { try { await import(pathToFileURL(join(process.cwd(), f)).href); } catch (e) { loadErrors[relative(WEB, f)] = String(e).slice(0, 200); } }
 
-// --- Replay (as export/export.ts) ------------------------------------------------------------------------------------
-const tpl = JSON.parse(readFileSync(TEMPLATE, 'utf8'));
-const m = new WorldModel({ constants: { ground: 'land', extent: 1000, ...tpl.constants }, seed: SEED });
-m.library = coreLibrary();
+// --- Replay (as export/export.ts), or a live world's backup (export.ts --backup) -------------------------------------
+// A template's mesh things name core assets by hash (the Mars campus does); resolve them as the server does (export.ts).
+const backup = await import('../../import-world/export/backup.ts');
+const core = backup.coreAssets();
+const BACKUP = arg('--backup', '');
+const live = BACKUP ? backup.fromBackup(BACKUP, arg('--world', ''), arg('--map', 'content/worlds/eden/map.json')) : null;
+const tpl = live ? { batches: [] } : JSON.parse(readFileSync(TEMPLATE, 'utf8'));
+const m = live?.m ?? new WorldModel({ constants: { ground: 'land', extent: 1000, ...tpl.constants }, seed: SEED, assets: (sha) => core[sha] });
+if (!live) m.library = coreLibrary();
 let tick = 1;
 const apply = (batch: unknown, what: string) => { const r = applyBatch(m, batch, 'genesis', tick++, { trusted: true }); if (!r.result.accepted) throw new Error(`${what} refused: ${JSON.stringify(r.result).slice(0, 600)}`); };
 if (tpl.state) apply({ ops: [{ op: 'world', state: tpl.state }], group: 'genesis' }, 'state');
@@ -153,11 +162,38 @@ function stats(o: import('three').Object3D) {
   return { tris: Math.round(tris), parts, effects, roles: [...named].sort() };
 }
 
-type KindRow = { kind: string; ref: string; hash: string; things: number; builder: string | null; models: Record<string, string>; model?: string; reason?: string; stored?: string; states?: Record<string, string[]>; worldThings?: number; failed?: Record<string, string> };
+// --- Stored meshes --------------------------------------------------------------------------------------------------
+// A kind made from a stored glTF file (`make: {kind:'mesh', asset}`) is drawn from that file's bytes as today's page gets
+// them: the viewer's rendition when there is one (worlds/core-assets/renditions.json, served under the source's hash at
+// /asset-view), else the file itself. The bytes go in unchanged (meshopt, WebP), named by their T3 hash like any model.
+// Today's page fits the model to the def's box (apps/web/src/gen-mesh/gltf-assets.ts `instantiate`): its bounds centred
+// on x and z, standing on y = 0, uniformly scaled so its largest extent matches the box on that axis. The bake does the
+// same from the measured bounds in the core index (`min`, `box`) and writes it on the kind as `fit`
+// ([scale, x, y, z]: the model's point p is drawn at scale * p + (x, y, z), metres). A model a few centimetres thick (a
+// rug, a lily pad) is drawn a hair towards the camera, as today: `flat`.
+const renditions = (JSON.parse(readFileSync('worlds/core-assets/renditions.json', 'utf8')) as { renditions: Record<string, { path: string }> }).renditions;
+function storedModel(row: KindRow, def: StoredDef): string {
+  const sha = row.stored!, info = core[sha] as (typeof core)[string] & { path?: string; min?: number[] } | undefined;
+  const file = renditions[sha]?.path && existsSync(renditions[sha].path) ? renditions[sha].path : info?.path;
+  if (!info || !file || !existsSync(file) || !info.min) { row.reason = `stored mesh ${sha.slice(0, 12)}: ${!info ? 'not a core asset' : !info.min ? 'no measured bounds' : 'file missing (pnpm assets:pull)'}`; return ''; }
+  const bytes = readFileSync(file), hash = modelHash(bytes);
+  const out = join(OUT, 'worlds/models', `${hash}.glb`);
+  if (!existsSync(out)) writeFileSync(out, bytes, { flag: 'wx' });
+  const size = info.box as number[], min = info.min, box = def.size.box as number[];
+  const a = size.indexOf(Math.max(...size)), k = size[a] > 1e-6 ? box[a] / size[a] : 1;
+  const r6 = (x: number) => Math.round(x * 1e6) / 1e6;
+  row.fit = [r6(k), r6(-k * (min[0] + size[0] / 2)), r6(-k * min[1]), r6(-k * (min[2] + size[2] / 2))];
+  if (box[1] <= 0.06) row.flat = true;
+  row.models.stored = hash; row.model = hash; built++;
+  models.set(hash, { hash, bytes: bytes.length, tris: info.tris ?? 0, parts: 0, effects: 0, roles: [], kind: def.ref, key: 'stored', sha256: sha256(bytes), source: sha });
+  return hash;
+}
+
+type KindRow = { kind: string; ref: string; hash: string; things: number; builder: string | null; models: Record<string, string>; model?: string; reason?: string; stored?: string; states?: Record<string, string[]>; worldThings?: number; failed?: Record<string, string>; fit?: number[]; flat?: true };
 const kinds = new Map<string, KindRow>();
-const models = new Map<string, { hash: string; bytes: number; tris: number; parts: number; effects: number; roles: string[]; kind: string; key: string; sha256: string }>();
+const models = new Map<string, { hash: string; bytes: number; tris: number; parts: number; effects: number; roles: string[]; kind: string; key: string; sha256: string; source?: string }>();
 const keyed = new Map<string, string>(); // kind ref + key -> model hash
-const thingModels: Record<string, string> = {}; // today's thing id -> its model's hash (V8 #2718: the page's table)
+const thingModels: Record<string, string> = {}; // today's thing id (the facts' `origin`) -> its model's hash (V8 #2718: the page's table)
 mkdirSync(join(OUT, 'worlds/models'), { recursive: true });
 let built = 0;
 for (const e of [...m.entities.values()].sort((a, b) => a.id.localeCompare(b.id))) {
@@ -167,7 +203,13 @@ for (const e of [...m.entities.values()].sort((a, b) => a.id.localeCompare(b.id)
   row.things++;
   if (row.reason) continue;
   if (def.make.kind === 'none' || def.make.kind === 'parts') { row.reason = `no picture of its own (make: ${def.make.kind})`; continue; }
-  if (def.make.kind === 'mesh') { const sha = (def.make as { sha256?: string; asset?: string }).sha256 ?? (def.make as { asset?: string }).asset; row.builder = 'mesh'; row.stored = String(sha); continue; }
+  if (def.make.kind === 'mesh') {
+    row.builder = 'mesh'; row.stored = (def.make as { asset: string }).asset;
+    const hash = keyed.get(def.ref) ?? storedModel(row, def);
+    keyed.set(def.ref, hash);
+    if (hash) thingModels[e.id] = hash;
+    continue;
+  }
   const builder = meshFor(def as never);
   if (!builder) { row.reason = 'no mesh builder for its generator'; continue; }
   row.builder = builder.gen;
@@ -205,7 +247,7 @@ const stateCheck = { kindsWithState: 0, statesTried: 0, posedOnInstance: {} as R
 const firstThing = new Map<string, Entity>();
 for (const e of m.entities.values()) { const d = m.resolvedDef(e.def); if (d && !firstThing.has(d.ref)) firstThing.set(d.ref, e); }
 for (const r of kinds.values()) {
-  if (!Object.keys(r.models).length) continue;
+  if (!Object.keys(r.models).length || r.stored) continue;
   const def = m.resolvedDef(firstThing.get(r.ref)!.def)!, fields = Object.entries((def.state ?? {}) as Record<string, FieldSpec>);
   if (!fields.length) continue;
   stateCheck.kindsWithState++;
@@ -223,7 +265,8 @@ for (const r of kinds.values()) {
 }
 const rows = [...kinds.values()].sort((a, b) => a.ref.localeCompare(b.ref));
 const summary = {
-  template: TEMPLATE, templateSha256: sha256(readFileSync(TEMPLATE)), label: LABEL, things: m.entities.size,
+  ...(live ? { world: live.head.world, backup: live.head.backup } : { template: TEMPLATE, templateSha256: sha256(readFileSync(TEMPLATE)) }),
+  label: LABEL, things: m.entities.size, thingsWithModel: Object.keys(thingModels).length,
   kinds: rows.length, kindsWithModel: rows.filter((r) => Object.keys(r.models).length).length,
   kindsStored: rows.filter((r) => r.stored).length, kindsListed: rows.filter((r) => r.reason).length,
   models: models.size, modelBytes: [...models.values()].reduce((n, x) => n + x.bytes, 0), triangles: [...models.values()].reduce((n, x) => n + x.tris, 0),
@@ -233,8 +276,10 @@ const summary = {
 const reviewedPath = 'tools/cdn/approved-derivatives.json';
 const reviewed = JSON.parse(readFileSync(reviewedPath, 'utf8')) as { derivatives: { sha256: string; licence: string }[]; generated?: { by: string; licence: string; note: string; models: { path: string; sha256: string; bytes: number; licence: string; kind: string }[] } };
 const servedPublic = JSON.parse(readFileSync('tools/cdn/served-public.json', 'utf8')) as { objects: { sha256: string }[] };
-for (const r of rows) if (r.stored) (r as KindRow & { storedRecord?: string }).storedRecord = reviewed.derivatives.some((d) => d.sha256 === r.stored && d.licence === 'CC0-1.0') ? 'approved-derivatives (CC0-1.0)' : servedPublic.objects.some((o) => o.sha256 === r.stored) ? 'served-public' : 'none';
-const records = [...models.values()].sort((a, b) => a.hash.localeCompare(b.hash)).map((x) => ({ path: `models/${x.hash}.glb`, sha256: x.sha256, bytes: x.bytes, licence: 'own-work', kind: x.kind }));
+// Its model file is those bytes (or the rendition's), checked by their own SHA-256 as the CDN inventory checks them.
+const recordOf = (sha: string) => reviewed.derivatives.some((d) => d.sha256 === sha && d.licence === 'CC0-1.0') ? 'approved-derivatives (CC0-1.0)' : servedPublic.objects.some((o) => o.sha256 === sha) ? 'served-public' : 'none';
+for (const r of rows) if (r.stored) Object.assign(r, { storedRecord: recordOf(r.stored), ...(r.model ? { modelRecord: recordOf(models.get(r.model)!.sha256) } : {}) });
+const records = [...models.values()].filter((x) => !x.source).sort((a, b) => a.hash.localeCompare(b.hash)).map((x) => ({ path: `models/${x.hash}.glb`, sha256: x.sha256, bytes: x.bytes, licence: 'own-work', kind: x.kind }));
 // --write-records: add this run's models to tools/cdn/approved-derivatives.json `generated` (records are only added)
 if (process.argv.includes('--write-records')) {
   const g = reviewed.generated ??= { by: 'v2/tools/import-eden/bake/bake.ts', licence: 'own-work', note: 'Engine v2 V17 (#2717): models drawn by this repository\'s own mesh builders (apps/web/src/gen-mesh) from the kinds of committed world templates, with no image or third-party bytes in them. Each is pinned by its SHA-256 and bytes; its file is named by its T3 hash (souls/model/1). Records are only added.', models: [] };

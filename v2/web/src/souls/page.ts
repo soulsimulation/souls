@@ -13,7 +13,7 @@ import type { WorldView } from '../draw/world.ts';
 import { SoulsCopy, TestMark, label, spoken, TALK_MM, wrap, type Status } from './souls.ts';
 import { Conversations, SPEECH_W, groupShot, measurer, paint, place, placeOf, type Candidate, type Ctx, type Placed, type Thread } from './layer.ts';
 import { placeWords } from '../places/places.ts';
-import { mountCard, nowText, readNow, type NowLine } from './mine.ts';
+import { DIM_STYLE, mountCard, nowDims, nowText, readNow, type NowLine } from './mine.ts';
 import { enters, inside, solidsNear } from '../camera/follow.ts';
 
 const UM = 1e-6, HEAD = 2.1, FAR = 150;
@@ -261,7 +261,7 @@ export function pageSouls(view: HTMLCanvasElement, world: WorldView, params: URL
     mark.open(soul, (test) => { ui.test.textContent = test === true ? 'Test Soul' : test === false ? '' : 'Test status unavailable'; });
   };
   // C14: the open Soul's status line, by its grant; a late answer for another Soul is dropped.
-  let line: { soul: string; now: NowLine | null } | null = null, lineAt = 0;
+  let line: { soul: string; now: NowLine | null } | null = null, lineAt = -Infinity;
   const readLine = (soul: string) => {
     lineAt = performance.now();
     void readNow([soul]).then((got) => {
@@ -287,6 +287,11 @@ export function pageSouls(view: HTMLCanvasElement, world: WorldView, params: URL
     ui.desc.textContent = p.description;
     ui.now.textContent = said;
     ui.now.hidden = !said;
+    // #3784: dimmed while the Soul is asleep or a zombie, as today's card.
+    const dim = nowDims(p.status);
+    ui.now.setAttribute('data-dim', dim ? '1' : '');
+    ui.now.style.color = dim ? DIM_STYLE.color : '#e8e6e1';
+    ui.now.style.fontSize = dim ? DIM_STYLE.fontSize : '';
     ui.status.textContent = p.status;
     ui.list.replaceChildren(...p.recent.map((r) => {
       const li = document.createElement('li');
@@ -308,7 +313,7 @@ export function pageSouls(view: HTMLCanvasElement, world: WorldView, params: URL
     const hit = out.placed.find((p) => e.clientX >= p.x && e.clientX <= p.x + p.w && e.clientY >= p.y && e.clientY <= p.y + p.h);
     if (hit) out.open(hit.id);
   });
-  addEventListener('keydown', (e) => e.key === 'Escape' && (focus ? out.converse(null) : out.open(null)));
+  window.addEventListener('keydown', (e) => e.key === 'Escape' && (focus ? out.converse(null) : out.open(null)));
 
   const out: PageSouls = {
     copy,

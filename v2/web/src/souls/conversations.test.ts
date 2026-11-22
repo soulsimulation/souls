@@ -81,7 +81,7 @@ test('the dock and the Soul page show a thread as text, live; opening it frames 
     }
   }
   const doc = { body: new El('body'), createElement: (t: string) => new El(t) };
-  Object.assign(globalThis, { document: doc, innerWidth: 1280, innerHeight: 720, devicePixelRatio: 1, addEventListener() {} });
+  Object.assign(globalThis, { document: doc, innerWidth: 1280, innerHeight: 720, devicePixelRatio: 1, addEventListener() {}, window: globalThis });
   const { pageSouls } = await import('./page.ts');
   const body = (id: string, name: string, x: number): NodeRec => ({ id, kind: 'souls:body@1', parent: null, slot: null, pos: [x * 1e6, 0, 0], rot: [1 << 30, 0, 0, 0], at: null, name });
   const nodes = new Map([['a.1', body('a.1', 'Ada', 0)], ['b.2', body('b.2', 'Bo', 2)], ['w.3', body('w.3', 'Wren', 1)]]);

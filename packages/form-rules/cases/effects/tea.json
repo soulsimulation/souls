@@ -539,6 +539,24 @@
           ]
         }
       }
+    },
+    {
+      "name": "kettle_take",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": { "loose": ["b1", "k1"] },
+          "k1": { "kind": "eden:kettle", "fields": { "water": 0 } },
+          "b1": { "hands": { "left": null, "right": null } }
+        }
+      },
+      "do": [
+        {
+          "act": { "this": "k1", "form": "take" },
+          "receipt": "rkt1",
+          "expect": { "verdict": "yes", "changes": [{ "change": "reparent", "node": "k1", "to": { "node": "b1", "hand": "left" } }] }
+        }
+      ]
     }
   ]
 }

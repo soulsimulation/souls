@@ -5,7 +5,9 @@
 // hovers, and a drag clears it. Read-only: the pick reads the world view's bodies and the thing layer's boxes and
 // changes nothing drawn but the ring. Resting on the ground inside a named place (an area with a name and an outline)
 // shows a ring scaled to the place and its name, as today's `containingPlace` (#3779); a Soul or thing under the
-// pointer comes first.
+// pointer comes first. On a touch screen a finger held still for LONG_PRESS_MS on a Soul, thing or place picks it, shows
+// its ring and name and opens what it is (a Soul's page), as today's `WorldHover` (#3778); moving the finger past
+// LONG_PRESS_SLOP_PX, a second finger (a pinch) or lifting it first cancels, so a tap, a drag and a pinch are as before.
 import * as THREE from 'three';
 import { placeWords } from '../places/places.ts';
 import { rayUnitBox, type ThingHit, type ThingLayer } from '../things/things.ts';
@@ -20,6 +22,45 @@ export const BODY_R = 0.45, BODY_H = 1.9;
 export const FAR = 150;
 /** Wall ms between picks. */
 const PICK_MS = 34;
+/** Today's long-press: held this long, and moved no more than this many CSS px. */
+export const LONG_PRESS_MS = 450, LONG_PRESS_SLOP_PX = 10;
+
+/** A touch long-press's timer and cancel rules: one finger down starts it; moving it past the slop, another finger, a
+ *  lift or a cancel stops it; when it runs out, `fire` gets the point. */
+export class LongPress {
+  private timer: unknown = null;
+  private at: [number, number] | null = null;
+  private readonly fingers = new Set<number>();
+  private readonly fire: (x: number, y: number) => void;
+  private readonly later: (f: () => void, ms: number) => unknown;
+  private readonly stop: (h: unknown) => void;
+  constructor(fire: (x: number, y: number) => void, later = (f: () => void, ms: number): unknown => setTimeout(f, ms), stop = (h: unknown) => clearTimeout(h as ReturnType<typeof setTimeout>)) {
+    this.fire = fire;
+    this.later = later;
+    this.stop = stop;
+  }
+  get pending(): boolean { return this.timer !== null; }
+  down(id: number, x: number, y: number): void {
+    this.fingers.add(id);
+    this.cancel();
+    if (this.fingers.size !== 1) return; // a pinch
+    const at: [number, number] = [x, y];
+    this.at = at;
+    this.timer = this.later(() => ((this.timer = null), this.fire(at[0], at[1])), LONG_PRESS_MS);
+  }
+  move(x: number, y: number): void {
+    if (this.at && Math.hypot(x - this.at[0], y - this.at[1]) > LONG_PRESS_SLOP_PX) this.cancel();
+  }
+  up(id: number): void {
+    this.fingers.delete(id);
+    this.cancel();
+  }
+  cancel(): void {
+    if (this.timer !== null) this.stop(this.timer);
+    this.timer = null;
+    this.at = null;
+  }
+}
 
 /** What the hover needs from the world view (`draw/world.ts`'s `WorldView`). */
 export type HoverWorld = {
@@ -37,6 +78,8 @@ export type HoverOptions = {
   name: (id: string) => string | null;
   /** Whether the Soul's name chip is drawn this frame. */
   chipShown: (id: string) => boolean;
+  /** Opens what a long-press picked (#3778): a Soul's page; a thing's or place's name is the tooltip itself. */
+  inspect?: (h: HoverTarget) => void;
 };
 export type HoverTarget = { kind: 'soul' | 'thing' | 'place'; id: string; name: string; foot: THREE.Vector3; radius: number; detail?: string };
 
@@ -204,6 +247,8 @@ export class WorldHover {
   target: HoverTarget | null = null;
   private pointer: { x: number; y: number } | null = null;
   private held = false;
+  /** The world time last drawn, for a long-press's pick. */
+  private t: number | null = null;
   private last = -Infinity;
   private readonly ray = new THREE.Raycaster();
   private readonly ndc = new THREE.Vector2();
@@ -229,19 +274,27 @@ export class WorldHover {
     this.tooltip.style.cssText = 'position:fixed;z-index:3;pointer-events:none;max-width:260px;padding:4px 7px;border-radius:4px;'
       + 'background:rgba(16,20,26,0.85);color:#f2efe8;font:12px system-ui,sans-serif;white-space:nowrap;overflow:hidden;text-overflow:ellipsis';
     document.body.append(this.tooltip);
+    const press = new LongPress((x, y) => this.press(x, y));
     canvas.addEventListener('pointermove', (e) => {
-      if (e.pointerType === 'touch') return;
+      if (e.pointerType === 'touch') return void press.move(e.clientX, e.clientY);
       if (e.buttons) return this.clear();
       this.pointer = { x: e.clientX, y: e.clientY };
     });
-    canvas.addEventListener('pointerleave', () => ((this.pointer = null), this.clear()));
-    canvas.addEventListener('pointerdown', () => ((this.held = true), this.clear()));
+    // A lifted finger also leaves the canvas: what a long-press showed stays until the next touch.
+    canvas.addEventListener('pointerleave', (e) => e.pointerType !== 'touch' && ((this.pointer = null), this.clear()));
+    canvas.addEventListener('pointerdown', (e) => {
+      this.held = true;
+      this.clear();
+      if (e.pointerType === 'touch') press.down(e.pointerId, e.clientX, e.clientY);
+    });
+    canvas.addEventListener('pointerup', (e) => e.pointerType === 'touch' && press.up(e.pointerId));
     addEventListener('pointerup', () => (this.held = false));
-    canvas.addEventListener('pointercancel', () => ((this.held = false), (this.pointer = null), this.clear()));
+    canvas.addEventListener('pointercancel', (e) => ((this.held = false), (this.pointer = null), press.up(e.pointerId), this.clear()));
   }
 
   /** Once a frame, after the world is placed at world time `t`: re-picks at most every PICK_MS. */
   update(now: number, t: number): void {
+    this.t = t;
     if (this.held || !this.pointer || now - this.last < PICK_MS) return;
     this.last = now;
     const r = this.canvas.getBoundingClientRect();
@@ -251,6 +304,20 @@ export class WorldHover {
     const hit = pickAt(this.ray.ray.origin, this.ray.ray.direction, t, this.opts);
     if (hit) this.show(hit);
     else this.clear();
+  }
+
+  /** A long-press at (`x`, `y`) CSS px: picks there, shows the ring and name, and opens it. */
+  private press(x: number, y: number): void {
+    const t = this.t, r = this.canvas.getBoundingClientRect();
+    if (t === null || !r.width || !r.height) return;
+    this.ndc.set(((x - r.left) / r.width) * 2 - 1, -((y - r.top) / r.height) * 2 + 1);
+    this.ray.setFromCamera(this.ndc, this.camera());
+    const hit = pickAt(this.ray.ray.origin, this.ray.ray.direction, t, this.opts);
+    if (!hit) return;
+    this.pointer = { x, y };
+    this.show(hit);
+    this.pointer = null; // touch never hovers: the ring and name stay until the next touch
+    this.opts.inspect?.(hit);
   }
 
   private show(h: HoverTarget): void {

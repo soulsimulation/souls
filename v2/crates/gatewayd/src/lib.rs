@@ -54,6 +54,7 @@ use std::sync::{Arc, Mutex, RwLock};
 use replica::encode::Value;
 use tokio::sync::mpsc;
 
+pub mod bulk;
 pub mod control;
 pub mod creator;
 pub mod entries;
@@ -118,6 +119,10 @@ pub struct Gateway {
     pub exchange: std::sync::OnceLock<creator::Exchange>,
     /// The world's kind entries for its clients (`--entries`, #3760); unset, `GET /v2/entries` answers 404.
     pub entries: std::sync::OnceLock<entries::Entries>,
+    /// The creator's live helpers (#3727): each helper's actor id and its token's hash, until it lapses.
+    pub helpers: Mutex<BTreeMap<replica::ids::Id, [u8; 32]>>,
+    /// A creator's bulk edits' counts (#3695, `bulk.rs`).
+    pub bulk: bulk::Gauge,
     /// Set once when the gateway stops: every signed-in socket closes with [`RESTART`].
     pub closing: tokio::sync::watch::Sender<bool>,
     hub: Mutex<Hub>,
@@ -201,6 +206,8 @@ impl Gateway {
             mailbox: std::sync::OnceLock::new(),
             exchange: std::sync::OnceLock::new(),
             entries: std::sync::OnceLock::new(),
+            helpers: Mutex::new(BTreeMap::new()),
+            bulk: bulk::Gauge::default(),
             closing: tokio::sync::watch::channel(false).0,
             hub: Mutex::new(Hub::default()),
             watchers: Mutex::new(BTreeMap::new()),
