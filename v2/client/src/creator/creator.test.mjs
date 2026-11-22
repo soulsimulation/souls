@@ -446,6 +446,27 @@ test('#3701: a creator records a district plan, claims its first chapter, builds
   assert.equal((await god('build', 'release', c)).code, 'claim.unknown');
 });
 
+test('#3728: move --by and clone go to the claims judge as any edit: refused by name in a claim they are not under', async () => {
+  await connected();
+  const place = (await god('describe')).nodes.find((n) => n.kind === 'souls:place');
+  const made = await god('place', 'room', '--in', place.id, '--at', '61000,0,61000');
+  assert.equal(made.ok, true, JSON.stringify(made));
+  const room = made.names['1'];
+  const claimed = await god('build', 'claim', 'yard', '--area', '60000,60000,64000,64000');
+  assert.equal(claimed.ok, true, JSON.stringify(claimed));
+  const c = claimed.claim.id;
+  const moved = await god('move', room, '--by', '1,0');
+  assert.deepEqual([moved.ok, moved.code], [false, 'edit.claimed'], JSON.stringify(moved));
+  const cloned = await god('clone', room, '--at', '63,63');
+  assert.deepEqual([cloned.ok, cloned.code], [false, 'edit.claimed'], JSON.stringify(cloned));
+  // Under the claim, each of the clone's edits carries it.
+  const movedUnder = await god('move', room, '--by', '1,0', '--claim', c);
+  assert.equal(movedUnder.ok, true, JSON.stringify(movedUnder));
+  const clonedUnder = await god('clone', room, '--at', '63,63', '--claim', c);
+  assert.equal(clonedUnder.ok, true, JSON.stringify(clonedUnder));
+  assert.equal((await god('build', 'release', c)).ok, true);
+});
+
 test('#3700: own, access and zone words make today\'s marks in the world\'s units', () => {
   const soul = `${'ab'.repeat(16)}-4`;
   assert.deepEqual(layerOf('own', ['aa-1', soul, '--private']), { act: 'own', node: 'aa-1', owner: soul, access: 2 });

@@ -1064,12 +1064,12 @@ function keyAnswered(a) {
 const worldNowOrReal = () => worldNow(clockOf(copy)) ?? Date.now() * 1000;
 
 /** #3728: an import plan's edits, one at a time, each answered before the next is planned. The first refusal stops
- *  it, and says how far it got. */
-async function runPlan(plan) {
+ *  it, and says how far it got. Each edit goes under the build claim named, if any, as any edit does (#3701). */
+async function runPlan(plan, claim) {
   const started = performance.now();
   let edits = 0;
   for (let ops; (ops = plan.next());) {
-    const a = await answer({ op: 'edit', ops });
+    const a = await answer({ op: 'edit', ops, ...(claim !== undefined ? { claim } : {}) });
     if (!a.ok) return { ok: false, code: a.code, op: a.op, detail: `edit ${edits + 1} was refused (${ops.length} operations, the first ${ops[0].op} ${ops[0].kind ?? ops[0].node}); ${edits} edits were made`, ...summary(plan, edits, started) };
     plan.took(a.names);
     edits++;
@@ -1387,7 +1387,7 @@ async function answer(req) {
         const c = await clonePlan(req.world);
         if (c.ok === false) return closing({ ...c, local: true }, null, { now: true });
         const ops = c.plan.next();
-        const v = JSON.parse(wire.editCheck(copy, batchOf(ops), kindsText()));
+        const v = JSON.parse(wire.editCheck(copy, batchOf(ops, req.claim), kindsText()));
         return closing({ ...v, local: true, would: c.says, ops }, null, { now: true });
       }
       const w = await worldBatch(req);
@@ -1412,7 +1412,7 @@ async function answer(req) {
         const age = await ageAfter();
         const c = await clonePlan(req.world);
         if (c.ok === false) return closing({ ...c, sent: false, local: true }, null, { age });
-        const out = await runPlan(c.plan);
+        const out = await runPlan(c.plan, req.claim);
         return out.ok ? { ...out, did: c.says, copies: c.copies.map((id) => c.plan.ids.get(id) ?? null) } : out;
       }
       return editOnce(req);

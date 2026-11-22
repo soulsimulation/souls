@@ -46,7 +46,7 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 | `place <kind> --in <id> [--at x,y,z] [--slot n] [--field n=v]` | a new thing in `<id>`; the answer's `names["1"]` is its id |
 | `move <id> --at x,y,z [--slot n]` | to another spot in the same parent |
 | `move <id> [<id> ...] --by dx,dz [--yaw r]` | each that far over (metres), what is in it riding along; on the open ground it keeps its height over the ground |
-| `clone <id> [--at x,z] [--count n] [--step dx,dz] [--yaw r]` | copies of it and everything in it (its doorways and stairs too), the first one step away unless `--at` (metres) |
+| `clone <id> [--at x,z] [--count n] [--step dx,dz] [--yaw r]` | copies of it and everything in it (its doorways and stairs too), the first one step away unless `--at` (metres); with `--claim`, each of its edits goes under that claim |
 | `set <id> <field> <value>` | one numbered field: an integer, `true`, `false` or a name |
 | `remove <id>` | it and everything in it |
 | `about <id> --title '<t>' [--alias '<a>' ...]` | a place's title and aliases, kept as words for everyone; Souls' `find` matches either. `--set '{"title":"..","aliases":[".."]}'` sets both, `--clear` clears both |
