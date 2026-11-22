@@ -309,7 +309,7 @@ impl Table {
         let mut best: Option<(i64, u16, u16, usize)> = None;
         let mut misses = 0;
         for (bound, ring, k, i) in order {
-            if best.is_some_and(|b| bound > b.0) || misses >= MISSES_MOST {
+            if best.is_some_and(|b| bound > b.0) {
                 break;
             }
             if joined && !self.joined(g, t, i) {
@@ -317,6 +317,9 @@ impl Table {
             }
             let Some(walk) = g.walk(ask.node, ask.from, t.node, self.places[i].at) else {
                 misses += 1;
+                if misses >= MISSES_MOST {
+                    break;
+                }
                 continue;
             };
             let key = (walk + WEIGHT * gap(&self.places[i]), ring, k, i);
@@ -413,11 +416,14 @@ fn rings(
     let mut best: Option<(i64, i64, i64, Vec3)> = None;
     let mut misses = 0;
     for (bound, ring, k, at) in order {
-        if best.is_some_and(|b| bound > b.0) || misses >= MISSES_MOST {
+        if best.is_some_and(|b| bound > b.0) {
             break;
         }
         let Some(walk) = g.walk(node, p, target.node, at) else {
             misses += 1;
+            if misses >= MISSES_MOST {
+                break;
+            }
             continue;
         };
         let key = (walk + WEIGHT * flat(at, t), ring, k, at);
