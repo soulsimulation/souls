@@ -2818,9 +2818,9 @@ fn c22_an_area_off_a_things_floors_is_walked_to_on_the_ground() {
 /// #3983: the roof stairs of eden-house-3 and eden-house-4 (today's e_303f348f and e_f071fa8e, 4.2 m long and
 /// 2.82 m high) climb from the west garden onto their bedroom wing's flat roof, 2.82 m up. Born west of each
 /// flight's foot, a Soul goes up (`go_up` to `top`) and ends on that roof (e_3d52ac7f's and e_0c946e80's floor-1).
-/// Before, each flight stood 0.51 m further west: its top was 0.51 m short of the roof's edge, the roof's standing
-/// ground lay more than the 1 m a flight's top is carried along its floor, and the flight met no floor at its top.
-/// Their kind borrows `eden:stair_flight`'s entry through Eden's map, as live Eden's import does: the facts must be
+/// Each flight's top is 0.51 m short of the roof's edge and its landing 10 mm short, so nothing of it overlaps the
+/// roof (the office's landing overlaps its roof by 0.48 m); the top is carried along the flight onto the roof's
+/// standing ground, which starts within the 1 m a flight's top may be carried (`sim::links`, #3979). Their kind borrows `eden:stair_flight`'s entry through Eden's map, as live Eden's import does: the facts must be
 /// exported with `--map content/worlds/eden/map.json` (without it, `go_up` ends `no_such_kind`).
 #[test]
 #[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
