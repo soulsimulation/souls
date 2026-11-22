@@ -44,7 +44,7 @@ that serves a world and sends the schedule as them. Load runs use marked test So
 `worldd seed` writes `souls.tokens`, is read too. Agent k signs in with line k; the file needs at least as many
 Souls as the schedule has agents.
 
-The release owner's command, from a checkout on a machine that reaches the world's gatewayd port (`127.0.0.1:<port>`
+The release owner's command, from a checkout on a machine that reaches the world's gatewayd port (the loopback port
 on the world's host; `GATEWAYD_ARGS` in its unit names the port). Pair the test Souls first (#4016), then run each arm:
 
 ```sh
@@ -54,7 +54,7 @@ node tools/ops/test-soul pair <world> 100 --directory <origin> --out <private fo
 for arm in uneven even; do
   node tools/driver/loads.mjs ladder-100-$arm --seconds 600 --seed 1 --out <run folder>/$arm/schedule.txt
   target/release/driver --schedule <run folder>/$arm/schedule.txt --dir <run folder>/$arm \
-    --remote ws://127.0.0.1:<port> --tokens <private folder>/souls.tokens
+    --remote ws://<gatewayd host>:<port> --tokens <private folder>/souls.tokens
 done
 ```
 
