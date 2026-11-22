@@ -1,0 +1,3812 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "Every one of14 forms and every unmet exact phase/code/closed/hand/reach need.",
+  "cases": [
+    {
+      "name": "turn_left_0_accepted",
+      "act": {
+        "this": "l1",
+        "form": "turn_left_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "turn_left_0_refuses_need_0",
+      "act": {
+        "this": "l1",
+        "form": "turn_left_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 1,
+              "middle": 0,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "turn_left_0_refuses_need_1",
+      "act": {
+        "this": "l1",
+        "form": "turn_left_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 0,
+              "released": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "turn_left_0_refuses_need_2",
+      "act": {
+        "this": "l1",
+        "form": "turn_left_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "propL",
+              "right": "propR"
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "turn_left_0_refuses_need_3",
+      "act": {
+        "this": "l1",
+        "form": "turn_left_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "turn_left_1_accepted",
+      "act": {
+        "this": "l1",
+        "form": "turn_left_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 1,
+              "middle": 0,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "turn_left_1_refuses_need_0",
+      "act": {
+        "this": "l1",
+        "form": "turn_left_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 2,
+              "middle": 0,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "turn_left_1_refuses_need_1",
+      "act": {
+        "this": "l1",
+        "form": "turn_left_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 1,
+              "middle": 0,
+              "right": 0,
+              "released": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "turn_left_1_refuses_need_2",
+      "act": {
+        "this": "l1",
+        "form": "turn_left_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 1,
+              "middle": 0,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "propL",
+              "right": "propR"
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "turn_left_1_refuses_need_3",
+      "act": {
+        "this": "l1",
+        "form": "turn_left_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 1,
+              "middle": 0,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "turn_left_2_accepted",
+      "act": {
+        "this": "l1",
+        "form": "turn_left_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 2,
+              "middle": 0,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "turn_left_2_refuses_need_0",
+      "act": {
+        "this": "l1",
+        "form": "turn_left_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 3,
+              "middle": 0,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "turn_left_2_refuses_need_1",
+      "act": {
+        "this": "l1",
+        "form": "turn_left_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 2,
+              "middle": 0,
+              "right": 0,
+              "released": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "turn_left_2_refuses_need_2",
+      "act": {
+        "this": "l1",
+        "form": "turn_left_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 2,
+              "middle": 0,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "propL",
+              "right": "propR"
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "turn_left_2_refuses_need_3",
+      "act": {
+        "this": "l1",
+        "form": "turn_left_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 2,
+              "middle": 0,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "turn_left_3_accepted",
+      "act": {
+        "this": "l1",
+        "form": "turn_left_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 3,
+              "middle": 0,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "turn_left_3_refuses_need_0",
+      "act": {
+        "this": "l1",
+        "form": "turn_left_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "turn_left_3_refuses_need_1",
+      "act": {
+        "this": "l1",
+        "form": "turn_left_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 3,
+              "middle": 0,
+              "right": 0,
+              "released": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "turn_left_3_refuses_need_2",
+      "act": {
+        "this": "l1",
+        "form": "turn_left_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 3,
+              "middle": 0,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "propL",
+              "right": "propR"
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "turn_left_3_refuses_need_3",
+      "act": {
+        "this": "l1",
+        "form": "turn_left_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 3,
+              "middle": 0,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "turn_middle_0_accepted",
+      "act": {
+        "this": "l1",
+        "form": "turn_middle_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "turn_middle_0_refuses_need_0",
+      "act": {
+        "this": "l1",
+        "form": "turn_middle_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 1,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "turn_middle_0_refuses_need_1",
+      "act": {
+        "this": "l1",
+        "form": "turn_middle_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 0,
+              "released": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "turn_middle_0_refuses_need_2",
+      "act": {
+        "this": "l1",
+        "form": "turn_middle_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "propL",
+              "right": "propR"
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "turn_middle_0_refuses_need_3",
+      "act": {
+        "this": "l1",
+        "form": "turn_middle_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "turn_middle_1_accepted",
+      "act": {
+        "this": "l1",
+        "form": "turn_middle_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 1,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "turn_middle_1_refuses_need_0",
+      "act": {
+        "this": "l1",
+        "form": "turn_middle_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 2,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "turn_middle_1_refuses_need_1",
+      "act": {
+        "this": "l1",
+        "form": "turn_middle_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 1,
+              "right": 0,
+              "released": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "turn_middle_1_refuses_need_2",
+      "act": {
+        "this": "l1",
+        "form": "turn_middle_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 1,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "propL",
+              "right": "propR"
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "turn_middle_1_refuses_need_3",
+      "act": {
+        "this": "l1",
+        "form": "turn_middle_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 1,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "turn_middle_2_accepted",
+      "act": {
+        "this": "l1",
+        "form": "turn_middle_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 2,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "turn_middle_2_refuses_need_0",
+      "act": {
+        "this": "l1",
+        "form": "turn_middle_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 3,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "turn_middle_2_refuses_need_1",
+      "act": {
+        "this": "l1",
+        "form": "turn_middle_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 2,
+              "right": 0,
+              "released": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "turn_middle_2_refuses_need_2",
+      "act": {
+        "this": "l1",
+        "form": "turn_middle_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 2,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "propL",
+              "right": "propR"
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "turn_middle_2_refuses_need_3",
+      "act": {
+        "this": "l1",
+        "form": "turn_middle_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 2,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "turn_middle_3_accepted",
+      "act": {
+        "this": "l1",
+        "form": "turn_middle_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 3,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "turn_middle_3_refuses_need_0",
+      "act": {
+        "this": "l1",
+        "form": "turn_middle_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "turn_middle_3_refuses_need_1",
+      "act": {
+        "this": "l1",
+        "form": "turn_middle_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 3,
+              "right": 0,
+              "released": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "turn_middle_3_refuses_need_2",
+      "act": {
+        "this": "l1",
+        "form": "turn_middle_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 3,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "propL",
+              "right": "propR"
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "turn_middle_3_refuses_need_3",
+      "act": {
+        "this": "l1",
+        "form": "turn_middle_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 3,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "turn_right_0_accepted",
+      "act": {
+        "this": "l1",
+        "form": "turn_right_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "turn_right_0_refuses_need_0",
+      "act": {
+        "this": "l1",
+        "form": "turn_right_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 1,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "turn_right_0_refuses_need_1",
+      "act": {
+        "this": "l1",
+        "form": "turn_right_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 0,
+              "released": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "turn_right_0_refuses_need_2",
+      "act": {
+        "this": "l1",
+        "form": "turn_right_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "propL",
+              "right": "propR"
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "turn_right_0_refuses_need_3",
+      "act": {
+        "this": "l1",
+        "form": "turn_right_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "turn_right_1_accepted",
+      "act": {
+        "this": "l1",
+        "form": "turn_right_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 1,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "turn_right_1_refuses_need_0",
+      "act": {
+        "this": "l1",
+        "form": "turn_right_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 2,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "turn_right_1_refuses_need_1",
+      "act": {
+        "this": "l1",
+        "form": "turn_right_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 1,
+              "released": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "turn_right_1_refuses_need_2",
+      "act": {
+        "this": "l1",
+        "form": "turn_right_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 1,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "propL",
+              "right": "propR"
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "turn_right_1_refuses_need_3",
+      "act": {
+        "this": "l1",
+        "form": "turn_right_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 1,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "turn_right_2_accepted",
+      "act": {
+        "this": "l1",
+        "form": "turn_right_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 2,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "turn_right_2_refuses_need_0",
+      "act": {
+        "this": "l1",
+        "form": "turn_right_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 3,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "turn_right_2_refuses_need_1",
+      "act": {
+        "this": "l1",
+        "form": "turn_right_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 2,
+              "released": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "turn_right_2_refuses_need_2",
+      "act": {
+        "this": "l1",
+        "form": "turn_right_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 2,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "propL",
+              "right": "propR"
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "turn_right_2_refuses_need_3",
+      "act": {
+        "this": "l1",
+        "form": "turn_right_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 2,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "turn_right_3_accepted",
+      "act": {
+        "this": "l1",
+        "form": "turn_right_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 3,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "turn_right_3_refuses_need_0",
+      "act": {
+        "this": "l1",
+        "form": "turn_right_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "turn_right_3_refuses_need_1",
+      "act": {
+        "this": "l1",
+        "form": "turn_right_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 3,
+              "released": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "turn_right_3_refuses_need_2",
+      "act": {
+        "this": "l1",
+        "form": "turn_right_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 3,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "propL",
+              "right": "propR"
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "turn_right_3_refuses_need_3",
+      "act": {
+        "this": "l1",
+        "form": "turn_right_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 3,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "release_accepted",
+      "act": {
+        "this": "l1",
+        "form": "release"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 2,
+              "middle": 1,
+              "right": 3,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "release_refuses_need_0",
+      "act": {
+        "this": "l1",
+        "form": "release"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 3,
+              "middle": 1,
+              "right": 3,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "release_refuses_need_1",
+      "act": {
+        "this": "l1",
+        "form": "release"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 2,
+              "middle": 2,
+              "right": 3,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "release_refuses_need_2",
+      "act": {
+        "this": "l1",
+        "form": "release"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 2,
+              "middle": 1,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2
+      }
+    },
+    {
+      "name": "release_refuses_need_3",
+      "act": {
+        "this": "l1",
+        "form": "release"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 2,
+              "middle": 1,
+              "right": 3,
+              "released": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 3
+      }
+    },
+    {
+      "name": "release_refuses_need_4",
+      "act": {
+        "this": "l1",
+        "form": "release"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 2,
+              "middle": 1,
+              "right": 3,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "propL",
+              "right": "propR"
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 4
+      }
+    },
+    {
+      "name": "release_refuses_need_5",
+      "act": {
+        "this": "l1",
+        "form": "release"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 2,
+              "middle": 1,
+              "right": 3,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 5
+      }
+    },
+    {
+      "name": "relatch_accepted",
+      "act": {
+        "this": "l1",
+        "form": "relatch"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 0,
+              "released": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "relatch_refuses_need_0",
+      "act": {
+        "this": "l1",
+        "form": "relatch"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "relatch_refuses_need_1",
+      "act": {
+        "this": "l1",
+        "form": "relatch"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 0,
+              "released": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "propL",
+              "right": "propR"
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "relatch_refuses_need_2",
+      "act": {
+        "this": "l1",
+        "form": "relatch"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 0,
+              "released": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    }
+  ]
+}

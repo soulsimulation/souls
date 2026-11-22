@@ -1,0 +1,789 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Every dial phase and wrap, six-step target, release/relatch preserving all dial values, changed-dial restoration. Generic harness replays every receipt for idempotence.",
+  "cases": [
+    {
+      "name": "combination_latch_cycles_target_and_preservation",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "l1"
+            ]
+          },
+          "l1": {
+            "kind": "eden:combination_latch",
+            "fields": {
+              "left": 0,
+              "middle": 0,
+              "right": 0,
+              "released": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              350
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "l1",
+            "form": "turn_left_0"
+          },
+          "receipt": "latch0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "l1",
+                "field": "left",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:dial_changed",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "turn_left_1"
+          },
+          "receipt": "latch1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "l1",
+                "field": "left",
+                "n": 28,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:dial_changed",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "turn_left_2"
+          },
+          "receipt": "latch2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "l1",
+                "field": "left",
+                "n": 28,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:dial_changed",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "turn_left_3"
+          },
+          "receipt": "latch3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "l1",
+                "field": "left",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:dial_changed",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "turn_middle_0"
+          },
+          "receipt": "latch4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "l1",
+                "field": "middle",
+                "n": 29,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:dial_changed",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "turn_middle_1"
+          },
+          "receipt": "latch5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "l1",
+                "field": "middle",
+                "n": 29,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:dial_changed",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "turn_middle_2"
+          },
+          "receipt": "latch6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "l1",
+                "field": "middle",
+                "n": 29,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:dial_changed",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "turn_middle_3"
+          },
+          "receipt": "latch7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "l1",
+                "field": "middle",
+                "n": 29,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:dial_changed",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "turn_right_0"
+          },
+          "receipt": "latch8",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "l1",
+                "field": "right",
+                "n": 30,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:dial_changed",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "turn_right_1"
+          },
+          "receipt": "latch9",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "l1",
+                "field": "right",
+                "n": 30,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:dial_changed",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "turn_right_2"
+          },
+          "receipt": "latch10",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "l1",
+                "field": "right",
+                "n": 30,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:dial_changed",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "turn_right_3"
+          },
+          "receipt": "latch11",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "l1",
+                "field": "right",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:dial_changed",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "turn_left_0"
+          },
+          "receipt": "latch12",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "l1",
+                "field": "left",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:dial_changed",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "turn_left_1"
+          },
+          "receipt": "latch13",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "l1",
+                "field": "left",
+                "n": 28,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:dial_changed",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "turn_middle_0"
+          },
+          "receipt": "latch14",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "l1",
+                "field": "middle",
+                "n": 29,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:dial_changed",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "turn_right_0"
+          },
+          "receipt": "latch15",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "l1",
+                "field": "right",
+                "n": 30,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:dial_changed",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "turn_right_1"
+          },
+          "receipt": "latch16",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "l1",
+                "field": "right",
+                "n": 30,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:dial_changed",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "turn_right_2"
+          },
+          "receipt": "latch17",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "l1",
+                "field": "right",
+                "n": 30,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:dial_changed",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "release"
+          },
+          "receipt": "latch18",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "l1",
+                "field": "released",
+                "n": 31,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:bolt_changed",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "relatch"
+          },
+          "receipt": "latch19",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "l1",
+                "field": "released",
+                "n": 31,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:bolt_changed",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "turn_left_2"
+          },
+          "receipt": "latch20",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "l1",
+                "field": "left",
+                "n": 28,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:dial_changed",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "turn_left_3"
+          },
+          "receipt": "latch21",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "l1",
+                "field": "left",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:dial_changed",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "turn_left_0"
+          },
+          "receipt": "latch22",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "l1",
+                "field": "left",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:dial_changed",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "turn_left_1"
+          },
+          "receipt": "latch23",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "l1",
+                "field": "left",
+                "n": 28,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:dial_changed",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "release"
+          },
+          "receipt": "latch24",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "l1",
+                "field": "released",
+                "n": 31,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:bolt_changed",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "l1",
+            "form": "relatch"
+          },
+          "receipt": "latch25",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "l1",
+                "field": "released",
+                "n": 31,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:bolt_changed",
+                "node": "l1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "l1": {
+          "kind": "eden:combination_latch",
+          "fields": {
+            "left": 2,
+            "middle": 1,
+            "right": 3,
+            "released": 0
+          }
+        }
+      }
+    }
+  ]
+}
