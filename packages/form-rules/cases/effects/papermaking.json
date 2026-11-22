@@ -1891,7 +1891,12 @@
           "hands": {
             "left": "old_sheet",
             "right": null
-          }
+          },
+          "effector_mm": [
+            0,
+            8,
+            180
+          ]
         }
       }
     },
