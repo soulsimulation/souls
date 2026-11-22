@@ -466,7 +466,7 @@ fn a_thing_is_walkable_when_a_place_a_floor_to_stand_on_a_step_high_or_stood_on_
     assert!(
         !walkable(&j(
             r#"{"owner": "thing", "geometry": {"bounds_mm": [600, 900, 600]},
-                "slots": {"seat": {"admits": "body", "posture": "sit", "at_mm": [0, 450, 0]}}}"#
+                "slots": {"rest": {"admits": "body", "posture": "sit", "at_mm": [0, 450, 0]}}}"#
         )),
         "a chair"
     );
