@@ -4,12 +4,13 @@ import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { test } from 'node:test';
-import { rowsOf } from '../brief/copy.mjs';
+import { publicWordsOf, rememberPublicWords, rowsOf } from '../brief/copy.mjs';
 import { encode } from '../history/day.mjs';
-import { blankAt, calendarItems, calendarList, whatsOn, worldTimeOf } from './world.mjs';
+import { blankAt, calendarItems, calendarList, heldBlank, noticeBoards, whatsOn, worldTimeOf } from './world.mjs';
 
 const entry = JSON.parse(readFileSync(new URL('../../../../content/kinds/calendar/entry.json', import.meta.url), 'utf8'));
-const kinds = { [entry.kind]: entry };
+const board = JSON.parse(readFileSync(new URL('../../../../content/kinds/calendar/notice_board.json', import.meta.url), 'utf8'));
+const kinds = { [entry.kind]: entry, [board.kind]: board };
 const S = new Uint8Array(16).fill(7), id = (n) => [S, n], text = (n) => `${'07'.repeat(16)}-${n}`;
 const MIN = 60_000_000, n = (f) => entry.state[f].n;
 
@@ -82,4 +83,54 @@ test('A2: calendar lists items not over and the blank notices; add finds the bla
   assert.deepEqual(out.blank, [{ id: text(24), place: 'room 3', placeId: text(3) }]);
   assert.equal(blankAt(items, rows, text(3))?.id, text(24));
   assert.equal(blankAt(items, rows, text(2)), null, 'no blank notice in room 2');
+});
+
+test('A2: the notice boards that make blank notices, and the blank one a body holds', () => {
+  const held = copyOf([
+    { n: 1, kind: 'souls:world' },
+    { n: 2, kind: 'eden:room', parent: 1 },
+    { n: 3, kind: 'eden:room', parent: 1 },
+    { n: 30, kind: 'eden:notice_board', parent: 2 },
+    { n: 31, kind: 'eden:notice_board', parent: 3 },
+    { n: 10, kind: 'souls:body', parent: 2 },
+    { n: 40, kind: 'eden:calendar_entry', parent: 10 },
+    { n: 41, kind: 'eden:calendar_entry', parent: 3 },
+  ]);
+  const rows = rowsOf(held), items = calendarItems(held, kinds);
+  assert.deepEqual(noticeBoards(rows, kinds).map((b) => [b.id, b.form]).sort(), [[text(30), 'take_notice'], [text(31), 'take_notice']]);
+  assert.equal(noticeBoards(rows, kinds, text(3))[0].id, text(31), 'the board at the place comes first');
+  assert.equal(heldBlank(items, rows, text(10))?.id, text(40));
+  assert.equal(heldBlank(items, rows, text(11)), null);
+});
+
+test('A2: words beside a records answer reach the copy for public records only', () => {
+  const posted = copyOf([
+    { n: 1, kind: 'souls:world' },
+    { n: 50, kind: 'eden:calendar_entry', parent: 1, fields: [[n('start'), world(5)], [n('end'), world(65)], [n('words'), new Map([[21, id(6000)]])]],
+      links: [['eden:poster', 100, 50]] },
+  ]);
+  const record = (ref, everyone) => encode(new Map([[5, new Map([[1, everyone ? 1 : 2]])], [6, new Map([[n('words'), new Map([[21, id(ref)]])]])]]));
+  const frame = encode(new Map([[22, [record(6000, true), record(6001, false)]],
+    [27, [[id(6000), Buffer.from('Tea at four')], [id(6001), Buffer.from('a private line')], [id(6002), Buffer.from('named by no record')]]]]));
+  rememberPublicWords(posted, frame);
+  assert.deepEqual([...publicWordsOf(posted)], [[text(6000), 'Tea at four']], 'a private or unnamed reference gets no words');
+  const [item] = calendarItems(posted, kinds);
+  assert.equal(item.words, 'Tea at four');
+});
+
+test("#3699: a creator's event (words and a start, no poster link) is posted and on whatson; a blank stays blank", () => {
+  const placed = copyOf([
+    { n: 1, kind: 'souls:world' },
+    { n: 3, kind: 'eden:room', parent: 1 },
+    // Placed by a creator's edit: its words kept for everyone, no poster link.
+    { n: 60, kind: 'eden:calendar_entry', parent: 3, fields: [[n('start'), world(15)], [n('end'), world(75)], [n('words'), words('Market on the green')]] },
+    // A blank notice: no poster and no words.
+    { n: 61, kind: 'eden:calendar_entry', parent: 3 },
+  ]);
+  const rows = rowsOf(placed), items = calendarItems(placed, kinds);
+  const out = whatsOn(items, { rows, me: text(100), clock, cal, nowMs: NOW, hours: 3 });
+  assert.deepEqual(out.on.map((r) => [r.id, r.title, r.phase, r.startsInMinutes, r.forMinutes]), [[text(60), 'Market on the green', 'soon', 15, 60]]);
+  assert.equal('by' in out.on[0], false, 'no Soul posted it');
+  assert.deepEqual(calendarList(items, { rows, me: text(100), clock, cal, nowMs: NOW }).blank.map((b) => b.id), [text(61)]);
+  assert.equal(blankAt(items, rows, text(3))?.id, text(61), 'calendar add never writes over the creator\'s event');
 });

@@ -4,6 +4,7 @@
 //! creator as actor, through the same write as every act (`sim::commit::write`), or refused whole.
 //!
 //! - **Who:** the world's one creator, and nobody else (`edit.not-the-creator`).
+//! - **Marks:** an owner or access mark (`who_may::F_OWNER`, `F_ACCESS`, #3700) reads as one (`edit.owner-malformed`).
 //! - **Size:** at most [`OPS_MOST`] operations (`edit.too-many-operations`) and [`NODES_MOST`] changed nodes, a removed
 //!   subtree counted whole (`edit.too-many-nodes`).
 //! - **Structure:** a placed kind is known by its full `namespace:name@hash` (`edit.kind-unknown`), and the parent's
@@ -22,6 +23,7 @@
 //!   reverses by its cause, `Cause::Effect(first)`, where `first` is the sequence of that batch's first effect, with a
 //!   creator acting ([`reverses`]).
 
+pub mod claims;
 pub mod wire;
 
 use crate::apply::Replica;
@@ -196,6 +198,8 @@ pub struct Edit {
     pub actor: Actor,
     pub planned: u64,
     pub ops: Vec<Op>,
+    /// The build claim it is sent under, by id (#3701, [`claims`]); none for the lead's own edits.
+    pub claim: Option<Name>,
 }
 
 /// What an edit is checked against: the world's one creator, and the kinds it pins by full name.
@@ -244,7 +248,7 @@ pub struct DoorGeometry {
 }
 
 /// A doorway leaf's owned wall patch: [wall id, closed rows, open rows].
-pub const DOOR_GEOMETRY: u64 = 29;
+pub const DOOR_GEOMETRY: u64 = 100;
 const SOLIDS: u64 = 12;
 const GEOMETRY_MOST: usize = 64;
 type OwnedDoor = (Ref, Vec<Value>, Vec<Value>, [Ref; 2]);
@@ -304,11 +308,11 @@ struct New {
 
 /// Checks `edit` on `copy` (see the module's notes). Runs off the clock thread.
 pub fn check(edit: Edit, copy: &Replica, world: &World) -> Result<Checked, Refused> {
-    if edit.actor != Actor::Creator(world.creator) {
+    if !claims::admits(&edit, copy, world.creator) {
         return refuse(
             None,
             "edit.not-the-creator",
-            "only the world's creator edits it",
+            "only the world's creator edits it, or a claim's helper under that claim",
         );
     }
     if edit.ops.len() > OPS_MOST {
@@ -450,6 +454,11 @@ pub fn check(edit: Edit, copy: &Replica, world: &World) -> Result<Checked, Refus
                 }
                 let (pk, _) = named(*parent)?;
                 admits(&pk, k, at.slot)?;
+                for (f, v) in initial_fields {
+                    if let Err(why) = crate::who_may::check_mark(*f, v) {
+                        return refuse(here, "edit.owner-malformed", why);
+                    }
+                }
                 if let Ref::Node(p) = parent {
                     parents.push((i, *p));
                 }
@@ -495,6 +504,10 @@ pub fn check(edit: Edit, copy: &Replica, world: &World) -> Result<Checked, Refus
                     );
                 }
                 named(*node)?;
+                // #3700: an owner or access mark is checked as it is written.
+                if let Err(why) = crate::who_may::check_mark(*field, to) {
+                    return refuse(here, "edit.owner-malformed", why);
+                }
                 written = write_size(here, written, to)?;
                 if let Ref::Node(id) = node {
                     reads.push((i, *id));
@@ -813,6 +826,7 @@ pub fn check(edit: Edit, copy: &Replica, world: &World) -> Result<Checked, Refus
             );
         }
     }
+    claims::judge(&edit, copy)?;
     Ok(Checked {
         edit,
         reads,
@@ -838,7 +852,9 @@ pub fn confirm(live: &Replica, c: &Checked) -> Result<(), Refused> {
             return refuse(Some(*i), "edit.stale", format!("{id:?} is gone"));
         }
     }
-    Ok(())
+    // The claim check reads the root's claims and every ancestor's pose, which the read set does not hold: run it
+    // again on the live copy, so a claim committed since the check still binds (#3879 review). Cheap and deterministic.
+    claims::judge(&c.edit, live)
 }
 
 /// The batch an undo or redo reverses, by the sequence of its first effect: a creator's effect caused by an earlier

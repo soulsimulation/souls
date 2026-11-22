@@ -183,6 +183,9 @@ fn plan_with(
     ])))
     .map_err(|e| refused("encoding", e.to_string()))?;
     let part = Part::read(&bytes).map_err(|r| refused(r.name, r.detail))?;
+    if let Some(g) = ground {
+        on_ground(copy, g, &part)?;
+    }
     let terrain = terrain::guard(copy.tree(), copy.header(), ground, &checked, &part)?;
     let (guard, map) = guard(&part).map_err(|e| refused("edit.unchecked", e))?;
     Ok(Planned {
@@ -192,6 +195,30 @@ fn plan_with(
         terrain,
         map,
     })
+}
+
+/// A thing placed or moved off the world's open ground (#3958).
+pub const OFF_GROUND: &str = "edit.off-ground";
+
+/// Refuses, by [`OFF_GROUND`], a part that leaves a thing past the open ground `ground`'s extent
+/// ([`crate::ground::open::off_ground`]), before any ground is cut for it: the walkers' maps are cut over the whole
+/// extent, so a thing 100 km off would have the edit's check cut squares for minutes and every edit after it wait.
+fn on_ground(copy: &Replica, ground: Id, part: &Part) -> Result<(), Refused> {
+    let before = copy.tree();
+    let changed = crate::ground::changed(before, part);
+    if changed.is_empty() {
+        return Ok(());
+    }
+    let mut after = before.frozen();
+    // A part that does not apply is refused by the guard, which applies it again.
+    if after.apply(copy.header(), part).is_err() {
+        return Ok(());
+    }
+    match crate::ground::open::off_ground(before, &after, ground, &changed) {
+        Ok(None) => Ok(()),
+        Ok(Some(why)) => Err(refused(OFF_GROUND, why)),
+        Err(e) => Err(refused("edit.unchecked", e)),
+    }
 }
 
 /// Each placed node's temporary name and the id `minter` gives it.
@@ -702,6 +729,7 @@ mod doorway_lowering_tests {
             .expect("the doorway's row at its owner");
         let checked = Checked {
             edit: Edit {
+                claim: None,
                 intent: Id::new(Scope([0xec; 16]), 1).unwrap(),
                 actor: Actor::Creator(Id::new(Scope([0xed; 16]), 1).unwrap()),
                 planned: 0,
@@ -830,7 +858,10 @@ mod doorway_lowering_tests {
 
     #[test]
     fn g1f_lowered_doorway_part_uses_the_importers_qualified_row_label() {
-        assert_eq!(DOOR_GEOMETRY, 29, "field 28 belongs to terrain parameters");
+        assert_eq!(
+            DOOR_GEOMETRY, 100,
+            "entries take 28 to 79 (replica::fields)"
+        );
         let im = import_eden::load(&testworld::generate(1, 0).unwrap().text).unwrap();
         let header = import_eden::header(im.nodes["world"], &im.rules).unwrap();
         let door = im.nodes["door-building-to-b"];
@@ -850,6 +881,7 @@ mod doorway_lowering_tests {
         // Codec regression only: the served test separately proves authored geometry, admission and BUILDSAFE.
         let checked = Checked {
             edit: Edit {
+                claim: None,
                 intent: Id::new(Scope([0xec; 16]), 1).unwrap(),
                 actor: Actor::Creator(Id::new(Scope([0xed; 16]), 1).unwrap()),
                 planned: 0,

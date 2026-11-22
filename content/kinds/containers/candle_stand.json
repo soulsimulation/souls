@@ -39,6 +39,29 @@
     "front": "none"
   },
   "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "take"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": "this",
+          "into": "actor_hand",
+          "event": "taken"
+        }
+      ]
+    },
     "light": {
       "who": "anyone",
       "starts": "act",
@@ -228,7 +251,7 @@
     }
   },
   "text": {
-    "card": "A floor candle stand carried in both hands: light its candle, or put it out.",
+    "card": "A floor candle stand: carry it in both hands, set it down, light or put it out.",
     "light": "light",
     "candle": "candle",
     "candlestick": "candlestick"

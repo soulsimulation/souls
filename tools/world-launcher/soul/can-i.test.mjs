@@ -79,7 +79,7 @@ test("a definite no from the thing's state wins over what the copy cannot judge;
   assert.equal(r.can, "no");
   assert.equal(r.missing.field, "heating", "the first unmet need is named");
   const all = (await run(dir, "can", "kettle")).out;
-  assert.deepEqual(all.forms.map((f) => f.form), ["fill", "switch_on", "pour"]);
+  assert.deepEqual(all.forms.map((f) => f.form), ["take", "fill", "switch_on", "pour"]);
   assert.equal(all.forms.find((f) => f.form === "switch_on").can, "no");
 });
 
