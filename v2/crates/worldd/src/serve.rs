@@ -2412,6 +2412,8 @@ fn serve(args: &[String]) -> R<()> {
     let (ready_tx, ready_rx) = channel::<()>();
     let stream_header = built.header.clone();
     let stream_found = Arc::clone(&found);
+    // What a closed container holds stays out of the public stream too (#3948).
+    let stream_closed = closed_kinds.clone();
     // The history page's Back to live (#3661): the public stream this world serves now, written before listening.
     public_history_live(
         &dir,
@@ -2453,7 +2455,8 @@ fn serve(args: &[String]) -> R<()> {
                     clock_seed: stream_clock,
                     history: Some(&*stream_found),
                 };
-                let mut writer = view_out::PublicWriter::open(start, stream_store)?;
+                let mut writer =
+                    view_out::PublicWriter::open_hiding(start, stream_store, stream_closed)?;
                 // Both the pointer and placement bootstrap resolve the existing strict public history export.
                 let history = "history/";
                 let pointer = format!(
