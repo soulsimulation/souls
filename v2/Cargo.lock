@@ -265,6 +265,7 @@ dependencies = [
  "futures-util",
  "gatewayd",
  "libc",
+ "miniz_oxide",
  "replica",
  "tokio",
  "tokio-tungstenite",
