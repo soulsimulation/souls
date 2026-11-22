@@ -1,0 +1,1526 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "Every one of8 exact-phase input toggles and every unmet phase/hand/reach need.",
+  "cases": [
+    {
+      "name": "toggle_a_0_accepted",
+      "act": {
+        "this": "t1",
+        "form": "toggle_a_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1100,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "toggle_a_0_refuses_field_differs",
+      "act": {
+        "this": "t1",
+        "form": "toggle_a_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1100,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "toggle_a_0_refuses_no_free_hand",
+      "act": {
+        "this": "t1",
+        "form": "toggle_a_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "propL",
+              "right": "propR"
+            },
+            "effector_mm": [
+              0,
+              1100,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "toggle_a_0_refuses_out_of_reach",
+      "act": {
+        "this": "t1",
+        "form": "toggle_a_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "toggle_a_1_accepted",
+      "act": {
+        "this": "t1",
+        "form": "toggle_a_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1100,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "toggle_a_1_refuses_field_differs",
+      "act": {
+        "this": "t1",
+        "form": "toggle_a_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1100,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "toggle_a_1_refuses_no_free_hand",
+      "act": {
+        "this": "t1",
+        "form": "toggle_a_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "propL",
+              "right": "propR"
+            },
+            "effector_mm": [
+              0,
+              1100,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "toggle_a_1_refuses_out_of_reach",
+      "act": {
+        "this": "t1",
+        "form": "toggle_a_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "toggle_a_2_accepted",
+      "act": {
+        "this": "t1",
+        "form": "toggle_a_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1100,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "toggle_a_2_refuses_field_differs",
+      "act": {
+        "this": "t1",
+        "form": "toggle_a_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1100,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "toggle_a_2_refuses_no_free_hand",
+      "act": {
+        "this": "t1",
+        "form": "toggle_a_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "propL",
+              "right": "propR"
+            },
+            "effector_mm": [
+              0,
+              1100,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "toggle_a_2_refuses_out_of_reach",
+      "act": {
+        "this": "t1",
+        "form": "toggle_a_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "toggle_a_3_accepted",
+      "act": {
+        "this": "t1",
+        "form": "toggle_a_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1100,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "toggle_a_3_refuses_field_differs",
+      "act": {
+        "this": "t1",
+        "form": "toggle_a_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1100,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "toggle_a_3_refuses_no_free_hand",
+      "act": {
+        "this": "t1",
+        "form": "toggle_a_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "propL",
+              "right": "propR"
+            },
+            "effector_mm": [
+              0,
+              1100,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "toggle_a_3_refuses_out_of_reach",
+      "act": {
+        "this": "t1",
+        "form": "toggle_a_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "toggle_b_0_accepted",
+      "act": {
+        "this": "t1",
+        "form": "toggle_b_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1100,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "toggle_b_0_refuses_field_differs",
+      "act": {
+        "this": "t1",
+        "form": "toggle_b_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1100,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "toggle_b_0_refuses_no_free_hand",
+      "act": {
+        "this": "t1",
+        "form": "toggle_b_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "propL",
+              "right": "propR"
+            },
+            "effector_mm": [
+              0,
+              1100,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "toggle_b_0_refuses_out_of_reach",
+      "act": {
+        "this": "t1",
+        "form": "toggle_b_0"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "toggle_b_1_accepted",
+      "act": {
+        "this": "t1",
+        "form": "toggle_b_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1100,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "toggle_b_1_refuses_field_differs",
+      "act": {
+        "this": "t1",
+        "form": "toggle_b_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1100,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "toggle_b_1_refuses_no_free_hand",
+      "act": {
+        "this": "t1",
+        "form": "toggle_b_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "propL",
+              "right": "propR"
+            },
+            "effector_mm": [
+              0,
+              1100,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "toggle_b_1_refuses_out_of_reach",
+      "act": {
+        "this": "t1",
+        "form": "toggle_b_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "toggle_b_2_accepted",
+      "act": {
+        "this": "t1",
+        "form": "toggle_b_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1100,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "toggle_b_2_refuses_field_differs",
+      "act": {
+        "this": "t1",
+        "form": "toggle_b_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1100,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "toggle_b_2_refuses_no_free_hand",
+      "act": {
+        "this": "t1",
+        "form": "toggle_b_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "propL",
+              "right": "propR"
+            },
+            "effector_mm": [
+              0,
+              1100,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "toggle_b_2_refuses_out_of_reach",
+      "act": {
+        "this": "t1",
+        "form": "toggle_b_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "toggle_b_3_accepted",
+      "act": {
+        "this": "t1",
+        "form": "toggle_b_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1100,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "toggle_b_3_refuses_field_differs",
+      "act": {
+        "this": "t1",
+        "form": "toggle_b_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1100,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "toggle_b_3_refuses_no_free_hand",
+      "act": {
+        "this": "t1",
+        "form": "toggle_b_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "propL",
+              "right": "propR"
+            },
+            "effector_mm": [
+              0,
+              1100,
+              400
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "toggle_b_3_refuses_out_of_reach",
+      "act": {
+        "this": "t1",
+        "form": "toggle_b_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "t1"
+            ]
+          },
+          "t1": {
+            "kind": "eden:logic_trainer",
+            "fields": {
+              "inputs": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    }
+  ]
+}

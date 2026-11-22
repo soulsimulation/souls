@@ -1,0 +1,1836 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:logic_trainer",
+  "owner": "thing",
+  "state": {
+    "inputs": {
+      "n": 28,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 3,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand_a": {
+      "role": "stand",
+      "at_mm": [
+        -400,
+        0,
+        650
+      ],
+      "yaw_mdeg": 180000
+    },
+    "a": {
+      "role": "contact",
+      "at_mm": [
+        -400,
+        1000,
+        190
+      ]
+    },
+    "stand_b": {
+      "role": "stand",
+      "at_mm": [
+        400,
+        0,
+        650
+      ],
+      "yaw_mdeg": 180000
+    },
+    "b": {
+      "role": "contact",
+      "at_mm": [
+        400,
+        1000,
+        190
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      2100,
+      1900,
+      450
+    ]
+  },
+  "forms": {
+    "toggle_a_0": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "inputs",
+          "is": 0,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "a"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand_a"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "a"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "inputs",
+          "to": 1,
+          "event": "inputs_changed"
+        }
+      ]
+    },
+    "toggle_a_1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "inputs",
+          "is": 1,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "a"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand_a"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "a"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "inputs",
+          "to": 0,
+          "event": "inputs_changed"
+        }
+      ]
+    },
+    "toggle_a_2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "inputs",
+          "is": 2,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "a"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand_a"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "a"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "inputs",
+          "to": 3,
+          "event": "inputs_changed"
+        }
+      ]
+    },
+    "toggle_a_3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "inputs",
+          "is": 3,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "a"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand_a"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "a"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "inputs",
+          "to": 2,
+          "event": "inputs_changed"
+        }
+      ]
+    },
+    "toggle_b_0": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "inputs",
+          "is": 0,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "b"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand_b"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "b"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "inputs",
+          "to": 2,
+          "event": "inputs_changed"
+        }
+      ]
+    },
+    "toggle_b_1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "inputs",
+          "is": 1,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "b"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand_b"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "b"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "inputs",
+          "to": 3,
+          "event": "inputs_changed"
+        }
+      ]
+    },
+    "toggle_b_2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "inputs",
+          "is": 2,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "b"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand_b"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "b"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "inputs",
+          "to": 0,
+          "event": "inputs_changed"
+        }
+      ]
+    },
+    "toggle_b_3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "inputs",
+          "is": 3,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "b"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand_b"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "b"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "inputs",
+          "to": 1,
+          "event": "inputs_changed"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:logic_trainer",
+    "table": [
+      {
+        "part": "switch_a",
+        "field": "inputs",
+        "do": "rotate",
+        "axis": "z",
+        "at": {
+          "0": 0,
+          "1": 180000,
+          "2": 0,
+          "3": 180000
+        }
+      },
+      {
+        "part": "switch_b",
+        "field": "inputs",
+        "do": "rotate",
+        "axis": "z",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 180000,
+          "3": 180000
+        }
+      },
+      {
+        "part": "lamp_and",
+        "field": "inputs",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 1
+        }
+      },
+      {
+        "part": "lamp_or",
+        "field": "inputs",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 1,
+          "2": 1,
+          "3": 1
+        }
+      },
+      {
+        "part": "lamp_xor",
+        "field": "inputs",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 1,
+          "2": 1,
+          "3": 0
+        }
+      },
+      {
+        "part": "lamp_nand",
+        "field": "inputs",
+        "do": "show",
+        "at": {
+          "0": 1,
+          "1": 1,
+          "2": 1,
+          "3": 0
+        }
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            40,
+            0
+          ],
+          "size": [
+            2100,
+            80,
+            400
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -980,
+            940,
+            -100
+          ],
+          "size": [
+            70,
+            1720,
+            100
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            980,
+            940,
+            -100
+          ],
+          "size": [
+            70,
+            1720,
+            100
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1300,
+            -90
+          ],
+          "size": [
+            2050,
+            1100,
+            50
+          ],
+          "tint": "back"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -855,
+            1650,
+            65
+          ],
+          "size": [
+            101,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": 72646
+        },
+        {
+          "kind": "box",
+          "at": [
+            -825,
+            1650,
+            65
+          ],
+          "size": [
+            101,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": -72646
+        },
+        {
+          "kind": "box",
+          "at": [
+            -840,
+            1650,
+            65
+          ],
+          "size": [
+            36,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": 0
+        },
+        {
+          "kind": "box",
+          "at": [
+            -780,
+            1650,
+            65
+          ],
+          "size": [
+            96,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -750,
+            1650,
+            65
+          ],
+          "size": [
+            113,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": -57995
+        },
+        {
+          "kind": "box",
+          "at": [
+            -720,
+            1650,
+            65
+          ],
+          "size": [
+            96,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -690,
+            1650,
+            65
+          ],
+          "size": [
+            96,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -660,
+            1690,
+            65
+          ],
+          "size": [
+            62,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": -14036
+        },
+        {
+          "kind": "box",
+          "at": [
+            -630,
+            1650,
+            65
+          ],
+          "size": [
+            66,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": -90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -660,
+            1610,
+            65
+          ],
+          "size": [
+            62,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": -165964
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -750,
+            1450,
+            30
+          ],
+          "r": 75,
+          "h": 30,
+          "segments": 20,
+          "pitch": 90000,
+          "tint": "off"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -750,
+            1450,
+            55
+          ],
+          "r": 58,
+          "h": 10,
+          "segments": 20,
+          "pitch": 90000,
+          "tint": "on",
+          "glow": 800,
+          "role": "lamp_and",
+          "pivot": [
+            -750,
+            1450,
+            55
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -325,
+            1650,
+            65
+          ],
+          "size": [
+            96,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -295,
+            1698,
+            65
+          ],
+          "size": [
+            60,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": 0
+        },
+        {
+          "kind": "box",
+          "at": [
+            -265,
+            1650,
+            65
+          ],
+          "size": [
+            96,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": -90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -295,
+            1602,
+            65
+          ],
+          "size": [
+            60,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": 180000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -235,
+            1650,
+            65
+          ],
+          "size": [
+            96,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -205,
+            1698,
+            65
+          ],
+          "size": [
+            60,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": 0
+        },
+        {
+          "kind": "box",
+          "at": [
+            -175,
+            1674,
+            65
+          ],
+          "size": [
+            48,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": -90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -205,
+            1650,
+            65
+          ],
+          "size": [
+            60,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": 180000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -205,
+            1626,
+            65
+          ],
+          "size": [
+            77,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": -38660
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -250,
+            1450,
+            30
+          ],
+          "r": 75,
+          "h": 30,
+          "segments": 20,
+          "pitch": 90000,
+          "tint": "off"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -250,
+            1450,
+            55
+          ],
+          "r": 58,
+          "h": 10,
+          "segments": 20,
+          "pitch": 90000,
+          "tint": "on",
+          "glow": 800,
+          "role": "lamp_or",
+          "pivot": [
+            -250,
+            1450,
+            55
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            160,
+            1650,
+            65
+          ],
+          "size": [
+            113,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": -57995
+        },
+        {
+          "kind": "box",
+          "at": [
+            160,
+            1650,
+            65
+          ],
+          "size": [
+            113,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": -122005
+        },
+        {
+          "kind": "box",
+          "at": [
+            220,
+            1650,
+            65
+          ],
+          "size": [
+            96,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            250,
+            1698,
+            65
+          ],
+          "size": [
+            60,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": 0
+        },
+        {
+          "kind": "box",
+          "at": [
+            280,
+            1650,
+            65
+          ],
+          "size": [
+            96,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": -90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            250,
+            1602,
+            65
+          ],
+          "size": [
+            60,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": 180000
+        },
+        {
+          "kind": "box",
+          "at": [
+            310,
+            1650,
+            65
+          ],
+          "size": [
+            96,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            340,
+            1698,
+            65
+          ],
+          "size": [
+            60,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": 0
+        },
+        {
+          "kind": "box",
+          "at": [
+            370,
+            1674,
+            65
+          ],
+          "size": [
+            48,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": -90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            340,
+            1650,
+            65
+          ],
+          "size": [
+            60,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": 180000
+        },
+        {
+          "kind": "box",
+          "at": [
+            340,
+            1626,
+            65
+          ],
+          "size": [
+            77,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": -38660
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            250,
+            1450,
+            30
+          ],
+          "r": 75,
+          "h": 30,
+          "segments": 20,
+          "pitch": 90000,
+          "tint": "off"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            250,
+            1450,
+            55
+          ],
+          "r": 58,
+          "h": 10,
+          "segments": 20,
+          "pitch": 90000,
+          "tint": "on",
+          "glow": 800,
+          "role": "lamp_xor",
+          "pivot": [
+            250,
+            1450,
+            55
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            585,
+            1650,
+            65
+          ],
+          "size": [
+            96,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            615,
+            1650,
+            65
+          ],
+          "size": [
+            113,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": -57995
+        },
+        {
+          "kind": "box",
+          "at": [
+            645,
+            1650,
+            65
+          ],
+          "size": [
+            96,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            690,
+            1650,
+            65
+          ],
+          "size": [
+            101,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": 72646
+        },
+        {
+          "kind": "box",
+          "at": [
+            720,
+            1650,
+            65
+          ],
+          "size": [
+            101,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": -72646
+        },
+        {
+          "kind": "box",
+          "at": [
+            705,
+            1650,
+            65
+          ],
+          "size": [
+            36,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": 0
+        },
+        {
+          "kind": "box",
+          "at": [
+            765,
+            1650,
+            65
+          ],
+          "size": [
+            96,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            795,
+            1650,
+            65
+          ],
+          "size": [
+            113,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": -57995
+        },
+        {
+          "kind": "box",
+          "at": [
+            825,
+            1650,
+            65
+          ],
+          "size": [
+            96,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            855,
+            1650,
+            65
+          ],
+          "size": [
+            96,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            885,
+            1690,
+            65
+          ],
+          "size": [
+            62,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": -14036
+        },
+        {
+          "kind": "box",
+          "at": [
+            915,
+            1650,
+            65
+          ],
+          "size": [
+            66,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": -90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            885,
+            1610,
+            65
+          ],
+          "size": [
+            62,
+            12,
+            10
+          ],
+          "tint": "label",
+          "roll": -165964
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            750,
+            1450,
+            30
+          ],
+          "r": 75,
+          "h": 30,
+          "segments": 20,
+          "pitch": 90000,
+          "tint": "off"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            750,
+            1450,
+            55
+          ],
+          "r": 58,
+          "h": 10,
+          "segments": 20,
+          "pitch": 90000,
+          "tint": "on",
+          "glow": 800,
+          "role": "lamp_nand",
+          "pivot": [
+            750,
+            1450,
+            55
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -417,
+            1270,
+            65
+          ],
+          "size": [
+            114,
+            14,
+            10
+          ],
+          "tint": "label",
+          "roll": 72646
+        },
+        {
+          "kind": "box",
+          "at": [
+            -383,
+            1270,
+            65
+          ],
+          "size": [
+            114,
+            14,
+            10
+          ],
+          "tint": "label",
+          "roll": -72646
+        },
+        {
+          "kind": "box",
+          "at": [
+            -400,
+            1270,
+            65
+          ],
+          "size": [
+            41,
+            14,
+            10
+          ],
+          "tint": "label",
+          "roll": 0
+        },
+        {
+          "kind": "box",
+          "at": [
+            -400,
+            940,
+            90
+          ],
+          "size": [
+            24,
+            120,
+            24
+          ],
+          "tint": "lever",
+          "role": "switch_a",
+          "pivot": [
+            -400,
+            1000,
+            90
+          ]
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -400,
+            1000,
+            150
+          ],
+          "r": 35,
+          "h": 80,
+          "segments": 12,
+          "pitch": 90000,
+          "tint": "hub"
+        },
+        {
+          "kind": "box",
+          "at": [
+            366,
+            1270,
+            65
+          ],
+          "size": [
+            109,
+            14,
+            10
+          ],
+          "tint": "label",
+          "roll": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            395,
+            1324,
+            65
+          ],
+          "size": [
+            58,
+            14,
+            10
+          ],
+          "tint": "label",
+          "roll": 0
+        },
+        {
+          "kind": "box",
+          "at": [
+            400,
+            1270,
+            65
+          ],
+          "size": [
+            68,
+            14,
+            10
+          ],
+          "tint": "label",
+          "roll": 0
+        },
+        {
+          "kind": "box",
+          "at": [
+            400,
+            1216,
+            65
+          ],
+          "size": [
+            68,
+            14,
+            10
+          ],
+          "tint": "label",
+          "roll": 0
+        },
+        {
+          "kind": "box",
+          "at": [
+            424,
+            1297,
+            65
+          ],
+          "size": [
+            54,
+            14,
+            10
+          ],
+          "tint": "label",
+          "roll": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            434,
+            1243,
+            65
+          ],
+          "size": [
+            54,
+            14,
+            10
+          ],
+          "tint": "label",
+          "roll": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            400,
+            940,
+            90
+          ],
+          "size": [
+            24,
+            120,
+            24
+          ],
+          "tint": "lever",
+          "role": "switch_b",
+          "pivot": [
+            400,
+            1000,
+            90
+          ]
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            400,
+            1000,
+            150
+          ],
+          "r": 35,
+          "h": 80,
+          "segments": 12,
+          "pitch": 90000,
+          "tint": "hub"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -920,
+            1120,
+            65
+          ],
+          "size": [
+            77,
+            10,
+            10
+          ],
+          "tint": "on_label",
+          "roll": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -896,
+            1158,
+            65
+          ],
+          "size": [
+            48,
+            10,
+            10
+          ],
+          "tint": "on_label",
+          "roll": 0
+        },
+        {
+          "kind": "box",
+          "at": [
+            -872,
+            1120,
+            65
+          ],
+          "size": [
+            77,
+            10,
+            10
+          ],
+          "tint": "on_label",
+          "roll": -90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -896,
+            1082,
+            65
+          ],
+          "size": [
+            48,
+            10,
+            10
+          ],
+          "tint": "on_label",
+          "roll": 180000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -848,
+            1120,
+            65
+          ],
+          "size": [
+            77,
+            10,
+            10
+          ],
+          "tint": "on_label",
+          "roll": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -824,
+            1120,
+            65
+          ],
+          "size": [
+            91,
+            10,
+            10
+          ],
+          "tint": "on_label",
+          "roll": -57995
+        },
+        {
+          "kind": "box",
+          "at": [
+            -800,
+            1120,
+            65
+          ],
+          "size": [
+            77,
+            10,
+            10
+          ],
+          "tint": "on_label",
+          "roll": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -956,
+            880,
+            65
+          ],
+          "size": [
+            77,
+            10,
+            10
+          ],
+          "tint": "label",
+          "roll": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -932,
+            918,
+            65
+          ],
+          "size": [
+            48,
+            10,
+            10
+          ],
+          "tint": "label",
+          "roll": 0
+        },
+        {
+          "kind": "box",
+          "at": [
+            -908,
+            880,
+            65
+          ],
+          "size": [
+            77,
+            10,
+            10
+          ],
+          "tint": "label",
+          "roll": -90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -932,
+            842,
+            65
+          ],
+          "size": [
+            48,
+            10,
+            10
+          ],
+          "tint": "label",
+          "roll": 180000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -884,
+            880,
+            65
+          ],
+          "size": [
+            77,
+            10,
+            10
+          ],
+          "tint": "label",
+          "roll": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -860,
+            918,
+            65
+          ],
+          "size": [
+            48,
+            10,
+            10
+          ],
+          "tint": "label",
+          "roll": 0
+        },
+        {
+          "kind": "box",
+          "at": [
+            -865,
+            880,
+            65
+          ],
+          "size": [
+            38,
+            10,
+            10
+          ],
+          "tint": "label",
+          "roll": 0
+        },
+        {
+          "kind": "box",
+          "at": [
+            -812,
+            880,
+            65
+          ],
+          "size": [
+            77,
+            10,
+            10
+          ],
+          "tint": "label",
+          "roll": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -788,
+            918,
+            65
+          ],
+          "size": [
+            48,
+            10,
+            10
+          ],
+          "tint": "label",
+          "roll": 0
+        },
+        {
+          "kind": "box",
+          "at": [
+            -793,
+            880,
+            65
+          ],
+          "size": [
+            38,
+            10,
+            10
+          ],
+          "tint": "label",
+          "roll": 0
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1120,
+            30
+          ],
+          "size": [
+            1150,
+            8,
+            10
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            880,
+            30
+          ],
+          "size": [
+            1150,
+            8,
+            10
+          ],
+          "tint": "reference"
+        }
+      ],
+      "palette": {
+        "frame": "#35424c",
+        "back": "#182b35",
+        "label": "#e0eee9",
+        "off": "#283e42",
+        "on": "#65ef9b",
+        "lever": "#fff1a8",
+        "hub": "#65c3ad",
+        "on_label": "#65ef9b",
+        "reference": "#b4cfce"
+      },
+      "tags": [
+        "tool",
+        "logic",
+        "exhibit"
+      ]
+    }
+  },
+  "text": {
+    "work": "work",
+    "card": "Toggle A and B to compare the AND, OR, XOR and NAND indicators.",
+    "logic": "logic trainer",
+    "truth": "truth table display",
+    "wrong_phase": "Choose the toggle offer matching the current input phase.",
+    "free_hand": "Put down an object so a hand is free to use an input switch.",
+    "howto_toggle": "The two fixed input labels are A on the left and B on the right. A lever points toward the fixed ON line when on, and toward OFF when off. A is bit1 and B bit2 of the one input phase:0 both off,1 A only,2 B only,3 both on. Use the toggle offer for the current phase; it flips only that input. The four fixed output labels read AND, OR, XOR, NAND from left to right. A bright green inlay means true and a dark face means false. In phases0,1,2,3 the indicator maps are AND0001, OR0111, XOR0110, NAND1110. This local indexed learning display prescribes switch poses and indicator visibility together. It models no circuit, voltage, current, room illumination, remote control, reaction network, timing, autonomous work or general computation, and makes no physical-switch-contact guarantee."
+  },
+  "card": {
+    "text": "card",
+    "category": "work",
+    "synonyms": [
+      "logic",
+      "truth"
+    ]
+  },
+  "howtos": {
+    "toggle": {
+      "text": "howto_toggle",
+      "steps": [
+        {
+          "form": "toggle_a_0"
+        },
+        {
+          "form": "toggle_b_1"
+        },
+        {
+          "form": "toggle_a_3"
+        },
+        {
+          "form": "toggle_b_2"
+        }
+      ]
+    }
+  }
+}
