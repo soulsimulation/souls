@@ -81,7 +81,7 @@ impl<S> Patient<S> {
         }
     }
 
-    fn read<T>(&self, what: &str, call: impl Fn(&S) -> R<T>) -> R<T> {
+    fn read<T>(&self, call: impl Fn(&S) -> R<T>) -> R<T> {
         let mut waits = self.waits.iter();
         loop {
             match call(&self.store) {
@@ -90,7 +90,7 @@ impl<S> Patient<S> {
                         return Err(e);
                     };
                     eprintln!(
-                        "store: {what}: out of reach ({}), trying again in {} s",
+                        "store: out of reach ({}), trying again in {} s",
                         e.detail,
                         wait.as_secs_f32()
                     );
@@ -104,7 +104,7 @@ impl<S> Patient<S> {
 
 impl<S: Store> Store for Patient<S> {
     fn get(&self, key: &str) -> R<Option<Object>> {
-        self.read(key, |s| s.get(key))
+        self.read(|s| s.get(key))
     }
 
     fn put(&self, key: &str, bytes: &[u8], when: When) -> R<String> {
@@ -112,7 +112,7 @@ impl<S: Store> Store for Patient<S> {
     }
 
     fn list(&self, prefix: &str) -> R<Vec<String>> {
-        self.read(prefix, |s| s.list(prefix))
+        self.read(|s| s.list(prefix))
     }
 
     fn delete(&self, key: &str) -> R<()> {

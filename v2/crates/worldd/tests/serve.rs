@@ -801,9 +801,7 @@ fn i1960_a_world_starts_through_slow_store_reads_and_ends_on_an_unreachable_stor
     println!("restart through 2 stalled reads in {took:?}: {retried:?}");
     assert_eq!(retried.len(), 2, "the stalled read tried again twice");
     assert!(
-        retried
-            .iter()
-            .all(|l| l.contains("/header: out of reach") && l.contains("timeout")),
+        retried.iter().all(|l| l.contains("/header: timeout")),
         "{retried:?}"
     );
     w.kill();
