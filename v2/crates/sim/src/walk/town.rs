@@ -3285,14 +3285,15 @@ mod passage_tests {
         );
         assert!(at(f0, v(0, 0, -600_000)), "within CLEAR of its foot end");
         // Under the flight: where it is 1.4 m up, a body standing there meets a body on it, so it is still a stair;
-        // where it is 2.1 m up, over a standing body's height, it is not (whether a body may stand there is the
-        // floor's patch's to say, cut round the flight's solids).
+        // where it is 2.5 m up, over a standing body's height and more than half its width and half CLEAR in plan from
+        // where it is 1.8 m up, it is not (whether a body may stand there is the floor's patch's to say, cut round the
+        // flight's solids).
         assert!(
             at(f0, v(0, 0, 2_000_000)),
             "the floor under the flight's middle"
         );
         assert!(
-            !at(f0, v(0, 0, 3_000_000)),
+            !at(f0, v(0, 0, 3_600_000)),
             "the floor under the flight's top"
         );
     }
