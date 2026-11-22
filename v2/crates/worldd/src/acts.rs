@@ -42,7 +42,7 @@
 //! - **A walk that stalls** (C21, #3484). Each tick, every form's walk that asked its way is watched
 //!   ([`sim::walk::stall::Watch`]) against the corner its line aims at and that line's leg's end (never the walk's
 //!   goal, which on a route with crossings lies past the leg's end): one that gains less than a quarter metre on
-//!   them over 3 s of world time, or whose least way left to the leg's end has not shrunk by a quarter metre in 12 s
+//!   them over 3 s of world time, or whose least way left to the leg's end has not shrunk by a quarter metre in 30 s
 //!   (it circles or goes to and fro), ends `walk.blocked` in that tick, its body's driver released, and the act's
 //!   ending entry names the nearest thing or edge in its way ([`sim::walk::stall::blocker`]).
 //!

@@ -427,7 +427,7 @@ impl replica::host::Skill for Holds {
 /// place, which on a route with crossings lies past the leg's end. Here the granted place lies 20 m west and the
 /// line goes east round N2's hall to its leg's end: walking it at 1.4 m/s, the walk is never found stalled. Measured
 /// against the granted place (or its corner alone), its least way left stops shrinking at the hall's first corner
-/// and the backstop ends it there 12 s on.
+/// and the backstop ends it there 30 s on.
 #[test]
 fn a_gateway_walk_is_watched_against_its_legs_end_not_its_granted_place() {
     let generated = testworld::generate(1, 0).expect("the synthetic world");
