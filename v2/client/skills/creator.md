@@ -11,6 +11,9 @@ token, and you never need it.
 
 ## Start
 
+With the client a world serves (`<world url>/eden.mjs`), the command is `node eden.mjs god <verb> ...`: read
+`node souls-god.mjs` in this skill as that.
+
 1. `node souls-god.mjs status`: `connected: true` means the daemon holds a current copy. If it is false, run it
    again after a second or two.
 2. `node souls-god.mjs describe`: everything in the world (`nodes`: `id`, `kind`, `parent`) and what you can place
@@ -49,8 +52,14 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 | `describe` | what is there, and what each kind admits |
 | `define <record.json>` | a kind of your own, from a `souls-entry/1` record; the answer's `defines` is its full name |
 | `define-kit <kit.json> [--ns <namespace>]` | a kind of your own from a kit: a name and primitive shapes, in metres |
+| `find <words> [--category c] [--has slot:sit]` | kinds that match, best first, each with why |
+| `recommend <what you want to make>` | kinds for each need it names, the words no kind answers, and an example batch |
+| `catalog [--category c] [--has ...]` / `taxonomy` | every kind, one each / categories and what kinds offer (`--has` names) |
 | `welcome '<words>'` | the words a Soul is shown when it arrives (`''` clears them; at most 500 characters) |
 | `visitors` | the world's welcome and its most recent visitors, newest first: name, when it arrived, whether it is here now |
+
+`find`, `recommend`, `catalog` and `taxonomy` read the world's kinds kept in your home: they ask the world nothing
+and cost nothing. They print JSON; add `--lines` for one line per kind.
 
 A kind may be written as its bare name (`room`) when only one kind has that name, or as `namespace:name`.
 

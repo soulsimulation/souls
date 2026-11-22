@@ -3,9 +3,10 @@
 //!
 //! - **A1** (N2's test world): the store's list row and name record name the creator; `serve` prints it at the start.
 //!   Another creator's edit is refused `edit.not-the-creator`; the named creator's commits.
-//! - **A2, A3** (seeded Eden, `--ignored`: needs the exported Eden facts file): 21 Souls stand in a row on the open
-//!   ground, 20 of them walking. A wall where the 21st stands is refused `edit.would-bury`; once it has walked away,
+//! - **A2, A3** (seeded Eden, `--ignored`: needs the exported Eden facts file): 21 Souls in a row on the open
+//!   ground, 20 of them walking; the 21st walks to its place first, since no Soul stands until it acts (C3). A wall where the 21st stands is refused `edit.would-bury`; once it has walked away,
 //!   the same wall commits. Each edit's answer is timed through the gateway, beside the 20 walkers.
+//! - **#3923** (N2's test world, in CI): the same refusal for a Soul that has acted, standing where its walk ended.
 
 // A real process and a real gateway on the real clock: the waits and the times are real time.
 #![allow(clippy::disallowed_methods)]
@@ -975,6 +976,17 @@ fn socket_answer(s: &mut UnixStream) -> Got {
     read_answer(&decode(&frame).expect("a frame").value)
 }
 
+/// The next answer on the world's socket that ends an intent: a walk long enough to run past its tick is first
+/// answered accepted (kind 3), then at its end.
+fn socket_end(s: &mut UnixStream) -> Got {
+    loop {
+        let got = socket_answer(s);
+        if got.kind != 3 {
+            return got;
+        }
+    }
+}
+
 fn connect_socket(socket: &Path) -> UnixStream {
     let end = Instant::now() + Duration::from_secs(60);
     loop {
@@ -1141,6 +1153,40 @@ async fn g7b_standalone_metadata_creator_still_edits_without_a_directory() {
     );
 }
 
+/// #3923: BUILDSAFE on a served world, in CI (N2's test world, no Eden facts): a wall where a Soul stands, once its
+/// first act has born it, is refused `edit.would-bury` by the record's creator, and the same wall beside it commits.
+#[tokio::test(flavor = "multi_thread")]
+async fn g1e_buildsafe_refuses_a_wall_on_a_standing_soul_on_the_test_world() {
+    let d = scratch("g1e-buildsafe");
+    let w = seed(&d, &testworld::generate(1, 0).unwrap().text, 1, (-40, 30));
+    let bucket = d.join("bucket");
+    let (c, creator) = creator(0xc0);
+    record(&bucket, &w, c);
+    let socket = d.join("s");
+    let s = serve(&w, &socket, &bucket);
+    s.line("listening ", 60);
+    // No Soul stands in a world until it acts (C3): the Soul's walk births its body and ends where it stands.
+    let mut souls = connect_socket(&socket);
+    souls
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let (sx, sz) = (-37 * M, 30 * M);
+    walk(&mut souls, &w, w.souls[0], 1, sx, sz);
+    let got = socket_end(&mut souls);
+    assert_eq!(got.kind, 1, "the Soul's walk ends: {got:?}");
+    let (url, tokens) = gateway(&socket, &[creator]).await;
+    let mut ws = sign_in(&url, &tokens[0]).await;
+    let (got, _) = send(&mut ws, edit_intent(&w, creator, 1, 0, wall(&w, sx, sz))).await;
+    println!("a wall where the Soul stands: {got:?}");
+    assert_eq!((got.kind, got.reason.as_str()), (2, "edit.would-bury"));
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 2, got.version, wall(&w, -30 * M, 30 * M)),
+    )
+    .await;
+    assert_eq!(got.kind, 1, "a wall where no Soul stands commits: {got:?}");
+}
+
 /// The Souls' row on Eden: 21 places 2 m apart along x from (x0, z0) m, each clear for 8 m to the north, and the walls'
 /// places east of the row (x0 + 44 to x0 + 50 m), all on the open ground.
 fn clear_row(text: &str) -> (i64, i64) {
@@ -1206,14 +1252,24 @@ async fn g1e_a2_a3_eden_buildsafe_refuses_a_wall_on_a_soul_and_answers_fast() {
     let mut ws = sign_in(&url, &tokens[0]).await;
     let mut theirs = sign_in(&url, &tokens[1]).await;
 
-    // The 20 walkers set off north, 8 m each; the 21st stands at the row's east end.
+    // No Soul stands in a world until it acts (C3, #3367): the 21st walks to the row's east end first, which births
+    // its body there; then the 20 walkers set off north, 8 m each.
     let mut souls = connect_socket(&socket);
+    souls
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let stander = w.souls[20];
+    let (sx, sz) = ((x0 + 40) * M, z0 * M);
+    walk(&mut souls, &w, stander, 1, sx, sz);
+    let got = socket_end(&mut souls);
+    assert_eq!(
+        got.kind, 1,
+        "the 21st Soul's walk to its place ends: {got:?}"
+    );
     for (k, &body) in w.souls.iter().enumerate().take(20) {
         let x = (x0 + 2 * k as i64) * M;
         walk(&mut souls, &w, body, 1, x, (z0 + 8) * M);
     }
-    let stander = w.souls[20];
-    let (sx, sz) = ((x0 + 40) * M, z0 * M);
     tokio::time::sleep(Duration::from_millis(500)).await;
 
     // The path an edit takes without G2's guard, for comparison: another creator's edits, refused by the checker
@@ -1287,13 +1343,10 @@ async fn g1e_a2_a3_eden_buildsafe_refuses_a_wall_on_a_soul_and_answers_fast() {
     );
 
     // The 21st walks away north; then the same wall commits.
-    walk(&mut souls, &w, stander, 1, sx, sz + 6 * M);
+    walk(&mut souls, &w, stander, 2, sx, sz + 6 * M);
     // Walks answer at their ends: all 21, the 21st's among them.
-    souls
-        .set_read_timeout(Some(Duration::from_secs(60)))
-        .unwrap();
     for _ in 0..21 {
-        let got = socket_answer(&mut souls);
+        let got = socket_end(&mut souls);
         assert_eq!(got.kind, 1, "a walk ends: {got:?}");
     }
     sequence += 1;
@@ -1608,4 +1661,49 @@ async fn p3697_a_creator_kind_buries_no_soul_and_souls_walk_round_it() {
     assert_eq!((got.kind, got.reason.as_str()), (2, "edit.would-bury"));
 
     drop(s);
+}
+
+/// #3958: a creator's move of a thing far off the open ground (100 km east), sent straight to the world with no
+/// client check, is answered (refused by name or done), and the creator's next edit is answered too.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_move_far_off_the_ground_is_answered_and_so_is_the_next_edit() {
+    let d = scratch("far-move");
+    let w = seed(&d, &testworld::generate(1, 0).unwrap().text, 1, (-40, 30));
+    let bucket = d.join("bucket");
+    let (c, creator) = creator(0xc0);
+    record(&bucket, &w, c);
+    let socket = d.join("s");
+    let s = serve(&w, &socket, &bucket);
+    s.line("listening ", 60);
+    let (url, tokens) = gateway(&socket, &[creator]).await;
+    let mut ws = sign_in(&url, &tokens[0]).await;
+    let (placed, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 1, 0, wall(&w, -30 * M, 30 * M)),
+    )
+    .await;
+    assert_eq!(placed.kind, 1, "the wall commits: {placed:?}");
+    let far = Op::Move {
+        node: Ref::Node(placed.names[&1]),
+        at: Spot {
+            slot: None,
+            position: Vec3::new(100_000 * 1_000 * 1_000, 0, 0),
+            orientation: Quat::IDENTITY,
+            support: Support::None,
+        },
+    };
+    let (moved, took) = send(&mut ws, edit_intent(&w, creator, 2, placed.version, far)).await;
+    println!("#3958: the far move: {moved:?} in {took:?}");
+    assert_eq!(
+        (moved.kind, moved.reason.as_str()),
+        (2, "edit.off-ground"),
+        "the far move is refused by name, not timed out"
+    );
+    let (next, took) = send(
+        &mut ws,
+        edit_intent(&w, creator, 3, moved.version, wall(&w, -25 * M, 30 * M)),
+    )
+    .await;
+    println!("#3958: the next edit: {next:?} in {took:?}");
+    assert_eq!(next.kind, 1, "the next edit commits: {next:?}");
 }

@@ -23,6 +23,7 @@
 //! (`replica::schedule::stops`, E7), a frame that turns (N14), drawing.
 
 pub mod punts;
+pub mod rides;
 
 use replica::group::{Belonging, Group, Leave, Member, Outline};
 use replica::ids::Id;

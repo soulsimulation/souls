@@ -26,9 +26,14 @@
 # - /sitemap.xml is routes.mjs's: today's sitemap plus the directory's worlds; robots.txt stays today's.
 # - When an origin cannot answer, a page a browser asked for gets today's poster ("back in a moment"), as before.
 # Canonical and preview pages use identical static assets, bootstrap and native gateway routing.
+# - A world's models (/w/<slug>/models/: models.json and worlds/models/<hash>.glb, baked by
+#   v2/tools/import-eden/bake/bake.ts) are files in /var/lib/souls/models/<slug>, outside the page's mirrored folder, so
+#   an install never removes them. A model is named by its hash and never changes (immutable); models.json is revalidated.
+#   A world with no folder answers 404 and its page draws boxes.
 (v2_world) {
 	@page path_regexp ^/(?:preview/)?w/[^/]+/(index\.html)?$
 	@files path_regexp files ^/(?:preview/)?w/[^/]+(/assets/.+)$
+	@models path_regexp models ^/(?:preview/)?w/([a-z0-9][a-z0-9-]{0,62})/models(/.+)$
 	@panel path_regexp ^/(?:preview/)?w/[^/]+/src/panel/(index\.html)?$
 	@native path_regexp ^/(?:preview/)?w/[^/]+/(v1/bootstrap|views/world\.json|v2/ws|v2/creator-token|v2/entries)$
 	@client path_regexp client ^/(?:preview/)?w/([^/]+)/(eden\.mjs|skill\.md|creator\.md|instructions\.md|llms\.txt|replica\.js|replica_bg\.wasm|v1/config)$
@@ -36,6 +41,16 @@
 		header X-Souls-System v2
 		rewrite * /index.html
 		root * /usr/local/lib/souls/web
+		file_server
+	}
+	handle @models {
+		header X-Souls-System v2
+		@glb path *.glb
+		header @glb Cache-Control "public, max-age=31536000, immutable"
+		@index path */models.json
+		header @index Cache-Control no-cache
+		rewrite * {re.models.2}
+		root * /var/lib/souls/models/{re.models.1}
 		file_server
 	}
 	handle @panel {
