@@ -401,6 +401,7 @@ async fn agent(
     gate: Arc<Semaphore>,
     ready: Arc<AtomicU64>,
     seated: Arc<std::sync::atomic::AtomicBool>,
+    warm: Option<(Vec<u8>, u64)>,
     mut acts: mpsc::UnboundedReceiver<Job>,
 ) -> Sent {
     let mut out = Sent::default();
@@ -435,6 +436,23 @@ async fn agent(
             }
             _ => false,
         };
+    // On a served world a Soul's body is born by its first intent (C3): a rise, before the clock, answered (refused
+    // `not-seated` or taken) before the agent counts as ready, so every body is in the world when targets are read.
+    if let (true, Some((bytes, sequence))) = (ok, warm) {
+        ok = tx.send(Message::Binary(bytes.into())).await.is_ok();
+        let until = Instant::now() + Duration::from_secs(30);
+        while ok && Instant::now() < until {
+            match tokio::time::timeout_at(until.into(), rx.next()).await {
+                Ok(Some(Ok(Message::Binary(b)))) => match heard(&b) {
+                    Heard::Receipt(s) | Heard::Refused(s, _) if s == sequence => break,
+                    _ => {}
+                },
+                Ok(Some(Ok(_))) => {}
+                Ok(_) => ok = false,
+                Err(_) => break,
+            }
+        }
+    }
     drop(permit);
     out.closed = !ok;
     ready.fetch_add(1, Ordering::Relaxed);
@@ -739,7 +757,23 @@ async fn main() {
     // Each agent's own choice state (a cloned one would share its seated flag).
     let mut choices: Vec<targets::Choice> =
         (0..s.agents).map(|_| targets::Choice::default()).collect();
-    for ((token, _), c) in signed.into_iter().zip(&choices) {
+    // On a served world each Soul's sequences start past any an earlier run sent: at the run's start in Unix ms, the
+    // first (that number itself) its body's birth (the warm-up rise), the schedule's after it.
+    let first = if a.remote.is_some() {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis() as u64)
+    } else {
+        0
+    };
+    let based = basis(a.remote.is_some());
+    let rise = s
+        .verbs
+        .first()
+        .and_then(|v| v.split_once(':'))
+        .map_or("eden", |(ns, _)| ns);
+    let rise = Name::new(&format!("{rise}:rise")).expect("a verb");
+    for (k, ((token, _), c)) in signed.into_iter().zip(&choices).enumerate() {
         let (tx, rx) = mpsc::unbounded_channel();
         chans.push(tx);
         tasks.push(tokio::spawn(agent(
@@ -748,6 +782,9 @@ async fn main() {
             gate.clone(),
             ready.clone(),
             c.seated.clone(),
+            entries
+                .is_some()
+                .then(|| (intent(actors[k], &rise, None, first, &based), first)),
             rx,
         )));
     }
@@ -784,15 +821,6 @@ async fn main() {
     // The run: each act at its due time (plus its agent's thinking delay), whatever came back before it.
     let (cpu0, start) = (cpu_us(), Instant::now());
     let think = |agent: u32| a.think_ms * ((u64::from(agent) * 7919) % 1000) / 1000;
-    // On a served world each Soul's sequences start past any an earlier run sent: at the run's start in Unix ms.
-    let first = if a.remote.is_some() {
-        std::time::SystemTime::now()
-            .duration_since(std::time::UNIX_EPOCH)
-            .map_or(0, |d| d.as_millis() as u64)
-    } else {
-        0
-    };
-    let based = basis(a.remote.is_some());
     let mut sequence = vec![first; s.agents as usize];
     let mut intended = vec![0u64; s.agents as usize];
     let mut unmapped: BTreeMap<&str, u64> = BTreeMap::new();
