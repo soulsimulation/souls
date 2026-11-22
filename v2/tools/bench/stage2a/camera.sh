@@ -21,10 +21,15 @@ CREATOR=$(printf 'd0%.0s' $(seq 16))-1
 "$B/worldd" seed --facts "$FACTS" --dir "$DIR/world" --entries "$DIR/entries" --souls "$N" --creator "$CREATOR" \
   > "$DIR/seed.log" 2>&1 || { echo "seed failed: $(tail -n 3 "$DIR/seed.log")"; exit 1; }
 od -An -tx1 -N32 /dev/urandom | tr -d ' \n' > "$DIR/view.key"
+# The directory rewrites the gateway's tokens file with what it has paired: the seeded test Souls' lines go back in
+# once the stack is up (the gateway reads the file again every 2 s).
+cp "$DIR/world/tokens" "$DIR/tokens.seeded"
 V2_BIN=$B "$V2/tools/dev/run.sh" --port "$PORT" --dir "$DIR" > "$DIR/stack.log" 2>&1 &
 STACK=$!
 for _ in $(seq 1 900); do grep -q '^ready' "$DIR/stack.log" && break; kill -0 "$STACK" 2> /dev/null || break; sleep 1; done
 grep '^ready' "$DIR/stack.log" || { echo "the stack did not start:"; tail -n 20 "$DIR/stack.log"; exit 1; }
+grep -v '^#' "$DIR/tokens.seeded" >> "$DIR/world/tokens"
+sleep 3
 STREAM=$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).stream' "$DIR/world/views/world.json")
 node "$V2/tools/driver/loads.mjs" "mix-$N-uneven-every4" --seconds "$SECS" --seed 1 --out "$DIR/schedule.txt"
 "$B/driver" --schedule "$DIR/schedule.txt" --dir "$DIR/run" --tokens "$DIR/world/souls.tokens" \
