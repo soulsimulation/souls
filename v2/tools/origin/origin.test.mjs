@@ -2,7 +2,7 @@
 // v2/docs/viewer-cache.md states them. Run: node --test v2/tools/origin/
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, mkdirSync, mkdtempSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { get } from 'node:http';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -267,4 +267,42 @@ test('C1 (#3673) A3: a browser asking for an unknown page gets a 404 "No page he
   // A world route's own refusal stays JSON.
   const routed = await fetch(`${at}/w/missing/v1/bootstrap`, { headers: html });
   assert.equal(routed.headers.get('content-type'), 'application/json');
+});
+
+test('#4018: concurrent requests for one immutable file share one read and one buffer; a replaced or removed file answers as on disk', async () => {
+  const big = Buffer.alloc(4 << 20, 7), name = join(dir, stream, '9');
+  writeFileSync(name, big);
+  for (const cacheBytes of [64 << 20, 0]) {
+    const { server: s, stats } = createOrigin(dir, {}, { cacheBytes });
+    await new Promise((ok) => s.listen(0, '127.0.0.1', ok));
+    const url = `http://127.0.0.1:${s.address().port}/${stream}/9`;
+    try {
+      const rs = await Promise.all(Array.from({ length: 40 }, () => fetch(url)));
+      for (const r of rs) {
+        assert.equal(r.status, 200);
+        assert.equal(r.headers.get('etag'), `"${createHash('sha256').update(big).digest('hex')}"`);
+        assert.equal(r.headers.get('cache-control'), 'public, max-age=31536000, immutable, no-transform');
+        assert.equal(r.headers.get('content-length'), String(big.length));
+        assert.ok(big.equals(Buffer.from(await r.arrayBuffer())));
+      }
+      assert.equal(stats.reads, 1, `40 concurrent requests read the file once (cacheBytes ${cacheBytes})`);
+      assert.equal(stats.immutable, 40);
+      await fetch(url).then((r) => r.arrayBuffer());
+      if (cacheBytes) assert.equal(stats.reads, 1, 'a held file is not read again');
+      const other = Buffer.from([1, 2, 3]);
+      writeFileSync(`${name}.tmp`, other);
+      renameSync(`${name}.tmp`, name);
+      const r = await fetch(url);
+      assert.deepEqual(Buffer.from(await r.arrayBuffer()), other);
+      assert.equal(r.headers.get('etag'), `"${createHash('sha256').update(other).digest('hex')}"`);
+      rmSync(name);
+      const gone = await fetch(url);
+      assert.equal(gone.status, 404);
+      assert.equal(gone.headers.get('cache-control'), 'no-store');
+      writeFileSync(name, big);
+    } finally {
+      s.close();
+    }
+  }
+  rmSync(name);
 });

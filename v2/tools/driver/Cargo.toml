@@ -8,7 +8,9 @@ description = "Drives scripted agents through gatewayd from a schedule loads.mjs
 [dependencies]
 replica = { path = "../../crates/replica" }
 gatewayd = { path = "../../crates/gatewayd" }
-tokio = { version = "1", features = ["rt", "macros", "time", "sync"] }
+tokio = { version = "1", features = ["rt", "macros", "time", "sync", "net", "io-util"] }
 tokio-tungstenite = "0.29"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
 libc = "0.2"
+# The served world's kind entries come gzip-encoded (`gatewayd --entries`, #3760).
+miniz_oxide = "0.8"
