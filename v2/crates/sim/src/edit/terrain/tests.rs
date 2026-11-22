@@ -240,6 +240,7 @@ impl Edits {
         at: Micros,
     ) -> Result<crate::edit::Committed, Refused> {
         let edit = Edit {
+            claim: None,
             intent: self.intents.mint().unwrap(),
             actor: Actor::Creator(self.world.creator),
             planned: self.live.version(),
@@ -327,7 +328,7 @@ fn square() -> Vec<[i64; 2]> {
 fn landform_parameters_and_owned_doorway_metadata_have_distinct_fields() {
     use replica::edit::DOOR_GEOMETRY;
 
-    assert_eq!(DOOR_GEOMETRY, 29);
+    assert_eq!(DOOR_GEOMETRY, 100);
     let im = field();
     let mut edits = Edits::of(&im);
     let parameters = Value::Bytes(br#"{"kind":"bump","h":0}"#.to_vec());
@@ -647,6 +648,7 @@ fn a1_a_hill_across_a_route_re_routes_its_walkers_within_2_s() {
         let copy = e.live.frozen();
         let checked = check(
             Edit {
+                claim: None,
                 intent: id(9),
                 actor: Actor::Creator(e.world.creator),
                 planned: copy.version(),
