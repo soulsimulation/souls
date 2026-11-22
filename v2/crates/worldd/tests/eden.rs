@@ -3677,6 +3677,98 @@ fn i3802_a_form_with_no_slot_takes_the_nearest_free_one() {
     assert_eq!(after, before, "the fourth stays where it stood");
 }
 
+/// Eden's facts with one more thing, `id` of kind `def`, in room `room` of building `building` at `at` (mm, the
+/// room's frame), as a building's things are given; written to a file of its own, its path returned.
+fn facts_in_room(
+    id: &str,
+    def: &str,
+    building: &str,
+    room: &str,
+    at: [i64; 3],
+    tag: &str,
+) -> String {
+    use replica::rules::json::{Value as J, parse};
+    let base = facts_with(&[(id, def, at, 0)], tag);
+    let mut facts = parse(&std::fs::read_to_string(&base).unwrap()).unwrap();
+    if let J::Obj(o) = &mut facts {
+        for (key, v) in o.iter_mut() {
+            if let ("things", J::Arr(rows)) = (key.as_str(), v) {
+                let J::Obj(row) = rows.last_mut().unwrap() else {
+                    panic!("a thing's row")
+                };
+                for (k, v) in row.iter_mut() {
+                    if k == "parent" {
+                        *v = J::Str(building.into());
+                    }
+                }
+                let slot = J::Obj(vec![("room".into(), J::Str(room.into()))]);
+                row.push(("slot".into(), slot));
+            }
+        }
+    }
+    std::fs::write(&base, facts.to_json()).unwrap();
+    base
+}
+
+/// One Soul on a served Eden from `facts`, born at `at`, does each `(thing, form, want)` in turn: each step that does
+/// not end as wanted, named, and where the body stood after each (its node by origin key, x and z m).
+fn reach_steps(facts: &str, at: &str, tag: &str, cases: &[(&str, &str, &str)]) -> Vec<String> {
+    let im = import_eden::load(&std::fs::read_to_string(facts).unwrap()).expect("Eden loads");
+    let (served, mut soul, dir) = serve(facts, at, tag, im.nodes["world"].scope());
+    soul.0
+        .set_read_timeout(Some(Duration::from_secs(300)))
+        .unwrap();
+    let origin: BTreeMap<Id, &str> = im.nodes.iter().map(|(k, v)| (*v, k.as_str())).collect();
+    let mut wrong = Vec::new();
+    for (today, form, want) in cases {
+        let to = im.nodes[*today];
+        let ended = match soul.act(&format!("eden:{form}"), Some(to), BTreeMap::new()) {
+            Ok(_) => "done".to_owned(),
+            Err(name) => name,
+        };
+        let body = track(&dir)
+            .last()
+            .map(|b| (origin.get(&b.1).copied().unwrap_or("?"), b.2, b.3));
+        println!("{tag}: {form} at {today}: {ended} (the body at {body:?})");
+        if ended != *want {
+            wrong.push(format!("{tag} {form} at {today}: {ended}, not {want}"));
+        }
+    }
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    wrong
+}
+
+/// A move's reach counts height. In a cottage on a served full Eden, a Soul walked to a mark on the living-room floor
+/// straight under the upstairs bathroom's toilet cannot flush it through the ceiling (`out-of-reach`); walked up to
+/// the toilet, it flushes it.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn a_toilet_upstairs_is_flushed_from_its_bathroom_not_from_below() {
+    // The toilet stands at (1725, 1005) mm in the cottage's frame; the living room's origin at (0, 1520).
+    let facts = facts_in_room(
+        "e_reach0001",
+        "core-reachmark@1",
+        "e_1a460eb9",
+        "living",
+        [1_725, 0, -515],
+        "reachheight",
+    );
+    let wrong = reach_steps(
+        &facts,
+        "180.0,38.0",
+        "reachheight",
+        &[
+            ("e_reach0001", "walk", "done"),
+            ("e_d427d095", "flush", "out-of-reach"),
+            ("e_d427d095", "walk", "done"),
+            ("e_d427d095", "flush", "done"),
+        ],
+    );
+    let _ = std::fs::remove_file(&facts);
+    assert!(wrong.is_empty(), "{wrong:#?}");
+}
+
 /// Every course in a public projection `v` (field 80 of any node).
 fn projected_courses(v: &Value, out: &mut Vec<replica::schedule::course::Course>) {
     match v {
