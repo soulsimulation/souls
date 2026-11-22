@@ -11,6 +11,11 @@
 //! driver's cores (`driverCores`, its own user and system time over the run), the answers, kinds with no v2 intent,
 //! and `byTenth`, the same numbers per tenth of the agents by intended acts, busiest first
 //! (tools/playtest/eval/load.mjs's words).
+//!
+//! With `--remote <gateway address> --tokens <file>` (X7, #4015) it starts nothing: it signs in the file's tokens, one
+//! pre-paired test Soul each (agent k takes line k), at a gateway that serves a world, and sends the same schedule as
+//! those Souls. Either way the report adds `perMinute`: receipts a second, act latency (send to the act's first answer)
+//! p50/p95/p99, refusals by name and errors by name.
 
 // The repeat rule's map ban (K12, v2/clippy.toml) is `sim`'s; the driver's maps are lookups.
 #![allow(clippy::disallowed_types)]
@@ -115,6 +120,81 @@ struct Sent {
     receipts: u64,
     other: u64,
     closed: bool,
+    /// The answers by the minute of the run they came in (X7 A2).
+    minutes: Vec<Minute>,
+}
+
+/// One minute of the run's answers: receipts (a receipt, or a move's acceptance), refusals and errors by name, and
+/// each answered act's latency from its send to its first answer, in microseconds.
+#[derive(Default)]
+struct Minute {
+    receipts: u64,
+    refusals: BTreeMap<String, u64>,
+    errors: BTreeMap<String, u64>,
+    latency_us: Vec<u64>,
+}
+
+impl Sent {
+    fn minute(&mut self, start: Instant, at: Instant) -> &mut Minute {
+        let k = (at.saturating_duration_since(start).as_secs() / 60) as usize;
+        if self.minutes.len() <= k {
+            self.minutes.resize_with(k + 1, Minute::default);
+        }
+        &mut self.minutes[k]
+    }
+    fn error(&mut self, start: Instant, at: Instant, name: &str) {
+        *self
+            .minute(start, at)
+            .errors
+            .entry(name.to_owned())
+            .or_default() += 1;
+    }
+}
+
+/// `n` added to `name` in a count by name.
+fn add(m: &mut BTreeMap<String, u64>, from: &BTreeMap<String, u64>) {
+    for (k, v) in from {
+        *m.entry(k.clone()).or_default() += v;
+    }
+}
+
+/// The run's minutes, every agent's merged: receipts a second over the part of the minute the run covered, latency
+/// quantiles (ms) over every answered act, refusals and errors by name.
+fn per_minute(agents: &[Sent], wall: Duration) -> Vec<serde_like::Obj> {
+    let n = agents.iter().map(|a| a.minutes.len()).max().unwrap_or(0);
+    (0..n)
+        .map(|k| {
+            let mut m = Minute::default();
+            for a in agents.iter().filter_map(|a| a.minutes.get(k)) {
+                m.receipts += a.receipts;
+                add(&mut m.refusals, &a.refusals);
+                add(&mut m.errors, &a.errors);
+                m.latency_us.extend_from_slice(&a.latency_us);
+            }
+            m.latency_us.sort_unstable();
+            let covered = (wall.as_secs_f64() - 60.0 * k as f64).clamp(1.0, 60.0);
+            let ms = |share| at_share(&m.latency_us, share) as f64 / 1000.0;
+            serde_like::Obj::new()
+                .n("minute", (k + 1) as f64)
+                .n("receipts", m.receipts as f64)
+                .n(
+                    "receiptsPerS",
+                    (10.0 * m.receipts as f64 / covered).round() / 10.0,
+                )
+                .n("answered", m.latency_us.len() as f64)
+                .n("latencyP50Ms", ms(0.5))
+                .n("latencyP95Ms", ms(0.95))
+                .n("latencyP99Ms", ms(0.99))
+                .raw("refusals", counts(&m.refusals))
+                .raw("errors", counts(&m.errors))
+        })
+        .collect()
+}
+
+/// A count by name as a JSON object.
+fn counts<K: std::fmt::Debug>(m: &BTreeMap<K, u64>) -> String {
+    let f: Vec<String> = m.iter().map(|(k, v)| format!("{k:?}: {v}")).collect();
+    format!("{{{}}}", f.join(", "))
 }
 
 /// The numbers of a group of agents: intended, sent, the share sent within `late_ms`, and lateness quantiles (ms).
@@ -211,22 +291,38 @@ fn soul(n: u32) -> Actor {
     Actor::Soul(Id::new(Scope([3; 16]), u64::from(n)).expect("a counter"))
 }
 
-fn intent(actor: Actor, verb: &Name, sequence: u64) -> Vec<u8> {
-    let zone = Id::new(Scope(LINEAGE), 0).expect("a zone");
+/// The basis every intent is decided against: the driver's own world's start, or, on a served world it has never
+/// read, the zero version (as a client with nothing shown sends it).
+fn basis(remote: bool) -> Value {
+    let lineage = Scope(if remote { [0; 16] } else { LINEAGE });
+    Version {
+        lineage,
+        zone: Id::new(lineage, 0).expect("a zone"),
+        epoch: u64::from(!remote),
+        sequence: 0,
+    }
+    .to_value()
+}
+
+/// The words a say carries (parameter 1, `{23: words}`, as the client's `wireIntent` sends them): a served world
+/// refuses a say with none (`intent.no-words`). Every other act goes with no target or parameter.
+const WORDS: &str = "(load test)";
+
+fn intent(actor: Actor, verb: &Name, sequence: u64, basis: &Value) -> Vec<u8> {
+    let mut parameters = BTreeMap::new();
+    if verb.as_str().ends_with(":say") {
+        let words = Value::Map([(23, Value::Bytes(WORDS.as_bytes().to_vec()))].into());
+        parameters.insert(1, words);
+    }
     let i = Intent {
         actor,
         verb: verb.clone(),
         target: None,
-        parameters: BTreeMap::new(),
+        parameters,
         sequence,
-        basis: Version {
-            lineage: Scope(LINEAGE),
-            zone,
-            epoch: 1,
-            sequence: 0,
-        }
-        .to_value(),
-        expiry: 600_000_000,
+        basis: basis.clone(),
+        // No expiry: a served world's clock is far past any fixed one (the client's default, Number.MAX_SAFE_INTEGER).
+        expiry: (1 << 53) - 1,
         resources: Vec::new(),
         fallbacks: Vec::new(),
         replaces: None,
@@ -236,14 +332,51 @@ fn intent(actor: Actor, verb: &Name, sequence: u64) -> Vec<u8> {
     encode(&i.to_value()).expect("an intent")
 }
 
-/// Whether a stream frame is a receipt.
-fn is_receipt(bytes: &[u8]) -> bool {
-    let Ok(d) = decode(bytes) else { return false };
-    let Value::Map(m) = d.value else { return false };
-    matches!(m.get(&2), Some(Value::Map(a)) if a.get(&3) == Some(&Value::Uint(1)))
+/// What a frame from the gateway says about the acts.
+#[derive(Debug, PartialEq)]
+enum Heard {
+    /// An act's receipt, or a move's acceptance (`replica::intents::Answer` kinds 1 and 3), by its sequence.
+    Receipt(u64),
+    /// An act refused, by its sequence and the refusal's name (kind 2).
+    Refused(u64, String),
+    /// Bytes the gateway could not read (kind 5), or a gateway's own word (`{4: name}`, a token refused): an error.
+    Error(String),
+    /// Anything else: a move's outcome, the stream.
+    Other,
 }
 
-/// One agent: first frame and sign-in, then each intent the schedule hands it, sent at once; then its answers.
+fn heard(bytes: &[u8]) -> Heard {
+    let Ok(Value::Map(m)) = decode(bytes).map(|d| d.value) else {
+        return Heard::Other;
+    };
+    let name = |v: Option<&Value>| match v {
+        Some(Value::Text(t)) => t.as_str().to_owned(),
+        _ => "unnamed".to_owned(),
+    };
+    if let (None, Some(v @ Value::Text(_))) = (m.get(&2), m.get(&4)) {
+        return Heard::Error(name(Some(v)));
+    }
+    let Some(Value::Map(a)) = m.get(&2) else {
+        return Heard::Other;
+    };
+    match (a.get(&2), a.get(&3)) {
+        (Some(Value::Uint(s)), Some(Value::Uint(1 | 3))) => Heard::Receipt(*s),
+        (Some(Value::Uint(s)), Some(Value::Uint(2))) => Heard::Refused(*s, name(a.get(&4))),
+        (_, Some(Value::Uint(5))) => Heard::Error(name(a.get(&4))),
+        _ => Heard::Other,
+    }
+}
+
+/// One act handed to its agent: due at, the intent's bytes, its sequence, and the run's start.
+struct Due {
+    at: Instant,
+    bytes: Vec<u8>,
+    sequence: u64,
+    start: Instant,
+}
+
+/// One agent: first frame and sign-in, then each intent the schedule hands it, sent at once; then its answers, each
+/// act's first answer timed from its send. Acts still unanswered 5 s after the last is sent are errors (`unanswered`).
 // A tool, not the engine: it measures each send's lateness against its due time by the wall clock (K7, v2/clippy.toml).
 #[allow(clippy::disallowed_methods)]
 async fn agent(
@@ -251,7 +384,7 @@ async fn agent(
     token: String,
     gate: Arc<Semaphore>,
     ready: Arc<AtomicU64>,
-    mut acts: mpsc::UnboundedReceiver<(Instant, Vec<u8>)>,
+    mut acts: mpsc::UnboundedReceiver<Due>,
 ) -> Sent {
     let mut out = Sent::default();
     let permit = gate.acquire().await;
@@ -276,42 +409,83 @@ async fn agent(
         .await
         .is_ok();
     ok = ok && tx.send(Message::Binary(sign_in.into())).await.is_ok();
-    for _ in 0..2 {
-        ok = ok && matches!(rx.next().await, Some(Ok(Message::Binary(_))));
-    }
+    // The gateway's first frame, then the sign-in's outcome: `stream.*`, or `token.refused`.
+    ok = ok && matches!(rx.next().await, Some(Ok(Message::Binary(_))));
+    ok = ok
+        && match rx.next().await {
+            Some(Ok(Message::Binary(b))) => {
+                !matches!(heard(&b), Heard::Error(n) if !n.starts_with("stream."))
+            }
+            _ => false,
+        };
     drop(permit);
     out.closed = !ok;
     ready.fetch_add(1, Ordering::Relaxed);
     if !ok {
         return out;
     }
+    // Sent and not yet answered: sequence → when it went.
+    let mut pending: HashMap<u64, Instant> = HashMap::new();
+    let mut start: Option<Instant> = None;
     let mut drain_until: Option<Instant> = None;
     loop {
-        let answered = out.receipts + out.other;
-        if drain_until.is_some_and(|u| Instant::now() >= u || answered >= out.late_us.len() as u64)
-        {
+        if drain_until.is_some_and(|u| Instant::now() >= u || pending.is_empty()) {
             break;
         }
         let wait = drain_until.map_or(Duration::from_secs(3600), |u| u - Instant::now());
         tokio::select! {
             a = acts.recv(), if drain_until.is_none() => match a {
-                Some((due, bytes)) => {
-                    if tx.send(Message::Binary(bytes.into())).await.is_err() {
+                Some(d) => {
+                    start = Some(d.start);
+                    if tx.send(Message::Binary(d.bytes.into())).await.is_err() {
                         out.closed = true;
+                        out.error(d.start, Instant::now(), "send-failed");
                         break;
                     }
-                    out.late_us.push(due.elapsed().as_micros() as u64);
+                    let now = Instant::now();
+                    pending.insert(d.sequence, now);
+                    out.late_us.push(now.duration_since(d.at).as_micros() as u64);
                 }
                 None => drain_until = Some(Instant::now() + Duration::from_secs(5)),
             },
             m = rx.next() => match m {
                 Some(Ok(Message::Binary(b))) => {
-                    if is_receipt(&b) { out.receipts += 1 } else { out.other += 1 }
+                    let now = Instant::now();
+                    let s0 = start.unwrap_or(now);
+                    match heard(&b) {
+                        Heard::Receipt(s) if pending.contains_key(&s) => {
+                            let m = out.minute(s0, now);
+                            m.receipts += 1;
+                            m.latency_us.push(now.duration_since(pending[&s]).as_micros() as u64);
+                            pending.remove(&s);
+                            out.receipts += 1;
+                        }
+                        Heard::Refused(s, reason) if pending.contains_key(&s) => {
+                            let m = out.minute(s0, now);
+                            *m.refusals.entry(reason).or_default() += 1;
+                            m.latency_us.push(now.duration_since(pending[&s]).as_micros() as u64);
+                            pending.remove(&s);
+                            out.other += 1;
+                        }
+                        Heard::Error(name) => out.error(s0, now, &name),
+                        _ => out.other += 1,
+                    }
                 }
                 Some(Ok(_)) => {}
-                _ => { out.closed = true; break; }
+                _ => {
+                    out.closed = true;
+                    if let Some(s0) = start {
+                        out.error(s0, Instant::now(), "socket-closed");
+                    }
+                    break;
+                }
             },
             _ = tokio::time::sleep(wait) => {}
+        }
+    }
+    if let Some(s0) = start {
+        for at in pending.into_values() {
+            out.error(s0, at, "unanswered");
         }
     }
     let _ = tx.send(Message::Close(None)).await;
@@ -323,6 +497,8 @@ struct Args {
     dir: PathBuf,
     think_ms: u64,
     late_ms: u64,
+    /// A served world's gateway, and the file of its pre-paired test Souls' tokens (X7).
+    remote: Option<(String, PathBuf)>,
 }
 
 fn args() -> Option<Args> {
@@ -334,7 +510,68 @@ fn args() -> Option<Args> {
         dir: PathBuf::from(get("--dir")?),
         think_ms: num("--think-ms", 0)?,
         late_ms: num("--late-ms", 50)?,
+        remote: match (get("--remote"), get("--tokens")) {
+            (Some(r), Some(t)) => Some((r.clone(), PathBuf::from(t))),
+            (None, None) => None,
+            _ => return None,
+        },
     })
+}
+
+/// The gateway's socket address from `--remote`: `ws://host:port[/path]` or `host:port`, the agents' path added when
+/// none is given. `wss://` is refused: the driver carries no TLS, so it runs where it reaches the gateway's own port.
+fn socket_url(remote: &str) -> Result<String, String> {
+    if remote.starts_with("wss://") || remote.starts_with("https://") {
+        return Err(
+            "--remote: wss:// is not carried; run the driver where it reaches gatewayd's own ws:// port".into(),
+        );
+    }
+    let rest = remote.strip_prefix("ws://").unwrap_or(remote);
+    if rest.is_empty() || rest.contains("://") {
+        return Err("--remote: give ws://<host>:<port> or <host>:<port>".into());
+    }
+    Ok(match rest.find('/') {
+        Some(_) => format!("ws://{rest}"),
+        None => format!("ws://{rest}{}", gatewayd::socket::PATH),
+    })
+}
+
+/// The pre-paired Souls' tokens, one a line, the first `agents` of them, with the Soul each signs in as. A line is a
+/// token (`worldd seed`'s `souls.tokens`) or `<soul grant> <token>` (`v2/tools/ops/test-soul pair`'s file, #4016),
+/// whose grant must be the token's own. A line that is neither is refused by its number; a token's text is never
+/// printed.
+fn read_tokens(text: &str, agents: u32) -> Result<Vec<(String, Actor)>, String> {
+    let mut out = Vec::new();
+    for (n, line) in text
+        .lines()
+        .enumerate()
+        .filter(|(_, l)| !l.trim().is_empty())
+    {
+        if out.len() == agents as usize {
+            break;
+        }
+        let f: Vec<&str> = line.split_whitespace().collect();
+        let (named, token) = match f[..] {
+            [t] => (None, t),
+            [g, t] => (Some(g), t),
+            _ => (None, ""),
+        };
+        match Token::parse(token).map(|t| t.grant()) {
+            Some(g @ Grant::Actor(a @ Actor::Soul(_)))
+                if named.is_none_or(|x| Grant::parse(x) == Some(g)) =>
+            {
+                out.push((token.to_owned(), a))
+            }
+            _ => return Err(format!("--tokens: line {} is not a Soul's token", n + 1)),
+        }
+    }
+    if out.len() < agents as usize {
+        return Err(format!(
+            "--tokens: the schedule has {agents} agents and the file {} Souls",
+            out.len()
+        ));
+    }
+    Ok(out)
 }
 
 fn spawn(bin: &Path, name: &str, args: &[&str], dir: &Path) -> Child {
@@ -354,7 +591,8 @@ fn spawn(bin: &Path, name: &str, args: &[&str], dir: &Path) -> Child {
 async fn main() {
     let Some(a) = args() else {
         eprintln!(
-            "usage: driver --schedule <file from loads.mjs> --dir <empty folder> [--think-ms 0] [--late-ms 50]"
+            "usage: driver --schedule <file from loads.mjs> --dir <empty folder> [--remote ws://<host>:<port> \
+             --tokens <file>] [--think-ms 0] [--late-ms 50]"
         );
         std::process::exit(2);
     };
@@ -380,61 +618,80 @@ async fn main() {
         .expect("this binary's folder");
     std::fs::create_dir_all(&a.dir).expect("the run folder");
 
-    // Tokens: the gateway's file holds hashes only.
-    let mut tokens = Vec::new();
-    let mut file = String::new();
-    for i in 0..s.agents {
-        let t = Token::issue(Grant::Actor(soul(i))).expect("random bytes");
-        file.push_str(&Tokens::line(t.grant(), &t.hash()));
-        tokens.push(t.reveal().to_owned());
-    }
-    std::fs::write(a.dir.join("tokens"), file).expect("the tokens file");
-    let sock = a.dir.join("w.sock");
-    let sock = sock.to_str().expect("a path");
-    let mut w = spawn(
-        &bin,
-        "worldd",
-        &[
-            "gateway-link",
-            "--socket",
-            sock,
-            "--lineage",
-            &to_hex(&LINEAGE),
-            "--epoch",
-            "1",
-        ],
-        &a.dir,
-    );
-    let tokens_path = a.dir.join("tokens");
-    let mut g = spawn(
-        &bin,
-        "gatewayd",
-        &[
-            "--listen",
-            "127.0.0.1:0",
-            "--world",
-            sock,
-            "--tokens",
-            tokens_path.to_str().expect("a path"),
-            "--build",
-            "1220",
-        ],
-        &a.dir,
-    );
-    let mut line = String::new();
-    BufReader::new(g.stdout.take().expect("stdout"))
-        .read_line(&mut line)
-        .expect("gatewayd says where it listens");
-    let addr = line.trim().strip_prefix("listening ").expect("an address");
-    let url = format!("ws://{addr}{}", gatewayd::socket::PATH);
-    tokio::time::sleep(Duration::from_millis(300)).await;
+    let (url, signed, children) = match &a.remote {
+        Some((remote, file)) => {
+            let read = socket_url(remote).and_then(|url| {
+                let text = std::fs::read_to_string(file).map_err(|e| format!("--tokens: {e}"))?;
+                Ok((url, read_tokens(&text, s.agents)?))
+            });
+            match read {
+                Ok((url, signed)) => (url, signed, Vec::new()),
+                Err(e) => {
+                    eprintln!("driver: {e}");
+                    std::process::exit(2);
+                }
+            }
+        }
+        None => {
+            // Tokens: the gateway's file holds hashes only.
+            let mut signed = Vec::new();
+            let mut file = String::new();
+            for i in 0..s.agents {
+                let t = Token::issue(Grant::Actor(soul(i))).expect("random bytes");
+                file.push_str(&Tokens::line(t.grant(), &t.hash()));
+                signed.push((t.reveal().to_owned(), soul(i)));
+            }
+            std::fs::write(a.dir.join("tokens"), file).expect("the tokens file");
+            let sock = a.dir.join("w.sock");
+            let sock = sock.to_str().expect("a path");
+            let w = spawn(
+                &bin,
+                "worldd",
+                &[
+                    "gateway-link",
+                    "--socket",
+                    sock,
+                    "--lineage",
+                    &to_hex(&LINEAGE),
+                    "--epoch",
+                    "1",
+                ],
+                &a.dir,
+            );
+            let tokens_path = a.dir.join("tokens");
+            let mut g = spawn(
+                &bin,
+                "gatewayd",
+                &[
+                    "--listen",
+                    "127.0.0.1:0",
+                    "--world",
+                    sock,
+                    "--tokens",
+                    tokens_path.to_str().expect("a path"),
+                    "--build",
+                    "1220",
+                ],
+                &a.dir,
+            );
+            let mut line = String::new();
+            BufReader::new(g.stdout.take().expect("stdout"))
+                .read_line(&mut line)
+                .expect("gatewayd says where it listens");
+            let addr = line.trim().strip_prefix("listening ").expect("an address");
+            let url = format!("ws://{addr}{}", gatewayd::socket::PATH);
+            tokio::time::sleep(Duration::from_millis(300)).await;
+            (url, signed, vec![g, w])
+        }
+    };
 
     // Every agent signs in before the clock starts.
     let ready = Arc::new(AtomicU64::new(0));
     let gate = Arc::new(Semaphore::new(64));
     let mut chans = Vec::new();
     let mut tasks = Vec::new();
-    for token in tokens {
+    let actors: Vec<Actor> = signed.iter().map(|(_, a)| *a).collect();
+    for (token, _) in signed {
         let (tx, rx) = mpsc::unbounded_channel();
         chans.push(tx);
         tasks.push(tokio::spawn(agent(
@@ -452,7 +709,16 @@ async fn main() {
     // The run: each act at its due time (plus its agent's thinking delay), whatever came back before it.
     let (cpu0, start) = (cpu_us(), Instant::now());
     let think = |agent: u32| a.think_ms * ((u64::from(agent) * 7919) % 1000) / 1000;
-    let mut sequence = vec![0u64; s.agents as usize];
+    // On a served world each Soul's sequences start past any an earlier run sent: at the run's start in Unix ms.
+    let first = if a.remote.is_some() {
+        std::time::SystemTime::now()
+            .duration_since(std::time::UNIX_EPOCH)
+            .map_or(0, |d| d.as_millis() as u64)
+    } else {
+        0
+    };
+    let based = basis(a.remote.is_some());
+    let mut sequence = vec![first; s.agents as usize];
     let mut intended = vec![0u64; s.agents as usize];
     let mut unmapped: BTreeMap<&str, u64> = BTreeMap::new();
     let mut by_verb: BTreeMap<&str, u64> = BTreeMap::new();
@@ -467,7 +733,12 @@ async fn main() {
         sequence[k] += 1;
         intended[k] += 1;
         *by_verb.entry(&s.verbs[v]).or_default() += 1;
-        let _ = chans[k].send((due, intent(soul(act.agent), &verbs[v], sequence[k])));
+        let _ = chans[k].send(Due {
+            at: due,
+            bytes: intent(actors[k], &verbs[v], sequence[k], &based),
+            sequence: sequence[k],
+            start,
+        });
     }
     drop(chans);
     let mut sent = Vec::new();
@@ -477,24 +748,21 @@ async fn main() {
         sent.push(x);
     }
     let (wall, cpu) = (start.elapsed(), cpu_us() - cpu0);
-    let _ = g.kill();
-    let _ = w.kill();
-    let _ = g.wait();
-    let _ = w.wait();
+    for mut c in children {
+        let _ = c.kill();
+        let _ = c.wait();
+    }
 
     let all: Vec<&Sent> = sent.iter().collect();
     let total = group(&all, a.late_ms);
     let intended_all = s.acts.len() as u64;
     let achieved = ratio(total.get("sent").unwrap_or(0.0) as u64, intended_all);
     let cores = (1000.0 * cpu as f64 / wall.as_micros().max(1) as f64).round() / 1000.0;
-    let counts = |m: &BTreeMap<&str, u64>| {
-        let f: Vec<String> = m.iter().map(|(k, v)| format!("{k:?}: {v}")).collect();
-        format!("{{{}}}", f.join(", "))
-    };
     let receipts: u64 = sent.iter().map(|x| x.receipts).sum();
     let other: u64 = sent.iter().map(|x| x.other).sum();
     let closed = sent.iter().filter(|x| x.closed).count();
     let tenths = by_tenth(&sent, a.late_ms);
+    let minutes = per_minute(&sent, wall);
     let report = serde_like::Obj::new()
         .s("describe", &s.describe)
         .n("agents", f64::from(s.agents))
@@ -510,7 +778,9 @@ async fn main() {
         .raw("byVerb", counts(&by_verb))
         .raw("unmapped", counts(&unmapped))
         .raw("all", total.json())
-        .raw("byTenth", serde_like::list(&tenths));
+        .raw("byTenth", serde_like::list(&tenths))
+        .s("world", if a.remote.is_some() { "remote" } else { "own" })
+        .raw("perMinute", serde_like::list(&minutes));
     let on_time = total.get("onTimeShare").unwrap_or(0.0);
     println!(
         "Acts: {} achieved of {} intended ({:.1} %){}; {:.1} % sent within {} ms of due (p50 {} ms, p99 {} ms, max {} ms); \
@@ -537,6 +807,9 @@ async fn main() {
     );
     for t in &tenths {
         println!("  tenth {}", t.json());
+    }
+    for m in &minutes {
+        println!("  minute {}", m.json());
     }
     std::fs::write(a.dir.join("report.json"), report.json() + "\n").expect("report.json");
 }
@@ -583,6 +856,24 @@ mod tests {
         assert_eq!(g.get("onTimeShare"), Some(0.5));
         assert_eq!(g.get("sent"), Some(3.0));
         assert_eq!(g.get("lateMaxMs"), Some(50.001));
+    }
+
+    #[test]
+    fn x7_a1_tokens_are_read_bare_or_after_their_grant() {
+        let t = |c| {
+            Token::issue(Grant::Actor(soul(c)))
+                .unwrap()
+                .reveal()
+                .to_owned()
+        };
+        let (a, b) = (t(1), t(2));
+        let grant = |x: &str| x.rsplit_once('.').unwrap().0.to_owned();
+        let read = read_tokens(&format!("{a}\n\n{} {b}\n", grant(&b)), 2).unwrap();
+        assert_eq!(read, [(a.clone(), soul(1)), (b.clone(), soul(2))]);
+        assert!(read_tokens(&format!("{} {b}\n", grant(&a)), 1).is_err());
+        assert!(read_tokens(&format!("{a}\n"), 2).is_err());
+        let e = read_tokens("soul-x.y\n", 1).unwrap_err();
+        assert_eq!(e, "--tokens: line 1 is not a Soul's token");
     }
 
     #[test]
