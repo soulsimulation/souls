@@ -890,6 +890,143 @@ fn a3_a_walk_to_reaches_its_point_or_is_refused_by_name() {
     run.stop();
 }
 
+/// 0.132 scaling (#1960): the bodies' motion and stances, written by the tick, are a pure function of the history.
+/// Thirty Souls join a lockstep world, walk to points on the open ground (some twice, one cut short by a new walk),
+/// and two sit, for a minute of ticks. The log's effect hash (every record the world wrote: motion samples, transfers,
+/// receipts and each tick's state hash) is pinned to the value the tick wrote before the motion write skipped its
+/// decode round trip; a speed-up of the bodies phase must leave it bit for bit.
+#[test]
+fn motion_history_is_bit_identical_to_its_pinned_hash() {
+    const SOULS: u64 = 30;
+    const TICKS: i64 = 1_200;
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.lockstep = true;
+    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
+    cfg.engine = Some((tree_rules(), vec![pair_kind()]));
+    cfg.join = Some(Join {
+        entry: (ground(), entry()),
+        family: humanoid(),
+        kind: name(&fullname(BODY)),
+        per_tick: 8,
+    });
+    let rules = Rules {
+        kinds: entries(),
+        moves: Json::Obj(Vec::new()),
+    };
+    let store = Mem::with(Vec::new());
+    let w = answers::start(world(), rules, store.clone(), cfg).expect("the world starts");
+    let soul = |i: u64| Id::new(Scope([0x5b; 16]), 100 + i).unwrap();
+    let mut sequences = BTreeMap::new();
+    let mut replies = Vec::new();
+    let mut send = |tick: i64, who: Id, verb: &str, target: Option<Id>, point: Option<Vec3>| {
+        let sequence = sequences.entry(who).or_insert(0u64);
+        *sequence += 1;
+        let mut parameters = BTreeMap::new();
+        if let Some(p) = point {
+            let i = |n: i64| {
+                u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint)
+            };
+            parameters.insert(1, Value::Array(vec![i(p.x), i(p.y), i(p.z)]));
+        }
+        let intent = Intent {
+            actor: Actor::Soul(who),
+            verb: name(verb),
+            target: target.map(Target::Node),
+            parameters,
+            sequence: *sequence,
+            basis: Version {
+                lineage: LINEAGE,
+                zone: Id::new(LINEAGE, 0).unwrap(),
+                epoch: 1,
+                sequence: 0,
+            }
+            .to_value(),
+            // Lockstep world time starts at 0: an expiry far ahead.
+            expiry: 1_000_000_000_000,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+            reflex: false,
+        };
+        let (reply, rx) = std::sync::mpsc::channel();
+        w.events
+            .send(answers::Event::ArrivalAt {
+                tick,
+                bytes: encode(&intent.to_value()).unwrap(),
+                reply,
+            })
+            .unwrap();
+        replies.push(rx);
+    };
+    // A point on the open ground east of the entry, from a fixed sequence: within 8 m east and 6 m either side.
+    let point = |k: u64| {
+        let s = first_spot();
+        let (a, b) = ((k * 7_919) % 8_000, (k * 104_729) % 12_000);
+        Vec3::new(s.x + a as i64 * 1_000, 0, s.z + (b as i64 - 6_000) * 1_000)
+    };
+    let g = ground();
+    for i in 0..SOULS {
+        let who = soul(i);
+        send(1 + i as i64 / 8, who, JOIN, None, None);
+        send(10 + 7 * i as i64, who, "eden:walk", Some(g), Some(point(i)));
+        if i % 3 == 0 {
+            send(
+                400 + 11 * i as i64,
+                who,
+                "eden:walk",
+                Some(g),
+                Some(point(i + 100)),
+            );
+        }
+    }
+    // A walk replaced by another a tick later; two sits on the one chair (the second waits or is refused by name).
+    send(700, soul(1), "eden:walk", Some(g), Some(point(200)));
+    send(701, soul(1), "eden:walk", Some(g), Some(point(201)));
+    send(800, soul(2), "eden:sit", Some(chair()), None);
+    send(810, soul(4), "eden:sit", Some(chair()), None);
+    let ran = {
+        let (done, rx) = std::sync::mpsc::channel();
+        w.events
+            .send(answers::Event::RunTo { tick: TICKS, done })
+            .unwrap();
+        rx.recv().unwrap()
+    };
+    for rx in &replies {
+        rx.recv_timeout(Duration::from_secs(20)).expect("an answer");
+    }
+    w.stop();
+    assert_eq!(ran.tick, TICKS);
+    let log = store.0.lock().unwrap().bytes.clone();
+    let records = recover(&log).unwrap().records;
+    let motions: usize = records
+        .iter()
+        .filter(|r| !sim::recorder::is_input(r))
+        .map(|r| Part::read(r).unwrap())
+        .flat_map(|p| p.effects)
+        .filter_map(|e| match e.body {
+            Body::Changes(c) => Some(c),
+            _ => None,
+        })
+        .flatten()
+        .filter(|c| matches!(c.change, Change::Motion(_)))
+        .count();
+    let hash: String = sim::recorder::effect_hash(&records)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    println!(
+        "motion history: {} records, {motions} motion samples, effect hash {hash}",
+        records.len()
+    );
+    assert!(motions > 500, "the run wrote motion: {motions}");
+    assert_eq!(hash, PINNED_MOTION_HISTORY, "the history is bit-identical");
+}
+
+/// [`motion_history_is_bit_identical_to_its_pinned_hash`]'s effect hash, as `origin/main` (c919d8126) writes it.
+const PINNED_MOTION_HISTORY: &str =
+    "b18f5b817f8e19faaf0174ffbc43f546e27dc4732af99949575138ad374be048";
+
 /// R21: private membership is checked against the joined actor's authoritative body, not its principal id.
 #[test]
 fn r21_joined_principal_private_turn_uses_body_and_rejects_nonmember() {
