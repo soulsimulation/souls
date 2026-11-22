@@ -2058,6 +2058,11 @@ impl Ground for Grounds<'_> {
         }
         let from = self.map.get().spot_near(an, a, AT_EDGE)?;
         let to = self.map.get().spot_near(bn, b, AT_EDGE)?;
+        // Pieces no portal or link joins: no route, decided without a search (a failed search walks the whole part
+        // it starts in, twice; #4072).
+        if !self.map.get().may_reach(from.piece, to.piece) {
+            return None;
+        }
         let r = self.map.route(self.tree, from, to, HANDS).ok()?;
         Some(r.length as i64 * 1000)
     }

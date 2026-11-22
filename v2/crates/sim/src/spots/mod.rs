@@ -48,6 +48,9 @@ pub const CLEAR: i64 = 700_000;
 pub const WEIGHT: i64 = 3;
 /// A place is joined to a clear target when walked to from it within this many times their straight gap, plus a pitch.
 pub const DETOUR: i64 = 2;
+/// A search for a place to stand gives up after this many places the asker's walk does not reach (#4072): a target
+/// cut off from the asker (a floor with no way up) costs at most this many walks, never one per place round it.
+pub const MISSES_MOST: usize = 64;
 
 /// The ground as the spot tables read it. All µm.
 pub trait Ground {
@@ -304,14 +307,16 @@ impl Table {
             .collect();
         order.sort_unstable();
         let mut best: Option<(i64, u16, u16, usize)> = None;
+        let mut misses = 0;
         for (bound, ring, k, i) in order {
-            if best.is_some_and(|b| bound > b.0) {
+            if best.is_some_and(|b| bound > b.0) || misses >= MISSES_MOST {
                 break;
             }
             if joined && !self.joined(g, t, i) {
                 continue;
             }
             let Some(walk) = g.walk(ask.node, ask.from, t.node, self.places[i].at) else {
+                misses += 1;
                 continue;
             };
             let key = (walk + WEIGHT * gap(&self.places[i]), ring, k, i);
@@ -406,11 +411,13 @@ fn rings(
         return order.first().map(|o| o.3);
     };
     let mut best: Option<(i64, i64, i64, Vec3)> = None;
+    let mut misses = 0;
     for (bound, ring, k, at) in order {
-        if best.is_some_and(|b| bound > b.0) {
+        if best.is_some_and(|b| bound > b.0) || misses >= MISSES_MOST {
             break;
         }
         let Some(walk) = g.walk(node, p, target.node, at) else {
+            misses += 1;
             continue;
         };
         let key = (walk + WEIGHT * flat(at, t), ring, k, at);

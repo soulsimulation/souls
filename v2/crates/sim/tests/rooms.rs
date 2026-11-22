@@ -7,6 +7,9 @@
 //!
 //! Needs the exported Eden facts file: `cargo test -p sim --release --test rooms -- --ignored --nocapture`.
 
+// Times its own calls: the wall-clock rule (K7) binds the engine, not this test.
+#![allow(clippy::disallowed_methods)]
+
 mod common;
 
 use replica::encode::Value;
@@ -16,6 +19,7 @@ use replica::world_model::show;
 use sim::routes::Map;
 use sim::spots::{Ask, Spots, Target, within};
 use std::collections::BTreeMap;
+use std::time::{Duration, Instant};
 
 fn text() -> String {
     let path = concat!(
@@ -90,6 +94,10 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
     let mut no_door = 0;
     // Pocket targets a form's walk and a plain walk now reach.
     let mut fixed = (0, 0);
+    // Each standable target the walker's walk does not reach: how long `within` and a spot grant took (#4072).
+    let mut calls: Vec<(Duration, Duration)> = Vec::new();
+    // The map's parts are found on the first walk: not timed with the first target.
+    town.with_ground(|_, g| g.walk(ground, Vec3::ZERO, ground, Vec3::new(1_000_000, 0, 0)));
     let ids: Vec<Id> = im.nodes.values().copied().collect();
     for id in ids {
         let Some((floor, at, _)) = town.view().on_floor(id, Vec3::ZERO) else {
@@ -101,16 +109,22 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
         let Some(b) = parent(tree, floor) else {
             continue;
         };
-        let Some(&from) = door.get(&b) else {
-            no_door += 1;
-            continue;
+        // A building with no doorway onto the ground (a tower whose floors no way reaches) from another's.
+        let from = match door.get(&b) {
+            Some(&p) => p,
+            None => {
+                no_door += 1;
+                *door.values().next().expect("a doorway")
+            }
         };
         let target = Target::new(floor, at);
         let (pocket, form, walk) = town.with_ground(|_, g| {
             let pocket =
                 g.stand(floor, at).is_some() && g.walk(ground, from, floor, at).is_none();
-            let form = within(g, target, reach, Some((ground, from)))
-                .is_some_and(|p| g.walk(ground, from, floor, p).is_some());
+            let t0 = Instant::now();
+            let form = within(g, target, reach, Some((ground, from)));
+            let t1 = Instant::now();
+            let form = form.is_some_and(|p| g.walk(ground, from, floor, p).is_some());
             let mut spots = Spots::new();
             let ask = Ask {
                 who: walker,
@@ -119,7 +133,13 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
                 from,
                 target,
             };
-            let walk = spots.write(g, &[ask], 0).is_ok()
+            let t2 = Instant::now();
+            let wrote = spots.write(g, &[ask], 0).is_ok();
+            let t3 = Instant::now();
+            if pocket {
+                calls.push((t1 - t0, t3 - t2));
+            }
+            let walk = wrote
                 && matches!(spots.of(walker, &target), Some(Ok(p)) if g.walk(ground, from, floor, p).is_some());
             (pocket, form, walk)
         });
@@ -196,6 +216,28 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
             );
         }
     }
+    // A target the walk does not reach answers at once: no route search per place round it (#4072's review: about
+    // 1 s per call before, on the planner thread every walker waits on).
+    let ms = |d: Duration| d.as_secs_f64() * 1e3;
+    let mut forms: Vec<f64> = calls.iter().map(|c| ms(c.0)).collect();
+    let mut grants: Vec<f64> = calls.iter().map(|c| ms(c.1)).collect();
+    forms.sort_by(f64::total_cmp);
+    grants.sort_by(f64::total_cmp);
+    let mid = |v: &[f64]| v.get(v.len() / 2).copied().unwrap_or(0.0);
+    let top = |v: &[f64]| v.last().copied().unwrap_or(0.0);
+    println!(
+        "unreached standable targets: {}; within: median {:.2} ms, max {:.2} ms; a spot grant: median {:.2} ms, max \
+         {:.2} ms",
+        calls.len(),
+        mid(&forms),
+        top(&forms),
+        mid(&grants),
+        top(&grants)
+    );
+    assert!(
+        top(&forms) < 50.0 && top(&grants) < 50.0,
+        "an unreached target answers without a search per place"
+    );
     println!("school desks (pocket, form reached, walk reached):");
     for d in &desks {
         println!("  {d:?}");
