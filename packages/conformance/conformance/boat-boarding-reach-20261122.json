@@ -1,0 +1,5 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "2026-11-22 #1960 (PR #3978) a boat's boarding reach. New revisions of the Engine v2 entries eden:canoe (content/kinds/vehicles/canoe.json) and eden:rowing_boat (content/kinds/vehicles/rowing_boat.json); an entry's reference is the hash of its bytes, so the old revisions keep their bytes, e.g. in v2/crates/replica/cases/form-rules-snapshot. Each body slot (canoe back and front; rowing boat oars, bow and stern) gains board_mm 4000: when no body can stand at or within a form's reach of the slot's stand point (the hull's side afloat), the world moves that stand point to the nearest clear ground within 4 m of the slot, from which the straight step onto the slot crosses no solid but the boat's own, as today's sit slide checks (slotTransitionIssue). On full Eden the bank is 3.5 m from the canoe's back seat and the harbour quay 3.6 to 3.9 m from the rowing boat's seats. Nothing else in either entry changes; core-canoe@1, core-rowing-boat@1 and their other revisions are unchanged. No findings: no budgets, samples or gap checks were relaxed.",
+  "findings": []
+}

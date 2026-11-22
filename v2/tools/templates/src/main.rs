@@ -53,7 +53,8 @@ fn support(dir: &Path, facts: &[u8]) -> Result<PublicSupport, String> {
             .rsplit_once('@')
             .ok_or("template-pins-invalid")?;
         if name.is_empty()
-            || !(name.starts_with("souls:") || name.starts_with("eden:"))
+            // The catalogue's namespaces: content/kinds carries mars: kinds too, so a support seed pins them.
+            || !["souls:", "eden:", "mars:"].iter().any(|ns| name.starts_with(ns))
             || !hash.starts_with("1220")
             || from_hex(hash).is_err()
             || hash.len() != 68
