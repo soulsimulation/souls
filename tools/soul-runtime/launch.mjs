@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Small outer process owner: recover a killed controller, never restart explicit
 // configuration/auth failures. Machine sleep/reboot is outside this process.
-import { isMain } from '../lib/is-main.mjs';
 import {spawn} from 'node:child_process';
-import { fileURLToPath } from 'node:url';
+import {fileURLToPath} from 'node:url';
+import {realpathSync} from 'node:fs';
 import {resolve,join} from 'node:path';
 import {createControllerOwner} from './controller-ownership.mjs';
 import {abortableSleep} from './receiver.mjs';
@@ -39,4 +39,6 @@ export async function main(argv=process.argv.slice(2)){
  try{await superviseProcess({args,seconds,ownershipDirectory,signal:stop.signal,onState:s=>console.log(JSON.stringify({at:new Date().toISOString(),...s}))});}
  finally{process.removeListener('SIGINT',quit);process.removeListener('SIGTERM',quit);}
 }
-if(isMain(import.meta.url))main().catch(e=>{console.error(JSON.stringify({state:'blocked',code:e.code??'launcher.failure',reason:e.message}));process.exitCode=1;});
+// tools/lib/is-main.mjs, inlined: this file is bundled or copied alone. A start through a symlink still runs main.
+const startedAsScript = () => { try { return !!process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url)); } catch { return false; } };
+if(startedAsScript())main().catch(e=>{console.error(JSON.stringify({state:'blocked',code:e.code??'launcher.failure',reason:e.message}));process.exitCode=1;});
