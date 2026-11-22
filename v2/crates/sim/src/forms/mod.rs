@@ -142,12 +142,15 @@ pub struct Places<'a> {
 
 /// A seat's reach for one body, as the gateway's sit measures it (`worldd`'s bodies): a seat is taken from its stand
 /// point and left there (B3), so its contacts are at the stand point ([`PlaceAt::stand`]), measured across x and z
-/// from where the body stands (its seat's stand point while it is in one); any other target as `inner`.
+/// from where the body stands (its seat's stand point while it is in one), when it stands on the seat's own floor;
+/// from any other floor (the one below or above), and any other target, as `inner` measures it, height and all.
 struct SeatReach<'b, R> {
     inner: &'b R,
     body: Id,
     from: Vec3,
-    place: Option<(Id, Vec3)>,
+    /// The floor the body stands on (its seat's while it is in one).
+    on: Option<Id>,
+    place: Option<(Id, Vec3, Id)>,
 }
 
 impl<R: Reach> Reach for SeatReach<'_, R> {
@@ -159,7 +162,10 @@ impl<R: Reach> Reach for SeatReach<'_, R> {
         target: Id,
         point: &Name,
     ) -> Option<i64> {
-        let Some((_, to)) = self.place.filter(|p| p.0 == target && body == self.body) else {
+        let Some((_, to, _)) = self
+            .place
+            .filter(|p| p.0 == target && body == self.body && self.on == Some(p.2))
+        else {
             return self.inner.distance(body, effector, limb, target, point);
         };
         if !matches!(point.as_str(), "souls:slot" | "souls:stand") {
@@ -183,17 +189,20 @@ fn seat_reach<'b, R: Reach>(
     place: Option<&PlaceAt>,
 ) -> SeatReach<'b, R> {
     let at = |p: &PlaceAt| p.stand().ok();
-    let from = c.body(body).map_or(Vec3::ZERO, |b| {
+    let (from, on) = c.body(body).map_or((Vec3::ZERO, None), |b| {
         match (b.pose.support, slots.held_place(body)) {
-            (replica::pose::Support::Slot, Some(p)) => at(p).unwrap_or(b.pose.position),
-            _ => b.pose.position,
+            (replica::pose::Support::Slot, Some(p)) => {
+                (at(p).unwrap_or(b.pose.position), Some(p.floor))
+            }
+            _ => (b.pose.position, Some(crate::walk::node_of(b))),
         }
     });
     SeatReach {
         inner,
         body,
         from,
-        place: place.and_then(|p| Some((p.thing, at(p)?))),
+        on,
+        place: place.and_then(|p| Some((p.thing, at(p)?, p.floor))),
     }
 }
 
@@ -547,6 +556,11 @@ impl Forms {
         f
     }
 
+    /// Whether intent `intent` is one the forms hold: its run in progress, or its effects applied.
+    pub fn known(&self, intent: Id) -> bool {
+        self.by_intent.contains_key(&intent) || self.applied.contains_key(&intent)
+    }
+
     /// Marks `node` as ground: a form done there reserves nothing (E21).
     pub fn shared(&mut self, node: Id) {
         self.shared.insert(node);
@@ -588,6 +602,32 @@ impl Forms {
                 )),
                 _ => None,
             })
+            .collect()
+    }
+
+    /// The bodies whose step in progress is a walk that is to be there, not to act from there: no `move`, `sit` or
+    /// `lie` comes next. The world may end such a walk to an area anywhere within reach of the area's circle.
+    pub fn goal_walks(&self) -> BTreeSet<Id> {
+        self.runs
+            .values()
+            .filter(|fr| {
+                matches!(fr.runner.step(), Some(Step::WalkTo { .. }))
+                    && !matches!(
+                        fr.runner.next_step(),
+                        Some(Step::Move { .. } | Step::Sit { .. })
+                    )
+            })
+            .map(|fr| fr.body)
+            .collect()
+    }
+
+    /// The bodies whose run's step in progress is an approach walk, the walk the binding adds before a form's first
+    /// move at a point (#3688), so the world can aim it at clear ground on the body's side of that point.
+    pub fn approaches(&self) -> std::collections::BTreeSet<Id> {
+        self.runs
+            .values()
+            .filter(|fr| matches!(fr.runner.step(), Some(Step::WalkTo { approach: true, .. })))
+            .map(|fr| fr.body)
             .collect()
     }
 
@@ -1587,7 +1627,8 @@ const BODY_OF: &str = "souls:body-of";
 /// audience; the refusal names their ends only when the asker is a member of every one's audience (`audiences`, as
 /// resolved when written), and otherwise names the group alone. A refusal never holds an account id: ends are Soul or
 /// body ids, named by `names` (the directory's names), else shown as ids. Refused: `form-unknown`, `who-unknown` (a
-/// `who` outside the closed list), `not-permitted` with the sentence.
+/// `who` outside the closed list), `object.private` (a private thing not the asker's, #3700), `not-permitted` with the
+/// sentence.
 pub fn may(
     tree: &Tree,
     audiences: &BTreeMap<Id, BTreeSet<Id>>,
@@ -1610,6 +1651,10 @@ pub fn may(
         .find(|e| tree.ty(e).as_str() == BODY_OF)
         .map(|e| e.other);
     let asker = soul.unwrap_or(body);
+    // #3700: a private thing (its own mark, or its nearest marked ancestor's) is its owner's alone, whatever its form.
+    if let Some(words) = replica::who_may::private_to(tree, node, asker) {
+        return refuse("object.private", format!("who may: {words}"));
+    }
     let thing = tree.handle(node).and_then(|h| tree.node(h));
     let holds = thing.as_ref().and_then(|n| n.parent()) == Some(body);
     let (ends, seen) = match (&who, &thing) {

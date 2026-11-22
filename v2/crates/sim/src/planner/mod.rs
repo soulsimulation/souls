@@ -64,6 +64,8 @@ pub enum FormQuery {
         node: replica::ids::Id,
         at: Vec3,
         reach: i64,
+        /// The thing the walk's move acts on, when its own doorway may be stood in (a door's knock, #3688).
+        door: Option<replica::ids::Id>,
     },
     Line {
         to: Vec3,
@@ -242,7 +244,12 @@ impl Planner {
             for q in &w.forms {
                 out.searched += 1;
                 let result = match q.query {
-                    FormQuery::Walk { node, at, reach } => {
+                    FormQuery::Walk {
+                        node,
+                        at,
+                        reach,
+                        door,
+                    } => {
                         let view = match self.town.view_for(q.body.id) {
                             Ok(v) => v,
                             Err(_) => continue,
@@ -250,9 +257,11 @@ impl Planner {
                         let legs = view
                             .on_floor(node, at)
                             .and_then(|(floor, at, _)| {
-                                let to = view.stand_near(floor, at, reach, Some(&q.body)).or_else(
-                                    || (floor == crate::walk::node_of(&q.body)).then_some(at),
-                                )?;
+                                let to = view
+                                    .stand_near_door(floor, at, reach, Some(&q.body), door)
+                                    .or_else(|| {
+                                        (floor == crate::walk::node_of(&q.body)).then_some(at)
+                                    })?;
                                 view.plan(&q.body, floor, to).ok()
                             })
                             .unwrap_or_default();

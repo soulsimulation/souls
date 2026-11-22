@@ -73,6 +73,7 @@ pub fn router(gw: Arc<Gateway>) -> Router {
     Router::new()
         .route(PATH, get(upgrade))
         .route(crate::creator::PATH, post(crate::creator::exchange))
+        .route(crate::creator::HELPER_PATH, post(crate::creator::helper))
         .route(crate::entries::PATH, get(crate::entries::serve))
         .route(
             crate::bulk::PATH,

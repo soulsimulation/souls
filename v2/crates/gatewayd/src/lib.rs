@@ -120,6 +120,8 @@ pub struct Gateway {
     pub exchange: std::sync::OnceLock<creator::Exchange>,
     /// The world's kind entries for its clients (`--entries`, #3760); unset, `GET /v2/entries` answers 404.
     pub entries: std::sync::OnceLock<entries::Entries>,
+    /// The creator's live helpers (#3727): each helper's actor id and its token's hash, until it lapses.
+    pub helpers: Mutex<BTreeMap<replica::ids::Id, [u8; 32]>>,
     /// A creator's bulk edits' counts (#3695, `bulk.rs`).
     pub bulk: bulk::Gauge,
     /// A creator's uploads (`--uploads`, #3697, `uploads.rs`); unset, the routes answer 404.
@@ -207,6 +209,7 @@ impl Gateway {
             mailbox: std::sync::OnceLock::new(),
             exchange: std::sync::OnceLock::new(),
             entries: std::sync::OnceLock::new(),
+            helpers: Mutex::new(BTreeMap::new()),
             bulk: bulk::Gauge::default(),
             uploads: std::sync::OnceLock::new(),
             closing: tokio::sync::watch::channel(false).0,

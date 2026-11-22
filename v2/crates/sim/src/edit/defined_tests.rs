@@ -94,6 +94,7 @@ impl W {
             actor: Actor::Creator(self.world.creator),
             planned: self.live.version(),
             ops,
+            claim: None,
         };
         let copy = self.live.frozen();
         let checked = check(edit, &copy, &self.world)?;
@@ -245,6 +246,7 @@ fn define_and_place_in_one_batch_in_that_order() {
         actor: Actor::Creator(w.world.creator),
         planned: w.live.version(),
         ops: vec![define_op(1, w.root, BIRDBATH)],
+        claim: None,
     };
     let name = match &check(edit, &copy, &w.world).expect("checked").edit.ops[0] {
         Op::Place { fields, .. } => defined::named(fields).expect("named").to_owned(),
@@ -352,5 +354,143 @@ fn each_check_at_commit_refuses_by_name() {
             BTreeMap::new()
         )]),
         "edit.kind-unknown"
+    );
+}
+
+/// A record whose `tray` slot admits `admits` (a JSON list's items) and whose `sprout` form creates `makes` into it and
+/// starts `leaf` by timer after `after_us`; `leaf` starts `sprout` again after `back_us`, or nothing when `None`.
+fn pod(admits: &str, makes: &str, after_us: u64, back_us: Option<u64>) -> String {
+    let leaf = back_us.map_or(String::new(), |us| {
+        format!(r#"{{"change":"timer","form":"sprout","after_us":{us}}}"#)
+    });
+    format!(
+        r#"{{"format":"souls-entry/1","kind":"gene:pod","owner":"thing",
+  "slots":{{"tray":{{"kinds":[{admits}],"at_mm":[0,300,0]}}}},
+  "forms":{{"sprout":{{"who":"anyone","effects":[
+    {{"change":"create","kind":"{makes}","into":"tray"}},
+    {{"change":"timer","form":"leaf","after_us":{after_us}}}]}},
+   "leaf":{{"who":"anyone","effects":[{leaf}]}}}}}}"#
+    )
+}
+
+/// The review's blockers (#3697): a form's effects the world would refuse every time are refused at define
+/// (`kind.effects`), huge bounds are `kind.too-large` (never an overflow later), a definition is for everyone
+/// (`kind.audience`), and a kind another definition's form creates is `kind.in-use`.
+#[test]
+fn review_blockers_are_refused_at_define_by_name() {
+    let mut w = W::new();
+    let root = w.root;
+    // kind.too-large: bounds past the world's scale, which the ground's µm arithmetic would overflow.
+    let huge = BIRDBATH.replace("[1000,1200,1000]", "[20000000000000000,2000,400]");
+    assert_eq!(w.code(vec![define_op(1, root, &huge)]), "kind.too-large");
+    // kind.audience: a definition every copy must apply is for everyone.
+    let mut private = define_op(1, root, BIRDBATH);
+    if let Op::Place { audience, .. } = &mut private {
+        *audience = Audience::Of(root);
+    }
+    assert_eq!(w.code(vec![private]), "kind.audience");
+    // kind.effects: a create of a kind the world neither pins nor defines (by its full name) ...
+    let (seed_def, seed) = w
+        .define(1, &BIRDBATH.replace("birdbath", "seed"))
+        .expect("a seed");
+    let day = 86_400_000_000;
+    for makes in ["eden:apple@1220aa", "gene:typo", "gene:seed"] {
+        let r = pod("\"gene:seed\"", makes, day, None);
+        let no = w.edit(vec![define_op(1, root, &r)]).expect_err("refused");
+        assert_eq!(no.name, "kind.effects", "{makes}: {}", no.detail);
+    }
+    // ... into a slot that does not admit it ...
+    let r = pod("", &seed, day, None);
+    assert_eq!(w.code(vec![define_op(1, root, &r)]), "kind.effects");
+    // ... and forms that start each other by timer sooner than a tick, in a ring.
+    let r = pod("\"gene:seed\"", &seed, 1, Some(1));
+    assert_eq!(w.code(vec![define_op(1, root, &r)]), "kind.effects");
+    // A quick timer that is no ring, or a ring that takes a day, with a create the slot admits, are fine.
+    let r = pod("\"gene:seed\"", &seed, 1, Some(day));
+    let (pod_def, _) = w
+        .define(1, &r)
+        .expect("a pod whose forms the world can run");
+    // kind.in-use: the seed's kind is still made by the pod's form; removing both at once is fine.
+    assert_eq!(
+        w.code(vec![Op::Remove {
+            node: Ref::Node(seed_def)
+        }]),
+        "kind.in-use"
+    );
+    w.edit(vec![
+        Op::Remove {
+            node: Ref::Node(pod_def),
+        },
+        Op::Remove {
+            node: Ref::Node(seed_def),
+        },
+    ])
+    .expect("removed together");
+}
+
+/// A chain of forms, each starting the next by many 1 µs timers (#3697 re-review): with no ring, the ring search
+/// keeps the soonest timer per pair of forms and stays polynomial, so the record defines at once; the same chain
+/// closed into a ring under a tick is still `kind.effects`.
+fn chain(forms: usize, timers: usize, ring: bool) -> String {
+    let form = |i: usize| {
+        let next = if i + 1 < forms {
+            Some(i + 1)
+        } else {
+            ring.then_some(0)
+        };
+        let effects = next.map_or(String::new(), |n| {
+            vec![format!(r#"{{"change":"timer","form":"f{n}","after_us":1}}"#); timers].join(",")
+        });
+        format!(r#""f{i}":{{"who":"anyone","effects":[{effects}]}}"#)
+    };
+    let forms = (0..forms).map(form).collect::<Vec<_>>().join(",");
+    format!(
+        r#"{{"format":"souls-entry/1","kind":"gene:chain","owner":"thing","forms":{{{forms}}}}}"#
+    )
+}
+
+#[test]
+fn a_long_chain_of_quick_timers_with_no_ring_is_checked_fast() {
+    let mut w = W::new();
+    let root = w.root;
+    // 30^9 paths for the old search, which never finished; the soonest per pair checks 10 forms at once.
+    w.define(1, &chain(10, 30, false))
+        .expect("a ring-free chain of quick timers");
+    assert_eq!(
+        w.code(vec![define_op(2, root, &chain(10, 30, true))]),
+        "kind.effects"
+    );
+}
+
+/// `kind.in-use` holds at commit (#3697 review): a thing of the kind made after the removal was checked (as a Soul's
+/// form makes one) refuses it on the live copy, which the read set alone would not.
+#[test]
+fn a_thing_made_after_the_check_still_refuses_the_removal() {
+    let mut w = W::new();
+    let (def, name) = w.define(1, BIRDBATH).expect("defined");
+    let copy = w.live.frozen();
+    let removal = Edit {
+        intent: w.intents.mint().expect("an id"),
+        actor: Actor::Creator(w.world.creator),
+        planned: w.live.version(),
+        ops: vec![Op::Remove {
+            node: Ref::Node(def),
+        }],
+        claim: None,
+    };
+    let checked = check(removal, &copy, &w.world).expect("nothing uses it yet");
+    let room = w.room;
+    w.edit(vec![place(
+        1,
+        &full(&name),
+        Ref::Node(room),
+        BTreeMap::new(),
+    )])
+    .expect("placed meanwhile");
+    assert_eq!(
+        replica::edit::confirm(&w.live, &checked)
+            .expect_err("in use now")
+            .name,
+        "kind.in-use"
     );
 }
