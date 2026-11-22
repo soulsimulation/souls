@@ -1,8 +1,8 @@
 //! A served world's targets (follow-up of X7, #4015): what the driver's Souls walk to, sit on and act on, read the
 //! way a client reads them, before the clock starts.
 //!
-//! - **The ids** come from one test Soul's copy ([`read_copy`]): signed in on its own socket, it asks the world for
-//!   its scope's hashes and fetches every record they reach (R5b's compare and descend, `replica::sync`, as the
+//! - **The ids** come from the first agent's copy ([`sync_copy`]): once every agent is signed in, on its own socket,
+//!   it asks the world for its scope's hashes and fetches every record they reach (R5b's compare and descend, `replica::sync`, as the
 //!   client's daemon does), checked against their hashes. Each record gives a node's id and its kind's plain name
 //!   (the Soul Actions entry its field 27 names, else its kind, without `@revision`).
 //! - **The forms** come from the world's kind entries (`GET /v2/entries`, signed in with the same token, gzip), as
@@ -21,13 +21,12 @@ use std::sync::Arc;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use futures_util::{SinkExt, StreamExt};
-use replica::encode::{Name, Value, decode, encode};
+use replica::encode::{Value, decode, encode};
 use replica::ids::Id;
-use replica::intents::{Hello, PROTOCOL};
 use replica::rules::json::{self, Value as Json};
 use replica::sync::{Copy, read_hashes, read_records, wire};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
-use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::tungstenite::{Error as WsError, Message};
 
 /// Each shape kind but walk, sit and say, and the entry forms that carry it, the first one offered taken.
 pub const FORMS: &[(&str, &[&str])] = &[
@@ -248,12 +247,12 @@ impl Choice {
     }
 }
 
-type Ws =
-    tokio_tungstenite::WebSocketStream<tokio_tungstenite::MaybeTlsStream<tokio::net::TcpStream>>;
-
-async fn next_map(ws: &mut Ws, n: u64) -> Result<BTreeMap<u64, Value>, String> {
+async fn next_map<R>(rx: &mut R, n: u64) -> Result<BTreeMap<u64, Value>, String>
+where
+    R: futures_util::Stream<Item = Result<Message, WsError>> + Unpin,
+{
     loop {
-        let frame = tokio::time::timeout(std::time::Duration::from_secs(30), ws.next())
+        let frame = tokio::time::timeout(std::time::Duration::from_secs(30), rx.next())
             .await
             .map_err(|_| "targets: no answer to a sync request in 30 s".to_owned())?;
         let Some(Ok(Message::Binary(b))) = frame else {
@@ -309,26 +308,14 @@ fn soul_of(record: &BTreeMap<u64, Value>) -> Option<Id> {
     })
 }
 
-/// The nodes of a test Soul's scope, as its copy holds them after a sync from nothing.
-pub async fn read_copy(url: &str, token: &str) -> Result<Seen, String> {
-    let (mut ws, _) = tokio_tungstenite::connect_async(url)
-        .await
-        .map_err(|e| format!("targets: connect: {e}"))?;
-    let hello = Hello {
-        protocol: PROTOCOL,
-        build: vec![0x12, 0x20],
-        refused: None,
-        other: None,
-    };
-    let sign_in = encode(&Value::Map(
-        [(1, Value::Text(Name::new(token).ok_or("targets: a token")?))].into(),
-    ))
-    .map_err(|e| e.to_string())?;
+/// The nodes of a test Soul's scope, as its copy holds them after a sync from nothing, over its signed-in socket
+/// (its agent's, once every agent is signed in, so their bodies are in the world).
+pub async fn sync_copy<S, R>(tx: &mut S, rx: &mut R) -> Result<Seen, String>
+where
+    S: futures_util::Sink<Message, Error = WsError> + Unpin,
+    R: futures_util::Stream<Item = Result<Message, WsError>> + Unpin,
+{
     let send = |b: Vec<u8>| Message::Binary(b.into());
-    ws.send(send(hello.to_bytes().map_err(|e| e.to_string())?))
-        .await
-        .map_err(|e| e.to_string())?;
-    ws.send(send(sign_in)).await.map_err(|e| e.to_string())?;
     let ask = |n: u64, key: u64, list: Vec<Value>| {
         encode(&Value::Map(BTreeMap::from([
             (wire::ASK, Value::Uint(n)),
@@ -336,10 +323,10 @@ pub async fn read_copy(url: &str, token: &str) -> Result<Seen, String> {
         ])))
         .expect("a sync request")
     };
-    ws.send(send(ask(1, wire::IDS, Vec::new())))
+    tx.send(send(ask(1, wire::IDS, Vec::new())))
         .await
         .map_err(|e| e.to_string())?;
-    let (scope, hashes) = read_hashes(&next_map(&mut ws, 1).await?).map_err(|r| r.name)?;
+    let (scope, hashes) = read_hashes(&next_map(rx, 1).await?).map_err(|r| r.name)?;
     let mut copy = Copy::default();
     let mut d = copy.compare(&scope, hashes);
     let mut n = 1;
@@ -350,14 +337,13 @@ pub async fn read_copy(url: &str, token: &str) -> Result<Seen, String> {
         }
         n += 1;
         let list = asked.iter().map(|h| Value::Bytes(h.clone())).collect();
-        ws.send(send(ask(n, wire::RECORDS, list)))
+        tx.send(send(ask(n, wire::RECORDS, list)))
             .await
             .map_err(|e| e.to_string())?;
-        let got = read_records(&next_map(&mut ws, n).await?).map_err(|r| r.name)?;
+        let got = read_records(&next_map(rx, n).await?).map_err(|r| r.name)?;
         copy.take(&mut d, &asked, got).map_err(|r| r.name)?;
     }
     copy.finish(d).map_err(|r| r.name)?;
-    let _ = ws.send(Message::Close(None)).await;
     let mut out = Seen::default();
     for h in copy.reach().map_err(|r| r.name)? {
         let Some(Ok(Value::Map(m))) = copy.record(&h).map(|b| decode(b).map(|d| d.value)) else {
@@ -370,7 +356,6 @@ pub async fn read_copy(url: &str, token: &str) -> Result<Seen, String> {
             if let Some(soul) = soul_of(&m) {
                 out.bodies.insert(soul, id);
             }
-            if std::env::var("DRIVER_DEBUG").is_ok() { eprintln!("node {kind} {:?}", m.get(&9)); }
             out.nodes.push((id, kind));
         }
     }

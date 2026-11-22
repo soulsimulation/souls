@@ -373,6 +373,12 @@ fn heard(bytes: &[u8]) -> Heard {
     }
 }
 
+/// What the run hands an agent: an act, or (the first agent, before the clock starts) a request to read its copy.
+enum Job {
+    Act(Due),
+    Read(tokio::sync::oneshot::Sender<Result<targets::Seen, String>>),
+}
+
 /// One act handed to its agent: due at, the intent's bytes, its sequence, and the run's start.
 struct Due {
     at: Instant,
@@ -395,7 +401,7 @@ async fn agent(
     gate: Arc<Semaphore>,
     ready: Arc<AtomicU64>,
     seated: Arc<std::sync::atomic::AtomicBool>,
-    mut acts: mpsc::UnboundedReceiver<Due>,
+    mut acts: mpsc::UnboundedReceiver<Job>,
 ) -> Sent {
     let mut out = Sent::default();
     let permit = gate.acquire().await;
@@ -447,7 +453,10 @@ async fn agent(
         let wait = drain_until.map_or(Duration::from_secs(3600), |u| u - Instant::now());
         tokio::select! {
             a = acts.recv(), if drain_until.is_none() => match a {
-                Some(d) => {
+                Some(Job::Read(back)) => {
+                    let _ = back.send(targets::sync_copy(&mut tx, &mut rx).await);
+                }
+                Some(Job::Act(d)) => {
                     start = Some(d.start);
                     if tx.send(Message::Binary(d.bytes.into())).await.is_err() {
                         out.closed = true;
@@ -640,7 +649,8 @@ async fn main() {
         .expect("this binary's folder");
     std::fs::create_dir_all(&a.dir).expect("the run folder");
 
-    let mut aimed: Option<targets::Targets> = None;
+    // A served world's kind entries, read with the first test Soul's token before anyone signs in.
+    let mut entries = None;
     let (url, signed, children) = match &a.remote {
         Some((remote, file)) => {
             let read = socket_url(remote).and_then(|url| {
@@ -649,22 +659,16 @@ async fn main() {
             });
             let read = match read {
                 Ok((url, signed)) => {
-                    // The world's ids and forms, through the first test Soul, on a socket of its own before its agent's.
                     let token = signed.first().map_or("", |(t, _)| t.as_str());
-                    match targets::read_copy(&url, token).await {
-                        Ok(seen) => targets::read_entries(&url, token).await.map(|e| {
-                            let t = targets::Targets::of(&seen, &e);
-                            (url, signed, seen.nodes.len(), t)
-                        }),
-                        Err(e) => Err(e),
-                    }
+                    targets::read_entries(&url, token)
+                        .await
+                        .map(|e| (url, signed, e))
                 }
                 Err(e) => Err(e),
             };
             match read {
-                Ok((url, signed, nodes, t)) => {
-                    println!("targets: {nodes} nodes in the copy; {}", t.json());
-                    aimed = Some(t);
+                Ok((url, signed, e)) => {
+                    entries = Some(e);
                     (url, signed, Vec::new())
                 }
                 Err(e) => {
@@ -750,6 +754,32 @@ async fn main() {
     while ready.load(Ordering::Relaxed) < u64::from(s.agents) {
         tokio::time::sleep(Duration::from_millis(20)).await;
     }
+    // On a served world, the ids: the first agent's copy, read now that every agent's body is in the world.
+    let mut aimed: Option<targets::Targets> = None;
+    if let Some(e) = &entries {
+        let (back, seen) = tokio::sync::oneshot::channel();
+        let seen = match chans.first().map(|c| c.send(Job::Read(back))) {
+            Some(Ok(())) => seen
+                .await
+                .unwrap_or(Err("targets: the first agent's socket closed".into())),
+            _ => Err("targets: no first agent".into()),
+        };
+        match seen {
+            Ok(seen) => {
+                let t = targets::Targets::of(&seen, e);
+                println!(
+                    "targets: {} nodes in the copy; {}",
+                    seen.nodes.len(),
+                    t.json()
+                );
+                aimed = Some(t);
+            }
+            Err(e) => {
+                eprintln!("driver: {e}");
+                std::process::exit(2);
+            }
+        }
+    }
 
     // The run: each act at its due time (plus its agent's thinking delay), whatever came back before it.
     let (cpu0, start) = (cpu_us(), Instant::now());
@@ -799,13 +829,13 @@ async fn main() {
         sequence[k] += 1;
         intended[k] += 1;
         *by_verb.entry(verb.as_str().to_owned()).or_default() += 1;
-        let _ = chans[k].send(Due {
+        let _ = chans[k].send(Job::Act(Due {
             at: due,
             bytes: intent(actors[k], &verb, target, sequence[k], &based),
             sequence: sequence[k],
             start,
             verb,
-        });
+        }));
     }
     drop(chans);
     let mut sent = Vec::new();
