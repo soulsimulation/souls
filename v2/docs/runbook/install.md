@@ -22,8 +22,8 @@ sends to these programs once the owner places its site file. Routing between the
 
 The view tier runs inside each world's process (`worldd`), so it has no unit of its own. Every program runs as
 `souls` in `souls.slice`, whose `MemoryMax` is 3 GB; inside it a world may use 2 GB (O1), a gateway 512 MB, the
-directory and the origin 256 MB each. The processor and the disk are shared, never capped: the slice's `CPUWeight`
-and `IOWeight` are 20 against the default 100, so when both systems are busy the new one gets a fifth of what today's
+directory 256 MB, the origin 1 GB for all its processes (6 on 8 cores, `ORIGIN_PROCESSES`;
+[viewer cache](../viewer-cache.md)). The processor and the disk are shared, never capped: the slice's `CPUWeight` and `IOWeight` are 20 against the default 100, so when both systems are busy the new one gets a fifth of what today's
 gets, and all of it when today's is idle; neither system's world time is throttled. `TasksMax` is 4,096. Every unit
 runs with `NoNewPrivileges`, `ProtectSystem=strict` (writing only under `/var/lib/souls`), `ProtectHome` and
 `PrivateTmp`. Units read the secrets file as root before they drop to `souls`. The directory
