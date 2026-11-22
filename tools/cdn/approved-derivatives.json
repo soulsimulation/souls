@@ -1584,6 +1584,13 @@
         "kind": "core-cottage@3"
       },
       {
+        "path": "models/12203a9ead4e2c2bd957d3003d4456992d5374428180f60365080f475c6a8f5f327e.glb",
+        "sha256": "5d959276631a71e9891a906260d9c82916f2a5fd835c1c5b58a8e1d659166c4f",
+        "bytes": 2452,
+        "licence": "own-work",
+        "kind": "mars-tea-room-mat@1"
+      },
+      {
         "path": "models/12203ab0c8b1e98ffbf8c7882436727e03128ae6db589505bee3edd7071367666945.glb",
         "sha256": "b2a748e67e137a372b2bacfcf863a25f2dfd22d3278a0678e3ec34fa7075d2b9",
         "bytes": 197708,
@@ -2065,6 +2072,13 @@
         "bytes": 22068,
         "licence": "own-work",
         "kind": "core-altar@1"
+      },
+      {
+        "path": "models/122062c8b6bdf0f2ca96b19157a045f7028611a782c390978b5d8875771b324e96d8.glb",
+        "sha256": "c71ab01c96d9de0b632fcc1074d4f366f2d16ce32513cb5b6d05c1bdbbc6c9cb",
+        "bytes": 33300,
+        "licence": "own-work",
+        "kind": "mars-planter@1"
       },
       {
         "path": "models/122062eef40ecf0a4402f699ee28a9885ca186b185e44fdca7aa128bfbaea004f223.glb",
@@ -2732,6 +2746,13 @@
         "kind": "core-hall@4"
       },
       {
+        "path": "models/12208db3b3e9b5766271285eeed11a7bbbd41691b5f377fa491f507439310ad8e8be.glb",
+        "sha256": "754d295ee356563e02010d4434e2791df0ccb21731338dafae38cfbbf9562e8c",
+        "bytes": 69076,
+        "licence": "own-work",
+        "kind": "mars-water-tank@1"
+      },
+      {
         "path": "models/12208e43a1ddae2c81bdcf4feaafc1371ce81665a3cdb5e277395f5451305c277340.glb",
         "sha256": "324ac19c13c41d65054ef5bec7132ca00c88c946dc5ab5637357809dee902190",
         "bytes": 234412,
@@ -3171,6 +3192,13 @@
         "bytes": 219616,
         "licence": "own-work",
         "kind": "core-hall@4"
+      },
+      {
+        "path": "models/1220b1421d65b66d6feb7fd9da2dcc6d76b47b0c9c968a020904885e092a5b752843.glb",
+        "sha256": "c73a719f3889db17a56348b164cd580bde94242be7c05cd510d57fdccec715f7",
+        "bytes": 17236,
+        "licence": "own-work",
+        "kind": "mars-watering-can@1"
       },
       {
         "path": "models/1220b1a8090bf8eb89feaac967d5e97fc7d94d9dbe3ebe0905bcd71617769246780e.glb",
@@ -3642,6 +3670,13 @@
         "kind": "core-townhouse@3"
       },
       {
+        "path": "models/1220d7c84d2927683ce3b67f51304f456f48b3cc4ee0aaa001f648b5be2481140cd7.glb",
+        "sha256": "0c70775b9ed80fa96bf37b4f34c0a465ee2908b18fddd11f52312a1a4ae1c2e5",
+        "bytes": 26504,
+        "licence": "own-work",
+        "kind": "core-mars-tool-library-stair@1"
+      },
+      {
         "path": "models/1220d80dd64116e3fdc479cadc93440e0df7aa358e9af2d3e9b5c3f0f30f8de31f44.glb",
         "sha256": "6cc0a8b212f63ec6bc89306e5a2d912612fd21e270019e42bf16af2cf83c8c6c",
         "bytes": 59280,
@@ -3740,6 +3775,13 @@
         "kind": "core-shop@3"
       },
       {
+        "path": "models/1220dc593225f536c2fdabaaa58b9b9259f335ef7a0952332d197314298d0480a8dd.glb",
+        "sha256": "bb76a6be6ec1d659bebefafb20f618c2b051d9aaacbb7e4175ed60276dc6628a",
+        "bytes": 16772,
+        "licence": "own-work",
+        "kind": "mars-beanbag-seat@1"
+      },
+      {
         "path": "models/1220dc91af1a3a4488c5476790f5f29337efdb8f2deeef02bebbe53d004fcbac62dd.glb",
         "sha256": "fae11f432c565d42e9f4fd1b36925dc8bb5f76d0a88448804a78c5c602976891",
         "bytes": 131512,
@@ -3780,6 +3822,13 @@
         "bytes": 32708,
         "licence": "own-work",
         "kind": "core-office-chair@1"
+      },
+      {
+        "path": "models/1220defe937d3b18fbd693d22cd033840842b816f83bbc30f9cd03b08dafef111e55.glb",
+        "sha256": "487a5afb0b04b5888dc4b65b5aac9123188b65b63521329db3351326d6aac199",
+        "bytes": 15888,
+        "licence": "own-work",
+        "kind": "mars-fire-bowl-fire@1"
       },
       {
         "path": "models/1220df858546730711ad8e070098379c2cdac0b0102193c4a72727ff4f9c863382b1.glb",

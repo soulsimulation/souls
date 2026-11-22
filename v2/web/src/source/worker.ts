@@ -11,12 +11,15 @@ import { happenedInPart } from '../sound/record.ts';
 import { readChanged } from './changed.ts';
 import { skyFields } from '../sky/record.ts';
 import { BEHIND_US, CUT_US } from '../clock/clock.ts';
+import { fieldsOf } from '../kinds/state.ts';
 
 /** Parts fetched at once from the one played (#3822): a joiner far behind is not one round trip a part. */
 const AHEAD = 16;
 
 type Msg = { t: 'snapshot'; s: SnapshotRec } | { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'error'; message: string };
-const post = (m: Msg, transfer: Transferable[] = []) => (self as unknown as Worker).postMessage(m, transfer);
+// This worker's own scope, taken once: a test harness that loads several workers in one process gives each its own.
+const scope = self as unknown as Worker;
+const post = (m: Msg, transfer: Transferable[] = []) => scope.postMessage(m, transfer);
 
 const num = (v: unknown): number => (typeof v === 'bigint' ? Number(v) : (v as number));
 const hex = (b: Uint8Array) => Array.from(b, (x) => x.toString(16).padStart(2, '0')).join('');
@@ -62,10 +65,13 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
     at: moved ? num(moved.get(1)) : null,
     soul: publicSoul(v.get(9)),
   };
-  if (f.has(1)) rec.origin = new TextDecoder().decode(f.get(1) as Uint8Array);
-  if (f.has(11)) rec.outline = rows(f.get(11));
-  if (f.has(12)) rec.solids = rows(f.get(12));
-  if (f.has(13)) rec.slots = rows(f.get(13));
+  // The importer's fields share numbers with a kind's own state fields (a fridge's `open` is field 1): each is read
+  // only in the shape the importer writes it.
+  const o = f.get(1);
+  if (o instanceof Uint8Array) rec.origin = new TextDecoder().decode(o);
+  if (Array.isArray(f.get(11))) rec.outline = rows(f.get(11));
+  if (Array.isArray(f.get(12))) rec.solids = rows(f.get(12));
+  if (Array.isArray(f.get(13))) rec.slots = rows(f.get(13));
   if (f.has(14)) rec.surfaces = (f.get(14) as unknown[][]).map((r) => [num(r[0]), rows(r[1])!]);
   if (f.has(18)) rec.waterLevel = num(f.get(18));
   if (f.has(23)) rec.scale = num(f.get(23));
@@ -77,6 +83,8 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   if (f.has(32)) rec.body = hex(f.get(32) as Uint8Array);
   const placeName = f.get(PLACE_NAME);
   if (placeName instanceof Uint8Array && placeName.length === 32) rec.placeName = nameKey(placeName);
+  const fields = fieldsOf(f); // #3871: its kind's state, by field number
+  if (fields) rec.fields = fields;
   const sky = skyFields(f); // V19: the world node's day, night and weather
   if (sky) rec.sky = sky;
   return rec;
@@ -278,13 +286,13 @@ async function run(stream: URL) {
         if (!(await playOne(ptr))) break;
         if (Number(player.next()) > (ptr.newest ?? -1)) tell();
       }
-    } catch (e) { post({ t: 'error', message: String((e as Error)?.message ?? e) }); }
+    } catch (e) { post({ t: 'error', message: String((e as Error)?.stack ?? e) }); }
     finally { busy = false; }
   };
   await poll();
   setInterval(poll, 250);
 }
 
-self.onmessage = (e: MessageEvent<{ stream: string }>) => {
+scope.onmessage = (e: MessageEvent<{ stream: string }>) => {
   run(new URL(e.data.stream)).catch((err) => post({ t: 'error', message: String(err?.stack ?? err) }));
 };

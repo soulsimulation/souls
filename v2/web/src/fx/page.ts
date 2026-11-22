@@ -1,14 +1,13 @@
 // The effects on the page (0.131 parity C8, #3679), beside the thing layer (`things/page.ts`): they draw from the same
-// `models` root and index and in the same frames, so none when the page draws no things.
+// models root and index and in the same frames, so none when the page draws no things or has no models' index.
 import * as THREE from 'three';
 import type { WorldView } from '../draw/world.ts';
-import type { PageThings } from '../things/page.ts';
+import { modelsRoot, type PageThings } from '../things/page.ts';
 import { FxLayer } from './layer.ts';
 
 export function pageFx(scene: THREE.Scene, world: WorldView, things: PageThings, params: URLSearchParams, phone: boolean): FxLayer | null {
-  const root = params.get('models');
-  if (!root || params.get('things') === '0' || params.get('fx') === '0') return null;
-  const base = new URL(root, location.href), scale = new THREE.Vector3();
+  if (params.get('things') === '0' || params.get('fx') === '0') return null;
+  const base = modelsRoot(params, location.href), scale = new THREE.Vector3();
   const fx = new FxLayer({
     frame: (id) => {
       const n = world.nodes.get(id);
