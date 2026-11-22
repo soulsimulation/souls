@@ -1,7 +1,7 @@
 # Every Engine v2 program on a machine shared with today's system (Engine v2 O17, #2810): the worlds (worldd@), the
 # gateways, the directory and the origin. Memory is capped at 12 GB: the largest world's own cap (Eden, 8 GB in
-# world-limits.json; it idles at about 1.9 GB) plus 4 GB for the gateways (512 MB each at most), the directory and the
-# origin (256 MB each) and the small worlds (2 GB each at most, a few hundred MB settled). On the production host
+# world-limits.json; it idles at about 1.9 GB) plus 4 GB for the gateways (512 MB each at most), the directory
+# (256 MB), the origin (1 GB for all its processes) and the small worlds (2 GB each at most, a few hundred MB settled). On the production host
 # (30.6 GiB) that leaves 18.6 GiB for today's system (its production cap is 9 GB, docs/operations.md) and the host.
 # The processor and the disk are shared, never capped: at weight 20 against the default 100 the new system gets a
 # fifth of what today's gets when both are busy, and all of it when today's is idle, so neither system's world time is
