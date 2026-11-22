@@ -1657,9 +1657,9 @@ fn a_bare_lie_at_a_private_bed_is_refused_and_the_owner_sits_on_its_own() {
     let _ = std::fs::remove_file(&path);
 }
 
-/// #4086: the chair 100 m south of the body's start.
+/// #4086: a chair about 100 m from the body's start, across the square (open on its four sides), west of the ring.
 fn far_seat() -> Vec3 {
-    Vec3::new(start().x, 450_000, start().z - 100_000_000)
+    Vec3::new(55_000_000, 450_000, 0)
 }
 
 fn far_chair() -> Result<Bodies, replica::effects::Refusal> {
