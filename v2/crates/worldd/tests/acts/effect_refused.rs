@@ -40,16 +40,20 @@ fn planks(run: &Run) -> usize {
 fn a_refused_form_sinks_no_other_souls_act_beside_it() {
     let (run, mut a, mut b) = serve("refused-beside");
     a.send("test:overstock", Some(rack()), BTreeMap::new());
-    b.send("test:stock", Some(rack()), BTreeMap::new());
-    let (over, stocked) = (a.answer(), b.answer());
-    println!("overstock: {over:?}; stock beside it: {stocked:?}");
+    b.send("test:play_at_end_a", Some(court()), BTreeMap::new());
+    let (over, played) = (a.answer(), b.answer());
+    println!("overstock: {over:?}; another Soul's act beside it: {played:?}");
     assert_eq!(
         over,
         Err("kind-not-in-header".to_owned()),
         "refused alone, by name"
     );
-    assert!(!stocked.expect("the other Soul's stock lands").is_empty());
-    assert_eq!(planks(&run), 1, "the plank, and no ghost");
+    assert!(!played.expect("the other Soul's act lands").is_empty());
+    assert_eq!(planks(&run), 0, "no ghost");
+    // And the world goes on for the first Soul too.
+    let stocked = a.act("test:stock", Some(rack()), BTreeMap::new());
+    assert!(!stocked.expect("the stock lands").is_empty());
+    assert_eq!(planks(&run), 1, "the plank");
     run.stop();
 }
 
