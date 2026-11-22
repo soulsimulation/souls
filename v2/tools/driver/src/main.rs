@@ -296,6 +296,12 @@ fn visible_report(agents: &[Sent], seen: &stream::Seen) -> serde_like::Obj {
         .collect();
     let mut lag: Vec<u64> = seen.lag_ms.iter().map(|&l| l.max(0) as u64).collect();
     lag.sort_unstable();
+    let mut writer: Vec<u64> = seen
+        .writer_lag_ms
+        .iter()
+        .map(|&l| l.max(0) as u64)
+        .collect();
+    writer.sort_unstable();
     let within = |ms: u64| {
         ratio(
             all.iter().filter(|&&w| w <= ms).count() as u64,
@@ -322,6 +328,8 @@ fn visible_report(agents: &[Sent], seen: &stream::Seen) -> serde_like::Obj {
         .n("streamLagP50Ms", q(&lag, 0.5))
         .n("streamLagP95Ms", q(&lag, 0.95))
         .n("streamLagMaxMs", lag.last().copied().unwrap_or(0) as f64)
+        .n("writerLagP50Ms", q(&writer, 0.5))
+        .n("writerLagP95Ms", q(&writer, 0.95))
         .raw("byVerb", format!("{{{}}}", verbs.join(", ")))
 }
 

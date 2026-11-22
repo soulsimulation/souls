@@ -33,6 +33,8 @@ pub const POLL: Duration = Duration::from_millis(250);
 pub struct Seen {
     pub first: HashMap<Id, u64>,
     pub lag_ms: Vec<i64>,
+    /// At each pointer read: how far behind the wall the newest part's world-time end was (the writer's lag alone).
+    pub writer_lag_ms: Vec<i64>,
     pub parts: u64,
     pub failed: u64,
 }
@@ -137,6 +139,12 @@ pub async fn read(base: String, stop: Arc<AtomicBool>) -> Seen {
         let Some((Some(newest), dir, p)) = pointer(&b) else {
             continue;
         };
+        // The writer's own lag, apart from this reader's: how far behind the wall the newest part's end was when the
+        // pointer was read.
+        if let Some(to) = p.newest_to {
+            let end_wall = p.anchor_wall_ms as i64 + (to - p.anchor_world) / 1000;
+            seen.writer_lag_ms.push(now_ms() as i64 - end_wall);
+        }
         let from = match &last {
             // The parts written before the run are not the run's.
             None => {

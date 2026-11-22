@@ -113,8 +113,10 @@ and its own gatewayd.
   250 ms, then each new part in order, over HTTP; parts written before the run are not read. Each receipt or
   acceptance names its intent's id (field 4), and each effect in a part names the intent that caused it, so the
   report's `visible` is every act the world took joined with the first part that shows something it caused: `seen`
-  of `taken`, act wait from the send p50/p95/p99 (ms), `within100Ms` and `within300Ms`, the same per verb, and the
-  stream's own lag (each part's arrival against the wall time its world-time end fell at). The stream cuts a part
+  of `taken`, send to accepted (the world's first answer taking the act) p50/p95/p99 over the same acts, act wait from
+  the send to the first visible move p50/p95/p99 (ms), `within100Ms` and `within300Ms`, the same per verb, the
+  stream's lag at the reader (each part's arrival against the wall time its world-time end fell at) and the writer's
+  own lag (the newest part's end against the wall when the pointer is read). The stream cuts a part
   every 0.5 s of world time and writes it 0.25 s after (`worldd::view_out`, rules 3 and 11), so a viewer's wait has
   that floor whatever the load.
 - **`stuck`** in the report, per agent from its own socket: `stuck` counts agents that had an act unanswered for 60 s
@@ -131,8 +133,9 @@ and its own gatewayd.
   entry's (`"owner": "family"`).
 
 `v2/tools/bench/stage2a/` runs it on Eden: `rung.sh` one rung (world processes on a CPU set, the driver apart),
-`ladder.sh` the counts, rates and arms, `analyze.mjs` the summary and tables against the bar, `camera.sh` the whole
-local stack at a load for filming.
+`ladder.sh` the counts, rates, arms and repeats, `analyze.mjs` the summary and tables against the bar, `camera.sh`
+the whole local stack at a load for filming, and `box.sh` all of it on a fresh Linux box in one command (its head says
+what the box needs; Eden's facts file is copied to it).
 
 ## Faults (X10, #4019)
 

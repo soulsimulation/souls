@@ -36,7 +36,7 @@ export function analyze(D) {
     rung: D.split('/').pop(), agents: rep.agents, describe: rep.describe,
     acts: { intended: rep.intendedActs, achievedShare: rep.achievedShare, perS: +(rep.all.sent / Math.max(1, secs)).toFixed(1), lateP99Ms: rep.all.lateP99Ms, byVerb: rep.byVerb, standIns: rep.standIns, withheld: rep.withheld },
     accepted: { p50Ms: v.acceptedP50Ms, p95Ms: v.acceptedP95Ms, p99Ms: v.acceptedP99Ms },
-    wait: { taken: v.taken, seen: v.seen, seenShare: v.seenShare, p50Ms: v.p50Ms, p95Ms: v.p95Ms, p99Ms: v.p99Ms, maxMs: v.maxMs, within100: v.within100Ms, within300: v.within300Ms, streamLagP50Ms: v.streamLagP50Ms, streamLagP95Ms: v.streamLagP95Ms, byVerb: v.byVerb },
+    wait: { taken: v.taken, seen: v.seen, seenShare: v.seenShare, p50Ms: v.p50Ms, p95Ms: v.p95Ms, p99Ms: v.p99Ms, maxMs: v.maxMs, within100: v.within100Ms, within300: v.within300Ms, streamLagP50Ms: v.streamLagP50Ms, streamLagP95Ms: v.streamLagP95Ms, writerLagP50Ms: v.writerLagP50Ms, writerLagP95Ms: v.writerLagP95Ms, byVerb: v.byVerb },
     answer: rep.perMinute.map((m) => ({ p50: m.latencyP50Ms, p95: m.latencyP95Ms, p99: m.latencyP99Ms })),
     tick: { p50Us: w2.h.ticks.p50_us, p99Us: w2.h.ticks.p99_us, maxUs: w2.h.ticks.max_us, meanUs: Math.round(meanWin(w1.h.ticks, w2.h.ticks) ?? 0), count: dCount, over: dOver, onTimeShare: dCount ? +(1 - dOver / dCount).toFixed(4) : null },
     phases, stuck: rep.stuck, refusals, errors: rep.perMinute.reduce((e, m) => { for (const [k, x] of Object.entries(m.errors)) e[k] = (e[k] ?? 0) + x; return e; }, {}),
@@ -61,6 +61,9 @@ export function tables(rows, label = '') {
   for (const r of rows) {
     t.push(`| ${r.rung} | ${r.acts.perS} | ${r.accepted.p50Ms ?? '-'} / ${r.accepted.p95Ms ?? '-'} | ${r.wait.p50Ms} / ${r.wait.p95Ms} / ${r.wait.p99Ms} (${r.wait.seenShare}) | ${ms(r.tick.p50Us)} / ${ms(r.tick.p99Us)} / ${ms(r.tick.maxUs)} | ${r.tick.onTimeShare == null ? '-' : (100 * r.tick.onTimeShare).toFixed(2) + ' %'} | ${r.stuck?.stuck ?? '-'} (${r.stuck?.refusedOnly ?? '-'}) | ${r.cpu.world} / ${r.cpu.gateway} / ${r.cpu.origin} | ${r.cpu.worldMb} / ${r.cpu.gatewayMb} | ${yes(r.bar.met)} |`);
   }
+  t.push('', '**Where the wait to the first visible move goes** (ms, p50 / p95): the world takes the act (accepted), the stream writer cuts and writes the part (writer lag: the newest part\'s end against the wall when the pointer is read), the reader fetches it (stream lag: a part\'s arrival against its end).', '');
+  t.push('| Rung | send → accepted | writer lag | stream lag at the reader | send → first visible move |', '|---|---|---|---|---|');
+  for (const r of rows) t.push(`| ${r.rung} | ${r.accepted.p50Ms ?? '-'} / ${r.accepted.p95Ms ?? '-'} | ${r.wait.writerLagP50Ms ?? '-'} / ${r.wait.writerLagP95Ms ?? '-'} | ${r.wait.streamLagP50Ms} / ${r.wait.streamLagP95Ms} | ${r.wait.p50Ms} / ${r.wait.p95Ms} |`);
   t.push('', '**Phase profile** (mean µs per tick over the load window; p99 µs in brackets):', '');
   const keys = [...new Set(rows.flatMap((r) => Object.keys(r.phases)))];
   t.push(`| Rung | ${keys.join(' | ')} |`, `|---|${keys.map(() => '---').join('|')}|`);
