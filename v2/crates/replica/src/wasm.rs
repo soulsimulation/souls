@@ -569,6 +569,19 @@ fn spot_of(o: &json::Value) -> Result<Spot, String> {
     })
 }
 
+/// An id written as text, `<32 hex scope>-<counter>`.
+fn id_of_text(t: &str) -> Option<Id> {
+    let (scope, n) = t.split_once('-')?;
+    if scope.len() != 32 || !n.bytes().all(|b| b.is_ascii_digit()) {
+        return None;
+    }
+    let scope: [u8; 16] = from_hex(scope).ok()?.try_into().ok()?;
+    Id::new(Scope(scope), n.parse().ok()?)
+}
+/// The most bytes of words one field may carry in an edit (today's longest god-mode text, an event's title, is 120
+/// characters; a notice's words are longer).
+const WORDS_MOST: usize = 2_000;
+
 fn field_value(v: &json::Value) -> Result<Value, String> {
     match v {
         json::Value::Int(n) if *n >= 0 => u64::try_from(*n)
@@ -593,9 +606,24 @@ fn field_value(v: &json::Value) -> Result<Value, String> {
             .ok_or_else(|| "bytes are {\"hex\": \"<hex>\"}".to_owned())
             .and_then(|h| from_hex(h).map_err(|e| format!("bytes: {e}")))
             .map(Value::Bytes),
-        _ => {
-            Err("a field's value is an integer, true or false, a name, bytes as {\"hex\": ..}, or an array of these".into())
-        }
+        // Words (#3699): T8's `{23: words}`, which the world keeps in its text store and logs as `{21: id}`.
+        json::Value::Obj(pairs) => match pairs.as_slice() {
+            [(k, json::Value::Str(t))]
+                if k == "words" && !t.is_empty() && t.len() <= WORDS_MOST =>
+            {
+                Ok(Value::Map(BTreeMap::from([(
+                    crate::audience::WORDS,
+                    Value::Bytes(t.as_bytes().to_vec()),
+                )])))
+            }
+            _ => Err(format!(
+                "words are {{\"words\": \"...\"}}, 1 to {WORDS_MOST} bytes"
+            )),
+        },
+        _ => Err(
+            "a field's value is an integer, true or false, a name, words, bytes as {\"hex\": ..}, or an array of these"
+                .into(),
+        ),
     }
 }
 
@@ -664,11 +692,26 @@ fn ops_in(v: &json::Value) -> Result<Vec<Op>, String> {
                     node: node()?,
                     at: spot_of(o)?,
                 },
-                Some("set") => Op::Set {
-                    node: node()?,
-                    field: uint_of(o.get("field"), "a set's field")?,
-                    to: field_value(o.get("value").ok_or("a set's value")?)?,
-                },
+                Some("set") => {
+                    let field = uint_of(o.get("field"), "a set's field")?;
+                    let raw = o.get("value").ok_or("a set's value")?;
+                    // #3700: an owner written as an id's text (`<32 hex>-<counter>`, a Soul's) is written as an id;
+                    // any other field keeps text as a name.
+                    let to = match raw {
+                        json::Value::Str(t) if field == crate::who_may::F_OWNER => {
+                            match id_of_text(t) {
+                                Some(id) => id.to_value(),
+                                None => field_value(raw)?,
+                            }
+                        }
+                        _ => field_value(raw)?,
+                    };
+                    Op::Set {
+                        node: node()?,
+                        field,
+                        to,
+                    }
+                }
                 Some("remove") => Op::Remove { node: node()? },
                 Some("doorway") => {
                     let integer = |v: &json::Value| match v {

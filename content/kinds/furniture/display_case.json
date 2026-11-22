@@ -1,0 +1,354 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:display_case",
+  "owner": "thing",
+  "state": {},
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        600
+      ],
+      "yaw_mdeg": 180000
+    }
+  },
+  "slots": {
+    "shelf_1": {
+      "admits": "thing",
+      "most": 1,
+      "at_mm": [
+        -500,
+        730,
+        0
+      ],
+      "fits_mm": [
+        200,
+        400,
+        400
+      ],
+      "stand": "front"
+    },
+    "shelf_2": {
+      "admits": "thing",
+      "most": 1,
+      "at_mm": [
+        -300,
+        730,
+        0
+      ],
+      "fits_mm": [
+        200,
+        400,
+        400
+      ],
+      "stand": "front"
+    },
+    "shelf_3": {
+      "admits": "thing",
+      "most": 1,
+      "at_mm": [
+        -100,
+        730,
+        0
+      ],
+      "fits_mm": [
+        200,
+        400,
+        400
+      ],
+      "stand": "front"
+    },
+    "shelf_4": {
+      "admits": "thing",
+      "most": 1,
+      "at_mm": [
+        100,
+        730,
+        0
+      ],
+      "fits_mm": [
+        200,
+        400,
+        400
+      ],
+      "stand": "front"
+    },
+    "shelf_5": {
+      "admits": "thing",
+      "most": 1,
+      "at_mm": [
+        300,
+        730,
+        0
+      ],
+      "fits_mm": [
+        200,
+        400,
+        400
+      ],
+      "stand": "front"
+    },
+    "shelf_6": {
+      "admits": "thing",
+      "most": 1,
+      "at_mm": [
+        500,
+        730,
+        0
+      ],
+      "fits_mm": [
+        200,
+        400,
+        400
+      ],
+      "stand": "front"
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1380,
+      1000,
+      580
+    ],
+    "front": "z"
+  },
+  "forms": {
+    "put_on": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "thing": {
+          "type": "thing"
+        },
+        "place": {
+          "type": "slot"
+        }
+      },
+      "needs": [
+        {
+          "need": "held_by_actor",
+          "thing": {
+            "arg": "thing"
+          }
+        },
+        {
+          "need": "slot_free",
+          "slot": {
+            "arg": "place"
+          }
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "put",
+          "slot": {
+            "arg": "place"
+          }
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": {
+            "arg": "thing"
+          },
+          "into": {
+            "arg": "place"
+          },
+          "event": "displayed"
+        }
+      ]
+    },
+    "take_off": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "thing": {
+          "type": "thing"
+        }
+      },
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "take"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": {
+            "arg": "thing"
+          },
+          "into": "actor_hand",
+          "event": "taken_off"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:display_case",
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            30,
+            0
+          ],
+          "polygon": [
+            [
+              -670,
+              -270
+            ],
+            [
+              670,
+              -270
+            ],
+            [
+              670,
+              270
+            ],
+            [
+              -670,
+              270
+            ]
+          ],
+          "h": 640,
+          "tint": "body"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            850,
+            0
+          ],
+          "size": [
+            1380,
+            300,
+            580
+          ],
+          "round": 0,
+          "tint": "glass"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            720,
+            0
+          ],
+          "size": [
+            1300,
+            20,
+            500
+          ],
+          "round": 0,
+          "tint": "shelf"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -450,
+            760,
+            0
+          ],
+          "r": 110,
+          "h": 70,
+          "segments": 8,
+          "tint": "g0"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            760,
+            0
+          ],
+          "r": 110,
+          "h": 70,
+          "segments": 8,
+          "tint": "g1"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            450,
+            760,
+            0
+          ],
+          "r": 110,
+          "h": 70,
+          "segments": 8,
+          "tint": "g2"
+        }
+      ],
+      "palette": {
+        "body": "#5e3d27",
+        "glass": "#d8eef0",
+        "shelf": "#e8e4dc",
+        "stone": "#e4dccb",
+        "g0": "#c47a5a",
+        "g1": "#b8913f",
+        "g2": "#7a9ab0"
+      },
+      "tags": [
+        "furniture",
+        "shop",
+        "museum",
+        "display"
+      ]
+    }
+  },
+  "text": {
+    "card": "A glass display case: put a held thing on its shelf to show it, take it off.",
+    "furniture": "furniture",
+    "vitrine": "vitrine",
+    "showcase": "showcase",
+    "howto_show": "Hold a thing, put it on a free place on the shelf; take it off with a hand free."
+  },
+  "card": {
+    "text": "card",
+    "category": "furniture",
+    "synonyms": [
+      "vitrine",
+      "showcase"
+    ]
+  },
+  "howtos": {
+    "show": {
+      "text": "howto_show",
+      "steps": [
+        {
+          "form": "put_on"
+        },
+        {
+          "form": "take_off"
+        }
+      ]
+    }
+  }
+}

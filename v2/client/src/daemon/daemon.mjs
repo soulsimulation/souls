@@ -137,7 +137,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { atSocket, readSeat, runtimeOf } from '../home/home.mjs';
 import { QUOTED_NOTE, brief, changedBlock } from '../brief/brief.mjs';
-import { changedBetween, decode, posesOf, rememberPublicNames, rowsOf, sequenceOf } from '../brief/copy.mjs';
+import { changedBetween, decode, posesOf, rememberPublicNames, rowsOf, sequenceOf, rememberPublicWords } from '../brief/copy.mjs';
 import { find } from '../find/find.mjs';
 import { publicNameHydration } from '../find/public-names.mjs';
 import { achievedOf, causeOf, openTrace } from '../stats/trace.mjs';
@@ -157,7 +157,7 @@ import { worldOps } from '../creator/world.mjs';
 import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
-import { blankAt, CALENDAR_NOTE, calendarItems, calendarList, calendarOf, whatsOn, worldDue, worldTimeOf } from '../schedule/world.mjs';
+import { blankAt, CALENDAR_NOTE, calendarItems, calendarList, calendarOf, nextWorldTime, whatsOn, worldDue, worldTimeOf, heldBlank, noticeBoards } from '../schedule/world.mjs';
 import { refreshEntries } from '../pair/pair.mjs';
 
 const WAIT_FIRST = 100, WAIT_MOST = 5000;
@@ -480,7 +480,7 @@ function syncAnswer(sock, n, refused, bytes) {
   if (!syncing || n !== syncing.n) return; // an answer to a request since given up
   if (refused !== '-') throw new Error(`sync refused: ${refused}`);
   if (syncing.step === 'hashes') syncing.version = copy.onHashes(bytes);
-  else { copy.onRecords(bytes); rememberPublicNames(copy, bytes); }
+  else { copy.onRecords(bytes); rememberPublicNames(copy, bytes); rememberPublicWords(copy, bytes); }
   syncing.n = ++asked;
   const next = copy.next(BigInt(syncing.n));
   if (next.length > 0) { syncing.step = 'records'; awaitAnswer(sock); sock.send(next); return; }
@@ -563,15 +563,17 @@ function connect() {
         if (k >= 0) { state.unanswered.splice(k, 1); counts.answered++; }
         trace.write({ k: 'answer', seq: s, cause: causeOf(Number(c), d, rankedOf.get(s)), achieved: achievedOf(Number(c), d) });
         if (Number(c) !== 3) rankedOf.delete(s); // an accepted move is resolved later
+        // Its own intent changed the world at a version its copy is not at: the copy follows. No entry may bring that
+        // change (a world whose view tier sends none, or a resume's follow that hashed before the tick was on the
+        // disk: the sync thread takes a tick only once it is durable, so the receipt can come after that follow).
+        let changed = k >= 0 && (Number(c) === 1 || Number(c) === 4) && b !== '-' && b !== copyVersion;
         if (joinsOf.has(s) && Number(c) !== 3) {
           joinsOf.delete(s);
-          if (Number(c) === 1) {
-            // An older sync may still hold the pre-birth tree. Keep one follow pending until it finishes, then
-            // read the authoritative body link and renew hearing through the usual sync completion path.
-            followWanted = true;
-            follow();
-          }
+          // An older sync may still hold the pre-birth tree. Keep one follow pending until it finishes, then
+          // read the authoritative body link and renew hearing through the usual sync completion path.
+          if (Number(c) === 1) changed = true;
         }
+        if (changed) { followWanted = true; follow(); }
         if (movesOf.has(s) && Number(c) !== 3) { state.seated = seatedAfter(movesOf.get(s), Number(c), state.seated ?? null); movesOf.delete(s); }
         if (serving.has(s) && Number(c) !== 3) {
           closeMail(serving.get(s), achievedOf(Number(c), d) ? 'done' : 'failed', d !== '-' ? d : ['', 'receipt', 'refused', '', 'resolved', 'unread'][Number(c)] || 'answered');
@@ -583,6 +585,7 @@ function connect() {
       const edit = { ...(names !== '-' ? { names: Object.fromEntries(names.split(',').map((p) => p.split('='))) } : {}), ...(op !== '-' ? { op: Number(op) } : {}) };
       const answered = { kind: 'answer', sequence: a === '-' ? null : Number(a), version: b === '-' ? null : b, answer: Number(c), ...(d !== '-' ? { reason: d } : {}), ...edit };
       note(answered);
+      keyAnswered(answered);
       if (a !== '-') editsWaiting.get(Number(a))?.(answered);
     } catch (e) {
       log(`frame refused: ${String(e.message ?? e).slice(0, 200)}`);
@@ -781,6 +784,7 @@ const OPS = new Set([
   'wake',
   'wear',
   'whatson',
+  'when',
   'whisper',
 ]);
 const REPLY_MOST = 1000; // characters an owner's reply carries (C15; today's client clips at the same)
@@ -802,6 +806,16 @@ function fullKind(kinds, k) {
   if (hit.length === 1) return hit[0];
   throw Object.assign(new Error(`${s}: ${hit.length ? 'ambiguous; copy a full pinned name from describe' : `not pinned; describe lists ${Object.keys(kinds).join(', ')}`}`), { code: 'edit.kind-unknown' });
 }
+/** #3700: a node's owner and access marks (replica `who_may::F_OWNER` 143, `F_ACCESS` 144), when it carries either. */
+function marksOf(row) {
+  const pairs = JSON.parse(row.own).find(([k]) => Number(k) === 6)?.[1] ?? [];
+  const get = (n) => pairs.find(([k]) => Number(k) === n)?.[1];
+  const owner = get(143), access = get(144);
+  if (owner === undefined && access === undefined) return {};
+  const who = Array.isArray(owner) ? `${owner[0]}-${owner[1]}` : owner === 0 ? 'none' : owner;
+  return { marks: { ...(owner !== undefined ? { owner: who } : {}), ...(access !== undefined ? { access: Number(access) } : {}) } };
+}
+
 /** The batch as replica's `ops_of` reads it: kinds by full name, positions in µm (a creator writes mm). */
 async function editOnce(req) {
   if (seat.grant.actor !== 'creator') return { ok: false, code: 'edit.not-the-creator', detail: 'this home holds a Soul\'s token, not a creator\'s' };
@@ -941,13 +955,14 @@ function actsOf(words) {
       const c = out.at(-1), args = (c.args ??= {});
       // #3603: a carrier verb's point is in metres, a decimal allowed.
       if (arg && c.carrier) { c.args[arg[1]] = /^-?\d{1,7}(\.\d{1,6})?$/.test(arg[2]) ? Number(arg[2]) : arg[2]; continue; }
-      // #3686: a value that is not an id is a name (`pattern=along`) or a whole number (`grams=50`); #3712: a form's
+      // #3686: a value that is not an id is a name (`pattern=along`) or a whole number (`grams=50`, or a world time in
+      // µs, 16 digits: #3703); #3712: a form's
       // `text` argument is words, sent as T8's `{23: words}` for the world's text store, never logged as they are.
       if (arg) {
         kinds ??= kindsIn(join(home, 'kinds'));
         rows ??= rowsOf(copy);
         const take = kinds[rows.get(c.this)?.kind]?.forms?.[c.form]?.takes?.[arg[1]];
-        args[arg[1]] = take?.type === 'text' ? { 23: arg[2] } : /^-?\d{1,15}$/.test(arg[2]) ? Number(arg[2]) : arg[2];
+        args[arg[1]] = take?.type === 'text' ? { 23: arg[2] } : /^-?\d{1,16}$/.test(arg[2]) && Number.isSafeInteger(Number(arg[2])) ? Number(arg[2]) : arg[2];
         continue;
       }
       kinds ??= kindsIn(join(home, 'kinds'));
@@ -984,6 +999,44 @@ function sendIntent(ranked, { target, words, args, params, basis, expiry, reflex
   return { sequence, sent };
 }
 
+// --- #3706 (today's `--key`): a command sent again with the same key is one write --------------------------------
+// A write's key is kept with its first answer and the world's answer to its intent, on disk with the sequence, so a
+// retry (a harness that timed out, the same command run twice, a daemon restarted between) sends nothing and gets the
+// first answer back, `repeat: true`, with the receipt as it stands. Two at once with one key wait for the same write.
+const KEYED = new Set(['act', 'object', 'say', 'whisper', 'lie', 'set-down', 'converse', 'wear']);
+const KEYS_KEPT = 500, keying = new Map();
+/** Today's limits for a key (eden.mjs `keyArg`): 1 to 100 printable characters, no spaces. */
+const keyOk = (k) => typeof k === 'string' && /^[\x21-\x7e]{1,100}$/.test(k);
+async function keyed(req) {
+  const k = `${req.op} ${req.key}`;
+  state.keys ??= {};
+  const kept = state.keys[k];
+  if (kept) return { ...kept.first, sent: false, repeat: true, ...(kept.answer ? { receipt: kept.answer } : {}), ...ageNow() };
+  if (keying.has(k)) { const first = await keying.get(k); return { ...first, sent: false, repeat: true }; }
+  const { key: _key, ...rest } = req;
+  const going = answer(rest);
+  keying.set(k, going);
+  try {
+    const first = await going;
+    // Kept only once it wrote: a refusal before anything was sent can be fixed and sent again with the same key.
+    if (first.ok && first.sequence !== undefined) {
+      const { at: _a, changed: _c, age: _g, gap: _p, stale: _s, asleep: _z, ...answerOnly } = first;
+      state.keys[k] = { sequence: first.sequence, first: answerOnly, answer: null };
+      const names = Object.keys(state.keys);
+      if (names.length > KEYS_KEPT) delete state.keys[names[0]];
+      save();
+    }
+    return first;
+  } finally { keying.delete(k); }
+}
+/** The world's answer to a keyed write's intent, kept with its key (a later answer, the resolution, replaces it). */
+function keyAnswered(a) {
+  if (a.sequence === null || !state.keys) return;
+  for (const kept of Object.values(state.keys)) {
+    if (kept.sequence === a.sequence) { kept.answer = { answer: a.answer, ...(a.reason ? { reason: a.reason } : {}), ...(a.version ? { version: a.version } : {}) }; save(); }
+  }
+}
+
 /** World time now: the copy's clock mapping (E7b), else the machine's clock, as a world without a mapping runs on it
  *  (`worldd::answers::now`). For the creator's weather end and strike time (#3695). */
 const worldNowOrReal = () => worldNow(clockOf(copy)) ?? Date.now() * 1000;
@@ -995,7 +1048,7 @@ async function worldBatch(req) {
   if (req.world.verb === 'land') {
     let land;
     try { land = await import('../creator/terrain/land.mjs'); } catch (e) {
-      return { ok: false, code: 'land.unavailable', detail: `the land verbs need packages/ground and zod beside this client: ${String(e.message ?? e).slice(0, 160)}` };
+      return { ok: false, code: 'land.unavailable', detail: `the land verbs need Node 22.18 or later, and packages/ground and zod beside this client: ${String(e.message ?? e).slice(0, 160)}` };
     }
     return land.landOps(copy, req.world);
   }
@@ -1003,6 +1056,11 @@ async function worldBatch(req) {
 }
 
 async function answer(req) {
+  if (req.key !== undefined) {
+    if (!KEYED.has(req.op)) return { ok: false, code: 'key-not-a-write', detail: `--key goes on a write: ${[...KEYED].join(', ')}` };
+    if (!keyOk(req.key)) return { ok: false, code: 'key-form', detail: '--key takes 1 to 100 printable characters, no spaces' };
+    return keyed(req);
+  }
   // R13: a command from the model's turn shows that what a reader was handed was taken.
   if (!['wait', 'status', 'pending'].includes(req.op)) wakes.confirm();
   switch (req.op) {
@@ -1049,6 +1107,12 @@ async function answer(req) {
       replyOf.set(id, reply);
       closeMail(id, close, 'replied');
       return { ok: true, acked: id, reply, closed: close, sent: signedIn, ...ageNow() };
+    }
+    case 'when': {
+      // #3699: the next world time at local HH:MM on the world's published calendar (a creator's event start).
+      if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(String(req.at ?? ''))) return { ok: false, code: 'when.not-a-time', detail: 'HH:MM, 00:00 to 23:59' };
+      const clock = clockOf(copy), worldUs = nextWorldTime(req.at, calendarOf(copy), clock ? worldNow(clock) : null);
+      return worldUs === null ? { ok: false, code: 'when.no-calendar', detail: 'the copy has no world clock or calendar yet' } : { ok: true, worldUs };
     }
     case 'status': {
       const { rss, heapUsed } = process.memoryUsage();
@@ -1171,7 +1235,7 @@ async function answer(req) {
     case 'inspect': return inspect(req);
     case 'whatson': case 'calendar': return calendar(req);
     // #3704 (today's `query`, `catalog`, `context` and `batch`): reads from the copy, asking the world nothing.
-    case 'query': { const q = query(rowsOf(copy), req.questions, { budget: req.budget }); return q.ok ? closing(q, null, { now: true }) : { ...q, ...ageNow() }; }
+    case 'query': { const rows = rowsOf(copy), me = [...rows.values()].find((r) => r.id === ME || r.soul === ME)?.id ?? null; const q = query(rows, req.questions, { budget: req.budget, me }); return q.ok ? closing(q, null, { now: true }) : { ...q, ...ageNow() }; }
     case 'catalog': return closing(catalog(rowsOf(copy), kindsIn(join(home, 'kinds'))), null, { now: true });
     case 'context': return closing(context(rowsOf(copy), req.words ?? '', { cursor: req.cursor }), null, { now: true });
     case 'batch': {
@@ -1203,7 +1267,7 @@ async function answer(req) {
       // Where each stands in its parent, mm, for placing by relation (#3694).
       const poses = posesOf(copy);
       return {
-      nodes: [...rows.values()].map((r) => ({ id: r.id, kind: r.kind, parent: r.parent, ...poses.get(r.id), ...(r.text ? { text: r.text } : {}) })),
+      nodes: [...rows.values()].map((r) => ({ id: r.id, kind: r.kind, parent: r.parent, ...poses.get(r.id), ...(r.text ? { text: r.text } : {}), ...(r.hours ? { hours: r.hours } : {}), ...marksOf(r) })),
       kinds: Object.fromEntries(Object.entries(pinned()).map(([n, k]) => [n, { admits: k.admits, ...(Object.keys(k.slots).length ? { slots: k.slots } : {}) }])),
       };
     });
@@ -1353,7 +1417,7 @@ function inspect(req) {
     ok: true, id: row.id, name: row.name, kind: row.kind, ...(row.parent ? { parent: row.parent } : {}),
     ...(row.path?.length ? { in: row.path.slice().reverse().join(', ') } : {}),
     ...(typeof entry?.text?.[entry?.card?.text] === 'string' ? { card: entry.text[entry.card.text] } : {}),
-    ...(fields ? { state: readable(fields) } : {}), offers,
+    ...(fields ? { state: readable(fields) } : {}), ...(row.hours ? { hours: row.hours } : {}), offers,
     ...(entry ? {} : { note: 'its kind\'s entry is not on this machine: walking to it is all that is known here' }),
   }, null, { now: true });
 }
@@ -1387,12 +1451,71 @@ async function calendar(req) {
   if (!title || !req.place || !Number.isFinite(inMin) || inMin < 0 || !(forMin > 0)) return { ok: false, code: 'calendar-usage', detail: CALENDAR_USAGE };
   if (!rows.has(String(req.place))) return closing({ ok: false, code: 'calendar.unknown-place', detail: `${req.place} is not an id this Soul's copy holds; find gives place ids`, did_you_mean: nearestIds(rows.values(), req.place) }, null, { now: true });
   if (!clock) return closing({ ok: false, code: 'calendar.no-clock', detail: 'the world has published no clock in this copy yet' }, null, { now: true });
-  const blank = blankAt(items, rows, String(req.place));
-  if (!blank) return closing({ ok: false, code: 'calendar.no-blank', detail: `nothing at ${rows.get(String(req.place)).name} takes a calendar notice; calendar lists the blank ones and where they are` }, null, { now: true });
-  const words = req.description ? `${title} — ${req.description}` : title;
+  const place = String(req.place), at = rows.get(place).name;
+  const words = `${title}${place && !noticeBoards(rows, kinds, place).some((b) => b.id === place) ? ` (at ${at})` : ''}${req.description ? ` — ${req.description}` : ''}`;
   const start = worldNow(clock, (nowMs + inMin * 60_000) * 1000), end = worldNow(clock, (nowMs + (inMin + forMin) * 60_000) * 1000);
-  const out = await answer({ op: 'act', acts: [`post:${blank.id}`, `words=${words}`, `start=${start}`, `end=${end}`], ...(req.for !== undefined ? { for: req.for } : {}) });
-  return { ...out, item: blank.id };
+  const served = req.for !== undefined ? { for: req.for } : {};
+  // A blank notice already at that place is posted where it is.
+  const blank = blankAt(items, rows, place);
+  if (blank) return { ...(await answer({ op: 'act', acts: [`post:${blank.id}`, `words=${words}`, `start=${start}`, `end=${end}`], ...served })), item: blank.id };
+  // Else one is taken from a notice board (at that place first), written, and put up there: three acts, sent one after
+  // another as each one's effect reaches the copy. The answer returns once the first is sent; how it ends arrives in
+  // `wait` as a `calendar` event.
+  const body = [...rows.values()].find((r) => r.soul === ME)?.id ?? null;
+  const held = body ? heldBlank(items, rows, body) : null;
+  const board = noticeBoards(rows, kinds, place)[0];
+  if (!held && !board) return closing({ ok: false, code: 'calendar.no-board', detail: 'no notice board in this Soul\'s copy: nowhere to take a blank notice from' }, null, { now: true });
+  const first = held ? null : await answer({ op: 'act', acts: [`${board.form}:${board.id}`], ...served });
+  if (first && first.ok !== true) return first;
+  putUp({ first: first?.sequence ?? null, body, words, start, end }).catch((e) => note({ kind: 'calendar', what: 'failed', step: 'put-up', detail: String(e?.message ?? e).slice(0, 200) }));
+  return { ok: true, sent: first ? `${board.form}:${board.id}` : null, ...(first ? { sequence: first.sequence } : {}), board: board?.id ?? null, then: 'the notice is written and put up as each step lands; wait reports a calendar event (posted, or failed and why)' };
+}
+
+/** An act's ending as its receipt shows it: refused (with the reason), ended (a receipt), or null while it goes on. */
+function endingOf(sequence) {
+  const a = receipts.get(sequence)?.answers ?? [];
+  const refused = a.find((x) => x.answer === 'refused');
+  if (refused) return { refused: true, reason: refused.reason ?? 'refused' };
+  const done = a.find((x) => x.answer === 'receipt');
+  return done ? { done: true, reason: done.reason ?? null } : null;
+}
+
+/**
+ * #3703: the rest of `calendar add` from a notice board: once the blank notice is in this Soul's hand, it is written
+ * (`post`) and set down where the Soul stands. Each step waits for its effect in the copy, or its act's refusal, at
+ * most CALENDAR_STEP_MS; the outcome is a `calendar` event.
+ */
+const CALENDAR_STEP_MS = 180_000;
+async function putUp({ first, body, words, start, end }) {
+  const kinds = kindsIn(join(home, 'kinds'));
+  const step = async (name, sequence, done) => {
+    let ended = null; // when its receipt came: its effect then has a few seconds to reach the copy
+    for (const until = Date.now() + CALENDAR_STEP_MS; Date.now() < until;) {
+      await Promise.race([refresh(), sleep(2000)]);
+      const items = calendarItems(copy, kinds), rows = rowsOf(copy), got = done(items, rows);
+      const e = sequence === null ? null : endingOf(sequence);
+      // Its effect is in the copy, and its act has ended (the body's next act would be refused `form-running`).
+      if (got && (sequence === null || e?.done)) return got;
+      if (e?.refused) throw Object.assign(new Error(`${name}: ${e.reason}`), { step: name });
+      if (e?.done) ended ??= Date.now();
+      if (ended !== null && Date.now() - ended > 8000) throw Object.assign(new Error(`${name}: ended ${e.reason ?? 'without its effect'}`), { step: name });
+      await sleep(250);
+    }
+    throw Object.assign(new Error(`${name}: not done within ${CALENDAR_STEP_MS / 1000} s`), { step: name });
+  };
+  try {
+    const me = body ?? [...rowsOf(copy).values()].find((r) => r.soul === ME)?.id;
+    const blank = await step('take', first, (items, rows) => heldBlank(items, rows, me));
+    const posting = await answer({ op: 'act', acts: [`post:${blank.id}`, `words=${words}`, `start=${start}`, `end=${end}`] });
+    if (posting.ok !== true) throw Object.assign(new Error(`post: ${posting.code ?? 'refused'}`), { step: 'post' });
+    await step('post', posting.sequence, (items) => items.find((i) => i.id === blank.id && i.links.poster?.includes(ME)));
+    const down = await answer({ op: 'set-down', this: blank.id, word: 'here' });
+    if (down.ok !== true) throw Object.assign(new Error(`set-down: ${down.code ?? 'refused'}`), { step: 'set-down' });
+    await step('set-down', down.sequence, (items, rows) => !heldBlank(items, rows, me) && !(() => { for (let r = rows.get(rows.get(blank.id)?.parent); r; r = rows.get(r.parent)) if (r.id === me) return true; return false; })());
+    note({ kind: 'calendar', what: 'posted', item: blank.id });
+  } catch (e) {
+    note({ kind: 'calendar', what: 'failed', step: e.step ?? 'put-up', detail: String(e.message ?? e).slice(0, 200) });
+  }
 }
 const CALENDAR_USAGE = 'calendar | calendar add "<title>" --place <placeId> --in <minutes> --for <minutes> ["description"] | calendar interest|not-coming <id>';
 
@@ -1576,10 +1699,13 @@ function beat() {
  * file beat re-arm both; no polling.
  */
 function scheduleWorld(now = Date.now(), off = null) {
+  // A sync under way keeps the armed deadline: the beat comes every second, and clearing it here would hold the
+  // moment until the sync's last answer. The moment fires from its persisted occurrence; the sync's end re-arms.
+  if (signedIn && syncing) return;
   clearTimeout(worldTimer);
   clearTimeout(prepareTimer);
   worldTimer = prepareTimer = null;
-  if (!signedIn || syncing) return;
+  if (!signedIn) return;
   const s = state.schedule;
   const { fire, missed, next, resolved } = worldDue(scheduleNow(), s.marks, s.targets, clockOf(copy), calendarOf(copy), now, off);
   for (const m of missed) {
