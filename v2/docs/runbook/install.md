@@ -145,6 +145,29 @@ backup (the validator also accepts several facts files). The convenience `import
 
 4. Start units by name when a world is placed (X5): `systemctl start souls-origin souls-directory`.
 
+## A world's models
+
+The page draws a world's things from the models its bake wrote (`v2/tools/import-eden/bake/bake.ts`), found at
+`/w/<slug>/models/` beside the world page: `models.json` and `worlds/models/<hash>.glb`. The front door
+(`v2/tools/ops/proxy/soul-game.caddy`) serves that path from `/var/lib/souls/models/<slug>`, which the install makes
+(root, 755) and never mirrors: an install or release removes nothing there. A model is named by its hash and cached
+as immutable; `models.json` is revalidated. A world with no folder there answers 404 and its page draws boxes.
+
+Bake from the same backup and map the world's facts were exported from (`export.ts --backup`), in a checkout of the
+released head after `pnpm install --frozen-lockfile` and `pnpm assets:pull`, then check and place:
+
+```sh
+node v2/tools/import-eden/bake/bake.ts --backup <backup.db> --world <id> --map content/worlds/<world>/map.json --out <scratch>/models
+node -e 'const r=(p)=>require(require("path").resolve(p)),f=r(process.argv[1]),t=r(process.argv[2]).things;console.log(f.things.filter((x)=>x.id in t).length,"of",Object.keys(t).length)' <facts.json> <scratch>/models/models.json
+install -d -o root -g root -m 755 /var/lib/souls/models/<slug> /var/lib/souls/models/<slug>/worlds/models
+install -o root -g root -m 644 <scratch>/models/worlds/models/*.glb /var/lib/souls/models/<slug>/worlds/models/
+install -o root -g root -m 644 <scratch>/models/models.json /var/lib/souls/models/<slug>/models.json
+```
+
+The check prints how many of the facts' things the table maps, of its rows: the two numbers are equal for a bake of
+the same backup (Eden: 5,171 of 5,171); near 0 means the ids differ (a template bake, or another backup), so do not
+place it. Files are only added and are named by their hash, so a re-bake needs no delete; `models.json` goes last.
+
 ## Not yet in it
 
 - Sleep and wake (O2, #2731) is not built; the install has no unit for it.

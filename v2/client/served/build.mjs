@@ -6,6 +6,8 @@
 //                     version in one line, `const VERSION = "x.y.z";` (docs/architecture/api.md, frozen)
 //   skill.md          the agent's skill (v2/client/skill/SKILL.md), `name: souls`, stamped with the version
 //   creator.md        the creator's skill (v2/client/skills/creator.md, G7 #2796), when it is there
+//                     A package those modules import by name (zod, for the land verbs' `packages/ground`) rides along
+//                     as `node_modules/<name>/`: its package.json and its ESM entry's files, so Node finds it there
 //   instructions.md   how to start, in one line (`instructions.md` beside this file)
 //   safety.md         the safety page for agents (v2/client/src/help/safety.md), what `help safety` prints (#3706)
 //   replica.js, replica_bg.wasm   the daemon's library (replica's wasm-bindgen package), fetched apart and by hash
@@ -18,6 +20,7 @@
 
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { createRequire } from 'node:module';
 import { dirname, join, relative, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
 
@@ -54,6 +57,49 @@ export function payloadFiles() {
   return [...out].sort();
 }
 
+/** The packages the payload's modules import by name (not `node:`), each with the payload file that imports it. */
+export function namedImports(files = payloadFiles()) {
+  const named = new Map();
+  for (const f of files.filter((f) => /\.(mjs|ts)$/.test(f))) {
+    const text = readFileSync(join(REPO, f), 'utf8');
+    for (const m of text.matchAll(/^\s*(?:import|export)\b[^'"]*?\bfrom\s*['"]([^'"./][^'"]*)['"]|\bimport\(\s*['"]([^'"./][^'"]*)['"]\s*\)/gm)) {
+      const spec = m[1] ?? m[2];
+      if (spec.startsWith('node:')) continue;
+      const name = spec.startsWith('@') ? spec.split('/').slice(0, 2).join('/') : spec.split('/')[0];
+      if (!named.has(name)) named.set(name, f);
+    }
+  }
+  return named;
+}
+
+/** A named package as served files, `node_modules/<name>/<path>` → text: its package.json and the files its ESM entry
+ *  imports, closed over relative imports. Resolved as the importing file resolves it. A package not installed there
+ *  stops the build when `strict` (the command line, which a release runs, so it never serves a client whose land verbs
+ *  cannot load); otherwise it is left out (tests that build a client for other reasons). */
+export function vendored(name, from, { strict = false } = {}) {
+  let pj;
+  try { pj = createRequire(join(REPO, from)).resolve(`${name}/package.json`); } catch (e) {
+    if (!strict) return {};
+    throw new Error(`${from} imports ${name}, which is not installed (pnpm install --frozen-lockfile --filter @souls/ground): ${e.message}`);
+  }
+  const dir = dirname(pj), pkg = JSON.parse(readFileSync(pj, 'utf8'));
+  const dot = pkg.exports?.['.'] ?? pkg.exports;
+  const entry = (typeof dot === 'string' ? dot : dot?.import ?? dot?.default) ?? pkg.module ?? pkg.main ?? 'index.js';
+  const files = { [`node_modules/${name}/package.json`]: readFileSync(pj, 'utf8') };
+  const todo = [resolve(dir, entry)];
+  while (todo.length) {
+    const f = todo.pop(), key = `node_modules/${name}/${relative(dir, f)}`;
+    if (files[key] !== undefined) continue;
+    const text = readFileSync(f, 'utf8');
+    files[key] = text;
+    for (const m of text.matchAll(/(?:\bfrom|\bimport)\s*\(?\s*['"](\.\.?\/[^'"]+)['"]/g)) {
+      const dep = resolve(dirname(f), m[1]);
+      if (dep.startsWith(dir) && existsSync(dep)) todo.push(dep);
+    }
+  }
+  return files;
+}
+
 /** The skill with its version stamped: the frontmatter's `version:` and the client's version in its text. */
 export function stampSkill(text, version) {
   if (!/^---\n[\s\S]*?^name: souls$/m.test(text)) throw new Error('the skill must keep `name: souls`');
@@ -63,11 +109,13 @@ export function stampSkill(text, version) {
 }
 
 /** Builds the served set into `out`; gives the `soulClient` it wrote. */
-export function build({ out, version, min = '0.0.0', pkg }) {
+export function build({ out, version, min = '0.0.0', pkg, strict = false }) {
   if (!VERSION.test(version) || !VERSION.test(min)) throw new Error('--version and --min are x.y.z');
   rmSync(out, { recursive: true, force: true });
   mkdirSync(out, { recursive: true });
-  const files = Object.fromEntries(payloadFiles().map((f) => [f, readFileSync(join(REPO, f), 'utf8')]));
+  const payload = payloadFiles();
+  const files = Object.fromEntries(payload.map((f) => [f, readFileSync(join(REPO, f), 'utf8')]));
+  for (const [name, from] of namedImports(payload)) Object.assign(files, vendored(name, from, { strict }));
   const loader = readFileSync(join(here, 'loader.mjs'), 'utf8');
   writeFileSync(join(out, 'eden.mjs'), `#!/usr/bin/env node\n// Souls client ${version} (Engine v2 R17): start with \`node eden.mjs pair <world>\`.\n` +
     `const VERSION = "${version}";\nconst ENTRY = ${JSON.stringify(ENTRY)};\nconst FILES = ${JSON.stringify(files)};\n${loader}`);
@@ -92,6 +140,6 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     process.stderr.write('usage: build.mjs --out <dir> --version <x.y.z> [--min <x.y.z>] [--pkg <dir>]\n');
     process.exit(2);
   }
-  const c = build({ out: resolve(opt('--out')), version: opt('--version'), min: opt('--min'), pkg: opt('--pkg') && resolve(opt('--pkg')) });
+  const c = build({ out: resolve(opt('--out')), version: opt('--version'), min: opt('--min'), pkg: opt('--pkg') && resolve(opt('--pkg')), strict: true });
   for (const f of c.files) console.log(`served: ${f.name.padEnd(16)} ${f.version}  ${f.bytes} bytes  ${f.sha256}`);
 }

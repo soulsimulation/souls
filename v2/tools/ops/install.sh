@@ -191,6 +191,9 @@ install_all() {
   # The world route file (placement, the cut-over and the origin write or read it): Souls-owned, so a root-run
   # cut-over write never leaves a folder the placement child cannot lock.
   ensure_dir "$DATA/routes" 755 "$ACCOUNT" "$ACCOUNT"
+  # Each world's baked models (/w/<slug>/models/ at the front door), placed by the runbook's bake step: root-owned and
+  # world-readable for Caddy, and outside $LIB/web, whose mirror removes what the bundle lacks.
+  ensure_dir "$DATA/models" 755 root root
   ensure_dir "$DATA/worlds/directory" 750 "$ACCOUNT" "$ACCOUNT"
   ensure_dir "$DATA/worlds/worlds" 750 "$ACCOUNT" "$ACCOUNT"
   ensure_dir "$DATA/directory/placement-backup" 750 "$ACCOUNT" "$ACCOUNT"

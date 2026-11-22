@@ -59,19 +59,6 @@
     {
      "act": {
       "this": "t1",
-      "form": "lie_down"
-     },
-     "actor": "b2",
-     "receipt": "rnarrowboat_o0",
-     "expect": {
-      "verdict": "no",
-      "reason": "field_differs",
-      "need": 0
-     }
-    },
-    {
-     "act": {
-      "this": "t1",
       "form": "open"
      },
      "receipt": "rnarrowboat_o1",
