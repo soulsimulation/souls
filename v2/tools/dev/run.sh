@@ -1,0 +1,156 @@
+#!/usr/bin/env bash
+# One command for a local world of the new engine (V3, #4039): N2's test world served by `worldd`, its gateway
+# (`gatewayd`), the directory with the dev sign-in (`directoryd --test-sign-in`), the viewers' origin
+# (`tools/origin/origin.mjs`) and the page (`v2/web`, built from this checkout), behind the front door's own routing
+# (`tools/ops/proxy/soul-game.caddy`, its addresses replaced), all on loopback. No model runs: the engine has no mind.
+#
+#   v2/tools/dev/run.sh [--port <n>] [--dir <folder>] [--host <name>]
+#
+# It prints `ready <url>` and runs until it is stopped (Ctrl-C or SIGTERM), which stops everything it started.
+#
+#   --port  the page's port (default 7400); the directory, the gateway and the origin take the next three.
+#   --dir   everything the run writes (default <repo>/.local/v2-dev): the world's folder, the accounts, the logs
+#           (`logs/`). A folder that already holds a world serves it again; a new folder seeds a new world.
+#   --host  the page's host (default 127.0.0.1). The dev sign-in is for loopback only: with any other host the
+#           directory refuses to start and so does this command, before anything listens.
+#
+# The world is at <url>/w/dev/ and, signed in as the test person Ada, at <url>/w/dev/?as=Ada. Ada owns the world's one
+# Soul; its token, for a local client, is the first line of <dir>/world/souls.tokens.
+#
+# What it needs: `caddy` and `node` on PATH (CADDY names another caddy). What is missing it builds, as `tools/ci.sh`
+# does: the four programs (`cargo build`, into target/debug), replica's WASM package (target/wasm-load/pkg) and the
+# page (`vite build`, each start, so the page is this checkout's). Prebuilt instead: V2_BIN names the folder holding
+# worldd, gatewayd, directoryd and testworld; V2_REPLICA_PKG the WASM package; V2_WEB a built page (its `dist`).
+# Local only: loopback ports, its own folder, never a production world or its data.
+set -euo pipefail
+V2=$(cd "$(dirname "$0")/../.." && pwd)
+PORT=7400 HOST=127.0.0.1 DIR=$V2/../.local/v2-dev
+while [ $# -gt 0 ]; do
+  case "$1" in
+    --port) PORT=$2; shift 2 ;;
+    --dir) DIR=$2; shift 2 ;;
+    --host) HOST=$2; shift 2 ;;
+    *) sed -n '2,24p' "$0" >&2; exit 2 ;;
+  esac
+done
+die() { echo "run.sh: $*" >&2; exit 1; }
+[[ "$PORT" =~ ^[0-9]+$ ]] && [ "$PORT" -ge 1024 ] && [ "$PORT" -le 65532 ] || die "--port is a number from 1024 to 65532"
+CADDY=${CADDY:-caddy}
+command -v "$CADDY" > /dev/null || die "caddy is not on PATH (CADDY names another)"
+command -v node > /dev/null || die "node is not on PATH"
+mkdir -p "$DIR/logs"
+DIR=$(cd "$DIR" && pwd)
+BASE=http://$HOST:$PORT
+DIRECTORY=127.0.0.1:$((PORT + 1)) GATEWAY=127.0.0.1:$((PORT + 2)) ORIGIN=127.0.0.1:$((PORT + 3))
+
+# What is missing is built, as tools/ci.sh builds it.
+TARGET=${CARGO_TARGET_DIR:-$V2/target}
+BIN=${V2_BIN:-$TARGET/debug}
+PKG=${V2_REPLICA_PKG:-$TARGET/wasm-load/pkg}
+for b in worldd gatewayd directoryd testworld; do
+  [ -x "$BIN/$b" ] && continue
+  [ -z "${V2_BIN:-}" ] || die "V2_BIN has no $b"
+  (cd "$V2" && cargo build --locked -p worldd -p gatewayd -p directoryd -p testworld)
+  break
+done
+if [ ! -f "$PKG/replica.js" ]; then
+  [ -z "${V2_REPLICA_PKG:-}" ] || die "V2_REPLICA_PKG has no replica.js"
+  (cd "$V2" &&
+    cargo install wasm-bindgen-cli --locked --root "$TARGET/tools" --quiet \
+      --version "$(sed -n '/^name = "wasm-bindgen"$/{n;s/^version = "\(.*\)"$/\1/p;}' Cargo.lock)" &&
+    cargo build -p replica --release --target wasm32-unknown-unknown --locked --features vectors &&
+    "$TARGET/tools/bin/wasm-bindgen" --target web --out-dir "$PKG" "$TARGET/wasm32-unknown-unknown/release/replica.wasm")
+fi
+WEB=${V2_WEB:-$V2/web/dist}
+if [ -z "${V2_WEB:-}" ]; then
+  [ -d "$V2/web/node_modules" ] || npm ci --prefix "$V2/web" --no-audit --no-fund
+  (cd "$V2/web" && V2_REPLICA_PKG=$PKG npx vite build --logLevel warn)
+fi
+[ -f "$WEB/index.html" ] || die "no built page in $WEB"
+
+# The world: N2's test world, one Soul, the body's family from the repository's own entries. Seeded once per folder.
+cd "$DIR"
+if [ ! -f world/world.json ]; then
+  mkdir -p seed/entries
+  "$BIN/testworld" --seed 1 --things 0 --out seed > logs/seed.log
+  cp "$V2/../content/kinds/body/humanoid.json" seed/entries/
+  "$BIN/worldd" seed --facts seed/testworld-s1-t0.facts.json --dir world --souls 1 --at 0,0 --entries seed/entries \
+    >> logs/seed.log 2>&1 || die "worldd seed failed: $(tail -n 3 logs/seed.log)"
+  od -An -tx1 -N32 /dev/urandom | tr -d ' \n' > view.key
+fi
+GRANT=$(cut -d' ' -f1 world/tokens | head -n 1)
+
+PIDS=()
+stop() {
+  trap - EXIT INT TERM
+  [ ${#PIDS[@]} -eq 0 ] || kill "${PIDS[@]}" 2> /dev/null || true
+  wait 2> /dev/null || true
+}
+trap stop EXIT
+trap 'exit 0' INT TERM
+# start <name> <command...>: in the background, its output in logs/<name>.log.
+start() {
+  local name=$1
+  shift
+  "$@" > "logs/$name.log" 2>&1 &
+  PIDS+=($!)
+}
+# until_ready <name> <test command...>: waits up to 60 s; a program that ended is reported with its last lines.
+until_ready() {
+  local name=$1 pid=${PIDS[${#PIDS[@]} - 1]}
+  shift
+  for _ in $(seq 600); do
+    "$@" > /dev/null 2>&1 && return 0
+    kill -0 "$pid" 2> /dev/null || die "$name did not start: $(tail -n 3 "logs/$name.log")"
+    sleep 0.1
+  done
+  die "$name was not ready in 60 s: $(tail -n 3 "logs/$name.log")"
+}
+
+# The directory first: with the dev sign-in it refuses a page address that is not loopback, and nothing else starts.
+start directoryd "$BIN/directoryd" --listen "$DIRECTORY" --public-url "$BASE" --store "$DIR/accounts.sqlite" \
+  --pairing "$DIR/pairing.sqlite" --gateway-tokens "$DIR/world/tokens" --view-key "$DIR/view.key" \
+  --test-sign-in --test-own "Ada=$GRANT"
+until_ready directoryd grep -q '^listening' logs/directoryd.log
+
+rm -f w.sock
+start worldd "$BIN/worldd" serve --dir world --socket w.sock
+until_ready worldd test -S w.sock -a -f world/views/world.json
+start gatewayd "$BIN/gatewayd" --listen "$GATEWAY" --world w.sock --tokens world/tokens --build "1220$(printf '%064d' 0)" \
+  --entries world/entries --view-key view.key
+until_ready gatewayd grep -q '^listening' logs/gatewayd.log
+
+# The origin serves the world's stream and history as a placed world's (place-world.sh's links), and routes the
+# world's name to its gateway (world-routes.mjs). No provider is configured, so the page signs in with `as=`.
+mkdir -p public/w/dev slugs
+ln -sfn "$DIR/world/views" public/w/dev/views
+ln -sfn "$DIR/world/history" public/w/dev/history
+: > slugs/dev
+STREAM=$(node -p 'JSON.parse(require("fs").readFileSync("world/views/world.json", "utf8")).stream')
+cat > routes.json << JSON
+{"schema": "souls/world-routes/1", "worlds": {"dev": {"gateway": "http://$GATEWAY", "stream": "/s/w/dev/${STREAM%/}/",
+  "history": "/s/w/dev/history/", "canonical": true}}}
+JSON
+start origin env -u AUTH_PROVIDER SOULS_WEB="$WEB" SOULS_DATA="$DIR" SOULS_WORLD_ROUTES="$DIR/routes.json" \
+  node "$V2/tools/origin/origin.mjs" "$DIR/public" "${ORIGIN#*:}" 127.0.0.1
+until_ready origin grep -q '^origin' logs/origin.log
+
+# The page: the front door's own routes, with this run's addresses and folders in place of the install's.
+{
+  printf '{\n\tadmin off\n\tauto_https off\n\tpersist_config off\n\tdefault_bind 127.0.0.1\n\tstorage file_system "%s"\n}\n' "$DIR/caddy"
+  sed -e "s|https://soul.game|$BASE|" -e "s|/usr/local/lib/souls/web|$WEB|g" \
+    -e "s|/var/lib/souls-routes/slugs|$DIR/slugs|g" -e "s|/var/lib/souls-routes|$DIR/routes|g" \
+    -e "s|/var/lib/souls/models|$DIR/models|g" -e "s|localhost:7310|$DIRECTORY|g" -e "s|localhost:7320|$ORIGIN|g" \
+    -e "s|localhost:@@PRODUCTION_PORT@@|$ORIGIN|g" "$V2/tools/ops/proxy/soul-game.caddy"
+} > Caddyfile
+start caddy env XDG_CONFIG_HOME="$DIR/caddy" XDG_DATA_HOME="$DIR/caddy" "$CADDY" run --adapter caddyfile --config Caddyfile
+until_ready caddy node -e 'fetch(process.argv[1]).then(async (r) => process.exit(r.ok && (await r.json()).world === "dev" ? 0 : 1), () => process.exit(1))' \
+  "$BASE/w/dev/v1/bootstrap"
+
+echo "ready $BASE"
+echo "world $BASE/w/dev/   signed in as Ada: $BASE/w/dev/?as=Ada   logs: $DIR/logs"
+while sleep 1; do
+  for pid in "${PIDS[@]}"; do
+    kill -0 "$pid" 2> /dev/null || die "a program ended; see $DIR/logs"
+  done
+done
