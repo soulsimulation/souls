@@ -172,26 +172,37 @@ fn plan_with(
     guard: impl FnOnce(&Part) -> Result<(Guard, Option<PlannedMap>), String>,
 ) -> Result<Planned, Refused> {
     off_clock();
-    // A doorway's row is read at its first end (`ground::scene`, a door's removal): a doorway link, or a link with a
-    // door, owned by its second end would leave its floor unreadable and its door unremovable (#3934 review).
+    // A doorway's row is read at its first end, in field 22, with at least five values after its link (`ground::scene`,
+    // a door's removal): a doorway link, or a link with a door, owned by its second end, or a doorway link whose row
+    // is elsewhere or short, would leave its floor unreadable and its door unremovable (#3934 review).
     for (i, op) in checked.edit.ops.iter().enumerate() {
         use crate::ground::scene::{DOORWAY, F_DOORWAYS};
-        if let Op::Link {
+        let Op::Link {
             ty,
-            owner: replica::world_model::End::Second,
+            owner,
             field,
+            row,
             door,
             ..
         } = op
-            && (door.is_some() || *field == F_DOORWAYS || ty.as_str() == DOORWAY)
+        else {
+            continue;
+        };
+        let doorway = ty.as_str() == DOORWAY;
+        let why = if *owner == replica::world_model::End::Second
+            && (door.is_some() || *field == F_DOORWAYS || doorway)
         {
-            return Err(Refused {
-                op: Some(i),
-                name: "edit.link",
-                detail: "a doorway link is owned by its first end, where its row is read"
-                    .to_owned(),
-            });
-        }
+            "a doorway link is owned by its first end, where its row is read"
+        } else if doorway && (*field != F_DOORWAYS || row.len() < 5) {
+            "a doorway link writes a row of at least 5 values to field 22"
+        } else {
+            continue;
+        };
+        return Err(Refused {
+            op: Some(i),
+            name: "edit.link",
+            detail: why.to_owned(),
+        });
     }
     let names = names(&checked, &mut minter)?;
     let effects = effects(copy.tree(), copy.version(), &checked, &names, 0);

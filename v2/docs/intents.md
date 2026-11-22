@@ -124,7 +124,13 @@ completed intent with the same form decoder as the gateway before sending it.
     field 100 is engine-owned `[wall,closed,open]`; removal restores its patch only while the owned open rows still
     match (`edit.doorway-wall-changed`), with intervening wall writes refused `edit.stale` by the normal stamp check.
     Imported doors have no inferred restoration: their creator supplies an explicit wall Set in the same removal
-    batch. The JSON batch uses `wall`, `closed` and `open` with the same meaning. A node is an id, or the
+    batch. The JSON batch uses `wall`, `closed` and `open` with the same meaning. Link `{1: 6, 2: name, 3: type,
+    4: [end, end], 5: owner, 6: field, 7: row, 8: door}` (#3728, an imported world's doorways and stairs) makes a link
+    of `type` between two nodes, owned by its first (`5: 0`) or second (`5: 1`) end, appends `[link, ...row]` (at
+    most 16 values) to the owner's `field` and, with `8`, has that door name it in field 7 (8 left out when none).
+    It cuts no wall. A `souls:` type, field 7 or 100, or equal ends are refused `edit.link`; so is a doorway link
+    owned by its second end, or one whose row is not in field 22 with at least 5 values. The claim check judges
+    both ends and the door. A node is an id, or the
     temporary name of one placed earlier in the batch (an integer). A spot is
     `{1: position, 2: orientation, 3: support, 4: slot}` as T4's pose writes them (4 left out when none). The kind is
     split so no text is over the text limit. Any actor's edit reads; the world refuses one from anyone but its

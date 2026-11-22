@@ -1124,6 +1124,24 @@ fn a3728_a_link_is_judged_at_both_ends_and_its_door() {
         .edit(w.creator(), v, vec![link(1, [c, d], End::Second, Some(e))])
         .expect_err("a link with a door, owned by its second end");
     assert_eq!((r.op, r.name), (Some(0), "edit.link"), "{r:?}");
+    // A doorway link owned by its first end still writes a row of at least 5 values to field 22, where it is read.
+    let first = |field: u64, row: Vec<Value>| Op::Link {
+        name: 1,
+        ty: Name::new("eden:doorway").expect("a name"),
+        ends: [c, d].map(Ref::Node),
+        owner: End::First,
+        field,
+        row,
+        door: None,
+    };
+    let r = w
+        .edit(w.creator(), v, vec![first(21, vec![Value::Uint(1); 6])])
+        .expect_err("a doorway's row in another field");
+    assert_eq!((r.op, r.name), (Some(0), "edit.link"), "{r:?}");
+    let r = w
+        .edit(w.creator(), v, vec![first(22, vec![Value::Uint(1)])])
+        .expect_err("a doorway's row too short to read");
+    assert_eq!((r.op, r.name), (Some(0), "edit.link"), "{r:?}");
     assert_eq!(w.log_hash(), log, "refusals write nothing");
     // The lead links outside every claim, and the helper inside its own.
     w.edit(w.creator(), v, vec![link(1, [c, d], End::First, Some(e))])
