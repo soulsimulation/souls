@@ -172,6 +172,26 @@ fn plan_with(
     guard: impl FnOnce(&Part) -> Result<(Guard, Option<PlannedMap>), String>,
 ) -> Result<Planned, Refused> {
     off_clock();
+    // A doorway's row is read at its first end (`ground::scene`, a door's removal): a doorway link, or a link with a
+    // door, owned by its second end would leave its floor unreadable and its door unremovable (#3934 review).
+    for (i, op) in checked.edit.ops.iter().enumerate() {
+        use crate::ground::scene::{DOORWAY, F_DOORWAYS};
+        if let Op::Link {
+            ty,
+            owner: replica::world_model::End::Second,
+            field,
+            door,
+            ..
+        } = op
+            && (door.is_some() || *field == F_DOORWAYS || ty.as_str() == DOORWAY)
+        {
+            return Err(Refused {
+                op: Some(i),
+                name: "edit.link",
+                detail: "a doorway link is owned by its first end, where its row is read".to_owned(),
+            });
+        }
+    }
     let names = names(&checked, &mut minter)?;
     let effects = effects(copy.tree(), copy.version(), &checked, &names, 0);
     let bytes = encode(&Value::Map(BTreeMap::from([
