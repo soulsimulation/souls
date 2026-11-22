@@ -17,6 +17,8 @@ import type { StationLiveContract, BrainCall, CameraLine, KernelView, LogEvent, 
 declare const __BUILD__: string;
 
 export type Souls = {
+  /** The v2 stream cannot be read or has stalled: the page says so instead of loading (v2-engine/stream-health.ts). Unset on the old socket. */
+  streamNotice?: string | null;
   takes: { serverTick: number; chunks: {fromTick: number; toTick: number; take: unknown}[]; receivedAt: number };
   privateAuthorityGeneration?:number;conn: Connection; station:StationConnection|null;me: Me | null; log: LogEvent[]; brain: BrainCall[]; camera: CameraLine | null; ticker: TickerLine[];
   narratives: Record<string, NarrativeView>; stats: ServerStats | null; bytesPerSec: number;

@@ -9,6 +9,7 @@ import type { PublicSoul } from '@souls/protocol';
 import { apiPath } from '../world-path.ts';
 import type { Souls } from '../useSouls.ts';
 import type { V2Bridge } from './bridge.ts';
+import { streamNotice } from './stream-health.ts';
 
 const STREAM = /^\/s\/[A-Za-z0-9._/-]+\/$/;
 /** The v2 stream this world's page reads, when its inline config names one; else null (the old socket). */
@@ -34,9 +35,12 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
   if (!s.current) s.current = empty(quietConnection(worldId ?? (window as unknown as { __simConfig?: { worldId?: string } }).__simConfig?.worldId ?? 'v2'));
   useEffect(() => {
     const st = s.current!, conn = st.conn;
-    let bridge: V2Bridge | null = null, stopped = false, lastSouls: unknown = null, lastError: string | null = null, lastEntities: unknown = null;
+    let bridge: V2Bridge | null = null, failed = false, stopped = false, lastSouls: unknown = null, lastError: string | null = null, lastEntities: unknown = null;
+    const startedAt = performance.now();
+    let seenParts = 0, lastPartAt: number | null = null, errorAtParts: number | null = null;
     // The scenery the page binds is the world's own (/v1/scene, published with the world); takes carry its rules version.
     void (async () => {
+     try {
       const scene = await fetch(apiPath('/v1/scene')).then((r) => (r.ok ? r.json() : null)).catch(() => null) as { renderSceneRef?: { rulesVersion?: string } } | null;
       const [{ V2Bridge }, { makeReader }] = await Promise.all([import('./bridge.ts'), import('./reader.ts')]);
       if (stopped) return;
@@ -46,6 +50,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
       bridge.start(stream, makeReader);
       // read-only, for checks and proof: what the stream gave (parts played, newest time, the reader's last error)
       (window as unknown as { __soulsV2?: unknown }).__soulsV2 = bridge.view;
+     } catch (e) { failed = true; console.warn('v2 stream:', e); }
     })();
     const get = (path: string) => fetch(apiPath(path)).then((r) => (r.ok ? r.json() : null)).catch(() => null);
     void get('/v1/kernel').then((v) => { if (v && !st.kernel) st.kernel = v; });
@@ -63,8 +68,11 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
           conn.replica.souls = new Map([...v.souls.values()].map((x) => [x.id, { id: x.id, entityId: x.entityId, name: x.name, description: '', owner: '', intent: null, intentText: '',
             mood: '', energy: '', doing: '', native: false } satisfies PublicSoul]));
         }
-        if (v.error && v.error !== lastError) { lastError = v.error; console.warn('v2 stream:', v.error); }
+        if (v.error && v.error !== lastError) { lastError = v.error; errorAtParts = v.parts; console.warn('v2 stream:', v.error); }
+        if (v.parts !== seenParts) { seenParts = v.parts; lastPartAt = performance.now(); }
       }
+      // one visible state for every way the stream can fail or stall: the page's own status line (LiveWorld, ViewerFrame)
+      st.streamNotice = streamNotice({ failed, error: bridge?.view.error ?? null, errorAtParts, parts: seenParts, startedAt, lastPartAt, now: performance.now() });
       force((n) => n + 1);
     }, 200);
     return () => { stopped = true; clearInterval(t); bridge?.stop(); };
