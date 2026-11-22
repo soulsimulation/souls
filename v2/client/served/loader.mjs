@@ -11,6 +11,8 @@
 //   checked by length and hash before anything is written. A command whose version has no library yet fetches it.
 // - `upgrade`: a newer client from that site (served.mjs), then R18's `main` (`../src/upgrade/upgrade.mjs`), which
 //   brings the home's Souls of today's client across; `upgrade --rollback`: R18's `main`, then the daemons hand over.
+// - `god <verb> ...` runs the creator's command (`../src/creator/souls-god.mjs`); `god pair <world url> --creator
+//   <grant>` in a home with no client first installs it, as `pair` does.
 // - `version` prints the version.
 
 import { spawnSync } from 'node:child_process';
@@ -80,16 +82,19 @@ else if (args[0] === 'upgrade') {
     }
   } catch (e) { refused(e); }
 } else {
+  // `god <verb> ...`: the creator's command (souls-god.mjs, G7) from the same files, for a world's creator.
+  const god = args[0] === 'god', rest = god ? args.slice(1) : args;
   let ready = true;
-  if (args[0] === 'pair' && args[1]) {
-    try { await (await served()).firstInstall({ home, url: args[1] }); } catch (e) { refused(e); ready = false; }
+  if (rest[0] === 'pair' && rest[1]) {
+    try { await (await served()).firstInstall({ home, url: rest[1] }); } catch (e) { refused(e); ready = false; }
   }
   if (ready) {
     // The daemon's library for this version: kept, else fetched by hash from the home's site.
     const lib = await (await served()).libFor(home, VERSION).catch(() => null);
     if (lib && !process.env.SOULS_REPLICA_PKG) process.env.SOULS_REPLICA_PKG = join(home, 'bin', 'lib', lib);
     // The command runs when it is the script named; a module's own path has its symlinks resolved (/tmp, /var).
-    process.argv[1] = real(join(root, ENTRY));
+    process.argv[1] = real(join(root, god ? 'v2/client/src/creator/souls-god.mjs' : ENTRY));
+    if (god) process.argv.splice(2, 1);
     await import(pathToFileURL(process.argv[1]).href);
   }
 }

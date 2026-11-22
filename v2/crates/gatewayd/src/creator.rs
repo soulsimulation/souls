@@ -9,6 +9,13 @@
 //! `not-the-creator` (403); a session the directory refuses, `session-refused` (401). The token is never logged, and
 //! the answer is never cached. A socket already signed in keeps its sign-in when its token lapses; the page exchanges
 //! again to sign in again.
+//!
+//! The creator's helpers (#3727, today's `build claim --helper`): `POST /v2/creator-helper[?minutes=n]` with
+//! `Authorization: Bearer <the creator's own token>` answers `{"token", "grant", "helper", "expires_in"}`: a token for
+//! a new creator-scope actor of the creator's (`helper`, `<scope hex>-<counter>`), revoked after `minutes` (default
+//! 120, 1 to 720). The gateway lets it sign in while it lives; the world lets it edit only when a live claim names it
+//! as that claim's helper and the edit is sent under that claim (`replica::edit::claims`), so the creator names it on
+//! a claim next. A helper cannot ask for a helper, and an undo is the creator's alone. At most [`HELPERS_MOST`] live.
 
 use std::sync::Arc;
 use std::time::Duration;
@@ -29,6 +36,13 @@ use crate::token::{CreatorMark, Grant, Token};
 pub const PATH: &str = "/v2/creator-token";
 /// How long an exchanged token signs in.
 pub const LIFETIME: Duration = Duration::from_secs(15 * 60);
+/// Where the creator asks for a helper's token (#3727).
+pub const HELPER_PATH: &str = "/v2/creator-helper";
+/// A helper token's lifetime, minutes: by default, and at most (today's helper limits).
+pub const HELPER_MINUTES: u64 = 120;
+pub const HELPER_MINUTES_MOST: u64 = 720;
+/// The most helpers live at once (today's per-world limit).
+pub const HELPERS_MOST: usize = 64;
 /// The longest answer read from the directory.
 const ANSWER_MOST: u64 = 16 << 10;
 
@@ -138,12 +152,25 @@ pub fn current_mark(gw: &Gateway) -> Option<CreatorMark> {
     }
 }
 
+/// Whether `id` is a live helper's actor (#3727).
+pub fn is_helper(gw: &Gateway, id: Id) -> bool {
+    gw.helpers
+        .lock()
+        .unwrap_or_else(|e| e.into_inner())
+        .contains_key(&id)
+}
+
 /// Capture at sign-in; an idle socket cannot regain authority on an A → B → A handoff.
 pub fn session(gw: &Gateway, actor: Actor) -> Result<Option<CreatorMark>, &'static str> {
     if gw.exchange.get().is_none() {
         return Ok(None);
     }
     match actor {
+        // A helper holds the authority it was minted under; it lapses with it, or when revoked.
+        Actor::Creator(id) if is_helper(gw, id) => current_mark(gw)
+            .filter(|m| m.owner.is_some())
+            .map(Some)
+            .ok_or(crate::token::REFUSED),
         Actor::Creator(id) => current_mark(gw)
             .filter(|m| m.owner == Some(id))
             .map(Some)
@@ -228,6 +255,96 @@ pub async fn exchange(State(gw): State<Arc<Gateway>>, headers: HeaderMap) -> Res
             token.reveal(),
             grant.to_text(),
             LIFETIME.as_secs()
+        ),
+    )
+}
+
+/// The helper route (see the module's notes).
+pub async fn helper(
+    State(gw): State<Arc<Gateway>>,
+    axum::extract::RawQuery(query): axum::extract::RawQuery,
+    headers: HeaderMap,
+) -> Response {
+    let presented = headers
+        .get(header::AUTHORIZATION)
+        .and_then(|v| v.to_str().ok())
+        .and_then(|v| v.strip_prefix("Bearer "))
+        .and_then(|t| Token::parse(t.trim()));
+    if let Some(f) = gw.tokens_file.get() {
+        f.refresh(&gw.tokens);
+    }
+    let grant = presented
+        .as_ref()
+        .and_then(|t| gw.tokens.read().unwrap_or_else(|e| e.into_inner()).check(t));
+    // The creator's own token: with an exchange, the world's creator; a helper never mints a helper.
+    let owner = match grant {
+        Some(Grant::Actor(Actor::Creator(id))) if !is_helper(&gw, id) => id,
+        _ => return refuse(StatusCode::UNAUTHORIZED, "token-refused"),
+    };
+    if gw.exchange.get().is_some() && session(&gw, Actor::Creator(owner)).is_err() {
+        return refuse(StatusCode::FORBIDDEN, "not-the-creator");
+    }
+    let minutes = match query
+        .as_deref()
+        .unwrap_or("")
+        .split('&')
+        .find_map(|kv| kv.strip_prefix("minutes="))
+    {
+        None => HELPER_MINUTES,
+        Some(m) => match m.parse::<u64>() {
+            Ok(n) if (1..=HELPER_MINUTES_MOST).contains(&n) => n,
+            _ => return refuse(StatusCode::BAD_REQUEST, "helper-minutes"),
+        },
+    };
+    // A new actor of the creator's scope, its counter far above any grant a directory gives.
+    let mut bytes = [0u8; 5];
+    if getrandom::fill(&mut bytes).is_err() {
+        return refuse(StatusCode::SERVICE_UNAVAILABLE, "random-unavailable");
+    }
+    let counter = (1u64 << 44) + bytes.iter().fold(0u64, |n, b| (n << 8) | u64::from(*b));
+    let Some(id) = Id::new(owner.scope(), counter) else {
+        return refuse(StatusCode::SERVICE_UNAVAILABLE, "random-unavailable");
+    };
+    let grant = Grant::Actor(Actor::Creator(id));
+    let Ok(token) = Token::issue(grant) else {
+        return refuse(StatusCode::SERVICE_UNAVAILABLE, "random-unavailable");
+    };
+    let hash = token.hash();
+    {
+        let mut helpers = gw.helpers.lock().unwrap_or_else(|e| e.into_inner());
+        if helpers.len() >= HELPERS_MOST {
+            return refuse(StatusCode::TOO_MANY_REQUESTS, "helper-limit");
+        }
+        helpers.insert(id, hash);
+    }
+    gw.tokens
+        .write()
+        .unwrap_or_else(|e| e.into_inner())
+        .add_helper(grant, hash);
+    let lapse = gw.clone();
+    tokio::spawn(async move {
+        tokio::time::sleep(Duration::from_secs(minutes * 60)).await;
+        lapse
+            .helpers
+            .lock()
+            .unwrap_or_else(|e| e.into_inner())
+            .remove(&id);
+        lapse
+            .tokens
+            .write()
+            .unwrap_or_else(|e| e.into_inner())
+            .revoke(&hash);
+    });
+    (gw.log)("a helper token was issued for the creator");
+    answer(
+        StatusCode::OK,
+        format!(
+            "{{\"token\":\"{}\",\"grant\":\"{}\",\"helper\":\"{}-{}\",\"expires_in\":{}}}",
+            token.reveal(),
+            grant.to_text(),
+            to_hex(&id.scope().0),
+            id.counter(),
+            minutes * 60
         ),
     )
 }
