@@ -238,6 +238,15 @@
           "false": 0
         },
         "over_us": 6000000
+      },
+      {
+        "part": "lid",
+        "field": "released",
+        "do": "show",
+        "at": {
+          "true": 0,
+          "false": 1
+        }
       }
     ],
     "shape": {
@@ -411,6 +420,21 @@
           ],
           "tint": "gold",
           "when": "@twists>=3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            970,
+            0
+          ],
+          "size": [
+            90,
+            20,
+            35
+          ],
+          "tint": "red",
+          "role": "lid"
         }
       ],
       "palette": {
