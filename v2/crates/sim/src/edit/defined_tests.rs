@@ -433,14 +433,20 @@ fn review_blockers_are_refused_at_define_by_name() {
 /// closed into a ring under a tick is still `kind.effects`.
 fn chain(forms: usize, timers: usize, ring: bool) -> String {
     let form = |i: usize| {
-        let next = if i + 1 < forms { Some(i + 1) } else { ring.then_some(0) };
+        let next = if i + 1 < forms {
+            Some(i + 1)
+        } else {
+            ring.then_some(0)
+        };
         let effects = next.map_or(String::new(), |n| {
             vec![format!(r#"{{"change":"timer","form":"f{n}","after_us":1}}"#); timers].join(",")
         });
         format!(r#""f{i}":{{"who":"anyone","effects":[{effects}]}}"#)
     };
     let forms = (0..forms).map(form).collect::<Vec<_>>().join(",");
-    format!(r#"{{"format":"souls-entry/1","kind":"gene:chain","owner":"thing","forms":{{{forms}}}}}"#)
+    format!(
+        r#"{{"format":"souls-entry/1","kind":"gene:chain","owner":"thing","forms":{{{forms}}}}}"#
+    )
 }
 
 #[test]

@@ -292,7 +292,11 @@ pub fn effects_checked(
                         (e.get("form").and_then(Json::str), e.get("after_us"))
                         && *us < i128::from(TIMER_LEAST_US)
                     {
-                        let soonest = quick.entry(form.as_str()).or_default().entry(to).or_insert(*us);
+                        let soonest = quick
+                            .entry(form.as_str())
+                            .or_default()
+                            .entry(to)
+                            .or_insert(*us);
                         *soonest = (*soonest).min(*us);
                     }
                 }
