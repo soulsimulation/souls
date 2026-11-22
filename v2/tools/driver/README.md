@@ -106,6 +106,34 @@ CI's `driver-served` step (`v2/tools/ci.sh`, client leg) runs a 60 s `ladder-10-
 test world (no entries: walks go to any node of the copy, and the other kinds stand in as walks) under `worldd serve`
 and its own gatewayd.
 
+## What a viewer sees, stuck Souls and the real mix (stage 2a, #4154)
+
+- **`--stream <http://host:port/path/>`**: the world's public stream as the viewers' origin serves it (the folder
+  `views/world.json`'s `stream` names). A thread of its own reads it as the page's worker does: the pointer every
+  250 ms, then each new part in order, over HTTP; parts written before the run are not read. Each receipt or
+  acceptance names its intent's id (field 4), and each effect in a part names the intent that caused it, so the
+  report's `visible` is every act the world took joined with the first part that shows something it caused: `seen`
+  of `taken`, act wait from the send p50/p95/p99 (ms), `within100Ms` and `within300Ms`, the same per verb, and the
+  stream's own lag (each part's arrival against the wall time its world-time end fell at). The stream cuts a part
+  every 0.5 s of world time and writes it 0.25 s after (`worldd::view_out`, rules 3 and 11), so a viewer's wait has
+  that floor whatever the load.
+- **`stuck`** in the report, per agent from its own socket: `stuck` counts agents that had an act unanswered for 60 s
+  or more with no answer of any kind meanwhile; `refusedOnly` those that acted for 60 s or more with nothing but
+  refusals back; `stallMaxMs` and the last answer's age at the end of the schedule.
+- **The mix** (`loads.mjs`, `mix-<n>-<even|uneven>-<every4|burst>`, n of the ladder's counts): every act's kind is
+  drawn from `MIX` (say 22 %, walk 14, gesture 10, take 10, go_to 8, sit 8, look_at 7, point 6, touch 6, lean_on 5,
+  wait_by 4). `every4` is each agent every 4 s (125 acts a second at 500), `burst` every 1.5 s; even is `uniform`,
+  uneven the `event` shape with every agent present, its time scaled to intend as many acts. The driver sends a
+  gesture as the body family's argument-free forms in turn (wave, clap, cheer, bow, shrug, stretch, jump, dance,
+  look_around), the one-thing forms on the Soul's body with a thing of the copy as their argument (C2's
+  `[[name, id]]`), and take as the thing's own `take`, the next one putting it down (`hands:set-down`) once the take's
+  receipt has come. A seeded world's bodies are `souls:body`, which names no entry: their forms are the family
+  entry's (`"owner": "family"`).
+
+`v2/tools/bench/stage2a/` runs it on Eden: `rung.sh` one rung (world processes on a CPU set, the driver apart),
+`ladder.sh` the counts, rates and arms, `analyze.mjs` the summary and tables against the bar, `camera.sh` the whole
+local stack at a load for filming.
+
 ## Faults (X10, #4019)
 
 Flags for a fault pass on a served world (`v2/tools/stall-test/x10-faults.sh` runs the whole pass and prints its
