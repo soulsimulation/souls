@@ -108,7 +108,7 @@ completed intent with the same form decoder as the gateway before sending it.
 
 15. **An edit is a creator's batch under one cause** (Engine v2 G1b, #3362; the batch and its checks are G1's,
     `replica::edit`, committed by `sim::edit`). Its verb is `souls:edit` and its parameters are `{1: [operation, ...]}`,
-    1 to 256 operations; its basis's sequence is the version it was planned against. It carries nothing else: no
+    1 to 256 operations, with `6: claim id` when it is sent under a build claim (#3701, `replica::edit::claims`); its basis's sequence is the version it was planned against. It carries nothing else: no
     target, resources, fallbacks, replaced intent or body, since it drives none (`edit-not-bare`), and each operation
     is in its one byte form (`edit-not-a-batch`). The operations are place `{1: 1, 2: name, 3: kind's plain name, 4:
     kind's hash, 5: parent, 6: spot, 7: audience, 8: fields}` (7 left out for everyone, else the audience's id; 8

@@ -1,7 +1,7 @@
 // #3704: query, catalog and context on a copy's rows, and the CLI's request for each, with batch and views.
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { BUDGET, catalog, context, query } from './reads.mjs';
+import { BUDGET, NEAR_METRES, catalog, context, placeOf, query } from './reads.mjs';
 import { requestOf, runViews } from '../cli/souls.mjs';
 
 const row = (id, name, kind, parent, path, children = 0, text) => [id, { id, name, kind, parent, path, children, ...(text ? { text } : {}) }];
@@ -63,4 +63,28 @@ test('the commands: query, batch, catalog, context; views draws each name', asyn
   assert.deepEqual(shot, [['the library', '--out', 'ref-1.png'], ['fountain', '--out', 'ref-2.png']]);
   assert.equal(v.ok, true);
   assert.equal((await runViews([], async () => ({}))).code, 'views-form');
+});
+
+test('#3851: near keeps what is within its metres of an id, a name or me, from the poses composed up the tree', () => {
+  const ONE = 2 ** 30, half = Math.round(ONE * Math.SQRT1_2), m = 1e6;
+  const at = (id, name, kind, parent, pos, rot) => [id, { id, name, kind, parent, path: [], children: 0, pos, ...(rot ? { rot } : {}) }];
+  const posed = new Map([
+    at('z', 'Eden', 'eden:world', null, [0, 0, 0]),
+    // The square is turned a quarter about y: its +x is the world's -z.
+    at('sq', 'the square', 'eden:place', 'z', [100 * m, 0, 0], [half, 0, half, 0]),
+    at('f', 'fountain', 'eden:fountain', 'sq', [10 * m, 0, 0]),
+    at('b', 'bench', 'eden:bench', 'sq', [0, 0, 50 * m]),
+    at('far', 'far bench', 'eden:bench', 'z', [500 * m, 0, 0]),
+    at('me', 'Ada', 'souls:body', 'z', [100 * m, 0, -12 * m]),
+  ]);
+  const p = placeOf(posed, 'f').pos.map((c) => Math.round(c / m));
+  assert.deepEqual(p, [100, 0, -10], 'turned with its parent');
+  assert.equal(NEAR_METRES, 80, "today's radius");
+  const q = query(posed, [{ kind: 'eden:bench', near: 'the square' }, { find: 'fountain', near: 'me', within: 5 }, { find: 'bench', near: 'me', within: 1 }, { kind: 'eden:bench', near: 'nobody' }], { me: 'me' });
+  assert.deepEqual(q.answers[0].found.map((r) => [r.id, r.metres]), [['b', 50]], 'the far bench is past 80 m');
+  assert.deepEqual(q.answers[0].near, { id: 'sq', name: 'the square', within: 80 });
+  assert.deepEqual(q.answers[1].found.map((r) => [r.id, r.metres]), [['f', 2]]);
+  assert.deepEqual(q.answers[2].found, []);
+  assert.equal(q.answers[3].code, 'query.unknown-near');
+  assert.equal(query(posed, [{ find: 'fountain', near: 'me' }]).answers[0].code, 'query.unknown-near', 'no body: me is not placed');
 });

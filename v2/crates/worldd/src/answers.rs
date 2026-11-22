@@ -311,6 +311,8 @@ pub enum Event {
     /// A set-down checked off the clock thread by the edit checker's thread (E4's caller, #3604), with the walkers'
     /// maps prepared from its part when it changes what walkers go round, or its refusal.
     SetDown(Box<(Id, R<SetDownChecked>)>),
+    /// An undo or a redo checked off the clock thread (G4 served, #3694), or its refusal.
+    Undone(Box<(Id, Result<crate::undo::Checked, Refused>)>),
     /// The directory's Souls file as it now reads, and where the answers to the intents it causes go (W11b).
     Directory(Box<(Directory, Reply)>),
     /// A gateway connection that is told each Soul's wind-down word (#3784): now, all of them, then each change.
@@ -898,6 +900,12 @@ struct Clock {
     set_down: Vec<(Id, R<SetDownChecked>)>,
     /// Edits checked since the last tick, committed (or refused) at the next.
     edited: Vec<(Id, Result<Checked, Refused>)>,
+    /// The creator's edit history (G4, #3694): each committed edit's before-values, for undo and redo.
+    history: sim::edit::undo::History,
+    /// The build step each open edit is, when it is one.
+    steps: BTreeMap<Id, sim::edit::undo::Step>,
+    /// Undos and redos checked since the last tick, committed (or refused) at the next.
+    undone: Vec<(Id, Result<crate::undo::Checked, Refused>)>,
     /// Where the edit checker reads the bodies the controller holds, handed off each tick (G1d).
     walkers: Option<Arc<buildsafe::Moving>>,
     /// Soul Actions (C2, #3366): the forms in progress, and the form acts taken since the last tick, committed at
@@ -956,6 +964,8 @@ struct Clock {
 
 enum CheckJob {
     Edit(Id, Edit, Minter),
+    /// A creator's undo or redo (#3694): the asker, whether a redo, and the effects the clock's history previewed.
+    Undo(Box<(Id, Actor, bool, Vec<Effect>)>),
     /// A Soul's set-down (#3604).
     SetDown(crate::setdown::Ask),
     Wear(Box<WearRequest>),
@@ -1124,6 +1134,8 @@ enum Taken {
     Form(Act),
     Move(Asked),
     Edit(Edit),
+    /// An undo (false) or a redo (true).
+    Undo(bool),
     Engine(engine::Act),
     SetDown(crate::setdown::Ask),
 }
@@ -1510,7 +1522,7 @@ impl Clock {
         stamps: Stamps,
         now: Micros,
     ) {
-        let intent = match Intent::read(bytes) {
+        let mut intent = match Intent::read(bytes) {
             Ok(i) => i,
             Err(r) => {
                 let f = self.frame(&Answer::Unread {
@@ -1602,9 +1614,10 @@ impl Clock {
         if has_words(&value) {
             // The words go to the store and the intent is logged with their references (V1b); refused, it is logged
             // without its intent.
-            let r = match self.body_of(&intent) {
-                Ok(b) => {
-                    // Words a form writes into a field everyone reads are everyone's (#3712).
+            // A creator's edit with no body (#3699: an event's words) keeps them for everyone, as its author. Words a
+            // form writes into a field everyone reads are everyone's (#3712).
+            let author = match (self.body_of(&intent), intent.actor) {
+                (Ok(b), _) => {
                     let public =
                         match (form, &intent.target) {
                             (words::Form::Other, Some(Target::Node(node))) => self
@@ -1616,10 +1629,14 @@ impl Clock {
                         true => Audience::Everyone,
                         false => words::audience(form, b),
                     };
-                    words::keep(value, &self.text, audience, b, &mut kept).map_err(|r| r.name)
+                    Ok((b, audience))
                 }
-                Err(e) => Err(e),
+                (Err(_), Actor::Creator(c)) => Ok((c, Audience::Everyone)),
+                (Err(e), _) => Err(e),
             };
+            let r = author.and_then(|(b, seen_by)| {
+                words::keep(value, &self.text, seen_by, b, &mut kept).map_err(|r| r.name)
+            });
             value = match r {
                 Ok(v) => v,
                 Err(reason) => {
@@ -1627,6 +1644,19 @@ impl Clock {
                     return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
                 }
             };
+            // The edit is read from the intent as logged, so it holds the words' references, never their bytes.
+            if matches!(intent.actor, Actor::Creator(_)) {
+                let read = encode(&value)
+                    .map_err(|_| "intent.unread")
+                    .and_then(|b| Intent::read(&b).map_err(|r| r.name));
+                match read {
+                    Ok(i) => intent = i,
+                    Err(reason) => {
+                        let a = self.refusal(actor, sequence, reason);
+                        return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
+                    }
+                }
+            }
         }
         if expired(intent.expiry, now) {
             let a = self.refusal(actor, sequence, "intent.expired");
@@ -1836,10 +1866,22 @@ impl Clock {
             }),
             // An edit (G1b): checked off the clock thread, committed at a tick through `sim::edit`.
             (None, None, None, Ok(Kind::Edit)) => {
-                match (self.editing, edit::wire::edit_of(&intent, id)) {
-                    (true, Some(e)) => Ok(Taken::Edit(e)),
+                match (self.editing, edit::wire::asked(&intent.parameters)) {
                     (false, _) => Err("edit.not-the-creator"),
-                    (_, None) => Err("intent.not-an-edit"),
+                    (true, Ok(edit::wire::Asked::Undo)) => Ok(Taken::Undo(false)),
+                    (true, Ok(edit::wire::Asked::Redo)) => Ok(Taken::Undo(true)),
+                    (true, Ok(edit::wire::Asked::Batch(_, step))) => {
+                        match edit::wire::edit_of(&intent, id) {
+                            Some(e) => {
+                                if let Some((build, name)) = step {
+                                    self.steps.insert(id, sim::edit::undo::Step { build, name });
+                                }
+                                Ok(Taken::Edit(e))
+                            }
+                            None => Err("intent.not-an-edit"),
+                        }
+                    }
+                    (true, Err(_)) => Err("intent.not-an-edit"),
                 }
             }
             // A Soul puts its held thing down (E4, #3604): checked off the clock thread, committed at a tick.
@@ -1888,9 +1930,25 @@ impl Clock {
                 Actor::Soul(a) | Actor::Creator(a) => a,
                 Actor::World => self.zone,
             },
+            Taken::Undo(_) => match actor {
+                Actor::Soul(a) | Actor::Creator(a) => a,
+                Actor::World => self.zone,
+            },
             Taken::Engine(a) => a.body,
             Taken::SetDown(a) => a.body,
         };
+        // #3700: a private thing is its owner's alone, whatever reaches it: a bare sit or lie, a fixture's seat, an
+        // engine act (a lift's thing too) or a form. Checked once here, on the intent's target, before any dispatch.
+        // A walk up to it uses nothing, and an edit is the creator's.
+        let uses = match &taken {
+            Taken::Edit(_) => false,
+            Taken::Move(m) => !matches!(m.ask, replica::move_check::Ask::Walk { .. }),
+            _ => true,
+        };
+        if uses && self.private_to(&intent, actor, body) {
+            let a = self.refusal(actor, sequence, "object.private");
+            return self.answered(key, sequence, None, None, &a, (vec![reply], stamps));
+        }
         self.next_intent += 1;
         // The recorder's input (K12): the intent by id and verb; its words, were there any, by reference only.
         self.inputs.push(Input::Intent {
@@ -1950,6 +2008,31 @@ impl Clock {
                 }
                 Err(r) => self.end(id, |c| c.edit_refusal(actor, sequence, &r)),
             },
+            // Previewed on the history here (lookups only), judged and mapped off the clock, written at a tick.
+            Taken::Undo(redo) => {
+                let world = edit::World {
+                    creator: match actor {
+                        Actor::Creator(c) => c,
+                        _ => self.zone,
+                    },
+                    kinds: BTreeMap::new(),
+                };
+                match self
+                    .history
+                    .preview(redo, &self.replica, &world, actor, now)
+                {
+                    Ok(effects) => {
+                        if let Some(tx) = &self.edits
+                            && tx
+                                .send(CheckJob::Undo(Box::new((id, actor, redo, effects))))
+                                .is_ok()
+                        {
+                            self.outstanding += 1;
+                        }
+                    }
+                    Err(r) => self.end(id, |c| c.edit_refusal(actor, sequence, &r)),
+                }
+            }
             Taken::SetDown(a) => {
                 if let Some(tx) = &self.edits
                     && tx.send(CheckJob::SetDown(a)).is_ok()
@@ -2065,6 +2148,118 @@ impl Clock {
         }
     }
 
+    /// The tick's checked undos and redos (#3694): each still open is written through the history at this tick, whose
+    /// rule finds the very effects checked off the clock and judges G2's guard against the bodies as they stand
+    /// (lookups only); with walkers, through their prepared maps as an edit is. Else refused by name, nothing written.
+    fn undos(&mut self, now: Micros) {
+        let mut kept = Vec::new();
+        for (id, checked) in std::mem::take(&mut self.undone) {
+            let mut checked = checked;
+            let mut keep = |c: &mut Result<crate::undo::Checked, Refused>| {
+                if let Ok(crate::undo::Checked {
+                    maps: Some(maps), ..
+                }) = c
+                {
+                    kept.push(std::mem::take(&mut maps.surfaces));
+                }
+            };
+            let Some(o) = self.open.get(&id) else {
+                keep(&mut checked);
+                continue;
+            };
+            let (actor, sequence) = (o.actor, o.sequence);
+            if expired(o.expiry, now) {
+                keep(&mut checked);
+                self.end(id, |c| c.refusal(actor, sequence, "intent.expired"));
+                continue;
+            }
+            let done = checked.and_then(|k| {
+                let crate::undo::Checked {
+                    redo,
+                    effects,
+                    guard,
+                    classes,
+                    souls,
+                    maps,
+                } = k;
+                let sizes = self
+                    .bodies
+                    .as_ref()
+                    .map(Bodies::classes)
+                    .unwrap_or_default();
+                let bodies = match &self.bodies {
+                    Some(b) => buildsafe::judged(souls, &buildsafe::moving(b)),
+                    None => souls,
+                };
+                let world = edit::World {
+                    creator: match actor {
+                        Actor::Creator(c) => c,
+                        _ => self.zone,
+                    },
+                    kinds: BTreeMap::new(),
+                };
+                let (history, replica) = (&mut self.history, &mut self.replica);
+                let mut write = || {
+                    let mut rule = |live: &Replica, list: &[Effect]| {
+                        if !crate::undo::same(list, &effects) {
+                            return Err(Refused {
+                                op: None,
+                                name: "edit.stale",
+                                detail: "the world changed since the undo was checked".into(),
+                            });
+                        }
+                        // The claims as they stand now: one committed since the check still binds (#3727).
+                        edit::claims::judge_effects(live, list)?;
+                        crate::undo::judge(&guard, &classes, &sizes, &bodies)
+                    };
+                    let r = if redo {
+                        history.redo(replica, &world, actor, now, &mut rule)
+                    } else {
+                        history.undo(replica, &world, actor, now, &mut rule)
+                    };
+                    r.map(|r| sim::edit::Committed {
+                        part: r.part,
+                        names: BTreeMap::new(),
+                    })
+                };
+                match (&mut self.bodies, maps) {
+                    (Some(b), Some(maps)) => b.commit_map(maps, write),
+                    // Every edit a world with walkers commits reaches their town: none without its maps.
+                    (Some(_), None) => Err(Refused {
+                        op: None,
+                        name: "edit.map-unchecked",
+                        detail: "no walkers' map was prepared for the undo".into(),
+                    }),
+                    (None, _) => write(),
+                }
+            });
+            match done {
+                Ok(c) => {
+                    self.unsealed = true;
+                    if let Some(w) = &self.walkers {
+                        w.committed(Arc::clone(&c.part), self.replica.version(), None);
+                    }
+                    self.receipts.index(&c.part.effects);
+                    self.effects.extend(c.part.effects.iter().cloned());
+                    self.parts.push(c.part);
+                    self.end(id, |k| Answer::Receipt {
+                        actor,
+                        sequence,
+                        intent: id,
+                        entries: k.receipts.entries(id).to_vec(),
+                        names: BTreeMap::new(),
+                    });
+                }
+                Err(r) => self.end(id, |c| c.edit_refusal(actor, sequence, &r)),
+            }
+        }
+        if !kept.is_empty()
+            && let Some(tx) = &self.edits
+        {
+            let _ = tx.send(CheckJob::Release(kept));
+        }
+    }
+
     /// The tick's checked edits (G1b): each still open is committed through `sim::edit` on the live replica, as
     /// generic effects under its intent, and answered with a receipt carrying the map from names to ids; or refused
     /// whole, naming the failing operation. Placed nodes take their ids from the world's lineage, on the counter its
@@ -2140,6 +2335,11 @@ impl Clock {
                     .as_ref()
                     .map(|b| buildsafe::judged(souls.clone(), &buildsafe::moving(b)));
                 let current_classes = self.bodies.as_ref().map(Bodies::classes);
+                // What the edit overwrites, kept for its undo (G4, #3694): read before it is written.
+                let before = sim::edit::undo::Before::of(
+                    self.replica.tree(),
+                    c.checked.reads.iter().map(|(_, id)| *id),
+                );
                 let mut commit = || {
                     sim::edit::commit_classes(
                         &mut self.replica,
@@ -2163,10 +2363,12 @@ impl Clock {
                     }),
                     (None, _) => commit().map(|c| (c, None)),
                 };
-                done.map(|(c, mine)| (c, mine, places))
+                done.map(|(c, mine)| (c, mine, places, before))
             });
+            let step = self.steps.remove(&id);
             match committed {
-                Ok((c, mine, places)) => {
+                Ok((c, mine, places, before)) => {
+                    self.history.record(&before, &self.replica, &c.part, step);
                     if let Some(b) = &mut self.bodies
                         && let Err(e) = places.install(&mut b.slots, &c.names)
                     {
@@ -2373,6 +2575,36 @@ impl Clock {
     }
 
     /// The body an intent drives: with joins (C3), a Soul's born body, else as [`body_of`] says.
+    /// Whether the intent's target, or a lift's thing, is private to someone other than its Soul (#3700): a Soul
+    /// actor is its own Soul; a body driven by the creator counts as the Soul it is linked to by `souls:body-of`.
+    fn private_to(&self, intent: &Intent, actor: Actor, body: Id) -> bool {
+        let tree = self.replica.tree();
+        let soul = match actor {
+            Actor::Soul(s) => s,
+            _ => tree
+                .links_at(body)
+                .iter()
+                .find(|e| replica::world_model::plain(tree.ty(e).as_str()) == "souls:body-of")
+                .map_or(body, |e| e.other),
+        };
+        let target = match &intent.target {
+            Some(Target::Node(n)) => Some(*n),
+            _ => None,
+        };
+        let thing = (intent.verb.as_str() == "carry:lift")
+            .then(|| {
+                intent
+                    .parameters
+                    .get(&1)
+                    .and_then(|v| replica::effects::read_id(v).ok())
+            })
+            .flatten();
+        [target, thing]
+            .into_iter()
+            .flatten()
+            .any(|n| replica::who_may::private_to(tree, n, soul).is_some())
+    }
+
     fn body_of(&self, intent: &Intent) -> Result<Id, &'static str> {
         match (intent.actor, &self.life) {
             (Actor::Soul(s), Some(l)) => l.life.body_of(s).ok_or("intent.no-body"),
@@ -3626,6 +3858,22 @@ impl Clock {
                 let ends = Ends::unlinking(self.replica.tree(), changes);
                 self.unlinked.extend(ends);
             }
+            // #3700: the checker read the private marks above the thing outside its read set; a mark committed since
+            // still binds, so the candidate this commit would take is asked again on the live tree.
+            let soul = match actor {
+                Actor::Soul(s) => s,
+                _ => act.body,
+            };
+            let taking = checks.candidates.iter().find(|c| {
+                sim::commit::unchanged(&self.replica, &c.reads)
+                    && matches!(c.verdict, sim::commit::Verdict::Yes)
+            });
+            if taking.is_some_and(|c| {
+                replica::who_may::private_to(self.replica.tree(), c.node, soul).is_some()
+            }) {
+                self.end(id, |c| c.refusal(actor, sequence, "object.private"));
+                continue;
+            }
             match commit(&mut self.replica, &checks, now) {
                 Outcome::Applied { part, .. } => {
                     self.unsealed = true;
@@ -3656,6 +3904,7 @@ impl Clock {
         }
         // 4b. Checked edits (G1b): committed through `sim::edit`, or refused whole.
         self.edits(now);
+        self.undos(now);
         self.wears(now);
         // 4c. Checked set-downs (#3604): committed with lookups only, or refused by name.
         self.set_downs(now);
@@ -4471,6 +4720,7 @@ pub fn start<S: Storage + 'static>(
         kept,
         (cfg.lineage, zone, cfg.epoch),
         Arc::clone(&cfg.public_names),
+        Arc::clone(&text),
         std::mem::take(&mut cfg.closed),
     )
     .map_err(io)?;
@@ -4535,6 +4785,9 @@ pub fn start<S: Storage + 'static>(
         editing,
         set_down: Vec::new(),
         edited: Vec::new(),
+        history: sim::edit::undo::History::default(),
+        steps: BTreeMap::new(),
+        undone: Vec::new(),
         walkers,
         forms: {
             let mut acts = Acts::new(kinds, library, header, forms_scope);
@@ -4686,6 +4939,10 @@ pub fn start<S: Storage + 'static>(
                     Event::SetDown(k) => {
                         c.outstanding = c.outstanding.saturating_sub(1);
                         c.set_down.push(*k);
+                    }
+                    Event::Undone(k) => {
+                        c.outstanding = c.outstanding.saturating_sub(1);
+                        c.undone.push(*k);
                     }
                     Event::Directory(d) => {
                         let (d, reply) = *d;
@@ -4910,6 +5167,47 @@ fn edit_checker(
                 };
                 let (id, e, reserved) = match job {
                     CheckJob::Edit(id, e, reserved) => (id, e, reserved),
+                    // An undo or a redo (#3694): the creator, G2's rule and the maps on its previewed part.
+                    CheckJob::Undo(job) => {
+                        let (id, actor, redo, effects) = *job;
+                        let snapshot = walkers.current();
+                        let needed = snapshot
+                            .map
+                            .as_ref()
+                            .map_or(edited, |m| edited.max(m.version));
+                        let copy = publisher.wait_for(needed, Duration::from_secs(1));
+                        let who = match (&world, &creator) {
+                            (None, _) => None,
+                            (Some(w), c) => c.as_ref().map_or(Some(w.creator), |c| c.get()),
+                        };
+                        let checked = if copy.version() < needed {
+                            Err(Refused {
+                                op: None,
+                                name: "edit.stale",
+                                detail: "the published copy has not reached the map basis".into(),
+                            })
+                        } else {
+                            crate::undo::check(
+                                crate::undo::Ask {
+                                    actor,
+                                    creator: who,
+                                    redo,
+                                    effects,
+                                    copy: &copy,
+                                    kinds: &kinds,
+                                    moving: &snapshot.bodies,
+                                    sizes: &snapshot.classes,
+                                    source: snapshot.map.as_deref(),
+                                    movers: &snapshot.movers,
+                                },
+                                &mut town,
+                            )
+                        };
+                        if events.send(Event::Undone(Box::new((id, checked)))).is_err() {
+                            break;
+                        }
+                        continue;
+                    }
                     // A Soul's set-down (#3604): E4's plan, part and G2's rule on the town, off the clock; and, for a
                     // thing walkers go round, the walkers' maps from the same basis an edit's are prepared from.
                     CheckJob::SetDown(a) => {
@@ -5915,6 +6213,84 @@ mod tests {
             replica::ids::sha256(&a),
             replica::ids::sha256(&b),
             "the same edits at the same ticks write the same log"
+        );
+    }
+
+    /// #3699: a creator's edit may carry words (an event's): the world keeps them in its text store for everyone and
+    /// logs their reference, so the edit is taken and no byte of the words reaches the log.
+    #[test]
+    fn a_creators_edit_keeps_its_words_and_logs_their_reference() {
+        use replica::edit::wire::{VERB, parameters};
+        use replica::edit::{Op, Ref, Spot};
+        use replica::pose::{Quat, Support, Vec3};
+        let store = Held::new(Vec::new());
+        let w = toggles::World::build(1, 0, 0);
+        let tree = w.replica.tree();
+        let room = tree
+            .children(tree.root())
+            .and_then(|c| c.first())
+            .and_then(|h| tree.node(*h))
+            .map(|n| n.id())
+            .expect("a room");
+        let kinds = toggles::kinds();
+        let item = Name::new(kinds.keys().find(|k| k.starts_with("souls:item@")).unwrap()).unwrap();
+        let creator = Id::new(Scope([0xc2; 16]), 1).unwrap();
+        let mut cfg = Config::new(LINEAGE, 1);
+        cfg.lockstep = true;
+        cfg.measures = false;
+        cfg.edits = Some(edit::World { creator, kinds });
+        let world = start(w.replica, toggles::rules(), store.clone(), cfg).unwrap();
+        const SAID: &[u8] = b"market-on-the-green at nine";
+        let place = Op::Place {
+            name: 1,
+            kind: item,
+            parent: Ref::Node(room),
+            at: Spot {
+                slot: None,
+                position: Vec3::new(1_000_000, 0, 0),
+                orientation: Quat::IDENTITY,
+                support: Support::None,
+            },
+            audience: Audience::Everyone,
+            fields: BTreeMap::from([(
+                30,
+                Value::Map(BTreeMap::from([(
+                    words::WORDS,
+                    Value::Bytes(SAID.to_vec()),
+                )])),
+            )]),
+        };
+        let i = Intent {
+            actor: Actor::Creator(creator),
+            verb: Name::new(VERB).unwrap(),
+            target: None,
+            parameters: parameters(&[place]),
+            sequence: 1,
+            basis: Version {
+                lineage: LINEAGE,
+                zone: Id::new(LINEAGE, 0).unwrap(),
+                epoch: 1,
+                sequence: 0,
+            }
+            .to_value(),
+            expiry: i64::MAX,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+            reflex: false,
+        };
+        let rx = send(&world, &i);
+        let (done, ran) = channel();
+        world.events.send(Event::RunTo { tick: 2, done }).unwrap();
+        ran.recv().unwrap();
+        let f = answer(&rx);
+        world.stop();
+        assert_eq!(read(&f).0, 1, "taken: {:?}", decode(&f).unwrap().value);
+        let log = store.bytes();
+        assert!(
+            !log.windows(SAID.len()).any(|w| w == SAID),
+            "no byte of the words in the log"
         );
     }
 

@@ -53,6 +53,7 @@ pub(crate) fn start(
     mut kept: Records,
     (lineage, zone, epoch): (Scope, Id, u64),
     public_names: Arc<PublicNames>,
+    text: Arc<sim::text::Store>,
     closed: Closed,
 ) -> std::io::Result<Sender<ToSync>> {
     let (tx, rx) = channel();
@@ -125,6 +126,8 @@ pub(crate) fn start(
                     let mut a = sync::answer(&mut src, &[place], &ask, now);
                     a.insert(wire::ASK, n);
                     names::attach(&mut a, &public_names);
+                    // #3703: the public words of the text references these records hold.
+                    names::attach_words(&mut a, &|r| text.read(r, &[]).ok());
                     if let Ok(frame) = encode(&Value::Map(a)) {
                         let _ = reply.send(frame);
                     }

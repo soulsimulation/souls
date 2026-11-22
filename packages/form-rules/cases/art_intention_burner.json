@@ -1,0 +1,350 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:intention_burner (from core-intention-burner@1, #3716). Words are written on the one paper, may be erased while unburned, and are released by lighting it; the spent paper takes no more words and the fire is put out after.",
+  "cases": [
+    {
+      "name": "intention_write_blank",
+      "act": {
+        "this": "t1",
+        "form": "write",
+        "args": {
+          "words": "w_wish"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:intention_burner"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "intention_write_over_words_names_erase",
+      "act": {
+        "this": "t1",
+        "form": "write",
+        "args": {
+          "words": "w_wish"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:intention_burner",
+            "fields": {
+              "written": true
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2,
+        "detail": {
+          "field": "written",
+          "found": true,
+          "wanted": {
+            "is": false
+          }
+        },
+        "fix": {
+          "form": "erase"
+        }
+      }
+    },
+    {
+      "name": "intention_write_spent",
+      "act": {
+        "this": "t1",
+        "form": "write",
+        "args": {
+          "words": "w_wish"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:intention_burner",
+            "fields": {
+              "spent": true
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "spent",
+          "found": true,
+          "wanted": {
+            "is": false
+          }
+        }
+      }
+    },
+    {
+      "name": "intention_light_blank_names_write",
+      "act": {
+        "this": "t1",
+        "form": "light"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:intention_burner"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2,
+        "detail": {
+          "field": "written",
+          "found": false,
+          "wanted": {
+            "is": true
+          }
+        },
+        "fix": {
+          "form": "write"
+        }
+      }
+    },
+    {
+      "name": "intention_light_written",
+      "act": {
+        "this": "t1",
+        "form": "light"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:intention_burner",
+            "fields": {
+              "written": true
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "intention_erase_written",
+      "act": {
+        "this": "t1",
+        "form": "erase"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:intention_burner",
+            "fields": {
+              "written": true
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "intention_light_while_burning",
+      "act": {
+        "this": "t1",
+        "form": "light"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:intention_burner",
+            "fields": {
+              "on": true,
+              "spent": true
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "spent",
+          "found": true,
+          "wanted": {
+            "is": false
+          }
+        }
+      }
+    },
+    {
+      "name": "intention_put_out_burning",
+      "act": {
+        "this": "t1",
+        "form": "put_out"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:intention_burner",
+            "fields": {
+              "on": true,
+              "spent": true
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "intention_put_out_cold_names_light",
+      "act": {
+        "this": "t1",
+        "form": "put_out"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:intention_burner"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "on",
+          "found": false,
+          "wanted": {
+            "is": true
+          }
+        },
+        "fix": {
+          "form": "light"
+        }
+      }
+    }
+  ]
+}

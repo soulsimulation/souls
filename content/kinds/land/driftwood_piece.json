@@ -1,0 +1,124 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:driftwood_piece",
+  "owner": "thing",
+  "state": {},
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        32,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      288,
+      64,
+      60
+    ]
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "take"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": "this",
+          "into": "actor_hand",
+          "event": "taken"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "one_hand"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:driftwood_piece",
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            32,
+            0
+          ],
+          "r": 30,
+          "r2": 24,
+          "h": 280,
+          "segments": 7,
+          "roll": 90000,
+          "tint": "wood"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -142,
+            32,
+            0
+          ],
+          "r": 24,
+          "h": 4,
+          "segments": 7,
+          "roll": 90000,
+          "tint": "end"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            142,
+            32,
+            0
+          ],
+          "r": 30,
+          "h": 4,
+          "segments": 7,
+          "roll": 90000,
+          "tint": "end"
+        }
+      ],
+      "palette": {
+        "wood": "#8f7d64",
+        "end": "#b6a58b"
+      },
+      "tags": [
+        "land-art",
+        "item"
+      ]
+    }
+  },
+  "text": {
+    "card": "A short piece of driftwood to carry and set down on clear ground.",
+    "art": "art",
+    "driftwood": "driftwood",
+    "wood_piece": "wood piece"
+  },
+  "card": {
+    "text": "card",
+    "category": "art",
+    "synonyms": [
+      "driftwood",
+      "wood_piece"
+    ]
+  }
+}

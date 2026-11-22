@@ -94,6 +94,7 @@ impl W {
             actor: Actor::Creator(self.world.creator),
             planned: self.live.version(),
             ops,
+            claim: None,
         };
         let copy = self.live.frozen();
         let checked = check(edit, &copy, &self.world)?;
@@ -245,6 +246,7 @@ fn define_and_place_in_one_batch_in_that_order() {
         actor: Actor::Creator(w.world.creator),
         planned: w.live.version(),
         ops: vec![define_op(1, w.root, BIRDBATH)],
+        claim: None,
     };
     let name = match &check(edit, &copy, &w.world).expect("checked").edit.ops[0] {
         Op::Place { fields, .. } => defined::named(fields).expect("named").to_owned(),

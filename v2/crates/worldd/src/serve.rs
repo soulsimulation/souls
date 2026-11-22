@@ -3643,6 +3643,7 @@ mod tests {
                     audience: Audience::Everyone,
                     fields: BTreeMap::new(),
                 }],
+                claim: None,
             };
             (pinned.is_some(), check(edit, &live, &world).map(|_| ()))
         };
