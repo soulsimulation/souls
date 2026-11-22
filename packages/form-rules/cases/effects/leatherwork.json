@@ -897,14 +897,12 @@
         },
         "finish1.0": {
           "kind": "eden:open_leather_pouch",
-          "fields": {},
           "slots": {
             "inside": []
           }
         },
         "finish2.0": {
-          "kind": "eden:open_leather_pouch",
-          "fields": {}
+          "kind": "eden:open_leather_pouch"
         },
         "tomato": {
           "kind": "eden:tomato"
