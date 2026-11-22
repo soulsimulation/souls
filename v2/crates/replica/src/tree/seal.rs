@@ -35,6 +35,9 @@ use std::collections::{BTreeMap, BTreeSet};
 pub struct Sealed {
     /// `(hash, record)` of each node whose hash was worked out again, new or not.
     pub nodes: Vec<(Hash, Vec<u8>)>,
+    /// The id of each of `nodes`, in the same order: what lets a keeper of records let a node's old record go once a
+    /// seal gives it a new one (`sync::Records`).
+    pub ids: Vec<Id>,
     /// `(audience, state hash, record)`, the public audience first.
     pub audiences: Vec<(Audience, Hash, Vec<u8>)>,
 }
@@ -172,18 +175,24 @@ impl Tree {
     }
 
     /// The node's hash, worked out again (with its marked children first) if it is marked.
-    fn seal_node(&mut self, slot: u32, out: &mut Vec<(Hash, Vec<u8>)>) -> R<Hash> {
+    fn seal_node(
+        &mut self,
+        slot: u32,
+        out: &mut Vec<(Hash, Vec<u8>)>,
+        ids: &mut Vec<Id>,
+    ) -> R<Hash> {
         if let Some(h) = self.nodes[slot as usize].hash {
             return Ok(h);
         }
         let mut hashes = Vec::new();
         for c in self.covered(slot) {
-            hashes.push(self.seal_node(c, out)?.to_value());
+            hashes.push(self.seal_node(c, out, ids)?.to_value());
         }
         let (h, bytes) = self.node_record(slot, hashes)?;
         let rec = &mut self.nodes[slot as usize];
         (rec.hash, rec.state) = (Some(h), Some(h));
         out.push((h, bytes));
+        ids.push(rec.id);
         Ok(h)
     }
 
@@ -329,19 +338,23 @@ impl Tree {
     /// Hashes every marked node and lists each audience's record: on the clock thread, between ticks.
     pub fn seal(&mut self) -> R<Sealed> {
         let scan = self.scan();
-        let mut nodes = Vec::new();
+        let (mut nodes, mut ids) = (Vec::new(), Vec::new());
         let mut tops = BTreeMap::new();
         for (a, slots) in &scan.tops {
             let mut hashes = Vec::with_capacity(slots.len());
             for slot in slots {
-                hashes.push(self.seal_node(*slot, &mut nodes)?.to_value());
+                hashes.push(self.seal_node(*slot, &mut nodes, &mut ids)?.to_value());
             }
             tops.insert(*a, hashes);
         }
         let audiences = self.audiences(scan, tops)?;
         let hashes = audiences.iter().map(|(a, h, _)| (*a, *h)).collect();
         self.kept = Some((self.changes, hashes));
-        Ok(Sealed { nodes, audiences })
+        Ok(Sealed {
+            nodes,
+            ids,
+            audiences,
+        })
     }
 
     /// Each audience's state hash, the public one first: the hashes [`Tree::seal`] gives, worked out again only for
@@ -394,26 +407,36 @@ impl Tree {
     /// [`Tree::unseal`] reads a tree back from, without the records an earlier seal already gave.
     pub fn seal_whole(&self) -> R<Sealed> {
         let scan = self.scan();
-        let mut nodes = Vec::new();
+        let (mut nodes, mut ids) = (Vec::new(), Vec::new());
         let mut tops = BTreeMap::new();
         for (a, slots) in &scan.tops {
             let mut hashes = Vec::with_capacity(slots.len());
             for slot in slots {
-                hashes.push(self.whole_record(*slot, &mut nodes)?.to_value());
+                hashes.push(self.whole_record(*slot, &mut nodes, &mut ids)?.to_value());
             }
             tops.insert(*a, hashes);
         }
         let audiences = self.audiences(scan, tops)?;
-        Ok(Sealed { nodes, audiences })
+        Ok(Sealed {
+            nodes,
+            ids,
+            audiences,
+        })
     }
 
-    fn whole_record(&self, slot: u32, out: &mut Vec<(Hash, Vec<u8>)>) -> R<Hash> {
+    fn whole_record(
+        &self,
+        slot: u32,
+        out: &mut Vec<(Hash, Vec<u8>)>,
+        ids: &mut Vec<Id>,
+    ) -> R<Hash> {
         let mut hashes = Vec::new();
         for c in self.covered(slot) {
-            hashes.push(self.whole_record(c, out)?.to_value());
+            hashes.push(self.whole_record(c, out, ids)?.to_value());
         }
         let (h, bytes) = self.node_record(slot, hashes)?;
         out.push((h, bytes));
+        ids.push(self.nodes[slot as usize].id);
         Ok(h)
     }
 
