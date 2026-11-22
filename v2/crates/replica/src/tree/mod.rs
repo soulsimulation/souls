@@ -34,7 +34,7 @@ use crate::effects::{
     TimerState, TransferRec,
 };
 use crate::encode::{Name, Value};
-use crate::ids::{Hash, Id, Scope};
+use crate::ids::{Hash, Id, Scope, Sha256};
 use crate::pose::{Frame, Owner, Pose, Quat, Support, Vec3};
 use crate::time::{Micros, TimeEffect};
 use crate::world_model::{Audience, DEPTH_LIMIT, End};
@@ -312,10 +312,9 @@ pub struct Tree {
     kept: Option<(u64, Vec<(Audience, Hash)>)>,
     /// Nodes the state hash has hashed again since the tree was built (a measure; `seal`).
     rehashed: u64,
-    /// The state hash's SHA-256 of a node's record up to its children, and its children's hashes after it (`seal`,
-    /// #1960), by slot, for nodes whose record is large: kept while only what is below the node changes, let go when
-    /// the node itself does. Lookup only.
-    heads: HashMap<u32, seal::Head>,
+    /// The state hash's SHA-256 of a node's record up to its children (`seal`, #1960), by slot, for nodes whose
+    /// record is large: kept while only what is below the node changes, let go when the node itself does.
+    heads: HashMap<u32, Sha256>,
 }
 
 /// A read counter. A load and a store, not an atomic add: one thread reads a live tree. A frozen copy (K8, #2671),

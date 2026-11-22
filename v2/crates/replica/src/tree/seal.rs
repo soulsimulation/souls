@@ -25,9 +25,7 @@
 //!   rest) and then its children's hashes. The state hash keeps SHA-256 past the head of a node whose head is
 //!   [`HEAD_KEPT`] bytes or more, and while only nodes below it change takes just its children's hashes again: with
 //!   Souls walking on Eden's ground (megabytes of fields), a tick no longer hashes the ground's fields. A change to
-//!   the node itself lets its head go; attaching or taking out a child keeps it. Such a node also keeps its
-//!   children's hashes as last taken and SHA-256's state every [`KIDS_STRIDE`] children ([`Head`]), so a tick takes
-//!   again only the children from the first one whose hash changed: the bodies, born last, at the list's end.
+//!   the node itself lets its head go; attaching or taking out a child keeps it.
 
 use super::{Away, Life, LinkRec, Moved, NONE, NodeRec, Place, R, Tree, Where, refuse, show};
 use crate::effects::{TimerState, read_id};
@@ -41,55 +39,6 @@ use std::collections::{BTreeMap, BTreeSet};
 /// A node's head (its record up to its children) of this many bytes or more is kept between state hashes
 /// ([`Tree::head`]): below it, encoding the record again costs less than keeping a SHA-256 state per node.
 const HEAD_KEPT: usize = 4096;
-/// A kept head marks SHA-256's state at every this many children ([`Head`]).
-const KIDS_STRIDE: usize = 16;
-
-/// A kept head ([`Tree::head`]) and, after it, its node's children's hashes as last taken, with SHA-256's state at
-/// every [`KIDS_STRIDE`]th: a tick that changes children near the end of the list (Souls born last, walking) takes
-/// only the children from the last mark before the first changed one again. The children are compared by value, so
-/// however they changed (a child moved, attached, taken out), what is taken is the record's bytes.
-pub(super) struct Head {
-    /// SHA-256 past the head.
-    sha: Sha256,
-    /// The children's hashes last taken, in order.
-    kids: Vec<Hash>,
-    /// `marks[k]`: SHA-256 past the head, the children's array's own head and the first `k * KIDS_STRIDE` children.
-    marks: Vec<Sha256>,
-}
-
-impl Head {
-    /// The node's hash with these children's hashes (those its record covers, in order), keeping them and the marks.
-    fn take(&mut self, hashes: Vec<Hash>) -> R<Hash> {
-        let same = hashes.len() == self.kids.len() && !self.marks.is_empty();
-        if !same {
-            // Another count is another array head: every child is taken again.
-            let mut sha = self.sha.clone();
-            sha.update(&crate::encode::head(4, hashes.len() as u64));
-            self.marks = vec![sha];
-        }
-        let first = if same {
-            hashes
-                .iter()
-                .zip(&self.kids)
-                .position(|(a, b)| a != b)
-                .unwrap_or(hashes.len())
-        } else {
-            0
-        };
-        let k = (first / KIDS_STRIDE).min(self.marks.len() - 1);
-        PROF.with(|p| { let mut p = p.borrow_mut(); p[7] += first as u64; p[8] += (hashes.len() - k * KIDS_STRIDE) as u64; });
-        self.marks.truncate(k + 1);
-        let mut sha = self.marks[k].clone();
-        for (j, h) in hashes.iter().enumerate().skip(k * KIDS_STRIDE) {
-            sha.update(&bytes_of(&h.to_value())?);
-            if (j + 1) % KIDS_STRIDE == 0 {
-                self.marks.push(sha.clone());
-            }
-        }
-        self.kids = hashes;
-        Ok(Hash::of_taken(sha))
-    }
-}
 
 /// What a seal gives: the records of nodes hashed again, and each audience's record, with their hashes.
 pub struct Sealed {
@@ -159,8 +108,6 @@ fn int(n: i64) -> Value {
         Err(_) => Value::Nint(n.unsigned_abs() - 1),
     }
 }
-
-thread_local! { static PROF: std::cell::RefCell<[u64; 10]> = const { std::cell::RefCell::new([0; 10]) }; }
 
 impl Tree {
     /// A node's record without its children (field 10), its parent given (a flight's root names the node it left).
@@ -267,31 +214,18 @@ impl Tree {
         }
         let mut hashes = Vec::new();
         for c in self.covered(slot) {
-            hashes.push(self.state_node(c)?);
+            hashes.push(self.state_node(c)?.to_value());
         }
-        if !self.heads.contains_key(&slot) {
-            let mut sha = self.head(slot)?;
-            if !self.heads.contains_key(&slot) {
-                let children = Value::Array(hashes.into_iter().map(Hash::to_value).collect());
-                sha.update(&bytes_of(&children)?);
-                return Ok(self.stated(slot, Hash::of_taken(sha)));
-            }
-        }
-        let tk = std::time::Instant::now();
-        let nk = hashes.len() as u64;
-        let h = match self.heads.get_mut(&slot) {
-            Some(head) => head.take(hashes)?,
-            None => unreachable!("a head kept above"),
+        let mut sha = match self.heads.get(&slot) {
+            Some(head) => head.clone(),
+            None => self.head(slot)?,
         };
-        PROF.with(|p| { let mut p = p.borrow_mut(); p[5] += 1; p[6] += nk; p[9] += tk.elapsed().as_micros() as u64; });
-        Ok(self.stated(slot, h))
-    }
-
-    /// The node's hash for the state hash, now worked out.
-    fn stated(&mut self, slot: u32, h: Hash) -> Hash {
+        let children = bytes_of(&Value::Array(hashes))?;
+        sha.update(&children);
+        let h = Hash::of_taken(sha);
         self.nodes[slot as usize].state = Some(h);
         self.rehashed += 1;
-        h
+        Ok(h)
     }
 
     /// A node's record up to its children, field 10's key included, taken by SHA-256 after its audience's label:
@@ -310,14 +244,7 @@ impl Tree {
         let mut sha = Hash::taking(purpose(rec.audience));
         sha.update(&bytes);
         if bytes.len() >= HEAD_KEPT {
-            self.heads.insert(
-                slot,
-                Head {
-                    sha: sha.clone(),
-                    kids: Vec::new(),
-                    marks: Vec::new(),
-                },
-            );
+            self.heads.insert(slot, sha.clone());
         }
         Ok(sha)
     }
@@ -483,10 +410,7 @@ impl Tree {
         {
             return Ok(h.clone());
         }
-        let t0 = std::time::Instant::now();
-        let r0 = self.rehashed;
         let scan = self.scan();
-        let t1 = std::time::Instant::now();
         let mut tops = BTreeMap::new();
         for (a, slots) in &scan.tops {
             let mut hashes = Vec::with_capacity(slots.len());
@@ -495,25 +419,11 @@ impl Tree {
             }
             tops.insert(*a, hashes);
         }
-        let t2 = std::time::Instant::now();
         let hashes: Vec<(Audience, Hash)> = self
             .audiences(scan, tops)?
             .into_iter()
             .map(|(a, h, _)| (a, h))
             .collect();
-        let t3 = std::time::Instant::now();
-        PROF.with(|p| {
-            let mut p = p.borrow_mut();
-            p[0] += 1;
-            p[1] += (t1 - t0).as_micros() as u64;
-            p[2] += (t2 - t1).as_micros() as u64;
-            p[3] += (t3 - t2).as_micros() as u64;
-            p[4] += self.rehashed - r0;
-            if p[0] % 400 == 0 {
-                let n = p[0];
-                eprintln!("PROF state_hashes n={n} scan_us={} nodes_us={} audiences_us={} rehashed={} | take n={} kids={} first={} taken={} take_us={}", p[1] / n, p[2] / n, p[3] / n, p[4] / n, p[5], p[6] / p[5].max(1), p[7] / p[5].max(1), p[8] / p[5].max(1), p[9] / p[5].max(1));
-            }
-        });
         self.kept = Some((self.changes, hashes.clone()));
         Ok(hashes)
     }

@@ -465,15 +465,15 @@ impl Gen {
 }
 
 /// #1960: with large fields, a node's record up to its children is kept between ticks (`Tree::head`) and only its
-/// children's hashes are taken again while nodes below it change, from the mark before the first that changed (the
-/// root, with a large field, has dozens of children). Over 3,000 ticks of generated parts, refused parts
-/// that set and undo a large field among them, the state hash so worked out equals the whole tree's, hashed with no
-/// mark and nothing kept, at every tick, and K5's seal's at every 100th.
+/// children's hashes are taken again while nodes below it change (the root, with a large field, has dozens of
+/// children attached and taken out). Over 3,000 ticks of generated parts, refused parts that set and undo a large
+/// field among them, the state hash so worked out equals the whole tree's, hashed with no mark and nothing kept, at
+/// every tick, and K5's seal's at every 100th.
 #[test]
 fn a_kept_head_gives_the_whole_trees_state_hash_on_every_tick() {
     let mut g = Gen::new(1960);
     g.big = true;
-    // The root's own large field: its head is kept, and its many children are taken from their marks.
+    // The root's own large field: its head is kept while its many children change.
     let root = g.nodes[0];
     let mut set = g.set(root);
     while !matches!(&set, Change::Set { to: Value::Bytes(b), .. } if b.len() >= 4_096) {
