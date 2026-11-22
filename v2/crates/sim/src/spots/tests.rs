@@ -192,9 +192,15 @@ fn a_walker_sent_to_a_point_in_a_pocket_is_granted_the_nearest_place_beside_it()
 }
 
 /// Standable everywhere, but an island within 8 m of the origin no walk from outside reaches (a floor with no way up),
-/// counting the walks that find no way: each would be a route search over the asker's whole part.
+/// counting the walks that find no way: each would be a route search over the asker's whole part. With `knows`, it
+/// tells a place cut off without a walk ([`Ground::may_reach`], as the town's map parts do).
 struct Island {
+    knows: bool,
     misses: usize,
+}
+
+fn on_island(p: Vec3) -> bool {
+    flat(p, Vec3::ZERO) < 8_000_000
 }
 
 impl Ground for Island {
@@ -205,45 +211,52 @@ impl Ground for Island {
         false
     }
     fn walk(&mut self, _: Id, a: Vec3, _: Id, b: Vec3) -> Option<i64> {
-        let on = |p: Vec3| flat(p, Vec3::ZERO) < 8_000_000;
-        let w = (on(a) == on(b)).then(|| flat(a, b));
+        let w = (on_island(a) == on_island(b)).then(|| flat(a, b));
         self.misses += usize::from(w.is_none());
         w
     }
+    fn may_reach(&self, _: Id, a: Vec3, _: Id, b: Vec3) -> bool {
+        !self.knows || on_island(a) == on_island(b)
+    }
 }
 
-/// #4072's review: a standable target the asker's walk does not reach costs a bounded number of walks, not one per
-/// place round it (about 570 within reach, 345 in a table), and answers as before: the point itself for a form's
-/// walk, `spot-none-free` for a plain one.
+/// #4072's review: a standable target the asker's walk does not reach costs a bounded number of failed walks, not one
+/// per place round it (about 570 within reach, 345 in a table): none past the first when the ground can tell, at most
+/// [`MISSES_MOST`] per pass when it cannot. It answers as before: the point itself for a form's walk,
+/// `spot-none-free` for a plain one.
 #[test]
 fn a_target_cut_off_from_the_asker_answers_after_a_bounded_number_of_walks() {
     let from = Vec3::new(20_000_000, 0, 0);
     let t = target(0);
-    let mut g = Island { misses: 0 };
-    assert_eq!(
-        within(&mut g, t, REACH, Some((node(), from))),
-        Some(t.point())
-    );
-    assert!(
-        g.misses <= MISSES_MOST + 1,
-        "within: {} walks found no way",
-        g.misses
-    );
-    let mut g = Island { misses: 0 };
     let id = |n| Id::new(replica::ids::Scope([0x67; 16]), n).unwrap();
-    let ask = Ask {
-        who: id(1),
-        order: id(2),
-        node: node(),
-        from,
-        target: t,
-    };
-    let mut spots = Spots::new();
-    spots.write(&mut g, &[ask], 0).unwrap();
-    assert_eq!(spots.of(ask.who, &t), Some(Err("spot-none-free")));
-    assert!(
-        g.misses <= 2 * MISSES_MOST + 1,
-        "a grant: {} walks found no way",
-        g.misses
-    );
+    for (knows, most_within, most_grant) in
+        [(false, MISSES_MOST + 1, 2 * MISSES_MOST + 1), (true, 1, 1)]
+    {
+        let mut g = Island { knows, misses: 0 };
+        assert_eq!(
+            within(&mut g, t, REACH, Some((node(), from))),
+            Some(t.point())
+        );
+        assert!(
+            g.misses <= most_within,
+            "within ({knows}): {} walks found no way",
+            g.misses
+        );
+        let mut g = Island { knows, misses: 0 };
+        let ask = Ask {
+            who: id(1),
+            order: id(2),
+            node: node(),
+            from,
+            target: t,
+        };
+        let mut spots = Spots::new();
+        spots.write(&mut g, &[ask], 0).unwrap();
+        assert_eq!(spots.of(ask.who, &t), Some(Err("spot-none-free")));
+        assert!(
+            g.misses <= most_grant,
+            "a grant ({knows}): {} walks found no way",
+            g.misses
+        );
+    }
 }

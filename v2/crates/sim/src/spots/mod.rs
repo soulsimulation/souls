@@ -48,8 +48,9 @@ pub const CLEAR: i64 = 700_000;
 pub const WEIGHT: i64 = 3;
 /// A place is joined to a clear target when walked to from it within this many times their straight gap, plus a pitch.
 pub const DETOUR: i64 = 2;
-/// A search for a place to stand gives up after this many places the asker's walk does not reach (#4072): a target
-/// cut off from the asker (a floor with no way up) costs at most this many walks, never one per place round it.
+/// A search for a place to stand gives up after this many route searches that find no way (#4072). A place the ground
+/// already knows no walk reaches ([`Ground::may_reach`], a lookup) is skipped without one and is not counted, so a
+/// target cut off from the asker (a floor with no way up) costs lookups, and at most this many failed searches.
 pub const MISSES_MOST: usize = 64;
 
 /// The ground as the spot tables read it. All µm.
@@ -61,6 +62,11 @@ pub trait Ground {
     fn passage(&self, node: Id, p: Vec3) -> bool;
     /// The walking distance from `a` on node `an` to `b` on node `bn`, never through a wall; `None` with no way there.
     fn walk(&mut self, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64>;
+    /// Whether a walk from `a` to `b` may find a way: `false` only when none can (no portal or link joins them),
+    /// told without a route search (#4072). A ground that cannot tell says `true`.
+    fn may_reach(&self, _an: Id, _a: Vec3, _bn: Id, _b: Vec3) -> bool {
+        true
+    }
 }
 
 /// The same geometry questions selected for one admitted footprint. Reservations are never stored here.
@@ -68,6 +74,9 @@ pub trait ClassGround {
     fn stand(&self, size: Size, node: Id, p: Vec3) -> Option<(Vec3, Vec3)>;
     fn passage(&self, size: Size, node: Id, p: Vec3) -> bool;
     fn walk(&mut self, size: Size, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64>;
+    fn may_reach(&self, _size: Size, _an: Id, _a: Vec3, _bn: Id, _b: Vec3) -> bool {
+        true
+    }
 }
 struct Selected<'a> {
     ground: &'a mut dyn ClassGround,
@@ -82,6 +91,9 @@ impl Ground for Selected<'_> {
     }
     fn walk(&mut self, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64> {
         self.ground.walk(self.size, an, a, bn, b)
+    }
+    fn may_reach(&self, an: Id, a: Vec3, bn: Id, b: Vec3) -> bool {
+        self.ground.may_reach(self.size, an, a, bn, b)
     }
 }
 struct Standard<'a>(&'a mut dyn Ground);
@@ -98,6 +110,9 @@ impl ClassGround for Standard<'_> {
         (size == Size::Standard)
             .then(|| self.0.walk(an, a, bn, b))
             .flatten()
+    }
+    fn may_reach(&self, _size: Size, an: Id, a: Vec3, bn: Id, b: Vec3) -> bool {
+        self.0.may_reach(an, a, bn, b)
     }
 }
 
@@ -312,7 +327,9 @@ impl Table {
             if best.is_some_and(|b| bound > b.0) {
                 break;
             }
-            if joined && !self.joined(g, t, i) {
+            if !g.may_reach(ask.node, ask.from, t.node, self.places[i].at)
+                || joined && !self.joined(g, t, i)
+            {
                 continue;
             }
             let Some(walk) = g.walk(ask.node, ask.from, t.node, self.places[i].at) else {
@@ -418,6 +435,9 @@ fn rings(
     for (bound, ring, k, at) in order {
         if best.is_some_and(|b| bound > b.0) {
             break;
+        }
+        if !g.may_reach(node, p, target.node, at) {
+            continue;
         }
         let Some(walk) = g.walk(node, p, target.node, at) else {
             misses += 1;

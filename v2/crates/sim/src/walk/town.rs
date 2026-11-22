@@ -2020,6 +2020,9 @@ impl ClassGround for ClassGrounds<'_> {
     fn walk(&mut self, size: Size, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64> {
         self.0.get_mut(&size)?.walk(an, a, bn, b)
     }
+    fn may_reach(&self, size: Size, an: Id, a: Vec3, bn: Id, b: Vec3) -> bool {
+        self.0.get(&size).is_none_or(|g| g.may_reach(an, a, bn, b))
+    }
 }
 
 impl Ground for Grounds<'_> {
@@ -2065,6 +2068,14 @@ impl Ground for Grounds<'_> {
         }
         let r = self.map.route(self.tree, from, to, HANDS).ok()?;
         Some(r.length as i64 * 1000)
+    }
+
+    fn may_reach(&self, an: Id, a: Vec3, bn: Id, b: Vec3) -> bool {
+        let m = self.map.get();
+        match (m.spot_near(an, a, AT_EDGE), m.spot_near(bn, b, AT_EDGE)) {
+            (Some(from), Some(to)) => m.may_reach(from.piece, to.piece),
+            _ => true,
+        }
     }
 }
 
