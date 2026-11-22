@@ -1,6 +1,8 @@
 // Device tiers (V5, #2714), copied from apps/web/src/quality-tier.ts (not imported) and cut to what this page draws:
 // a phone (touch-first, short side ≤ 820 CSS px, or 2 GB) gets the `phone` tier, everything else `full`. The tier
 // changes only how the view is drawn, never what the world is.
+import { PHONE_STAND_INS, type StandInOptions } from '../things/standins.ts';
+
 export type QualityTier = 'phone' | 'full';
 export type QualitySettings = { tier: QualityTier; reason: string; maxPixelRatio: number; antialias: boolean };
 export type QualityEnvironment = { coarsePointer: boolean; screen: readonly [number, number]; deviceMemory?: number };
@@ -38,6 +40,19 @@ export function detailFor(tier: QualityTier, search = ''): DistanceDetail | null
   if (q.get('detail') === '0') return null;
   const base = tier === 'phone' ? PHONE_DETAIL : DESKTOP_DETAIL, num = (k: string, d: number) => (q.has(k) && Number(q.get(k)) >= 0 ? Number(q.get(k)) : d);
   return q.has('detailMinPx') || q.has('detailShadowNear') ? { ...base, minRadiusPx: num('detailMinPx', base.minRadiusPx), shadowNear: num('detailShadowNear', base.shadowNear) } : base;
+}
+
+/** #3786: today's far stand-ins are a phone's (LiveWorld: phone tier with distance detail); `?cards=0` turns them off
+ *  (today's `?phoneOff=cards`). */
+export function standInsFor(tier: QualityTier, search = ''): StandInOptions | null {
+  const q = new URLSearchParams(search);
+  return tier === 'phone' && q.get('detail') !== '0' && q.get('cards') !== '0' ? PHONE_STAND_INS : null;
+}
+
+/** The page's stand-ins (browser only). */
+export function pageStandIns(): StandInOptions | null {
+  if (typeof window === 'undefined' || typeof screen === 'undefined') return null;
+  return standInsFor(browserQuality().tier, location.search);
 }
 
 /** The page's detail (browser only; null elsewhere, so tests choose their own). */
