@@ -27,7 +27,7 @@ use crate::effects::Refusal;
 use crate::encode::{Value, decode, encode};
 use crate::ids::{Hash, Id, Purpose, Version};
 use crate::tree::{Sealed, Tree};
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 type R<T> = Result<T, Refusal>;
 
@@ -70,10 +70,43 @@ pub trait Source {
     fn records(&mut self, hashes: &[Vec<u8>]) -> R<Vec<Vec<u8>>>;
 }
 
-/// The world's records by hash: every record a seal gave (K5's checkpoint blobs are the same bytes).
+/// A replaced record this large or larger is a big one ([`BIG_SEALS`]).
+pub const BIG_RECORD: usize = 64 * 1024;
+/// How many seals a replaced big record is still served after (#1960). A record re-sealed often and big is a moving
+/// body's ancestor near the top (Eden's ground: its terrain and every child's hash, megabytes), which a descent asks
+/// for in its first rounds, right after the hashes answer.
+pub const BIG_SEALS: u64 = 16;
+/// How many seals a replaced small record (a body, a room) is still served after: a descent of a large scope asks for
+/// its leaves many rounds after the hashes answer that named them ([`wire::RECORDS_MOST`] a round).
+pub const SMALL_SEALS: u64 = 1024;
+/// At most this many bytes of replaced small records are kept; the oldest go first (never the newest seal's).
+pub const SMALL_BYTES: usize = 64 << 20;
+
+/// A record a seal replaced: when, whose, its hash and its size.
+struct Replaced {
+    seal: u64,
+    node: Id,
+    hash: Vec<u8>,
+    size: usize,
+}
+
+/// The world's records by hash: each node's record as last sealed (K5's checkpoint blobs are the same bytes), and
+/// the records seals replaced lately, for a descent still under way (#1960: a moving body re-seals itself and its
+/// ancestors at each seal, and keeping every record a seal ever gave grew worldd 5 to 9 MB a second while one Soul
+/// walked). A replaced record is kept [`BIG_SEALS`] seals if big, else [`SMALL_SEALS`] seals within
+/// [`SMALL_BYTES`]; a descent that then asks for it is refused `sync-unknown-hash`, and the client syncs again.
 #[derive(Default)]
 pub struct Records {
     by_hash: BTreeMap<Vec<u8>, Vec<u8>>,
+    /// Each node's record hash as last kept.
+    current: BTreeMap<Id, Vec<u8>>,
+    /// Big and small records seals replaced, oldest first, and the small ones' bytes.
+    big: VecDeque<Replaced>,
+    small: VecDeque<Replaced>,
+    small_bytes: usize,
+    /// The last seal each replaced hash was replaced at: a hash replaced again later waits for the later entry.
+    replaced_at: BTreeMap<Vec<u8>, u64>,
+    seals: u64,
 }
 
 impl Records {
@@ -86,12 +119,58 @@ impl Records {
         }
     }
 
-    /// Keeps the records a seal gave.
+    /// Keeps the records a seal gave, and lets go of the replaced ones past their window.
     pub fn keep(&mut self, sealed: &Sealed) {
-        for (h, bytes) in &sealed.nodes {
+        self.seals += 1;
+        let seal = self.seals;
+        for ((h, bytes), id) in sealed.nodes.iter().zip(&sealed.ids) {
+            let h = h.to_bytes();
             self.by_hash
-                .entry(h.to_bytes())
+                .entry(h.clone())
                 .or_insert_with(|| bytes.clone());
+            if let Some(old) = self.current.insert(*id, h.clone())
+                && old != h
+            {
+                let size = self.by_hash.get(&old).map_or(0, Vec::len);
+                self.replaced_at.insert(old.clone(), seal);
+                let r = Replaced {
+                    seal,
+                    node: *id,
+                    hash: old,
+                    size,
+                };
+                if size >= BIG_RECORD {
+                    self.big.push_back(r);
+                } else {
+                    self.small_bytes += size;
+                    self.small.push_back(r);
+                }
+            }
+        }
+        while self.big.front().is_some_and(|r| r.seal + BIG_SEALS <= seal) {
+            if let Some(r) = self.big.pop_front() {
+                self.let_go(r);
+            }
+        }
+        while self.small.front().is_some_and(|r| {
+            r.seal + SMALL_SEALS <= seal || (self.small_bytes > SMALL_BYTES && r.seal < seal)
+        }) {
+            if let Some(r) = self.small.pop_front() {
+                self.small_bytes -= r.size;
+                self.let_go(r);
+            }
+        }
+    }
+
+    /// Drops a replaced record, unless it was replaced again since (the later entry lets it go) or is its node's
+    /// record again.
+    fn let_go(&mut self, r: Replaced) {
+        if self.replaced_at.get(&r.hash) != Some(&r.seal) {
+            return;
+        }
+        self.replaced_at.remove(&r.hash);
+        if self.current.get(&r.node) != Some(&r.hash) {
+            self.by_hash.remove(&r.hash);
         }
     }
 
@@ -101,6 +180,11 @@ impl Records {
 
     pub fn is_empty(&self) -> bool {
         self.by_hash.is_empty()
+    }
+
+    /// The bytes of the records held (a measure).
+    pub fn bytes(&self) -> usize {
+        self.by_hash.values().map(Vec::len).sum()
     }
 }
 
