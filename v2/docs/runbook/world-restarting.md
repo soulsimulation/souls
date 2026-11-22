@@ -11,8 +11,9 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   (`stalled`: `now_ms` while it lasts, `ended`, `longest_ms`), and the world runs on: a busy host's pause never
   restarts a world. Only a clock with no tick for 15 s is wedged: exit 86, `tick-stalled`, and a restart.
 - **The launcher** (`supervisor launch <world>`, the unit's `ExecStart`) reads the world's pinned build from its
-  directory record (W8). The store is `DIRECTORY_STORE_*` in `/etc/souls/directory.env`, or the folder
-  `$WORLDS_ROOT/directory` on a machine without one. When the store is out of reach it uses this machine's cached
+  directory record (W8). The store is the directory's: `DIRECTORY_STORE_URL` (or `DIRECTORY_STORE_*`) in
+  `/etc/souls/secrets.env`, which the install's drop-in gives every worldd@, or the folder `$WORLDS_ROOT/directory` on a
+  machine without one. W3b's placement and archive read the same store through `supervisor directory-get`. When the store is out of reach it uses this machine's cached
   copy (`$WORLDS_ROOT/cache/<world>`), so an unreachable store holds no world down. It checks that
   `$WORLDS_ROOT/builds/<hash>/worldd` hashes to the pin (SHA-256 of the file, `1220` in front), and runs it as
   `worldd serve --dir $WORLDS_ROOT/worlds/<world>`, the world folder `worldd seed` made and `place-world.sh` placed (C1).
