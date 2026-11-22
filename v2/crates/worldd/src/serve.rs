@@ -1794,7 +1794,7 @@ fn off_machine(
     let store: Bucket = Shared(Arc::new(Patient::new(
         supervisor::bucket::Bucket::from_spec(spec).map_err(refusal)?,
     )));
-    println!("store: {}", store.0.what());
+    println!("store: {}", store.0.store.what());
     let prefix = format!("h/{name}/{}/", to_hex(&built.header.lineage.0));
     let fork_base = checkpoint
         .map(|newest| fork_archive_base(&store, &prefix, dir, &built.header, newest, recovered))
