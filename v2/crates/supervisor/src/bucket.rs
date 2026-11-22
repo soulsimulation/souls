@@ -262,10 +262,12 @@ mod tests {
         }
     }
 
+    const SHORT: [std::time::Duration; 3] = [std::time::Duration::from_millis(1); 3];
+
     fn patient(name: &'static str, refusals: usize) -> Patient<Flaky> {
         Patient {
             store: Flaky::new(name, refusals),
-            waits: &[std::time::Duration::from_millis(1); 3],
+            waits: &SHORT,
         }
     }
 
