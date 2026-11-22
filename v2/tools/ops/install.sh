@@ -215,6 +215,7 @@ install_all() {
 # Optional CLERK_SATELLITE_DOMAIN and CLERK_SIGN_IN_URL. Never put secrets or tokens here.
 # Private ops settings: SIM_SITE_OWNERS, SOULS_OPS_PUBLIC_ORIGIN, CLERK_AUTHORIZED_PARTIES.
 # Match the provider and application origin configured for souls-directory.
+# Serving processes on the origin's port: ORIGIN_PROCESSES (default: the cores less ORIGIN_RESERVE_CORES, 2).
 SOULS_OPS_DIRECTORY=http://127.0.0.1:$DIRECTORY_PORT"
   ensure_once "$ETC/secrets.env" 600 root root "$SECRETS"
   for u in "${UNIT_FILES[@]}"; do
@@ -223,6 +224,15 @@ SOULS_OPS_DIRECTORY=http://127.0.0.1:$DIRECTORY_PORT"
   done
   ensure_dir "$DROPIN" 755 root root "tree $DROPIN"
   ensure_file "$from/units/worldd-install.conf" "$DROPIN/10-install.conf" 644 root root
+  # Per-world limits: each world units/world-limits.json lists and this machine has placed gets
+  # worldd@<world>.service.d/limits.conf (world-limits.mjs; a world not listed keeps the unit's own).
+  local l limits
+  limits=$(node "$from/ops/world-limits.mjs" plan --config "$from/units/world-limits.json" --root "$R")
+  if [ -n "$limits" ]; then
+    [ "$MODE" = plan ] || node "$from/ops/world-limits.mjs" apply --config "$from/units/world-limits.json" > /dev/null
+    while IFS= read -r l; do act "$l" true; done <<< "$limits"
+    UNITS_CHANGED=1
+  fi
   if [ "$UNITS_CHANGED" = 1 ]; then act "systemctl daemon-reload" systemctl daemon-reload; fi
 }
 
@@ -234,6 +244,9 @@ machine() {
   [ "${v:-0}" -ge 254 ] 2> /dev/null || die "needs systemd 254 or later, found ${v:-none}"
   [ "$(stat -fc %T /sys/fs/cgroup)" = cgroup2fs ] || die "needs cgroup v2"
   command -v node > /dev/null || echo "install: warning: no node on PATH; souls-origin needs it" >&2
+  # Below 22.12 the origin runs one process: its port cannot be shared (listen reusePort).
+  node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=12)?0:1)' 2> /dev/null \
+    || echo "install: warning: node older than 22.12; souls-origin will run one process" >&2
 }
 
 # Refuses unless every unit of the install is inactive or failed (not running, starting, stopping or reloading) and
@@ -401,7 +414,7 @@ bundle() {
   cp "$HERE/../../../tools/world-launcher/owner-overview-data.mjs" "$out/origin/"
   cp -R "$page" "$out/web"
   mkdir -p "$out/ops/proxy"
-  cp "$HERE/place-created-world.mjs" "$HERE/archive-world.mjs" "$HERE/place-world.sh" "$out/ops/"
+  cp "$HERE/place-created-world.mjs" "$HERE/archive-world.mjs" "$HERE/place-world.sh" "$HERE/world-limits.mjs" "$out/ops/"
   cp "$HERE/proxy/route-config.mjs" "$HERE/proxy/routes.mjs" "$out/ops/proxy/"
   if [ -n "${4:-}" ]; then cp -R "$4" "$out/templates"; fi
   rm -rf "$out/client"
