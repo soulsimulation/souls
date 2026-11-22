@@ -1619,7 +1619,7 @@
       },
       "expect": {
         "verdict": "no",
-        "reason": "hands_not_empty",
+        "reason": "hand_not_empty",
         "need": 2
       }
     },
@@ -1767,7 +1767,7 @@
       },
       "expect": {
         "verdict": "no",
-        "reason": "hands_not_empty",
+        "reason": "hand_not_empty",
         "need": 2
       }
     },
@@ -1915,7 +1915,7 @@
       },
       "expect": {
         "verdict": "no",
-        "reason": "hands_not_empty",
+        "reason": "hand_not_empty",
         "need": 4
       }
     },
@@ -2063,7 +2063,7 @@
       },
       "expect": {
         "verdict": "no",
-        "reason": "hands_not_empty",
+        "reason": "hand_not_empty",
         "need": 5
       }
     },
