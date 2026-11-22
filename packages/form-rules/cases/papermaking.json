@@ -1862,7 +1862,7 @@
       },
       "expect": {
         "verdict": "no",
-        "reason": "slot_full",
+        "reason": "slot_taken",
         "need": 3,
         "says": "clear_output"
       }
