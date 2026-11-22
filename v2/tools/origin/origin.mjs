@@ -20,6 +20,7 @@ import { createServer } from 'node:http';
 import { basename, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { noPage, siteRoutes, wantsPage } from './site.mjs';
+import { upgradeRefusal } from './upgrade-refusal.mjs';
 import { worldRoutes } from './world-routes.mjs';
 
 export const IMMUTABLE = 'public, max-age=31536000, immutable, no-transform';
@@ -36,7 +37,7 @@ export function kindOf(path) {
 
 /** An origin over `dir`, with the site's pages from `site` ({web, data}; site.mjs). `stats` counts what it served. */
 export function createOrigin(dir, site = {}) {
-  const root = resolve(dir), pages = siteRoutes(site), worlds = worldRoutes(site.worldRoutes);
+  const root = resolve(dir), pages = siteRoutes(site), worlds = worldRoutes(site.worldRoutes), upgrade = upgradeRefusal(site.client);
   const stats = { pointer: 0, immutable: 0, miss: 0, perPath: new Map(), bytes: {} }; // bytes: served, by first segment (O11)
   const etags = new Map();
   const server = createServer(async (req, res) => {
@@ -46,6 +47,7 @@ export function createOrigin(dir, site = {}) {
       res.writeHead(404, { 'cache-control': MISS, 'content-length': 0 }).end();
     };
     try {
+      if (upgrade.handle(req, res)) return;
       if (worlds.handle(req, res)) return;
       if (pages.handle(req, res)) return;
     } catch {
