@@ -23,7 +23,7 @@ import { opsOverview } from './ops.mjs';
 
 // install.sh puts the served-client adapter beside this file; the checkout keeps it with the client.
 const { answer } = await import(existsSync(new URL('./serve.mjs', import.meta.url)) ? './serve.mjs' : '../../client/served/serve.mjs');
-const CLIENT_PATH = /^\/w\/[a-z0-9][a-z0-9-]*\/(eden\.mjs|skill\.md|creator\.md|instructions\.md|llms\.txt|replica\.js|replica_bg\.wasm|v1\/config)$/;
+const CLIENT_PATH = /^\/w\/[a-z0-9][a-z0-9-]*\/(eden\.mjs|skill\.md|creator\.md|instructions\.md|safety\.md|llms\.txt|replica\.js|replica_bg\.wasm|v1\/config)$/;
 
 export const SITE_PATHS = Object.freeze(['/changelog', '/changelog/', '/changelog.md', '/v1/feed', '/ops', '/v1/auth/config']);
 export const FEED_LIMITS = Object.freeze({ pageDefault: 20, pageMax: 100 });
