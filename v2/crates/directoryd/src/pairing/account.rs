@@ -344,7 +344,11 @@ impl Pairing {
         let force = b["move"].as_bool() == Some(true);
         let validate = || -> Result<(Option<String>, Option<String>)> {
             if fresh {
-                return Ok((None, None));
+                return if self.at_soul_cap(&login.account)? {
+                    Err("too-many")
+                } else {
+                    Ok((None, None))
+                };
             }
             match self.soul_of(&grant)? {
                 Some((a, _)) if a == login.account => {}
