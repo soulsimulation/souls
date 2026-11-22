@@ -215,6 +215,7 @@ install_all() {
 # Optional CLERK_SATELLITE_DOMAIN and CLERK_SIGN_IN_URL. Never put secrets or tokens here.
 # Private ops settings: SIM_SITE_OWNERS, SOULS_OPS_PUBLIC_ORIGIN, CLERK_AUTHORIZED_PARTIES.
 # Match the provider and application origin configured for souls-directory.
+# Serving processes on the origin's port: ORIGIN_PROCESSES (default: the cores less ORIGIN_RESERVE_CORES, 2).
 SOULS_OPS_DIRECTORY=http://127.0.0.1:$DIRECTORY_PORT"
   ensure_once "$ETC/secrets.env" 600 root root "$SECRETS"
   for u in "${UNIT_FILES[@]}"; do
@@ -234,6 +235,9 @@ machine() {
   [ "${v:-0}" -ge 254 ] 2> /dev/null || die "needs systemd 254 or later, found ${v:-none}"
   [ "$(stat -fc %T /sys/fs/cgroup)" = cgroup2fs ] || die "needs cgroup v2"
   command -v node > /dev/null || echo "install: warning: no node on PATH; souls-origin needs it" >&2
+  # Below 22.12 the origin runs one process: its port cannot be shared (listen reusePort).
+  node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=12)?0:1)' 2> /dev/null \
+    || echo "install: warning: node older than 22.12; souls-origin will run one process" >&2
 }
 
 # Refuses unless every unit of the install is inactive or failed (not running, starting, stopping or reloading) and
