@@ -158,6 +158,7 @@ the root, which `describe` shows), and from then on you place it like any other 
 | `kit.invalid`, `kit.program` | the kit is not one `define-kit` reads, or it uses a program |
 | `edit.would-bury`, `edit.would-cut-off`, `edit.in-use` | a Soul is there, would be shut in, or is using it: an edit or an undo is refused, never forced |
 | `undo.nothing`, `undo.nothing-to-redo` | nothing left to undo, or nothing undone to redo |
+| `solid-into-slot` | a Soul's form would put a thing of your kind that has solids into a slot with a fixed point, where it would stand unjudged: such a thing is made into a hand and set down, which is judged |
 | `undo.conflict` | something the undo would change has changed since: put it back by hand |
 
 ## Good habits

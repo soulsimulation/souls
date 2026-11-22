@@ -105,7 +105,7 @@ pub fn limits(kinds: &Kinds) -> Limits {
 }
 
 /// The tree as of the tick's start, and the entries written since, latest last.
-pub(super) struct View<'a> {
+pub(crate) struct View<'a> {
     pub tree: &'a Tree,
     pub out: &'a [Effect],
 }
@@ -291,7 +291,7 @@ impl View<'_> {
 
 /// What an effect works on: the view, the amount fields, the zone's header (for B4's transfer), the body, its hands'
 /// slots, and the node the form is done at.
-pub(super) struct Cx<'a> {
+pub(crate) struct Cx<'a> {
     pub view: View<'a>,
     pub limits: &'a Limits,
     pub header: Option<&'a Header>,
@@ -584,6 +584,7 @@ impl Cx<'_> {
                     );
                 }
                 self.not_in_use(thing)?;
+                self.not_fixed_unjudged(thing, *slot)?;
                 let to = self.free_slot(*slot)?;
                 self.transfer(m, thing, to)
             }
@@ -671,6 +672,45 @@ impl Cx<'_> {
             ),
             None => Ok(()),
         }
+    }
+}
+
+impl Cx<'_> {
+    /// A thing of a creator's kind with solids goes where it is fixed geometry (a slot its holder gives a point,
+    /// N19) only by an edit or a set-down, which judge what it would bury or cut off (BUILDSAFE). A form's put or
+    /// reparent judges nothing, so it is refused `solid-into-slot` (#3697 re-review); a boot thing keeps today's
+    /// behaviour (C12).
+    fn not_fixed_unjudged(&self, thing: Id, slot: u64) -> R<()> {
+        let tree = self.view.tree;
+        let Some(kind) = self.view.kind(thing) else {
+            return Ok(());
+        };
+        if replica::kinds::defined::defined_named(tree, kind.as_str()).is_none() {
+            return Ok(());
+        }
+        let solid = self
+            .view
+            .field(thing, crate::ground::scene::F_SOLIDS)
+            .is_some()
+            || !made_fields(tree, &kind).is_empty();
+        let pointed = matches!(
+            self.view.field(self.node, crate::ground::scene::F_SLOTS),
+            Some(Value::Array(rows)) if rows.iter().any(|r| matches!(
+                r,
+                Value::Array(c) if c.first().and_then(int) == i64::try_from(slot).ok()
+            ))
+        );
+        if solid && pointed {
+            return refuse(
+                "solid-into-slot",
+                format!(
+                    "{} has solids and slot {slot} of {} is fixed ground: set it down instead, where it is judged",
+                    show(thing),
+                    show(self.node)
+                ),
+            );
+        }
+        Ok(())
     }
 }
 

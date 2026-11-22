@@ -615,3 +615,70 @@ fn an_undo_or_redo_that_removes_a_kind_a_thing_still_has_is_refused() {
         .expect("nothing has the kind now");
     assert!(w.live.tree().handle(def).is_none(), "the definition undone");
 }
+
+/// #3697 round 3: a form's put (and a reparent into a slot, which binds to the same put) of a creator's thing with
+/// solids into a slot its holder gives a point would make it fixed geometry no one judged, so a Soul could be buried
+/// by a thing made into its hand and then put away. It is refused `solid-into-slot` by name; into a slot with no
+/// point (carried, never ground) the put goes through.
+#[test]
+fn a_form_cannot_put_a_creators_solid_thing_into_a_slot_with_a_point() {
+    use crate::forms::amounts::{Cx, View};
+    use skills::form_runner::{Effect as Bound, Of};
+    let mut w = W::new();
+    let (_, birdbath) = w.define(1, BIRDBATH).expect("a birdbath, 1.2 m tall");
+    let bay = r#"{"format":"souls-entry/1","kind":"gene:bay","owner":"thing",
+  "slots":{"bay":{"kinds":["gene:birdbath"],"at_mm":[0,0,600]}},
+  "forms":{"make":{"who":"anyone","effects":[{"change":"create","kind":"BIRDBATH","into":"actor_hand"}]}}}"#
+        .replace("BIRDBATH", &birdbath);
+    let (_, bay) = w
+        .define(2, &bay)
+        .expect("a bay whose form makes a birdbath into a hand");
+    let room = w.room;
+    // The bay with a point for its slot (a Soul may stand there), one without, and a birdbath standing in for the
+    // one the bay's form made into the Soul's hand (the room stands in for that Soul's body).
+    let point = Value::Array(vec![Value::Array(
+        [1u64, 0, 0, 600].map(Value::Uint).to_vec(),
+    )]);
+    let names = w
+        .edit(vec![
+            place(
+                1,
+                &full(&bay),
+                Ref::Node(room),
+                BTreeMap::from([(13, point)]),
+            ),
+            place(2, &full(&bay), Ref::Node(room), BTreeMap::new()),
+            place(3, &full(&birdbath), Ref::Node(room), BTreeMap::new()),
+        ])
+        .expect("placed");
+    let (fixed, carried, thing) = (names[&1], names[&2], names[&3]);
+    let limits = crate::forms::amounts::Limits::default();
+    let mut minter = Minter::new(Scope([0x3a; 16]));
+    let put = |node: Id, minter: &mut Minter| {
+        let cx = Cx {
+            view: View {
+                tree: w.live.tree(),
+                out: &[],
+            },
+            limits: &limits,
+            header: Some(&w.header),
+            body: room,
+            soul: room,
+            hands: &[],
+            node,
+            reserved: &[],
+            now: 0,
+        };
+        cx.entries(
+            minter,
+            &Bound::Put {
+                what: Of::Node(thing),
+                slot: 1,
+            },
+        )
+    };
+    let no = put(fixed, &mut minter).expect_err("refused");
+    println!("put the birdbath into the bay's pointed slot: {no:?}");
+    assert_eq!(no.name, "solid-into-slot", "{}", no.detail);
+    put(carried, &mut minter).expect("into a slot with no point, it is carried");
+}
