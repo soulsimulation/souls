@@ -5,11 +5,13 @@
 // page names them by its kind's entry and reads a timed value at the world time it draws (`kindState`).
 import { isTimed, valueAt, type Int, type Timed } from './timed.ts';
 
-/** A node's plain fields by number: whole numbers, texts and timed values. */
-export type Fields = Record<number, Int | string | Timed>;
+/** A list field's records (#3726): each record's values in the order of the entry's `of` (the stored map's keys 1, 2, …). */
+export type ListRecords = Int[][];
+/** A node's plain fields by number: whole numbers, texts, timed values and list fields' records. */
+export type Fields = Record<number, Int | string | Timed | ListRecords>;
 
 /** A kind's state field, as its entry declares it. */
-export type StateDef = { n: number; type: string; values?: string[]; min?: number; max?: number; unit?: string; default?: unknown };
+export type StateDef = { n: number; type: string; values?: string[]; min?: number; max?: number; unit?: string; default?: unknown; of?: Record<string, unknown> };
 
 const whole = (v: unknown): v is Int => (typeof v === 'number' && Number.isSafeInteger(v)) || typeof v === 'bigint';
 /** A whole number as a number when it is a safe one, else kept as a big integer. */
@@ -20,14 +22,26 @@ const int = (v: Int): Int => (typeof v === 'bigint' && v >= BigInt(Number.MIN_SA
 export function fieldsOf(f: Map<number, unknown>): Fields | undefined {
   let out: Fields | undefined;
   for (const [k, v] of f) {
-    let x: Int | string | Timed | undefined;
+    let x: Int | string | Timed | ListRecords | undefined;
     if (whole(v)) x = int(v);
+    else if (Array.isArray(v) && v.every(isRecord)) x = v.map(recordOf); // #3726: a list field (replica `Type::List`)
     else if (typeof v === 'boolean') x = v ? 1 : 0; // a bool as the encoding may carry it
     else if (typeof v === 'string') x = v;
     else if (Array.isArray(v) && v.length === 3 && v.every(whole)) x = { value: int(v[0]), per_s: int(v[1]), set_us: int(v[2]) };
     if (x !== undefined) (out ??= {})[k] = x;
   }
   return out;
+}
+
+/** A list record as stored: a map numbered 1, 2, … of whole numbers (an enum's text is not a look's to read here). */
+const isRecord = (r: unknown): r is Map<number, unknown> => r instanceof Map && r.size > 0 && [...r].every(([k, x], i) => k === i + 1 && whole(x));
+const recordOf = (r: Map<number, unknown>): Int[] => [...r.values()].map((x) => int(x as Int));
+
+/** A list field's records by the entry's record field names (#3726); empty when the node holds none or not a list. */
+export function listOf(fields: Fields | undefined, d: StateDef): Record<string, Int>[] {
+  const held = fields?.[d.n], names = Object.keys(d.of ?? {});
+  if (d.type !== 'list' || !Array.isArray(held)) return [];
+  return held.filter((r) => r.length === names.length).map((r) => Object.fromEntries(names.map((name, i) => [name, r[i]])));
 }
 
 /** A field's default as the entry writes it, in the node's terms. */

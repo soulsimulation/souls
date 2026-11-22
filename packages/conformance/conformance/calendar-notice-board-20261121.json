@@ -1,0 +1,5 @@
+{
+  "schema": "catalog-conformance-supplement/1",
+  "note": "2026-11-21 #3703 the town calendar on Engine v2. A new Engine v2 entry eden:notice_board (content/kinds/calendar/notice_board.json) for Eden's six notice boards (today's core/notice-board@1, which the import names eden:notice_board): take_notice makes a blank eden:calendar_entry in the Soul's free hand. A new revision of eden:calendar_entry (content/kinds/calendar/entry.json; its reference is the hash of its bytes, so the old revision keeps its bytes, e.g. in v2/crates/replica/cases/form-rules-snapshot): it is held in one hand (a grip point and an A4 sheet's bounds), so it can be taken, posted and set down; show_interest and drop_interest check the acting Soul's own link (end: actor) instead of anyone's, so a second Soul can say it will come; and take_down lets its poster clear it. core/notice-board@1 and its other revisions are unchanged. No findings: no budgets, samples or gap checks were relaxed.",
+  "findings": []
+}

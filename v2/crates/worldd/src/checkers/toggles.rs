@@ -205,6 +205,21 @@ impl World {
             .unwrap_or_else(|e| panic!("a part: {e}"))
     }
 
+    /// A thing of the item kind at the root, with this id and these fields: a node a test marks (#3700).
+    pub fn item_with(&mut self, node: Id, fields: BTreeMap<u64, Cbor>) {
+        let change = Change::Create {
+            node,
+            kind: self.kinds["souls:item"].clone(),
+            pose: pose(self.root, 0),
+            audience: Audience::Everyone,
+            fields,
+        };
+        let part = self.part(vec![(self.root, change)]);
+        self.replica
+            .apply(&part)
+            .unwrap_or_else(|e| panic!("an item applies: {e}"));
+    }
+
     fn room(&mut self, root: Id, bodies: usize, items: usize) {
         let room = self.id();
         let mut changes = vec![(root, self.create(room, "souls:room", root, 0, &[]))];

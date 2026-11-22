@@ -5,8 +5,8 @@
   "state": {},
   "points": {"bank":{"role":"stand","at_mm":[-1200,0,0],"yaw_mdeg":90000}},
   "slots": {
-    "back": {"admits":"body","posture":"sit","most":1,"at_mm":[0,270,-900],"stand":"bank"},
-    "front": {"admits":"body","posture":"sit","most":1,"at_mm":[0,270,900],"stand":"bank"}
+    "back": {"admits":"body","posture":"sit","most":1,"at_mm":[0,270,-900],"stand":"bank","board_mm":4000},
+    "front": {"admits":"body","posture":"sit","most":1,"at_mm":[0,270,900],"stand":"bank","board_mm":4000}
   },
   "geometry": {"bounds_mm":[816,1020,4200]},
   "forms": {
