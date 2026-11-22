@@ -4176,9 +4176,16 @@ fn answer_loop<S: Storage + 'static>(
                 // A record the log will not take (`record-size`, refused before a byte is written) is this tick's
                 // alone: the clock's write rule keeps it from happening (`sim::commit`'s room), and should one get
                 // past, the world keeps answering the ticks after it. Its answers are dropped, not sent: they are not
-                // on the disk.
+                // on the disk. That is said by name and counted in `health.json` (`dropped`, #3956 review); the
+                // waiters' senders go with the tick, so each waiter sees its answer channel close rather than wait on.
                 Err(e) if e.name == "record-size" => {
-                    eprintln!("worldd: a tick's record was refused, its answers dropped: {e}");
+                    let answers = t.replies.iter().map(|(w, ..)| w.len()).sum::<usize>()
+                        + t.bare.iter().map(|(w, _)| w.len()).sum::<usize>();
+                    measures::DROPPED.tick(answers);
+                    eprintln!(
+                        "worldd: {}: a tick's record was refused, {answers} answers dropped: {e}",
+                        measures::TICK_DROPPED
+                    );
                     skipped = true;
                     break;
                 }
@@ -4189,6 +4196,9 @@ fn answer_loop<S: Storage + 'static>(
             }
         }
         if skipped {
+            if let Some(m) = &measures {
+                m.queues[measures::LOG].leave(k);
+            }
             continue;
         }
         if trace {
@@ -7051,6 +7061,60 @@ mod no_brick_tests {
         assert!(
             names > 100 && not_names > 100,
             "both kinds tried: {names} names, {not_names} not"
+        );
+    }
+
+    /// #3956 review: a tick whose record the log refuses is not dropped silently. It is named
+    /// (`tick.answers-dropped`) and counted in `health.json`, its waiters see their channels close, and the next
+    /// tick is answered.
+    #[test]
+    fn a3956_a_dropped_ticks_answers_are_named_counted_and_the_next_tick_answers() {
+        let (log, _) = sim::log::Log::open(sim::log::Mem::default(), 1).unwrap();
+        let (ticks, rx) = std::sync::mpsc::channel();
+        let (syncs, _sync_rx) = std::sync::mpsc::channel();
+        let measured = Arc::new(Measures::default());
+        let tick = |record: Option<Vec<u8>>, waiter: Reply, frame: &[u8]| Tick {
+            inputs: None,
+            record,
+            replies: vec![(vec![waiter], frame.to_vec(), Stamps::default())],
+            started: None,
+            handed: None,
+            parts: Vec::new(),
+            bare: Vec::new(),
+            ran: None,
+        };
+        let (first, first_rx) = std::sync::mpsc::channel();
+        let (second, second_rx) = std::sync::mpsc::channel();
+        let before = measures::DROPPED.counts();
+        // An empty record is one the log refuses by `record-size`, as an oversize one is, before a byte is written.
+        ticks.send(tick(Some(Vec::new()), first, b"first")).unwrap();
+        ticks.send(tick(None, second, b"second")).unwrap();
+        drop(ticks);
+        let m = Arc::clone(&measured);
+        std::thread::spawn(move || answer_loop(log, rx, None, Some(m), None, None, None, syncs))
+            .join()
+            .unwrap();
+        assert!(
+            first_rx.recv().is_err(),
+            "the dropped tick's waiter is not answered and not left waiting"
+        );
+        assert!(
+            second_rx.recv().unwrap().starts_with(b"second"),
+            "the next tick is answered"
+        );
+        let after = measures::DROPPED.counts();
+        assert_eq!((after.0 - before.0, after.1 - before.1), (1, 1));
+        let health = measured.health(measures::steady_us());
+        assert!(
+            health.contains("\"dropped\":{\"name\":\"tick.answers-dropped\",\"ticks\":"),
+            "{health}"
+        );
+        assert_eq!(
+            measured.queues[measures::LOG]
+                .oldest(measures::steady_us())
+                .0,
+            0,
+            "the dropped tick leaves the log queue"
         );
     }
 }

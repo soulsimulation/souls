@@ -352,6 +352,8 @@ impl Measures {
         }
         o.push_str("},\"stalled\":");
         STALLS.json(&mut o);
+        o.push_str(",\"dropped\":");
+        DROPPED.json(&mut o);
         o.push_str("}\n");
         o
     }
@@ -402,6 +404,50 @@ impl Stalls {
             self.now_ms.load(Ordering::Relaxed),
             self.count.load(Ordering::Relaxed),
             self.longest_ms.load(Ordering::Relaxed)
+        );
+    }
+}
+
+/// The name of the answers thread's last resort: a tick whose record the log refused (`record-size`), its answers
+/// dropped and the world answering on (#3956). The clock's write rule (`sim::commit`'s room) keeps it from happening.
+pub const TICK_DROPPED: &str = "tick.answers-dropped";
+
+/// Ticks the answers thread dropped ([`TICK_DROPPED`]), and their answers. One per process, read by `health.json`.
+pub struct Dropped {
+    ticks: AtomicU64,
+    answers: AtomicU64,
+}
+
+/// This process's dropped ticks.
+pub static DROPPED: Dropped = Dropped {
+    ticks: AtomicU64::new(0),
+    answers: AtomicU64::new(0),
+};
+
+impl Dropped {
+    /// A tick's record was refused: its `answers` were dropped.
+    pub fn tick(&self, answers: usize) {
+        self.ticks.fetch_add(1, Ordering::Relaxed);
+        self.answers.fetch_add(
+            u64::try_from(answers).unwrap_or(u64::MAX),
+            Ordering::Relaxed,
+        );
+    }
+
+    /// `(ticks, answers)` dropped so far.
+    pub fn counts(&self) -> (u64, u64) {
+        (
+            self.ticks.load(Ordering::Relaxed),
+            self.answers.load(Ordering::Relaxed),
+        )
+    }
+
+    /// `{"name":"tick.answers-dropped","ticks":n,"answers":n}`.
+    pub fn json(&self, o: &mut String) {
+        let (ticks, answers) = self.counts();
+        let _ = write!(
+            o,
+            "{{\"name\":\"{TICK_DROPPED}\",\"ticks\":{ticks},\"answers\":{answers}}}"
         );
     }
 }

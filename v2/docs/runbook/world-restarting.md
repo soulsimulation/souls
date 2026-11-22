@@ -9,7 +9,9 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   WATCHDOG=1 twice a second while its clock is not wedged. No word for 5 s ends it: a process frozen whole. K7's own
   watchdog inside says a stall (no tick for 0.5 s) in the journal (`watchdog: stalled`) and in `health.json`
   (`stalled`: `now_ms` while it lasts, `ended`, `longest_ms`), and the world runs on: a busy host's pause never
-  restarts a world. Only a clock with no tick for 15 s is wedged: exit 86, `tick-stalled`, and a restart.
+  restarts a world. Only a clock with no tick for 15 s is wedged: exit 86, `tick-stalled`, and a restart. A tick
+  whose record the log refused (which the clock's write rule should never let happen) is not answered and the world
+  answers on: `tick.answers-dropped` in the journal and in `health.json` (`dropped`: `ticks`, `answers`).
 - **The launcher** (`supervisor launch <world>`, the unit's `ExecStart`) reads the world's pinned build from its
   directory record (W8). The store is the directory's: `DIRECTORY_STORE_URL` (or `DIRECTORY_STORE_*`) in
   `/etc/souls/secrets.env`, which the install's drop-in gives every worldd@, or the folder `$WORLDS_ROOT/directory` on a
