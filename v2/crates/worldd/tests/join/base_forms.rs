@@ -185,16 +185,16 @@ fn body_of(run: &Run, soul: Id) -> Option<Id> {
 fn last_at(run: &Run, body: Id) -> Vec3 {
     run.log()
         .iter()
-        .filter_map(|p| match p.rest.get(&answers::BODIES) {
+        .rev()
+        .find_map(|p| match p.rest.get(&answers::BODIES) {
             Some(Value::Array(rows)) => rows
                 .iter()
+                .rev()
                 .filter_map(worldd::bodies::read_row)
-                .filter(|(b, _, _)| *b == body)
-                .map(|(_, pose, _)| pose.position)
-                .last(),
+                .find(|(b, _, _)| *b == body)
+                .map(|(_, pose, _)| pose.position),
             _ => None,
         })
-        .last()
         .expect("the body's row")
 }
 
