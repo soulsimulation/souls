@@ -476,4 +476,10 @@ fn a_thing_is_walkable_when_a_place_a_floor_to_stand_on_a_step_high_or_stood_on_
         )),
         "a workbench"
     );
+    assert!(
+        !walkable(&j(
+            r#"{"owner": "thing", "geometry": {"bounds_mm": [200, 80, 200]}}"#
+        )),
+        "a bowl"
+    );
 }

@@ -585,8 +585,8 @@ pub fn within_footprint(
 }
 
 /// Whether a body goes onto a thing to be at it (#4072), by its entry: it is a place (`owner: place`: a deck, a pier, a
-/// terrace); it has an area that allows `stand`; it is no taller than a step ([`crate::ground::STEP`]: a rug, a mat);
-/// or a slot a body stands in (one that admits a body with no posture) lies inside its footprint (a stage's spots, a
+/// terrace); it has an area that allows `stand`; it is no taller than a step ([`crate::ground::STEP`]) and wide enough
+/// to stand on (a rug, a mat; not a bowl); or a slot a body stands in (one that admits a body with no posture) lies inside its footprint (a stage's spots, a
 /// court's sides). A bed (its mattress allows only `lie` and `sit`) and a pool table (its players' slots stand round
 /// it) are not. A walk to be at a walkable thing ends on it ([`within_footprint`] with `on`).
 pub fn walkable(entry: &replica::rules::json::Value) -> bool {
@@ -610,7 +610,9 @@ pub fn walkable(entry: &replica::rules::json::Value) -> bool {
             [x, y, z] => Some([mm(x)?, mm(y)?, mm(z)?]),
             _ => None,
         });
-    let low = bounds.is_some_and(|[_, y, _]| y <= crate::ground::STEP);
+    // Low, and wide enough to stand on a body's width in from its edge (not a bowl).
+    let wide = 2 * ON_DEPTH / 1000;
+    let low = bounds.is_some_and(|[x, y, z]| y <= crate::ground::STEP && x >= wide && z >= wide);
     let standing = match (entry.get("slots"), bounds) {
         (Some(J::Obj(slots)), Some([x, _, z])) => slots.iter().any(|(_, s)| {
             let inside = match s.get("at_mm").and_then(J::arr) {
