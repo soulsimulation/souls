@@ -10,7 +10,9 @@
 //! - **The world the runner reaches** is the bodies' own: their controller (B1), their town for a walk's corners (N7),
 //!   and a due list, moves (B2) and a minter of the forms' own. A move's reach is measured across x and z from the
 //!   body's edge to the nearer of the thing's point the move names and its nearest surface (its entry's bounds), on
-//!   the floor the body stands on (C22, #3485); from the feet to the node's place when its entry gives neither.
+//!   the floor the body stands on or another floor of its building (C22, #3485); from the feet to the node's place
+//!   when its entry gives neither. Height counts too: what lies above the body's standing reach or more than
+//!   [`BELOW_FEET`] under its feet is that much further (a thing on the floor above or below is out of reach).
 //! - **Moves and their targets** (C23, #3494). A step's move is one of [`library`]'s: every move `content/moves`
 //!   declares and the body's own ([`crate::moves`]). A move with no `at` is made where the body stands ([`AT_SELF`]);
 //!   one whose `at`, or with no `at` whose `toward`, is a thing argument reaches that thing ([`AT_ARG`]); a missing
@@ -40,9 +42,11 @@
 //!   timer ([`Acts::fired`]). A form's value arguments ([`Args::values`]: a value by name, words by reference) reach
 //!   its sets.
 //! - **A walk that stalls** (C21, #3484). Each tick, every form's walk that asked its way is watched
-//!   ([`sim::walk::stall::Watch`]): one that gains less than a quarter metre toward its goal over 3 s of world time
-//!   ends `walk.blocked` in that tick, its body's driver released, and the act's ending entry names the nearest thing
-//!   or edge in its way ([`sim::walk::stall::blocker`]).
+//!   ([`sim::walk::stall::Watch`]) against the corner its line aims at and that line's leg's end (never the walk's
+//!   goal, which on a route with crossings lies past the leg's end): one that gains less than a quarter metre on
+//!   them over 3 s of world time, or whose least way left to the leg's end has not shrunk by a quarter metre in 30 s
+//!   (it circles or goes to and fro), ends `walk.blocked` in that tick, its body's driver released, and the act's
+//!   ending entry names the nearest thing or edge in its way ([`sim::walk::stall::blocker`]).
 //!
 //! - **Needs at commit** (#3888). After who may, every need of the form is decided by R2's one evaluator on the
 //!   world's own state, links, seats and hands included ([`crate::needs`]): an unmet need is refused by its reason's
@@ -337,6 +341,8 @@ struct Sight<'a> {
     /// Each run's walk in progress right before a sit into a slot the places hold: its step, the seat's floor and its
     /// stand point on that floor (moved clear at registration when the entry's point is blocked).
     sit_walks: BTreeMap<Id, (usize, Id, Vec3)>,
+    /// The bodies whose walk in progress is to be there, not to act from there ([`Forms::goal_walks`]).
+    goals: BTreeSet<Id>,
     planning: &'a RefCell<Planning>,
     map: Arc<Versions>,
 }
@@ -394,17 +400,50 @@ impl Sight<'_> {
     }
 
     /// Point `at` of node `node`'s frame carried onto the floor of `node` nearest its height (#3688), when `node` has
-    /// floors: `None` when it has none.
+    /// floors: `None` when it has none. A floor's heights are its surfaces' (N1's `F_SURFACES`, mm in the thing's
+    /// frame) and its rooms': every floor node stands at the thing's origin, so its place says nothing of its height
+    /// (#1960: an upper landing's door was carried onto the ground floor, where no place is within an arm of it).
     fn floor_of(&self, node: Id, at: Vec3) -> Option<(Id, Vec3)> {
-        use import_eden::FLOOR;
+        use import_eden::{FLOOR, ROOM};
+        use replica::encode::Value;
+        let mm = |v: &Value| match v {
+            Value::Uint(n) => i64::try_from(*n).ok(),
+            Value::Nint(n) => i64::try_from(*n).ok().map(|n| -1 - n),
+            _ => None,
+        };
         let floor = self
             .tree
             .children(self.tree.handle(node)?)?
             .iter()
             .filter_map(|&c| self.tree.node(c))
             .filter(|f| plain(f.kind()) == FLOOR)
-            .filter_map(|f| Some((f.id(), f.place()?)))
-            .min_by_key(|(_, p)| (p.position.y - at.y).abs())?;
+            .filter_map(|f| {
+                let place = f.place()?;
+                let surfaces = match f.fields().get(&sim::ground::scene::F_SURFACES) {
+                    Some(Value::Array(rows)) => rows.as_slice(),
+                    _ => &[],
+                };
+                let rooms = self
+                    .tree
+                    .children(self.tree.handle(f.id())?)?
+                    .iter()
+                    .filter_map(|&c| self.tree.node(c))
+                    .filter(|r| plain(r.kind()) == ROOM)
+                    .filter_map(|r| Some(r.place()?.position.y));
+                let off = surfaces
+                    .iter()
+                    .filter_map(|r| match r {
+                        Value::Array(r) => r.first().and_then(mm).map(|y| y * 1000),
+                        _ => None,
+                    })
+                    .chain(rooms)
+                    .map(|y| (y - at.y).abs())
+                    .min()
+                    .unwrap_or((place.position.y - at.y).abs());
+                Some((off, f.id(), place))
+            })
+            .min_by_key(|(off, _, _)| *off)
+            .map(|(_, id, place)| (id, place))?;
         let [w, x, y, z] = floor.1.orientation.parts();
         let back = replica::pose::Quat::new(w, -x, -y, -z).ok()?;
         let local = back.rotate(at.minus(floor.1.position).ok()?).ok()?;
@@ -664,6 +703,127 @@ fn fit(areas: &[[i64; 2]; 3], thing: &[[i64; 2]; 3], p: Vec3) -> Vec3 {
     Vec3::new(axis(0, p.x), axis(1, p.y), axis(2, p.z))
 }
 
+impl Sight<'_> {
+    /// The radius of the area a body walks to, at step `step`, to be there (no move or sit after it): the walk may end
+    /// within reach of the area's circle. `None` for any other walk.
+    fn area_radius(&self, body: Id, step: usize) -> Option<i64> {
+        if !self.goals.contains(&body) {
+            return None;
+        }
+        let &(at_step, thing, ref point) = self.walks.get(&body)?;
+        if at_step != step {
+            return None;
+        }
+        let n = self.tree.node(self.tree.handle(thing)?)?;
+        let r = self
+            .kinds
+            .get(plain(n.kind()))?
+            .get("areas")?
+            .get(point.as_str())?
+            .get("radius_mm")?;
+        match r {
+            Json::Int(mm) => i64::try_from(*mm).ok()?.checked_mul(1000),
+            _ => None,
+        }
+    }
+
+    fn on_shape(&self, body: Id, step: usize, node: Id) -> Option<Vec3> {
+        let &(at_step, thing, ref point) = self.walks.get(&body)?;
+        if at_step != step {
+            return None;
+        }
+        let n = self.tree.node(self.tree.handle(thing)?)?;
+        if n.parent() != Some(node) {
+            return None;
+        }
+        on_drawn_shape(&n, self.kinds.get(plain(n.kind()))?, point.as_str())
+    }
+}
+
+/// Point `point` of entry `entry` laid on thing `n`'s own shape, when `n` is drawn in its parent's frame (placed at its
+/// origin, with a line or an outline field), as Eden's land features are: on its line ([`on_line`]) when the entry
+/// is long along x (a hedge's, a bridge's: x at least twice z), else on the box of its line's or outline's points
+/// ([`on_outline`]: a pond, a garden, a winding channel). `None` for any other thing or point.
+pub fn on_drawn_shape(n: &replica::tree::NodeRef<'_>, entry: &Json, point: &str) -> Option<Vec3> {
+    use import_eden::{F_LINE, F_OUTLINE};
+    if n.place().is_some_and(|p| p.position != Vec3::ZERO) {
+        return None;
+    }
+    let p = ["points", "areas"]
+        .iter()
+        .find_map(|k| um(entry.get(k)?.get(point)?.get("at_mm")))?;
+    let bounds = um(entry.get("geometry")?.get("bounds_mm"))?;
+    let xz = |v: &replica::encode::Value| -> Option<Vec<[i64; 2]>> {
+        let replica::encode::Value::Array(rows) = v else {
+            return None;
+        };
+        rows.iter()
+            .map(|r| match r {
+                replica::encode::Value::Array(c) => {
+                    Some([int_of(c.first()?)? * 1000, int_of(c.get(1)?)? * 1000])
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    if let Some(line) = n.fields().get(&F_LINE).and_then(xz) {
+        if bounds.x >= 2 * bounds.z {
+            return on_line(p, bounds, &line);
+        }
+        return on_outline(p, bounds, &line);
+    }
+    on_outline(p, bounds, &n.fields().get(&F_OUTLINE).and_then(xz)?)
+}
+
+/// `v` stretched from `from` to `to` (µm).
+fn stretch(v: i64, from: i64, to: i64) -> Option<i64> {
+    i64::try_from(i128::from(v) * i128::from(to) / i128::from(from.max(1))).ok()
+}
+
+/// Point `p` of an entry whose bounds are `bounds` laid on `line` (`[x, z]` µm): its x along the line from the first
+/// point to the last, stretched from the bounds' x to the line's length, from the line's middle; its z across it, as
+/// it is; its y as it is.
+fn on_line(p: Vec3, bounds: Vec3, line: &[[i64; 2]]) -> Option<Vec3> {
+    let (a, b) = (line.first()?, line.last()?);
+    let (dx, dz) = (b[0] - a[0], b[1] - a[1]);
+    let len = flat(*a, *b);
+    if len == 0 {
+        return None;
+    }
+    let along = stretch(p.x, bounds.x, len)?;
+    let on = |u: i64, w: i64| i64::try_from(i128::from(u) * i128::from(w) / i128::from(len)).ok();
+    // The line's way is (dx, dz), and across it (-dz, dx), each over its length.
+    Some(Vec3::new(
+        (a[0] + b[0]) / 2 + on(along, dx)? - on(p.z, dz)?,
+        p.y,
+        (a[1] + b[1]) / 2 + on(along, dz)? + on(p.z, dx)?,
+    ))
+}
+
+/// Point `p` of an entry whose bounds are `bounds` laid on `outline` (`[x, z]` µm): from the middle of the outline's
+/// box, each of x and z stretched from the bounds to the box; its y as it is.
+fn on_outline(p: Vec3, bounds: Vec3, outline: &[[i64; 2]]) -> Option<Vec3> {
+    let lo = [0, 1].map(|k| outline.iter().map(|q| q[k]).min());
+    let hi = [0, 1].map(|k| outline.iter().map(|q| q[k]).max());
+    let ([Some(x0), Some(z0)], [Some(x1), Some(z1)]) = (lo, hi) else {
+        return None;
+    };
+    Some(Vec3::new(
+        (x0 + x1) / 2 + stretch(p.x, bounds.x, x1 - x0)?,
+        p.y,
+        (z0 + z1) / 2 + stretch(p.z, bounds.z, z1 - z0)?,
+    ))
+}
+
+/// A whole number of the encoding as an `i64`.
+fn int_of(v: &replica::encode::Value) -> Option<i64> {
+    match v {
+        replica::encode::Value::Uint(u) => i64::try_from(*u).ok(),
+        replica::encode::Value::Nint(n) => i64::try_from(*n).ok().map(|n| -n - 1),
+        _ => None,
+    }
+}
+
 impl Geometry for Sight<'_> {
     fn ask(&self, body: Id, q: &Ask) -> Option<Answer> {
         match q {
@@ -734,6 +894,9 @@ impl Geometry for Sight<'_> {
         let Some(me) = self.bodies.get(&body) else {
             return WalkPlan::Legs(Vec::new());
         };
+        let at = self.on_shape(body, step, node).unwrap_or(at);
+        // A walk to be in an area ends within reach of the area's circle, not of its middle.
+        let reach = reach.saturating_add(self.area_radius(body, step).unwrap_or(0));
         // A walk before a sit goes to the seat's own stand point, the one its sit is measured from.
         let (node, at) = match self.sit_walks.get(&body) {
             Some(&(at_step, floor, stand)) if at_step == step => (floor, stand),
@@ -745,17 +908,27 @@ impl Geometry for Sight<'_> {
         // An approach to a move's point (#3688): a point of a thing on a building with floors (an inner door) is on
         // the building's floor nearest its height, so the walk goes in to it, and once in through a link the runner
         // approaches again from that floor; on the floor the body stands on, it is aimed short of the point, on the
-        // body's side.
+        // body's side. When the body is not before the point (behind the building whose door it is), the point moved
+        // toward it may have no place within an arm (#1960): then the walk aims at the point itself, and the search
+        // for a place to stand, from the body, finds the body's side.
+        // An approach's move acts on the run's own thing: when that is a doorway's door, the walk may end in its
+        // doorway (#3688).
+        let door = self
+            .approaches
+            .contains(&body)
+            .then(|| self.walks.get(&body).map(|w| w.1))
+            .flatten();
         let (node, at) = if self.approaches.contains(&body) {
             let (node, at) = self.floor_of(node, at).unwrap_or((node, at));
             self.with_view(body, |v| {
                 let (floor, p, _) = v.on_floor(node, at)?;
                 (floor == sim::walk::node_of(me)).then(|| {
                     let short = skills::form_runner::APPROACH_SHORT;
-                    (
-                        floor,
-                        skills::form_runner::short_of(p, me.pose.position, short),
-                    )
+                    let aim = skills::form_runner::short_of(p, me.pose.position, short);
+                    match v.stand_near_door(floor, aim, reach, Some(me), door) {
+                        Some(_) => (floor, aim),
+                        None => (floor, p),
+                    }
                 })
             })
             .flatten()
@@ -764,13 +937,6 @@ impl Geometry for Sight<'_> {
             (node, at)
         };
         let mut planning = self.planning.borrow_mut();
-        // An approach's move acts on the run's own thing: when that is a doorway's door, the walk may end in its
-        // doorway (#3688).
-        let door = self
-            .approaches
-            .contains(&body)
-            .then(|| self.walks.get(&body).map(|w| w.1))
-            .flatten();
         let query = FormQuery::Walk {
             node,
             at,
@@ -849,13 +1015,49 @@ fn um(v: Option<&Json>) -> Option<Vec3> {
     }
 }
 
+/// How far below its feet a body reaches, µm: today's contact check (`contact-actuator.ts`, a hand reaches a thing
+/// within 1.2 m of the feet's height).
+pub const BELOW_FEET: i64 = 1_200_000;
+
+/// How far a span of heights `[lo, hi]` (µm) lies outside what a body with feet at `feet` and standing reach `reach`
+/// gets a hand to: from [`BELOW_FEET`] under its feet to its standing reach above them (`sim::slots::standing_reach`,
+/// today's overhead reach); 0 within.
+fn off_height(feet: i64, reach: i64, lo: i64, hi: i64) -> i64 {
+    (feet - BELOW_FEET - hi).max(lo - feet - reach).max(0)
+}
+
+/// `[x, z]` gap `h` and height gap `v` (µm) as one distance.
+fn with_height(h: i64, v: i64) -> i64 {
+    let (h, v) = (i128::from(h), i128::from(v));
+    i64::try_from((h * h + v * v).isqrt()).unwrap_or(i64::MAX)
+}
+
 impl Sight<'_> {
-    /// How far a body standing at `from` on floor `floor` is from thing `target` across x and z (C22, #3485): from
+    /// Whether floors `a` and `b` share one frame: the same node, or two floors of one building, each placed at the
+    /// building's origin (a storey's height is in its rooms' and things' places).
+    fn same_frame(&self, a: Id, b: Id) -> bool {
+        let at_origin = |id: Id| {
+            let n = self.tree.handle(id).and_then(|h| self.tree.node(h))?;
+            n.place()
+                .is_none_or(|p| p.position == Vec3::ZERO)
+                .then(|| n.parent())
+                .flatten()
+        };
+        a == b || at_origin(a).is_some_and(|pa| at_origin(b) == Some(pa))
+    }
+
+    /// How far a body standing at `from` on floor `floor` is from thing `target` (C22, #3485): across x and z from
     /// the body's edge (a standard body's radius from its feet, [`sim::ground::HUMAN_RADIUS`]: a hand reaches from the
     /// shoulder, not the feet) to the nearer of the thing's point `point` its entry names and its nearest surface, the
     /// box its entry's `geometry.bounds_mm` gives (centred on its place), each turned with the thing and carried onto
-    /// that floor ([`View::on_floor`]). `None` when its entry gives neither, or the thing is not over that floor.
+    /// that floor ([`View::on_floor`]) or another floor of its building; and in height, how far the point or the box
+    /// lies outside the body's reach above and below its feet ([`off_height`]), so a thing on the floor above or
+    /// below is out of reach however near across x and z. `None` when its entry gives neither, or the thing is not
+    /// over that floor or its building.
     fn to_thing(&self, body: Id, floor: Id, from: Vec3, target: Id, point: &Name) -> Option<i64> {
+        let build = *self.builds.get(&body)?;
+        let reach = sim::slots::standing_reach(build);
+        let radius = build.size.radius_mm() * 1000;
         self.with_view(body, |view| {
             let n = self.tree.node(self.tree.handle(target)?)?;
             let entry = self.kinds.get(entry_of(&n))?;
@@ -870,10 +1072,13 @@ impl Sight<'_> {
                 });
             let on = |p: Vec3| {
                 if own_floor {
-                    return Some([p.x, p.z]);
+                    return Some(p);
                 }
-                if let Some(on) = view.on_floor(target, p).filter(|(f, ..)| *f == floor) {
-                    return Some([on.1.x, on.1.z]);
+                if let Some(on) = view
+                    .on_floor(target, p)
+                    .filter(|(f, ..)| self.same_frame(*f, floor))
+                {
+                    return Some(on.1);
                 }
                 // A thing of a building with floors (an inner door, #3688), from a body on that building's floor.
                 let place = n.place()?;
@@ -882,38 +1087,44 @@ impl Sight<'_> {
                     .plus(place.orientation.rotate(p).ok()?)
                     .ok()?;
                 self.floor_of(n.parent()?, up)
-                    .filter(|(f, _)| *f == floor)
-                    .map(|(_, p)| [p.x, p.z])
+                    .filter(|(f, _)| self.same_frame(*f, floor))
+                    .map(|(_, p)| p)
             };
             let q = [from.x, from.z];
+            let gap = |h: i64, lo: i64, hi: i64| {
+                with_height(
+                    h.saturating_sub(radius).max(0),
+                    off_height(from.y, reach, lo, hi),
+                )
+            };
             let named = um(entry
                 .get("points")
                 .and_then(|ps| ps.get(point.as_str()))
                 .and_then(|p| p.get("at_mm")))
             .and_then(on)
-            .map(|p| flat(q, p));
+            .map(|p| gap(flat(q, [p.x, p.z]), p.y, p.y));
             let surface =
                 um(entry.get("geometry").and_then(|g| g.get("bounds_mm"))).and_then(|b| {
                     let (x, z) = (b.x / 2, b.z / 2);
                     let c = |u: i64, v: i64| on(Vec3::new(u, 0, v));
-                    let ring = [c(-x, -z)?, c(x, -z)?, c(x, z)?, c(-x, z)?];
-                    Some(to_ring(q, &ring))
+                    let corners = [c(-x, -z)?, c(x, -z)?, c(x, z)?, c(-x, z)?];
+                    let ring = corners.map(|p| [p.x, p.z]);
+                    let lo = corners.iter().map(|p| p.y).min()?;
+                    let hi = corners.iter().map(|p| p.y).max()? + b.y.max(0);
+                    Some(gap(to_ring(q, &ring), lo, hi))
                 });
-            let d = match (named, surface) {
-                (Some(a), Some(b)) => a.min(b),
-                (a, b) => a.or(b)?,
-            };
-            Some(
-                d.saturating_sub(self.builds.get(&body)?.size.radius_mm() * 1000)
-                    .max(0),
-            )
+            match (named, surface) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (a, b) => a.or(b),
+            }
         })?
     }
 }
 
 impl Reach for Sight<'_> {
     /// To another body, from feet to feet; to a thing, from the body's edge to its point or its nearest surface
-    /// ([`Sight::to_thing`]), else to its place in the tree; across x and z.
+    /// ([`Sight::to_thing`]), else to its place in the tree; across x and z, and in height beyond the body's reach
+    /// above and below its feet ([`off_height`]).
     fn distance(
         &self,
         body: Id,
@@ -930,14 +1141,36 @@ impl Reach for Sight<'_> {
             AT_ARG => *self.toward.get(&body)?,
             _ => target,
         };
-        if let Some(d) = self.to_thing(body, sim::walk::node_of(me), a, target, point) {
+        // A thing in the body's own hand is within its reach (#3715): a held kettle's switch.
+        let parent = self
+            .tree
+            .handle(target)
+            .and_then(|h| self.tree.node(h)?.parent());
+        if parent == Some(body) {
+            return Some(0);
+        }
+        let floor = sim::walk::node_of(me);
+        if let Some(d) = self.to_thing(body, floor, a, target, point) {
             return Some(d);
         }
-        let b = match self.bodies.get(&target) {
-            Some(t) => t.pose.position,
-            None => self.place(target)?,
+        // Heights in the tree's frame: a body's feet on its floor's place, as a thing's place is found.
+        let height = |node: Id, y: i64| self.place(node).map(|p| p.y + y);
+        let (b, top) = match self.bodies.get(&target) {
+            Some(t) => (
+                t.pose.position,
+                height(sim::walk::node_of(t), t.pose.position.y),
+            ),
+            None => {
+                let b = self.place(target)?;
+                (b, Some(b.y))
+            }
         };
-        Some(flat([a.x, a.z], [b.x, b.z]))
+        let reach = sim::slots::standing_reach(*self.builds.get(&body)?);
+        let v = match (height(floor, a.y), top) {
+            (Some(feet), Some(y)) => off_height(feet, reach, y, y),
+            _ => 0,
+        };
+        Some(with_height(flat([a.x, a.z], [b.x, b.z]), v))
     }
 }
 
@@ -961,6 +1194,74 @@ fn obj_mut<'a>(v: &'a mut Json, key: &str) -> Option<&'a mut Json> {
 /// argument is at [`AT_ARG`], that thing (returned). A point of this thing named by `at` stays as it is. An argument
 /// not given as a thing is refused `arg-missing`. The two points are added to the copy's points, at its origin, so the
 /// binder knows them; [`Sight`] measures them.
+/// `kinds` (entries by kind) with each form's `create` kind written as `pinned` names it (`<kind>@<hash>`), where it
+/// pins one; any other is left as it is, and its make is refused by name (`name-not-pinned`).
+fn pin_made(kinds: Json, pinned: &[Name]) -> Json {
+    let pin = |k: &str| {
+        pinned
+            .iter()
+            .find(|n| plain(n) == k)
+            .map(|n| n.as_str().to_owned())
+    };
+    let Json::Obj(entries) = kinds else {
+        return kinds;
+    };
+    Json::Obj(
+        entries
+            .into_iter()
+            .map(|(name, mut entry)| {
+                if let Some(Json::Obj(forms)) = obj_mut(&mut entry, "forms") {
+                    for (_, f) in forms.iter_mut() {
+                        if let Some(Json::Arr(effects)) = obj_mut(f, "effects") {
+                            for e in effects.iter_mut() {
+                                let made = (e.get("change").and_then(Json::str) == Some("create"))
+                                    .then(|| e.get("kind").and_then(Json::str).and_then(pin))
+                                    .flatten();
+                                if let (Some(p), Json::Obj(o)) = (made, e) {
+                                    for (k, v) in o.iter_mut() {
+                                        if k == "kind" {
+                                            *v = Json::s(&p);
+                                        }
+                                    }
+                                }
+                            }
+                        }
+                    }
+                }
+                (name, entry)
+            })
+            .collect(),
+    )
+}
+
+/// An intent's whole-number arguments split for `form` of `entry`: those it `takes` as an `int` or a `duration` (a
+/// count, a start time) as values, the rest as slot numbers (#3703).
+fn numbers(
+    entry: &Json,
+    form: &str,
+    given: &BTreeMap<String, u64>,
+) -> (skills::form_runner::Args, BTreeMap<String, u64>) {
+    let takes = |k: &str| {
+        entry
+            .get("forms")
+            .and_then(|f| f.get(form))
+            .and_then(|f| f.get("takes"))
+            .and_then(|t| t.get(k))
+            .and_then(|t| t.get("type"))
+            .and_then(Json::str)
+    };
+    let (mut counts, mut slots) = (skills::form_runner::Args::new(), BTreeMap::new());
+    for (k, &n) in given {
+        match (takes(k), i64::try_from(n)) {
+            (Some("count" | "int" | "duration"), Ok(v)) => {
+                drop(counts.insert(k.clone(), skills::form_runner::Arg::Int(v)))
+            }
+            _ => drop(slots.insert(k.clone(), n)),
+        }
+    }
+    (counts, slots)
+}
+
 fn targets(entry: &Json, form: &str, args: &skills::form_runner::Args) -> R<(Json, Option<Id>)> {
     let mut e = entry.clone();
     let mut thing = None;
@@ -1119,16 +1420,18 @@ fn within_reach(tree: &Tree, entry: &Json, body: Id, body_at: Option<Vec3>, node
 /// `form-rules`' `selectThing` reads it the same way, #3914). `Ok(Some(thing))` binds it, `Ok(None)` finds nothing
 /// that qualifies, and `Err(())` is a selector this does not read (the argument stays missing).
 ///
-/// - **The set** (`in`): `this` the children of the act's node; `here` those of the node the actor's body is in
-///   (the act's node's parent when the body is not in the tree) and what the body holds, within [`HERE_REACH_MM`]
-///   of the anchor; `parent` those of the act's node's parent. Never the act's node, the actor's body, a body (a
-///   node linked `souls:body-of`) or a node of a private audience; with `kind`, only that kind.
+/// - **The set** (`in`): `this` the children of the act's node; `here` every thing within [`HERE_REACH_MM`] of the
+///   anchor across x and z, what the body holds included, in the same building or on the same ground as the act's
+///   node when both say (#3715: the kettle fills at the nearest sink in its own building), and never one inside a
+///   closed container; `parent` those of the act's node's parent. Never the act's node, the actor's body, a body (a
+///   node linked `souls:body-of`) or a node of a private audience; with `kind`, only things of that kind or entry.
 /// - **The order**: by squared distance in the zone's frame (x, y and z) from the `anchor` (`me` the body, `this`
 ///   the act's node), `nearest` first or `furthest` first, ties by id; a thing with no place goes after every placed
 ///   one, by id.
 /// - **The rank**: 1, 2, ... or `last`. Too few is nothing.
 pub(crate) fn select_thing(
     tree: &Tree,
+    kinds: &Json,
     select: &Json,
     node: Id,
     body: Id,
@@ -1141,11 +1444,8 @@ pub(crate) fn select_thing(
     let here = select.get("in").and_then(Json::str) == Some("here");
     let sets: Vec<Id> = match select.get("in").and_then(Json::str) {
         Some("this") => vec![node],
-        Some("here") => parent(body)
-            .or_else(|| parent(node))
-            .into_iter()
-            .chain([body])
-            .collect(),
+        // Every node of the tree, narrowed below by reach, building and closed containers.
+        Some("here") => Vec::new(),
         Some("parent") => parent(node).into_iter().collect(),
         _ => return Err(()),
     };
@@ -1175,20 +1475,68 @@ pub(crate) fn select_thing(
         d(a.x, p.x) + d(a.y, p.y) + d(a.z, p.z)
     };
     let reach = i128::from(HERE_REACH_MM * 1_000) * i128::from(HERE_REACH_MM * 1_000);
-    let mut ranked: Vec<(Option<i128>, Id)> = sets
-        .iter()
-        .filter_map(|s| tree.children(tree.handle(*s)?))
-        .flatten()
-        .filter_map(|&h| tree.node(h))
+    let handles: Vec<replica::tree::Handle> = if here {
+        let mut all = Vec::new();
+        let mut stack = vec![tree.root()];
+        while let Some(h) = stack.pop() {
+            stack.extend(tree.children(h).unwrap_or(&[]));
+            all.push(h);
+        }
+        all
+    } else {
+        sets.iter()
+            .filter_map(|s| tree.children(tree.handle(*s)?))
+            .flatten()
+            .copied()
+            .collect()
+    };
+    // Here: the same building or ground as the act's node, when both say; never inside a closed container.
+    let frame = replica::select::standing(tree, node).ok().map(|f| f.0);
+    let same_place = |id: Id| match (frame, replica::select::standing(tree, id)) {
+        (Some(f), Ok((g, _))) => f == g,
+        _ => true,
+    };
+    let closed_above = |id: Id| {
+        let mut up = parent(id);
+        for _ in 0..64 {
+            let Some(p) = up else { return false };
+            let Some(pn) = tree.node(tree.handle(p).unwrap_or_else(|| tree.root())) else {
+                return false;
+            };
+            if p != node
+                && kinds
+                    .get(plain(pn.kind()))
+                    .and_then(|e| e.get("closed"))
+                    .is_some()
+            {
+                return true;
+            }
+            up = pn.parent();
+        }
+        true
+    };
+    let xz = |a: Vec3, p: Vec3| {
+        let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+        d(a.x, p.x) + d(a.z, p.z)
+    };
+    let of_kind = |n: &replica::tree::NodeRef<'_>| {
+        kind.is_none_or(|k| plain(n.kind()) == k || entry_of(n).split('@').next() == Some(k))
+    };
+    let mut ranked: Vec<(Option<i128>, Id)> = handles
+        .into_iter()
+        .filter_map(|h| tree.node(h))
         .filter(|n| n.id() != node && n.id() != body)
         .filter(|n| n.audience() == replica::world_model::Audience::Everyone)
-        .filter(|n| kind.is_none_or(|k| plain(n.kind()) == k))
+        .filter(|n| of_kind(n))
         .filter(|n| !is_body(n.id()))
-        .map(|n| {
-            let d = anchor.zip(world_at(tree, n.id())).map(|(a, p)| d2(a, p));
-            (d, n.id())
+        .filter(|n| !here || (same_place(n.id()) && !closed_above(n.id())))
+        .filter_map(|n| {
+            let p = world_at(tree, n.id());
+            if here && anchor.zip(p).is_none_or(|(a, p)| xz(a, p) > reach) {
+                return None;
+            }
+            Some((anchor.zip(p).map(|(a, p)| d2(a, p)), n.id()))
         })
-        .filter(|(d, _)| !here || d.is_some_and(|d| d <= reach))
         .collect();
     ranked.sort_by(|(da, a), (db, b)| {
         let by = match (da, db) {
@@ -1281,12 +1629,19 @@ impl Acts {
         header: replica::effects::Header,
         scope: Scope,
     ) -> Acts {
+        // A form's `create` names its kind plainly; the world makes it as the header pins it (#3703).
+        let kinds = pin_made(kinds, &header.kinds);
         let mut forms = Forms::new();
         let mut loaded = replica::kinds::Kinds::default();
         for (_, entry) in kinds.obj().unwrap_or(&[]) {
             let mut e = entry.clone();
             if let Json::Obj(o) = &mut e {
                 o.retain(|(k, _)| k != "forms");
+                // A timed field (a kettle's heat) is not an amount, and the kind format cannot hold its default yet:
+                // left out, so the entry's amounts load (#3715).
+                if let Some((_, Json::Obj(state))) = o.iter_mut().find(|(k, _)| k == "state") {
+                    state.retain(|(_, f)| f.get("type").and_then(Json::str) != Some("timed"));
+                }
             }
             if let Ok(text) = replica::kinds::entry::entry_to_kind(&e.to_json()) {
                 loaded.load(&[("entry", text.as_str())]);
@@ -1436,6 +1791,7 @@ impl Acts {
             walks,
             approaches,
             sit_walks,
+            goals: self.forms.goal_walks(),
             planning: &self.planning,
             map,
         };
@@ -1542,26 +1898,9 @@ impl Acts {
                 first.get_or_insert(refusal("arg-ambiguous", key));
                 continue;
             }
-            // A number for an argument the form takes as a count or an int is that number, not a slot (#3713).
-            let takes = entry
-                .get("forms")
-                .and_then(|f| f.get(form))
-                .and_then(|f| f.get("takes"));
-            let counted = |k: &String| {
-                matches!(
-                    takes
-                        .and_then(|t| t.get(k))
-                        .and_then(|t| t.get("type"))
-                        .and_then(Json::str),
-                    Some("count" | "int")
-                )
-            };
-            let slots: BTreeMap<String, u64> = args
-                .slots
-                .iter()
-                .filter(|(k, _)| !counted(k))
-                .map(|(k, n)| (k.clone(), *n))
-                .collect();
+            // A whole number the form takes as a `count`, an `int` or a `duration` is that value (#3703, #3713); any
+            // other is a slot of the node by number (C12).
+            let (counts, slots) = numbers(entry, form, &args.slots);
             let mut all = match skills::form_runner::args_in(entry, &args.things, &slots) {
                 Ok(all) => all,
                 Err(e) => {
@@ -1569,14 +1908,8 @@ impl Acts {
                     continue;
                 }
             };
-            for (k, n) in args.slots.iter().filter(|(k, _)| counted(k)) {
-                all.insert(
-                    k.clone(),
-                    skills::form_runner::Arg::Int(i64::try_from(*n).unwrap_or(i64::MAX)),
-                );
-            }
             let mut ambiguous = None;
-            for (key, value) in &args.values {
+            for (key, value) in counts.iter().chain(&args.values) {
                 if all.insert(key.clone(), value.clone()).is_some() {
                     ambiguous = Some(key.clone());
                     break;
@@ -1649,7 +1982,7 @@ impl Acts {
                     let Some(select) = take.get("select") else {
                         continue;
                     };
-                    match select_thing(tree, select, *node, body, body_at) {
+                    match select_thing(tree, &self.kinds, select, *node, body, body_at) {
                         Ok(Some(t)) => {
                             all.insert(key.clone(), skills::form_runner::Arg::Node(t));
                             picked = true;
@@ -2001,6 +2334,44 @@ mod gateway_walk_tests {
         // A 600 m route is not capped at the old 180 s: 429 s of walking, plus half again.
         assert!(walk_span(600_000, 0) > 600_000_000);
         assert_eq!(walk_span(u64::MAX, usize::MAX), Micros::MAX);
+    }
+}
+
+#[cfg(test)]
+mod number_tests {
+    use super::*;
+
+    /// #3703: a whole number a form takes as an int or a duration is a value; any other names a slot.
+    #[test]
+    fn whole_numbers_a_form_takes_as_counts_are_values_and_others_slots() {
+        let entry = replica::rules::json::parse(
+            r#"{"forms":{"post":{"takes":{"start":{"type":"duration"},"n":{"type":"int"},"spot":{"type":"slot"}}}}}"#,
+        )
+        .expect("an entry");
+        let given = BTreeMap::from([
+            ("start".to_owned(), 1_800_000_000_000_000u64),
+            ("n".to_owned(), 3),
+            ("spot".to_owned(), 2),
+            ("other".to_owned(), 1),
+        ]);
+        let (counts, slots) = numbers(&entry, "post", &given);
+        assert_eq!(
+            counts,
+            skills::form_runner::Args::from([
+                ("n".to_owned(), skills::form_runner::Arg::Int(3)),
+                (
+                    "start".to_owned(),
+                    skills::form_runner::Arg::Int(1_800_000_000_000_000)
+                ),
+            ])
+        );
+        assert_eq!(
+            slots,
+            BTreeMap::from([("other".to_owned(), 1), ("spot".to_owned(), 2)])
+        );
+        // A number past i64 stays a slot number, refused there by name.
+        let huge = BTreeMap::from([("n".to_owned(), u64::MAX)]);
+        assert_eq!(numbers(&entry, "post", &huge).1, huge);
     }
 }
 

@@ -36,7 +36,7 @@
 	@models path_regexp models ^/(?:preview/)?w/([a-z0-9][a-z0-9-]{0,62})/models(/.+)$
 	@panel path_regexp ^/(?:preview/)?w/[^/]+/src/panel/(index\.html)?$
 	@native path_regexp ^/(?:preview/)?w/[^/]+/(v1/bootstrap|views/world\.json|v2/ws|v2/creator-token|v2/entries)$
-	@client path_regexp client ^/(?:preview/)?w/([^/]+)/(eden\.mjs|skill\.md|creator\.md|instructions\.md|llms\.txt|replica\.js|replica_bg\.wasm|v1/config)$
+	@client path_regexp client ^/(?:preview/)?w/([^/]+)/(eden\.mjs|skill\.md|creator\.md|instructions\.md|safety\.md|llms\.txt|replica\.js|replica_bg\.wasm|v1/config)$
 	handle @page {
 		header X-Souls-System v2
 		rewrite * /index.html
