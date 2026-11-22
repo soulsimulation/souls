@@ -123,11 +123,19 @@ impl Targets {
             .collect();
         // The bodies' own entries (the kind the world looks a body's forms up by), and the things that are not bodies.
         let is_body = |id: &Id| seen.bodies.values().any(|b| b == id);
-        let families: Vec<&Json> = nodes
+        let mut families: Vec<&Json> = nodes
             .iter()
             .filter(|(id, _)| is_body(id))
             .filter_map(|(_, k)| by_kind.get(k.as_str()).copied())
             .collect();
+        // #4154: a seeded world's test bodies are of kind `souls:body`, which names no entry; their forms are the body
+        // family's entry's (`"owner": "family"`, Eden's `eden:humanoid`), sent on the body as an agent sends them.
+        if families.is_empty() {
+            families = all
+                .iter()
+                .filter(|e| e.get("owner").and_then(Json::str) == Some("family"))
+                .collect();
+        }
         let things: Vec<(Id, &Json)> = nodes
             .iter()
             .filter(|(id, _)| !is_body(id))
