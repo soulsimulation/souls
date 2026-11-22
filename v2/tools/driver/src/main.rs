@@ -132,6 +132,8 @@ struct Sent {
     duplicates: u64,
     resent: u64,
     restarting: u64,
+    /// Acts answered accepted (kind 3) and not yet ended when the drain ran out: answered, so not an error (W11).
+    unfinished: u64,
     /// X10's trace lines (`--trace`): `ack|dup <agent> <sequence> <unix ms>`, `first <agent> <sequence> <sent unix ms>
     /// <answer unix ms> <receipt or refusal name>`, `gone|back <agent> <unix ms>`.
     trace: Vec<String>,
@@ -484,8 +486,8 @@ async fn come_back(url: &str, token: &str, k: u32, jitter: bool) -> Option<(Tx, 
 
 /// One agent: first frame and sign-in, then each intent the schedule hands it, sent at once; then its answers, each
 /// act's first answer timed from its send (an accepted act's acceptance, W11 #4087), each act kept until its end (its
-/// receipt or refusal). Acts still unanswered at the drain's end are errors (`unanswered`), accepted ones not yet
-/// ended `unfinished`.
+/// receipt or refusal). Acts still unanswered at the drain's end are errors (`unanswered`); accepted ones not yet
+/// ended are counted as `unfinished`, not as errors.
 /// With [`Faults`] it comes back after a lost or dropped socket and sends again, under its old sequence, every intent
 /// it has no answer for (the runbook's client, `v2/docs/runbook/gateway-upgrade.md`). A second receipt for one
 /// sequence is counted as a duplicate.
@@ -699,16 +701,12 @@ async fn agent(
     }
     if let Some(s0) = start {
         for (s, (at, sent_ms, _)) in pending {
-            // Accepted and still going at the drain's end: answered, not ended.
-            out.error(
-                s0,
-                at,
-                if accepted.contains(&s) {
-                    "unfinished"
-                } else {
-                    "unanswered"
-                },
-            );
+            // Accepted and still going at the drain's end: answered, not ended, so counted apart, not an error.
+            if accepted.contains(&s) {
+                out.unfinished += 1;
+            } else {
+                out.error(s0, at, "unanswered");
+            }
             out.trace.push(format!("open {k} {s} {sent_ms}"));
         }
     }
@@ -1248,6 +1246,7 @@ async fn main() {
     let duplicates: u64 = sent.iter().map(|x| x.duplicates).sum();
     let resent: u64 = sent.iter().map(|x| x.resent).sum();
     let restarting: u64 = sent.iter().map(|x| x.restarting).sum();
+    let unfinished: u64 = sent.iter().map(|x| x.unfinished).sum();
     let mut viewers = Vec::new();
     for v in watching {
         if let Ok(v) = v.await {
@@ -1305,6 +1304,7 @@ async fn main() {
         .n("duplicateReceipts", duplicates as f64)
         .n("resent", resent as f64)
         .n("restartingAnswers", restarting as f64)
+        .n("unfinished", unfinished as f64)
         .raw("viewers", serde_like::list(&viewers));
     let on_time = total.get("onTimeShare").unwrap_or(0.0);
     println!(
@@ -1340,6 +1340,7 @@ async fn main() {
         println!("  minute {}", m.json());
     }
     println!("  refused by verb {}", counts(&refused_by));
+    println!("  accepted, not ended by the drain's end: {unfinished}");
     if a.reconnect || a.drop.is_some() || !viewers.is_empty() {
         println!(
             "  faults: duplicate receipts {duplicates}, sent again {resent}, world.restarting answers {restarting}"
