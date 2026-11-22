@@ -329,7 +329,13 @@
             50,
             5
           ],
-          "tint": "blue"
+          "tint": "blue",
+          "role": "flip",
+          "pivot": [
+            0,
+            1080,
+            0
+          ]
         },
         {
           "kind": "box",
@@ -343,7 +349,58 @@
             70,
             5
           ],
-          "tint": "red"
+          "tint": "red",
+          "role": "flip",
+          "pivot": [
+            0,
+            1080,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -30,
+            950,
+            -100
+          ],
+          "size": [
+            20,
+            20,
+            8
+          ],
+          "tint": "gold",
+          "when": "@twists>=1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            950,
+            -100
+          ],
+          "size": [
+            20,
+            20,
+            8
+          ],
+          "tint": "gold",
+          "when": "@twists>=2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            30,
+            950,
+            -100
+          ],
+          "size": [
+            20,
+            20,
+            8
+          ],
+          "tint": "gold",
+          "when": "@twists>=3"
         }
       ],
       "palette": {

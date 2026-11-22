@@ -1,0 +1,195 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Reachable optical play cycles, end stops, refusal without mutation and same-object reuse.",
+  "cases": [
+    {
+      "name": "zoetrope_cycle_boundaries_and_reuse",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:zoetrope"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "spin_drum"
+          },
+          "receipt": "cycle-0",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs"
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "fit_strip",
+            "args": {
+              "strip": "horse"
+            }
+          },
+          "receipt": "cycle-1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "strip",
+                "n": 28,
+                "to": "horse"
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "spin_drum"
+          },
+          "receipt": "cycle-2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "spinning",
+                "n": 29,
+                "to": 1
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "remove_strip"
+          },
+          "receipt": "cycle-3",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs"
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "brake_drum"
+          },
+          "receipt": "cycle-4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "spinning",
+                "n": 29,
+                "to": 0
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "spin_drum"
+          },
+          "receipt": "cycle-5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "spinning",
+                "n": 29,
+                "to": 1
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "coast_to_stop"
+          },
+          "receipt": "cycle-6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "spinning",
+                "n": 29,
+                "to": 0
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "remove_strip"
+          },
+          "receipt": "cycle-7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "strip",
+                "n": 28,
+                "to": "none"
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "fit_strip",
+            "args": {
+              "strip": "bouncing_ball"
+            }
+          },
+          "receipt": "cycle-8",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "strip",
+                "n": 28,
+                "to": "bouncing_ball"
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:zoetrope",
+          "fields": {
+            "strip": "bouncing_ball",
+            "spinning": 0
+          }
+        }
+      }
+    }
+  ]
+}

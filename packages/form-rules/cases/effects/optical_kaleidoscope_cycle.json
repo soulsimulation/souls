@@ -1,0 +1,166 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Reachable optical play cycles, end stops, refusal without mutation and same-object reuse.",
+  "cases": [
+    {
+      "name": "kaleidoscope_cycle_boundaries_and_reuse",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:kaleidoscope"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "turn_chamber",
+            "args": {
+              "pattern": "flower"
+            }
+          },
+          "receipt": "cycle-0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "pattern",
+                "n": 28,
+                "to": "flower"
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "turn_chamber",
+            "args": {
+              "pattern": "flower"
+            }
+          },
+          "receipt": "cycle-1",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs"
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "close_eyepiece"
+          },
+          "receipt": "cycle-2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "shutter",
+                "n": 29,
+                "to": 1
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "turn_chamber",
+            "args": {
+              "pattern": "wheel"
+            }
+          },
+          "receipt": "cycle-3",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs"
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "open_eyepiece"
+          },
+          "receipt": "cycle-4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "shutter",
+                "n": 29,
+                "to": 0
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "turn_chamber",
+            "args": {
+              "pattern": "wheel"
+            }
+          },
+          "receipt": "cycle-5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "pattern",
+                "n": 28,
+                "to": "wheel"
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "turn_chamber",
+            "args": {
+              "pattern": "star"
+            }
+          },
+          "receipt": "cycle-6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "pattern",
+                "n": 28,
+                "to": "star"
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:kaleidoscope",
+          "fields": {
+            "pattern": "star",
+            "shutter": 0
+          }
+        }
+      }
+    }
+  ]
+}

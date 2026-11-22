@@ -263,7 +263,7 @@
           "h": 300,
           "segments": 16,
           "tint": "dark",
-          "roll": 90000
+          "pitch": 90000
         },
         {
           "kind": "cyl",
@@ -276,8 +276,8 @@
           "h": 30,
           "segments": 16,
           "tint": "gold",
-          "roll": 90000,
-          "role": "knob"
+          "role": "knob",
+          "pitch": 90000
         },
         {
           "kind": "box",
