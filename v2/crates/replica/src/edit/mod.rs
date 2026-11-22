@@ -255,16 +255,25 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
         .into_iter()
         .map(|(_, full, _)| full)
         .collect();
-    for (full, k, _) in made.values() {
+    for (full, k, _, _) in made.values() {
         kinds.insert(full.clone(), k.clone());
         defined_names.insert(full.clone());
+    }
+    // Each new definition's forms create only kinds the world has, into slots that admit them, and fire no ring of
+    // timers every tick (`kind.effects`): one record never makes every run fail (#3697 review).
+    for (i, (_, k, _, entry)) in &made {
+        defined::effects_checked(entry, k, &kinds).map_err(|(name, detail)| Refused {
+            op: Some(*i),
+            name,
+            detail,
+        })?;
     }
     // A thing of a creator's kind stands as its kind's bounds say (#3697): its solids, unless the batch gives its own,
     // so walkers go round it and the safety rule (G2) judges what it would bury, as a boot thing's.
     let mut shapes = defined::solids_in(tree);
     shapes.extend(
         made.values()
-            .filter_map(|(full, _, s)| Some((full.clone(), s.clone()?))),
+            .filter_map(|(full, _, s, _)| Some((full.clone(), s.clone()?))),
     );
     for op in &mut edit.ops {
         if let Op::Place { kind, fields, .. } = op
@@ -398,7 +407,7 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
                 }
                 let k = kind.as_str();
                 // A kind defined later in the batch is not yet pinned here.
-                let later = made.range(i..).any(|(_, (full, _, _))| full == k);
+                let later = made.range(i..).any(|(_, (full, ..))| full == k);
                 if !kinds.contains_key(k) || !pinned(kind) || later {
                     return refuse(
                         here,
@@ -588,7 +597,7 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
                         Ref::New(n) => made
                             .iter()
                             .find(|(j, _)| matches!(&edit.ops[**j], Op::Place { name, .. } if name == n))
-                            .map(|(_, (full, _, _))| full.clone()),
+                            .map(|(_, (full, _, _, _))| full.clone()),
                     };
                     definitions_gone.extend(full.map(|f| (i, f)));
                 }
@@ -753,6 +762,31 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
                 ),
             );
         }
+        // A definition the batch leaves whose form still creates it.
+        let gone_names: BTreeSet<&str> = definitions_gone.iter().map(|(_, f)| f.as_str()).collect();
+        let kept = defined::nodes(tree)
+            .into_iter()
+            .filter(|(_, f, _)| !gone_names.contains(f.as_str()))
+            .filter_map(|(_, f, b)| defined::stored(&f, &b))
+            .map(|d| (d.full.clone(), d.entry.clone()))
+            .chain(
+                made.values()
+                    .filter(|(f, ..)| !gone_names.contains(f.as_str()))
+                    .map(|(f, _, _, e)| (f.clone(), e.clone())),
+            );
+        for (by, entry) in kept {
+            if defined::creates(&entry).contains(&full.as_str()) {
+                return refuse(
+                    Some(*i),
+                    "kind.in-use",
+                    format!(
+                        "{}'s forms still create a {}; remove or change it first",
+                        plain(&by),
+                        plain(full)
+                    ),
+                );
+            }
+        }
     }
     claims::judge(&edit, copy)?;
     Ok(Checked {
@@ -767,7 +801,7 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
 /// in field [`defined::ENTRY`]: checked ([`defined::read`]), and its fields made the canonical record and the full name
 /// it defines, which every replica reads. By the operation that makes each: the full name and its rules.
 /// By the operation that makes each definition: its full name, its rules and the solids a thing of it stands as.
-type Made = BTreeMap<usize, (String, Kind, Option<Value>)>;
+type Made = BTreeMap<usize, (String, Kind, Option<Value>, crate::rules::json::Value)>;
 
 fn define(edit: &mut Edit, copy: &Replica) -> Result<Made, Refused> {
     let tree = copy.tree();
@@ -783,6 +817,7 @@ fn define(edit: &mut Edit, copy: &Replica) -> Result<Made, Refused> {
             kind,
             parent,
             fields,
+            audience,
             ..
         } = op
         else {
@@ -800,6 +835,13 @@ fn define(edit: &mut Edit, copy: &Replica) -> Result<Made, Refused> {
             return Err(no(
                 "kind.invalid",
                 "a kind is defined at the world's root".into(),
+            ));
+        }
+        // Every copy (the public stream's among them) must hold a kind to apply a thing of it.
+        if *audience != Audience::Everyone {
+            return Err(no(
+                "kind.audience",
+                "a kind is defined for everyone: every copy applies things of it".into(),
             ));
         }
         let Some(Value::Bytes(sent)) = fields.get(&defined::ENTRY) else {
@@ -838,7 +880,7 @@ fn define(edit: &mut Edit, copy: &Replica) -> Result<Made, Refused> {
             (defined::ENTRY, Value::Bytes(d.bytes)),
         ]);
         let solids = defined::solids_of(&d.entry);
-        made.insert(i, (d.full, d.kind, solids));
+        made.insert(i, (d.full, d.kind, solids, d.entry));
     }
     Ok(made)
 }
@@ -860,9 +902,63 @@ pub fn confirm(live: &Replica, c: &Checked) -> Result<(), Refused> {
             return refuse(Some(*i), "edit.stale", format!("{id:?} is gone"));
         }
     }
+    in_use_live(live, c)?;
     // The claim check reads the root's claims and every ancestor's pose, which the read set does not hold: run it
     // again on the live copy, so a claim committed since the check still binds (#3879 review). Cheap and deterministic.
     claims::judge(&c.edit, live)
+}
+
+/// `kind.in-use` again on the live copy (#3697 review): a thing a Soul's form made of a definition's kind after the
+/// check, which the read set cannot hold, still refuses that definition's removal. Only a batch that removes a
+/// definition pays for the walk.
+fn in_use_live(live: &Replica, c: &Checked) -> Result<(), Refused> {
+    let tree = live.tree();
+    let removed: Vec<(usize, Id)> = c
+        .edit
+        .ops
+        .iter()
+        .enumerate()
+        .filter_map(|(i, op)| match op {
+            Op::Remove {
+                node: Ref::Node(id),
+            } => Some((i, *id)),
+            _ => None,
+        })
+        .collect();
+    let gone: Vec<(usize, String)> = removed
+        .iter()
+        .filter_map(|(i, id)| {
+            let n = tree.node(tree.handle(*id)?)?;
+            if !defined::is_definition(n.kind().as_str()) {
+                return None;
+            }
+            defined::named(n.fields()).map(|f| (*i, f.to_owned()))
+        })
+        .collect();
+    if gone.is_empty() {
+        return Ok(());
+    }
+    let removed: BTreeSet<Id> = removed.into_iter().map(|(_, id)| id).collect();
+    let mut stack = vec![tree.root()];
+    while let Some(h) = stack.pop() {
+        let Some(n) = tree.node(h) else { continue };
+        if removed.contains(&n.id()) {
+            continue;
+        }
+        if let Some((i, full)) = gone.iter().find(|(_, f)| f == n.kind().as_str()) {
+            return refuse(
+                Some(*i),
+                "kind.in-use",
+                format!(
+                    "{:?} is still a {}; remove what uses it first",
+                    n.id(),
+                    plain(full)
+                ),
+            );
+        }
+        stack.extend(tree.children(h).unwrap_or(&[]).iter().copied());
+    }
+    Ok(())
 }
 
 /// The batch an undo or redo reverses, by the sequence of its first effect: a creator's effect caused by an earlier

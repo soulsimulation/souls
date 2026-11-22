@@ -5060,7 +5060,7 @@ pub fn start<S: Storage + 'static>(
 }
 
 /// A creator's definitions' forms (#3697) pass the entry checker content entries pass: the import check, and each form
-/// that takes no arguments binds. Refused `kind.invalid`, naming the form.
+/// that takes no arguments binds, its steps and its effects. Refused `kind.invalid`, naming the form.
 fn definitions_form_checked(c: &edit::Checked) -> Result<(), Refused> {
     use replica::kinds::defined;
     for (i, op) in c.edit.ops.iter().enumerate() {
@@ -5087,8 +5087,12 @@ fn definitions_form_checked(c: &edit::Checked) -> Result<(), Refused> {
             .and_then(replica::rules::json::Value::obj)
             .unwrap_or(&[])
         {
+            // A form that takes no arguments binds its steps and its effects now, as its run would (#3697 review);
+            // what `kind.effects` cannot see without the run's arguments is refused for that run alone.
             if f.get("takes").is_none() {
                 skills::form_runner::bind(&d.entry, form)
+                    .map_err(|r| no(format!("{form}: {}: {}", r.name, r.detail)))?;
+                skills::form_runner::bind_effects(&d.entry, form)
                     .map_err(|r| no(format!("{form}: {}: {}", r.name, r.detail)))?;
             }
         }

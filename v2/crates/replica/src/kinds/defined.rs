@@ -13,10 +13,14 @@
 //!
 //! - `kind.invalid`: not a `souls-entry/1` record the kind loader reads (its numbered kind must load), a section it
 //!   cannot hold, or a number that is not whole;
-//! - `kind.too-large`: over [`ENTRY_MOST`] bytes as stored;
+//! - `kind.too-large`: over [`ENTRY_MOST`] bytes as stored, or `geometry.bounds_mm` over [`BOUNDS_MOST_MM`];
 //! - `kind.namespace`: `souls:` and `eden:`, and every namespace a boot kind uses, are not the creator's;
 //! - `kind.collision`: the same full name is already defined (by a node with other bytes, or already the same);
-//! - `kind.in-use`: removing a kind that placed things still use (in `edit::check`).
+//! - `kind.in-use`: removing a kind that placed things still use, or that another definition's form creates (in
+//!   `edit::check`, and again on the live copy in `edit::confirm`);
+//! - `kind.effects`: a form's effect the world would refuse every time it ran ([`effects_checked`]): a `create` of a
+//!   kind the world neither pins nor defines, or into a slot that does not admit it, or forms that start each other
+//!   by timer sooner than [`TIMER_LEAST_US`] in a ring.
 //!
 //! The record's `forms` are checked by the same entry checker content entries pass (the form runner's, which runs in
 //! the world's edit checker); the client's checker checks the rest.
@@ -29,7 +33,7 @@ use crate::rules::json::{self, Value as Json};
 use crate::tree::Tree;
 use crate::world_model::{Kind, parse_kinds, plain};
 use std::collections::BTreeMap;
-use std::sync::OnceLock;
+use std::sync::{Arc, Mutex, OnceLock};
 
 /// The engine's generic kind a definition is a node of: owned by nothing a slot admits, admitting nothing.
 pub const SOURCE: &str = "{1: \"souls:kind\", 2: \"kind\"}";
@@ -39,6 +43,12 @@ pub const NAME: u64 = 1;
 pub const ENTRY: u64 = 2;
 /// The most bytes a stored record may have.
 pub const ENTRY_MOST: usize = 64 << 10;
+/// The most any of `geometry.bounds_mm` may be: 1 km. Content's largest kind is about 120 m; anything far past that
+/// is a mistake, and its µm arithmetic would leave `i64`.
+pub const BOUNDS_MOST_MM: i64 = 1_000_000;
+/// A ring of forms that start each other by timer must take at least this long to go round, µs (one tick, 50 ms), so
+/// one record never fires every tick for ever.
+pub const TIMER_LEAST_US: i64 = 50_000;
 /// The sections of a record: those the kind loader numbers, and those beside its meaning.
 const SECTIONS: [&str; 15] = [
     "format", "kind", "owner", "state", "links", "points", "slots", "children", "geometry",
@@ -133,6 +143,20 @@ pub fn read(sent: &[u8], boot: &dyn Fn(&str) -> bool) -> Result<Defined, Why> {
             format!("{ns}: is not the creator's; use your own namespace"),
         ));
     }
+    if let Some(b) = entry
+        .get("geometry")
+        .and_then(|g| g.get("bounds_mm"))
+        .and_then(Json::arr)
+        && let Some(big) = b.iter().find(|v| match v {
+            Json::Int(n) => *n > i128::from(BOUNDS_MOST_MM),
+            _ => false,
+        })
+    {
+        return Err((
+            "kind.too-large",
+            format!("geometry.bounds_mm {big:?} is over {BOUNDS_MOST_MM} mm"),
+        ));
+    }
     let bytes = entry.to_json().into_bytes();
     if bytes.len() > ENTRY_MOST {
         return Err((
@@ -165,8 +189,10 @@ pub fn read(sent: &[u8], boot: &dyn Fn(&str) -> bool) -> Result<Defined, Why> {
     if let Some(e) = loaded.refused().first() {
         return invalid(format!("{e:?}"));
     }
-    let kind = parse_kinds(&source)
-        .or_else(|e| invalid(format!("{e:?}")))?
+    // Its rules as the loader gives a boot kind's (`Kinds::admits`): T3's kinds-file reader does not read the loader's
+    // slot rows, so a record with slots read through it was refused.
+    let kind = loaded
+        .admits()
         .into_values()
         .next()
         .ok_or(("kind.invalid", "no kind".to_owned()))?;
@@ -176,6 +202,123 @@ pub fn read(sent: &[u8], boot: &dyn Fn(&str) -> bool) -> Result<Defined, Why> {
         kind,
         entry,
     })
+}
+
+/// The most records [`stored`] keeps read.
+const STORED_MOST: usize = 4096;
+
+/// A stored record (a `souls:kind` node's bytes) read, when it defines `full`: from the cache by full name, which a
+/// name can key because it is the hash of the bytes (the bytes are compared too), else read and kept. Every lookup of
+/// a creator's kind (the loader, the commit's `Rules::kind`, the form runner) reads through it, so a record is parsed
+/// once per process, not on every act or create. The cache holds what [`read`] gives, so it changes no answer.
+pub fn stored(full: &str, bytes: &[u8]) -> Option<Arc<Defined>> {
+    static CACHE: OnceLock<Mutex<BTreeMap<String, Arc<Defined>>>> = OnceLock::new();
+    let cache = CACHE.get_or_init(|| Mutex::new(BTreeMap::new()));
+    if let Ok(c) = cache.lock()
+        && let Some(d) = c.get(full)
+        && d.bytes == bytes
+    {
+        return Some(d.clone());
+    }
+    let d = Arc::new(read(bytes, &|_| false).ok().filter(|d| d.full == full)?);
+    if let Ok(mut c) = cache.lock() {
+        if c.len() >= STORED_MOST {
+            c.clear();
+        }
+        c.insert(full.to_owned(), d.clone());
+    }
+    Some(d)
+}
+
+/// The kinds a record's forms create (each `create` effect's `kind`), as written.
+pub fn creates(entry: &Json) -> Vec<&str> {
+    let mut out = Vec::new();
+    for (_, f) in entry.get("forms").and_then(Json::obj).unwrap_or(&[]) {
+        for e in f.get("effects").and_then(Json::arr).unwrap_or(&[]) {
+            if e.get("change").and_then(Json::str) == Some("create")
+                && let Some(k) = e.get("kind").and_then(Json::str)
+            {
+                out.push(k);
+            }
+        }
+    }
+    out
+}
+
+/// A record's forms' effects that the world would refuse each time they ran, refused now, `kind.effects` (#3697
+/// review): a `create` of a kind `kinds` (the world's, by full name) does not hold, or into a slot of this kind that
+/// does not admit it; and forms that start each other by `timer` in a ring that goes round sooner than
+/// [`TIMER_LEAST_US`]. `kind` is this record's own rules. What depends on a form's arguments is left to the run, which
+/// refuses that act alone.
+pub fn effects_checked(
+    entry: &Json,
+    kind: &Kind,
+    kinds: &BTreeMap<String, Kind>,
+) -> Result<(), Why> {
+    let no = |why: String| Err(("kind.effects", why));
+    let forms = entry.get("forms").and_then(Json::obj).unwrap_or(&[]);
+    let slots = entry.get("slots").and_then(Json::obj).unwrap_or(&[]);
+    // The quick timers: form to the forms it starts sooner than the least, and how soon.
+    let mut quick: BTreeMap<&str, Vec<(&str, i128)>> = BTreeMap::new();
+    for (form, f) in forms {
+        for e in f.get("effects").and_then(Json::arr).unwrap_or(&[]) {
+            match e.get("change").and_then(Json::str) {
+                Some("create") => {
+                    let made = e.get("kind").and_then(Json::str).unwrap_or("");
+                    let Some(k) = kinds.get(made) else {
+                        return no(format!(
+                            "{form}: creates {made}, a kind this world neither pins nor defines (its full name)"
+                        ));
+                    };
+                    let into = e.get("into").and_then(Json::str).unwrap_or("");
+                    if matches!(into, "actor_hand" | "here") {
+                        continue;
+                    }
+                    let admits = (1u64..)
+                        .zip(slots)
+                        .find(|(_, (s, _))| s == into)
+                        .and_then(|(n, _)| kind.slots.get(&n))
+                        .is_some_and(|l| crate::world_model::takes(l, plain(made), &k.owner));
+                    if !admits {
+                        return no(format!(
+                            "{form}: creates {} into {into}, a slot that does not admit it",
+                            plain(made)
+                        ));
+                    }
+                }
+                Some("timer") => {
+                    if let (Some(to), Some(Json::Int(us))) =
+                        (e.get("form").and_then(Json::str), e.get("after_us"))
+                        && *us < i128::from(TIMER_LEAST_US)
+                    {
+                        quick.entry(form.as_str()).or_default().push((to, *us));
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+    // A ring of quick timers: from each form, every path of quick timers that comes back to it.
+    for start in quick.keys() {
+        let mut stack = vec![(*start, 0i128, 0usize)];
+        while let Some((at, spent, depth)) = stack.pop() {
+            for (to, us) in quick.get(at).map_or(&[][..], Vec::as_slice) {
+                let spent = spent + us;
+                if spent >= i128::from(TIMER_LEAST_US) {
+                    continue;
+                }
+                if to == start {
+                    return no(format!(
+                        "{start}: starts itself again by timer within {spent} µs, under {TIMER_LEAST_US}"
+                    ));
+                }
+                if depth < forms.len() {
+                    stack.push((to, spent, depth + 1));
+                }
+            }
+        }
+    }
+    Ok(())
 }
 
 /// A placed thing's solids field (N1's field 12) for a kind of this record: its walk outline, from `geometry.bounds_mm`
@@ -206,7 +349,7 @@ pub fn solids_in(tree: &Tree) -> BTreeMap<String, Value> {
     nodes(tree)
         .into_iter()
         .filter_map(|(_, full, bytes)| {
-            let d = read(&bytes, &|_| false).ok().filter(|d| d.full == full)?;
+            let d = stored(&full, &bytes)?;
             Some((full, solids_of(&d.entry)?))
         })
         .collect()
@@ -269,10 +412,7 @@ pub fn kind_named(tree: &Tree, full: &str) -> Option<Kind> {
     let Some(Value::Bytes(b)) = n.fields().get(&ENTRY) else {
         return None;
     };
-    read(b, &|_| false)
-        .ok()
-        .filter(|d| d.full == full)
-        .map(|d| d.kind)
+    stored(full, b).map(|d| d.kind.clone())
 }
 
 /// The loader: the kinds a world's `souls:kind` nodes define, with `souls:kind` itself, by full name. A node whose
@@ -280,10 +420,8 @@ pub fn kind_named(tree: &Tree, full: &str) -> Option<Kind> {
 pub fn kinds_in(tree: &Tree) -> BTreeMap<String, Kind> {
     let mut out = BTreeMap::from([kind().clone()]);
     for (_, full, bytes) in nodes(tree) {
-        if let Ok(d) = read(&bytes, &|_| false)
-            && d.full == full
-        {
-            out.insert(full, d.kind);
+        if let Some(d) = stored(&full, &bytes) {
+            out.insert(full, d.kind.clone());
         }
     }
     out
