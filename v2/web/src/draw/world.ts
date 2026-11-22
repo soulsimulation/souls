@@ -6,7 +6,7 @@ import type { NodeRec, SampleRec } from '../source/source.ts';
 import { Track } from '../clock/samples.ts';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { CrowdBodies } from '../crowd/bodies.ts';
-import { BANKS, DECKS, DRAPES, PAVING, WATER, GroundCover, drapeMesh, drapeName, turfMaterial, type Area } from './drapes.ts';
+import { BANKS, DECKS, DRAPES, PAVING, WATER, GroundCover, bandLine, drapeMesh, drapeName, turfMaterial, type Area } from './drapes.ts';
 import { asWater } from '../water/water.ts';
 import { CoursePlace, type CourseAt } from './course.ts';
 import { backdropMesh, type Backdrop } from './backdrop.ts';
@@ -455,14 +455,14 @@ export class WorldView {
       if (colour === undefined) continue;
       const bank = drapeName(n.kind) in BANKS ? drapeName(n.kind) : undefined;
       const own = floors.get(n.id) ?? [];
-      // #3965: a path's surfaces in their material (today's roads.mesh.ts), laid along its centre line.
-      const path = drapeName(n.kind) === 'footpath' && n.line && n.lineWidth ? { line: n.line.map(([x, z]) => [x * MM, z * MM] as [number, number]), width: n.lineWidth * MM } : {};
+      // #3965: a path's surfaces in their material (today's roads.mesh.ts), laid along their own centre line.
       for (const f of own) {
         const m = this.frame(f.id);
         for (const [k, [y, pts]] of f.surfaces!.entries()) {
           const at = p.set(0, y * MM, 0).applyMatrix4(m).y;
           const material = drapeName(n.kind) === 'footpath' ? f.materials?.[k] : undefined, look = material ? PAVING[material] : undefined;
-          areas.push({ colour: look?.base ?? colour, level, bank, lift: level ? at : y * MM, points: pts.map(([x, z]) => (p.set(x * MM, 0, z * MM).applyMatrix4(m), [p.x, p.z])), ...(look ? { material, ...path } : {}) });
+          const points = pts.map(([x, z]) => (p.set(x * MM, 0, z * MM).applyMatrix4(m), [p.x, p.z] as [number, number]));
+          areas.push({ colour: look?.base ?? colour, level, bank, lift: level ? at : y * MM, points, ...(look ? { material, ...bandLine(points) } : {}) });
         }
       }
       if (!own.length && n.outline) areas.push({ colour, bank, lift: 0, points: n.outline.map(([x, z]) => [x * MM, z * MM]) });

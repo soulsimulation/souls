@@ -68,11 +68,25 @@ const MIN_LIFT = 0.02;
 const MAX_SIDE = 1;
 
 /** An area's corners `[x, z]` (m); `lift` above the ground, or the height itself when `level` (a deck). A path's
- *  surface names its `material` and its path's centre `line` (m, world) and `width` (m), which lay its pattern. */
+ *  surface names its `material`, and its centre `line` (m, world) and `width` (m) lay its pattern (`bandLine`). */
 export type Area = {
   colour: number; lift: number; points: [number, number][]; level?: boolean; bank?: string;
   material?: string; line?: [number, number][]; width?: number;
 };
+
+/** A path surface's own centre line and width: today's path bakes are bands (`generators` `band`: one edge forward,
+ *  the other back, a point for a point), so each pair of opposite corners straddles the centre (#3965). */
+export function bandLine(points: [number, number][]): { line: [number, number][]; width: number } | null {
+  const n = points.length >> 1;
+  if (n < 2 || points.length % 2) return null;
+  const line: [number, number][] = [], across: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const [ax, az] = points[i], [bx, bz] = points[points.length - 1 - i];
+    line.push([(ax + bx) / 2, (az + bz) / 2]);
+    across.push(Math.hypot(ax - bx, az - bz));
+  }
+  return { line, width: across.sort((a, b) => a - b)[n >> 1] };
+}
 
 /** A point's place on a path: `[q, t]`, how far along its centre line (m, from its start) and how far across it (m,
  *  signed), against the nearest of its segments, as today's setts are laid (`l3-path.ts` `at`). */

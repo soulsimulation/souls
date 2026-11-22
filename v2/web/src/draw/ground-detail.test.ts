@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import type { NodeRec } from '../source/source.ts';
 import { WorldView, terrainColour } from './world.ts';
 import { WIND, setWind } from '../sky/wind.ts';
-import { DRAPES, GroundCover, PAVING, alongPath, bankColour, cellKind, coverSetting, drapeMesh, siteAt, wetness, type CoverGround } from './drapes.ts';
+import { DRAPES, GroundCover, PAVING, alongPath, bandLine, bankColour, cellKind, coverSetting, drapeMesh, siteAt, wetness, type CoverGround } from './drapes.ts';
 
 const ROT: NodeRec['rot'] = [1 << 30, 0, 0, 0];
 const node = (o: Partial<NodeRec> & { id: string; kind: string }): NodeRec => ({ parent: null, slot: null, pos: [0, 0, 0], rot: ROT, at: null, ...o });
@@ -139,9 +139,11 @@ test('A1: what stands on the ground and every non-lawn area keep the cover off',
 test('#3965: a path\'s surface is drawn in its material, cobble as setts laid along its centre line', () => {
   assert.deepEqual(alongPath([[0, 0], [10, 0], [10, 10]], 4, 1), [4, 1], 'along the first leg, a metre to its side');
   assert.deepEqual(alongPath([[0, 0], [10, 0], [10, 10]], 11, 6), [16, -1], 'along the second leg');
+  assert.deepEqual(bandLine([[0, -1], [10, -1], [10, 1], [0, 1]]), { line: [[0, 0], [10, 0]], width: 2 }, 'a band\'s centre and width');
   const path = (id: string, material: string, z: number) => [
-    node({ id, kind: 'eden:footpath', parent: 'g', line: [[5000, z], [15000, z]], lineWidth: 3000 }),
-    node({ id: `${id}/floor-0`, kind: 'eden:floor', parent: id, surfaces: [[40, [[5000, z - 1500], [15000, z - 1500], [15000, z + 1500], [5000, z + 1500]]]], materials: [material] }),
+    node({ id, kind: 'eden:footpath', parent: 'g' }),
+    // a band, as today's bake writes one: one edge forward, the other back
+    node({ id: `${id}/floor-0`, kind: 'eden:floor', parent: id, surfaces: [[40, [[5000, z - 1500], [10000, z - 1500], [15000, z - 1500], [15000, z + 1500], [10000, z + 1500], [5000, z + 1500]]]], materials: [material] }),
   ];
   const w = new WorldView();
   w.apply([node({ id: 'w', kind: 'eden:world' }), pondGround(), ...path('cobble', 'cobble', 4000), ...path('gravel', 'gravel', 12000)], []);
