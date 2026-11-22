@@ -1,0 +1,324 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:locking_fence",
+  "owner": "thing",
+  "state": {
+    "lever_locked": {
+      "n": 28,
+      "type": "bool",
+      "default": true,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "offset": {
+      "n": 29,
+      "type": "int",
+      "unit": "mm",
+      "default": 100,
+      "min": 100,
+      "max": 300,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        750
+      ],
+      "yaw_mdeg": 180000
+    },
+    "control": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        900,
+        250
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1100,
+      1050,
+      800
+    ]
+  },
+  "forms": {
+    "release_fence": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "lever_locked",
+          "is": true
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "lever_locked",
+          "to": false,
+          "event": "release_fence"
+        }
+      ]
+    },
+    "set_fence_offset": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "offset": {
+          "type": "value",
+          "of": [
+            100,
+            200,
+            300
+          ]
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "lever_locked",
+          "is": false,
+          "says": "unlock_first"
+        },
+        {
+          "need": "state",
+          "field": "offset",
+          "not": {
+            "arg": "offset"
+          }
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "offset",
+          "to": {
+            "arg": "offset"
+          },
+          "event": "set_fence_offset"
+        }
+      ]
+    },
+    "lock_fence": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "lever_locked",
+          "is": false
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "lever_locked",
+          "to": true,
+          "event": "lock_fence"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:locking_fence",
+    "table": [
+      {
+        "part": "fence",
+        "field": "offset",
+        "do": "slide",
+        "axis": "x",
+        "range": [
+          100,
+          300
+        ],
+        "to": [
+          0,
+          200
+        ],
+        "over_us": 350000
+      },
+      {
+        "part": "lever",
+        "field": "offset",
+        "do": "slide",
+        "axis": "x",
+        "range": [
+          100,
+          300
+        ],
+        "to": [
+          0,
+          200
+        ],
+        "over_us": 350000
+      },
+      {
+        "part": "lever",
+        "field": "lever_locked",
+        "do": "rotate",
+        "axis": "z",
+        "at": {
+          "false": 90000,
+          "true": 0
+        },
+        "over_us": 350000
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            450,
+            0
+          ],
+          "size": [
+            1000,
+            900,
+            650
+          ],
+          "tint": "base"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -400,
+            960,
+            0
+          ],
+          "size": [
+            40,
+            120,
+            650
+          ],
+          "tint": "steel",
+          "role": "fence",
+          "pivot": [
+            -400,
+            960,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -400,
+            960,
+            300
+          ],
+          "size": [
+            25,
+            25,
+            140
+          ],
+          "tint": "handle",
+          "role": "lever",
+          "pivot": [
+            -400,
+            960,
+            300
+          ]
+        }
+      ],
+      "palette": {
+        "base": "#72583e",
+        "steel": "#7a8b98",
+        "handle": "#b54c35"
+      },
+      "tags": [
+        "workshop",
+        "fixture",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "card": "Release a workbench fence, set its offset, then lock the lever.",
+    "workshop": "workshop",
+    "unlock_first": "Release the fence lever before changing its offset.",
+    "fence": "fence",
+    "guide": "guide"
+  },
+  "card": {
+    "text": "card",
+    "category": "workshop",
+    "synonyms": [
+      "fence",
+      "guide"
+    ]
+  }
+}

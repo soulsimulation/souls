@@ -1,0 +1,309 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:indexing_head",
+  "owner": "thing",
+  "state": {
+    "pin_engaged": {
+      "n": 28,
+      "type": "bool",
+      "default": true,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "index": {
+      "n": 29,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 2,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        750
+      ],
+      "yaw_mdeg": 180000
+    },
+    "control": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        900,
+        250
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      800,
+      1050,
+      650
+    ]
+  },
+  "forms": {
+    "withdraw_pin": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "pin_engaged",
+          "is": true
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "pin_engaged",
+          "to": false,
+          "event": "withdraw_pin"
+        }
+      ]
+    },
+    "index_head": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": {
+        "index": {
+          "type": "value",
+          "of": [
+            0,
+            1,
+            2
+          ]
+        }
+      },
+      "needs": [
+        {
+          "need": "state",
+          "field": "pin_engaged",
+          "is": false,
+          "says": "unlock_first"
+        },
+        {
+          "need": "state",
+          "field": "index",
+          "not": {
+            "arg": "index"
+          }
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "index",
+          "to": {
+            "arg": "index"
+          },
+          "event": "index_head"
+        }
+      ]
+    },
+    "engage_pin": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "pin_engaged",
+          "is": false
+        },
+        {
+          "need": "hand",
+          "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "pin_engaged",
+          "to": true,
+          "event": "engage_pin"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:indexing_head",
+    "table": [
+      {
+        "part": "head",
+        "field": "index",
+        "do": "rotate",
+        "axis": "y",
+        "range": [
+          0,
+          2
+        ],
+        "to": [
+          0,
+          90000
+        ],
+        "over_us": 350000
+      },
+      {
+        "part": "pin",
+        "field": "pin_engaged",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "false": 80,
+          "true": 0
+        },
+        "over_us": 350000
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            425,
+            0
+          ],
+          "size": [
+            500,
+            850,
+            450
+          ],
+          "tint": "base"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            900,
+            0
+          ],
+          "size": [
+            500,
+            50,
+            300
+          ],
+          "tint": "steel",
+          "role": "head",
+          "pivot": [
+            0,
+            900,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            260,
+            880,
+            160
+          ],
+          "size": [
+            30,
+            30,
+            160
+          ],
+          "tint": "handle",
+          "role": "pin",
+          "pivot": [
+            260,
+            880,
+            160
+          ]
+        }
+      ],
+      "palette": {
+        "base": "#72583e",
+        "steel": "#7a8b98",
+        "handle": "#b54c35"
+      },
+      "tags": [
+        "workshop",
+        "fixture",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "card": "Index a pinned workshop head: positions 0/1/2 mean 0/45/90 degrees.",
+    "workshop": "workshop",
+    "unlock_first": "Withdraw the locating pin before indexing the head.",
+    "indexer": "indexer",
+    "pin": "pin"
+  },
+  "card": {
+    "text": "card",
+    "category": "workshop",
+    "synonyms": [
+      "indexer",
+      "pin"
+    ]
+  }
+}
