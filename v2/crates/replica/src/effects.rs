@@ -994,6 +994,37 @@ pub struct Part {
     stored: Vec<u8>,
 }
 
+/// [`Part::of_effects`]' check of a motion effect the world built: `None` when `e` is not one (any other body or
+/// change, events, or unknown fields), else what reading its value would refuse of it.
+fn motion_checked(e: &Effect) -> Option<R<()>> {
+    if e.events.is_some() || !e.rest.is_empty() {
+        return None;
+    }
+    let checked = match &e.body {
+        Body::Changes(changes) if !changes.is_empty() => {
+            let mut out = Ok(());
+            for c in changes {
+                if !c.rest.is_empty() {
+                    return None;
+                }
+                let r = match &c.change {
+                    Change::Motion(h) => h.check(),
+                    Change::Reparent { pose, .. } => pose.check(),
+                    _ => return None,
+                };
+                if out.is_ok() {
+                    out = r;
+                }
+            }
+            out
+        }
+        Body::Transfer(TransferRec::Leave { pose, .. }) => pose.check(),
+        Body::Transfer(TransferRec::Arrive { carried, .. }) if carried.is_empty() => Ok(()),
+        _ => return None,
+    };
+    Some(checked.map_err(pose_refusal))
+}
+
 impl Part {
     pub fn read(bytes: &[u8]) -> R<Part> {
         let v = decode(bytes)
@@ -1014,6 +1045,47 @@ impl Part {
         if let Some(t) = not_a_name(&part.to_value()) {
             return refuse("text-not-a-name", t);
         }
+        Ok(part)
+    }
+
+    /// The part of `effects` under the header hash `header`, as its writer built them: the part
+    /// `Part::read(&encode(&value))` gives for the value `{1: header, 2: [effect, ...]}`, or the refusal it gives,
+    /// without decoding the bytes it has just encoded when every effect is a motion one (0.132 scaling, #1960: the
+    /// world's motion samples, about 150 a tick at 500 walking Souls, spent most of their write in that round trip).
+    ///
+    /// A motion effect ([`motion_checked`]: motion samples, reparents, a leave and an empty arrive, with no events
+    /// and no unknown fields) is checked in every build for what [`Part::read`] refuses of one built in memory: each
+    /// pose's support against its frame ([`Pose::check`]) and an island owner ([`HandOff::check`]); every other
+    /// field (ids, times, velocities, a unit orientation, closed enums) holds by construction. Names are checked as
+    /// [`Part::read`] checks them. A part with any other effect is encoded and read back as before. A debug build
+    /// also reads every built part back and asserts it is the same.
+    pub fn of_effects(header: Vec<u8>, effects: Vec<Effect>) -> R<Part> {
+        let mut part = Part {
+            header,
+            effects,
+            rest: Rest::new(),
+            stored: Vec::new(),
+        };
+        let v = part.to_value();
+        for e in &part.effects {
+            match motion_checked(e) {
+                Some(Ok(())) => {}
+                Some(Err(r)) => return Err(r),
+                None => {
+                    let bytes = encode(&v).or_else(|e| refuse("encoding", e.to_string()))?;
+                    return Part::read(&bytes);
+                }
+            }
+        }
+        if let Some(t) = not_a_name(&v) {
+            return refuse("text-not-a-name", t);
+        }
+        part.stored = encode(&v).or_else(|e| refuse("encoding", e.to_string()))?;
+        debug_assert_eq!(
+            Part::read(&part.stored).as_ref(),
+            Ok(&part),
+            "a built part reads back as itself"
+        );
         Ok(part)
     }
 

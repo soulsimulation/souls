@@ -292,7 +292,7 @@ impl fmt::Display for Hash {
     }
 }
 
-/// SHA-256 (FIPS 180-4), written out so that `replica` needs no dependency and both builds run the same code.
+/// SHA-256 (FIPS 180-4) of `input`, through [`Sha256`]: the same digest in every build and on every machine.
 pub fn sha256(input: &[u8]) -> [u8; 32] {
     let mut h = Sha256::new();
     h.update(input);
@@ -310,15 +310,20 @@ const SHA256_K: [u32; 64] = [
     0x748f82ee, 0x78a5636f, 0x84c87814, 0x8cc70208, 0x90befffa, 0xa4506ceb, 0xbef9a3f7, 0xc67178f2,
 ];
 
-/// [`sha256`] taken in pieces (#3799): the same digest of the pieces one after another, with no copy of them.
+/// [`sha256`] taken in pieces (#3799): the same digest of the pieces one after another, with no copy of them. A clone
+/// carries on from what the original had taken (a kept head, `tree/seal.rs`).
+///
+/// The digest is FIPS 180-4's whatever computes it. The native build computes it with the `sha2` crate, which asks
+/// the processor once, at run time, whether it has SHA-256 instructions (x86-64 SHA-NI, aarch64 SHA2) and otherwise
+/// runs its own portable code. The WASM build has no such instructions and runs [`PortableSha256`], written out
+/// here, so the module a page loads gains no dependency. `tests/ids.rs` holds the two to the same digests.
 #[derive(Clone)]
-pub struct Sha256 {
-    h: [u32; 8],
-    block: [u8; 64],
-    filled: usize,
-    /// Bytes taken, through u64, never usize (32 bits in WASM).
-    taken: u64,
-}
+pub struct Sha256(Taker);
+
+#[cfg(not(target_arch = "wasm32"))]
+type Taker = sha2::Sha256;
+#[cfg(target_arch = "wasm32")]
+type Taker = PortableSha256;
 
 impl Default for Sha256 {
     fn default() -> Self {
@@ -328,7 +333,47 @@ impl Default for Sha256 {
 
 impl Sha256 {
     pub fn new() -> Sha256 {
-        Sha256 {
+        #[cfg(not(target_arch = "wasm32"))]
+        return Sha256(<sha2::Sha256 as sha2::Digest>::new());
+        #[cfg(target_arch = "wasm32")]
+        return Sha256(PortableSha256::new());
+    }
+
+    pub fn update(&mut self, input: &[u8]) {
+        #[cfg(not(target_arch = "wasm32"))]
+        sha2::Digest::update(&mut self.0, input);
+        #[cfg(target_arch = "wasm32")]
+        self.0.update(input);
+    }
+
+    pub fn finish(self) -> [u8; 32] {
+        #[cfg(not(target_arch = "wasm32"))]
+        return sha2::Digest::finalize(self.0).into();
+        #[cfg(target_arch = "wasm32")]
+        return self.0.finish();
+    }
+}
+
+/// SHA-256 written out in plain Rust: what the WASM build runs, and what the native build's digests are compared
+/// with (`tests/ids.rs`). The same interface as [`Sha256`].
+#[derive(Clone)]
+pub struct PortableSha256 {
+    h: [u32; 8],
+    block: [u8; 64],
+    filled: usize,
+    /// Bytes taken, through u64, never usize (32 bits in WASM).
+    taken: u64,
+}
+
+impl Default for PortableSha256 {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
+impl PortableSha256 {
+    pub fn new() -> PortableSha256 {
+        PortableSha256 {
             h: [
                 0x6a09e667, 0xbb67ae85, 0x3c6ef372, 0xa54ff53a, 0x510e527f, 0x9b05688c, 0x1f83d9ab,
                 0x5be0cd19,

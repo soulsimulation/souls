@@ -36,30 +36,27 @@ Get the tier of the current diff with `node tools/proof/tier.mjs --base origin/m
 - **Never commit video** (or frames) into the repo. Work under `.e2e/` (gitignored).
 - The clip must show the change. Watch it (or at least extract frames, below) before you attach it.
 
-## 1. Boot a fake-mind world
+## 1. Start a local world
 
-Needs a built web client (`pnpm install --frozen-lockfile && pnpm build`; skip if
-`apps/web/dist/index.html` exists and is current for your change). In a fresh clone the build's prebuild check fails
-until the web media are in place: `node tools/assets/pull.mjs --only 'apps/web/**'` (a few files) is enough for it.
-
-```bash
-node tools/god-skill/dev-world.mjs proof 4710 --genesis worlds/templates/hello-hamlet.json --fresh --data .local/proof
-# prints http://127.0.0.1:4710/w/proof?dev=1 (pid N, log .lane/proof.log); the server keeps running detached
-```
-
-The homepage (world list, New world) is served by the world launcher, not by a single world. For a journey that
-starts there, run a launcher (its worlds always get fake minds) and make a world for the list through its API:
+One command starts a local world of the new engine: N2's test world, its gateway, the directory with the dev sign-in,
+the viewers' origin and the page built from this checkout, all on loopback (`v2/tools/dev/run.sh`; its head lists
+what it needs and builds). No model runs: the engine has no mind.
 
 ```bash
-node tools/world-launcher/launcher.mjs --port 4720 --range 4721-4723 --data "$PWD/.local/proof-launcher" --eager 0 &
-curl -s -X POST -H 'content-type: application/json' -H 'authorization: Bearer dev:proof' \
-  -d '{"name":"Proof Garden","template":"hello-hamlet"}' http://127.0.0.1:4720/__sim/worlds
-# record against http://127.0.0.1:4720/ ; stop the launcher by its pid (it stops its worlds)
+v2/tools/dev/run.sh --port 4710 --dir .local/proof > .local/proof.log 2>&1 &
+# wait for the line `ready http://127.0.0.1:4710` in .local/proof.log, then:
+#   the world              http://127.0.0.1:4710/w/dev/
+#   signed in as Ada, its creator   http://127.0.0.1:4710/w/dev/?as=Ada
+#   the homepage           http://127.0.0.1:4710/
 ```
 
-Pick the template that contains the changed surface (`worlds/templates/`: hello-hamlet is small and fast; eden-2026,
-mars-two and others are larger). Use a free port; `e2e/config.mjs` lists ports reserved for other harnesses. Stop the server
-with `kill <pid>` when done.
+The dev sign-in is `as=<test person>` in the address and works on loopback only; on any other host the command
+refuses to start. Use a free port (the command takes four, from `--port`); `e2e/config.mjs` lists ports reserved for
+other harnesses. Stop it with `kill <pid>` of the command when done: it stops everything it started.
+
+On this page the recorder needs two flags until its arrival check and world-time route are re-pointed (#2838):
+`--from-load` (the take starts at page creation) and `--time-of-day keep`. For daylight, add `hour=12:00` to the
+address: it sets the sky and its light for the picture only.
 
 ## Quick proof the app works: the local smoke
 
@@ -90,8 +87,8 @@ when the owner's message ends it. Keep that block when you copy the file.
 ## 3. Record
 
 ```bash
-node .claude/skills/proof/record.mjs --url 'http://127.0.0.1:4710/w/proof?dev=1' \
-  --steps .e2e/proof/<slug>/steps.mjs --out .e2e/proof/<slug>/desktop.mp4 --viewport desktop
+node .claude/skills/proof/record.mjs --url 'http://127.0.0.1:4710/w/dev/?as=Ada&hour=12:00' --from-load \
+  --time-of-day keep --steps .e2e/proof/<slug>/steps.mjs --out .e2e/proof/<slug>/desktop.mp4 --viewport desktop
 # layout or touch changed? also:
 node .claude/skills/proof/record.mjs --url '...' --steps .e2e/proof/<slug>/steps.mjs \
   --out .e2e/proof/<slug>/phone.mp4 --viewport phone
