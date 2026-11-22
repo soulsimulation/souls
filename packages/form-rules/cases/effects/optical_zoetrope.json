@@ -207,21 +207,9 @@
                 "changes": [
                   0
                 ]
-              },
-              {
-                "event": "eden:drum_coasting",
-                "node": "t1",
-                "changes": []
               }
             ],
-            "timers": [
-              {
-                "node": "t1",
-                "form": "coast_to_stop",
-                "after_us": 8000000,
-                "event": 1
-              }
-            ]
+            "timers": []
           }
         }
       ]
@@ -268,59 +256,6 @@
             "events": [
               {
                 "event": "eden:picture_drum_braked",
-                "node": "t1",
-                "changes": [
-                  0
-                ]
-              }
-            ],
-            "timers": []
-          }
-        }
-      ]
-    },
-    {
-      "name": "zoetrope_coast_to_stop_exact_changes",
-      "state": {
-        "actor": "b1",
-        "now_us": 0,
-        "nodes": {
-          "t1": {
-            "kind": "eden:zoetrope",
-            "fields": {
-              "strip": 0,
-              "spinning": true
-            }
-          },
-          "b1": {
-            "hands": {
-              "left": null,
-              "right": null
-            }
-          }
-        }
-      },
-      "do": [
-        {
-          "act": {
-            "this": "t1",
-            "form": "coast_to_stop"
-          },
-          "receipt": "r-zoetrope-coast_to_stop",
-          "expect": {
-            "verdict": "yes",
-            "changes": [
-              {
-                "change": "set",
-                "node": "t1",
-                "field": "spinning",
-                "n": 29,
-                "to": 0
-              }
-            ],
-            "events": [
-              {
-                "event": "eden:picture_drum_stopped",
                 "node": "t1",
                 "changes": [
                   0

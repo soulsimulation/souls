@@ -179,32 +179,42 @@
           "field": "spinning",
           "to": true,
           "event": "picture_disc_spun"
-        },
-        {
-          "change": "timer",
-          "form": "settle_disc",
-          "after_us": 6000000,
-          "event": "disc_unwinding"
         }
       ]
     },
-    "settle_disc": {
-      "who": "world",
-      "starts": "timer",
+    "catch_disc": {
+      "who": "anyone",
+      "starts": "act",
       "needs": [
         {
           "need": "state",
           "field": "spinning",
-          "is": true
+          "is": true,
+          "says": "already_caught"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
         }
       ],
-      "steps": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "control"
+        }
+      ],
       "effects": [
         {
           "change": "set",
           "field": "spinning",
           "to": false,
-          "event": "picture_disc_settled"
+          "event": "picture_disc_caught"
         }
       ]
     }
@@ -419,14 +429,15 @@
     }
   },
   "text": {
-    "card": "A two-sided picture disc: wind its strings, release it, and let it settle.",
+    "card": "A two-sided picture disc: wind its strings, release it, then catch it.",
     "optical": "optical",
     "empty_hands": "Empty your hands before operating this mounted optical toy.",
-    "let_settle": "Let the released picture disc settle before winding or releasing again.",
+    "let_settle": "Catch the released picture disc before winding or releasing it again.",
     "fully_wound": "The strings have three twists; release the disc or unwind a twist.",
     "not_wound": "Wind the strings before releasing or unwinding the disc.",
-    "howto_play": "Wind one to three twists into the strings, release the picture disc, and let it settle before winding again.",
-    "toy": "optical toy"
+    "howto_play": "Wind one to three twists into the strings, release the picture disc, and catch it before winding again. Catching is explicit; there is no automatic settling.",
+    "toy": "optical toy",
+    "already_caught": "The picture disc is already caught; wind and release it first."
   },
   "card": {
     "text": "card",
@@ -444,6 +455,9 @@
         },
         {
           "form": "release_disc"
+        },
+        {
+          "form": "catch_disc"
         }
       ]
     }

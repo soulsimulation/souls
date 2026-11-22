@@ -157,7 +157,7 @@
         {
           "act": {
             "this": "t1",
-            "form": "settle_disc"
+            "form": "catch_disc"
           },
           "receipt": "cycle-8",
           "expect": {

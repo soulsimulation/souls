@@ -447,10 +447,10 @@
       }
     },
     {
-      "name": "thaumatrope_settle_disc_ready",
+      "name": "thaumatrope_catch_disc_ready",
       "act": {
         "this": "t1",
-        "form": "settle_disc"
+        "form": "catch_disc"
       },
       "state": {
         "actor": "b1",
@@ -481,10 +481,10 @@
       }
     },
     {
-      "name": "thaumatrope_settle_disc_refuses_need_0",
+      "name": "thaumatrope_catch_disc_refuses_need_0",
       "act": {
         "this": "t1",
-        "form": "settle_disc"
+        "form": "catch_disc"
       },
       "state": {
         "actor": "b1",
@@ -513,7 +513,48 @@
       "expect": {
         "verdict": "no",
         "need": 0,
-        "reason": "field_differs"
+        "reason": "field_differs",
+        "says": "already_caught"
+      }
+    },
+    {
+      "name": "thaumatrope_catch_disc_refuses_need_1",
+      "act": {
+        "this": "t1",
+        "form": "catch_disc"
+      },
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "t1": {
+            "kind": "eden:thaumatrope",
+            "fields": {
+              "twists": 0,
+              "spinning": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            }
+          },
+          "held": {
+            "kind": "eden:apple"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty",
+        "says": "empty_hands"
       }
     }
   ]

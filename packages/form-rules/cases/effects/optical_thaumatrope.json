@@ -168,27 +168,15 @@
                 "changes": [
                   1
                 ]
-              },
-              {
-                "event": "eden:disc_unwinding",
-                "node": "t1",
-                "changes": []
               }
             ],
-            "timers": [
-              {
-                "node": "t1",
-                "form": "settle_disc",
-                "after_us": 6000000,
-                "event": 2
-              }
-            ]
+            "timers": []
           }
         }
       ]
     },
     {
-      "name": "thaumatrope_settle_disc_exact_changes",
+      "name": "thaumatrope_catch_disc_exact_changes",
       "state": {
         "actor": "b1",
         "now_us": 0,
@@ -212,9 +200,9 @@
         {
           "act": {
             "this": "t1",
-            "form": "settle_disc"
+            "form": "catch_disc"
           },
-          "receipt": "r-thaumatrope-settle_disc",
+          "receipt": "r-thaumatrope-catch_disc",
           "expect": {
             "verdict": "yes",
             "changes": [
@@ -228,7 +216,7 @@
             ],
             "events": [
               {
-                "event": "eden:picture_disc_settled",
+                "event": "eden:picture_disc_caught",
                 "node": "t1",
                 "changes": [
                   0

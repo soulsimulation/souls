@@ -120,7 +120,7 @@
         {
           "act": {
             "this": "t1",
-            "form": "coast_to_stop"
+            "form": "brake_drum"
           },
           "receipt": "cycle-6",
           "expect": {

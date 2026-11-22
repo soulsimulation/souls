@@ -215,12 +215,6 @@
           "field": "spinning",
           "to": true,
           "event": "picture_drum_spun"
-        },
-        {
-          "change": "timer",
-          "form": "coast_to_stop",
-          "after_us": 8000000,
-          "event": "drum_coasting"
         }
       ]
     },
@@ -257,26 +251,6 @@
           "field": "spinning",
           "to": false,
           "event": "picture_drum_braked"
-        }
-      ]
-    },
-    "coast_to_stop": {
-      "who": "world",
-      "starts": "timer",
-      "needs": [
-        {
-          "need": "state",
-          "field": "spinning",
-          "is": true
-        }
-      ],
-      "steps": [],
-      "effects": [
-        {
-          "change": "set",
-          "field": "spinning",
-          "to": false,
-          "event": "picture_drum_stopped"
         }
       ]
     }
@@ -669,7 +643,7 @@
     "remove_first": "Remove the fitted strip before choosing another.",
     "no_strip": "Fit a picture strip in the stopped drum first.",
     "already_stopped": "The picture drum is already stopped.",
-    "howto_play": "Fit the captive horse or ball strip, spin the drum, brake it, and remove the strip. The strip field is 0 when empty, 1 for horse and 2 for ball.",
+    "howto_play": "Fit a captive horse or ball strip, spin the drum, brake it, and remove the strip. Braking is explicit; the strip field is 0 when empty, 1 for horse and 2 for ball.",
     "toy": "optical toy"
   },
   "card": {
