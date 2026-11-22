@@ -783,8 +783,9 @@ fn i1960_a_world_starts_through_slow_store_reads_and_ends_on_an_unreachable_stor
     w.line("listening");
     w.kill();
 
-    // The restart: its first two reads each go unanswered for 6 s, past the client's 5 s.
-    s.stall_reads(2, Duration::from_secs(6));
+    // The restart: its first two reads of the history's header (the archiver's, as production's counts read was) each
+    // go unanswered for 6 s, past the client's 5 s.
+    s.stall_reads(2, Duration::from_secs(6), "/header");
     let begun = Instant::now();
     let w = serve_env(&dir, &socket, &args, &env);
     w.line("listening");
@@ -798,7 +799,13 @@ fn i1960_a_world_starts_through_slow_store_reads_and_ends_on_an_unreachable_stor
         .filter(|l| l.starts_with("store: ") && l.contains("out of reach"))
         .collect();
     println!("restart through 2 stalled reads in {took:?}: {retried:?}");
-    assert_eq!(retried.len(), 2, "each stalled read tried again once");
+    assert_eq!(retried.len(), 2, "the stalled read tried again twice");
+    assert!(
+        retried
+            .iter()
+            .all(|l| l.contains("/header: out of reach") && l.contains("timeout")),
+        "{retried:?}"
+    );
     w.kill();
 
     // The bucket gone: nothing listens at its address. Four tries of the first read, then the refusal.
