@@ -72,6 +72,8 @@ pub const F_TILE_SIZE: u64 = 24; // the open ground: a terrain tile's side, mm (
 pub const F_TILES: u64 = 25;
 pub const F_ASSET: u64 = 26; // X6: [SHA-256 …] of the world's uploads the thing names (a mesh's, a picture's)
 pub const F_ENTRY: u64 = 27; // X6: the Soul Actions entry of the thing's kind (SA-E11's map), when it has one
+/// A floor's surface materials, one per surface (#3965): `replica::fields`' master list keeps the number.
+pub use replica::fields::F_MATERIALS;
 
 pub const WORLD: &str = "eden:world";
 pub const GROUND: &str = "eden:ground";
@@ -655,26 +657,37 @@ pub fn load(text: &str) -> R<Import> {
         let node = b.add(id, parent, slot, &kind, pose, fields)?;
 
         // Floors: one node per level its rooms, floors or stairs name, at the thing's origin.
-        let mut levels: BTreeMap<i64, Vec<Value>> = BTreeMap::new();
+        // Each level's surfaces, and each surface's material (#3965; `None` where it names none).
+        type Level = (Vec<Value>, Vec<Option<Name>>);
+        let mut levels: BTreeMap<i64, Level> = BTreeMap::new();
         for r in need(t, "rooms").map(Json::arr).unwrap_or(&[]) {
             levels.entry(int(r, "floor")?).or_default();
         }
         for fl in need(t, "floors").map(Json::arr).unwrap_or(&[]) {
             let y = int(fl, "y")?;
-            levels
-                .entry(int(fl, "level")?)
-                .or_default()
-                .push(Value::Array(vec![i(y), points(need(fl, "polygon")?)?]));
+            let material = (fl.get("material").and_then(Json::str))
+                .map(|m| label(m).ok_or("a floor's material"))
+                .transpose()?;
+            let lv = levels.entry(int(fl, "level")?).or_default();
+            lv.0.push(Value::Array(vec![i(y), points(need(fl, "polygon")?)?]));
+            lv.1.push(material);
         }
         for st in need(t, "stairs").map(Json::arr).unwrap_or(&[]) {
             levels.entry(int(st, "from")?).or_default();
             levels.entry(int(st, "to")?).or_default();
         }
-        for (lv, surfaces) in levels {
+        for (lv, (surfaces, materials)) in levels {
             let mut ff = BTreeMap::new();
             ff.insert(F_LEVEL, i(lv));
             if !surfaces.is_empty() {
                 ff.insert(F_SURFACES, Value::Array(surfaces));
+            }
+            if materials.iter().any(Option::is_some) {
+                let none = Name::new("").ok_or("an empty name")?;
+                let texts = materials
+                    .into_iter()
+                    .map(|m| Value::Text(m.unwrap_or_else(|| none.clone())));
+                ff.insert(F_MATERIALS, Value::Array(texts.collect()));
             }
             b.add(
                 &format!("{id}/floor-{lv}"),

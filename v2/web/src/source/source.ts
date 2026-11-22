@@ -30,6 +30,12 @@ export type NodeRec = {
   outline?: number[][];
   /** A floor's surfaces `[y, [[x, z] …]]` mm in its thing's frame (field 14). */
   surfaces?: [number, number[][]][];
+  /** A path thing's centre line `[x, z]` mm, world (import-eden's field 16), and its width, mm (field 17). */
+  line?: number[][];
+  lineWidth?: number;
+  /** A floor's surfaces' materials, one per surface (`cobble`, `gravel` …; '' for none), from
+   *  `replica::fields::F_MATERIALS` (#3965). */
+  materials?: string[];
   /** A water's level, mm (field 18). */
   waterLevel?: number;
   /** Scale in parts per million (field 23). */

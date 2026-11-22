@@ -1,6 +1,7 @@
 // Ground-laid areas (paths, lawns, pitches, courts, beds): flat on the drawn ground in their surface's
 // colour, as today's page drapes them (apps/web/src/gen-mesh/areas.mesh.ts, paths.mesh.ts), not as a box around
-// their solids. The stream carries no material, so the colour is the kind's default there. Each area is its floor's
+// their solids. A path's surfaces carry their material (#3965, `F_MATERIALS`), drawn as today's roads.mesh.ts draws it
+// (`PAVING`); every other area's colour is its kind's default. Each area is its floor's
 // surfaces (import-eden's field 14), or its outline (field 11) when it has none, cut into triangles no side longer
 // than the ground's 1 m grid, each corner at the ground's height plus the surface's own lift.
 import * as THREE from 'three';
@@ -33,6 +34,21 @@ export const BANKS: Record<string, { wet: number; dry: number }> = {
 };
 const BANK_GREEN: Record<string, number> = { shore: 0x7d9c56, river: 0x8a9b6e };
 
+/** Today's path/1 surfaces by material (apps/web/src/gen-mesh/roads.mesh.ts `BASE`, `GROUT`, setts): the surface's
+ *  colour, the grout between its setts and each sett's length along the path and width across it, m (a board runs
+ *  the path's whole width); gravel and dirt are speckled (`[cells a metre, least, spread, hash seed]`), dirt has wheel ruts. */
+export const PAVING: Record<string, { base: number; grout?: number; sett?: [number, number]; speck?: [number, number, number, number] }> = {
+  gravel: { base: 0xb5ad9c, speck: [3, 0.82, 0.3, 1] },
+  dirt: { base: 0x8e6d4b, speck: [2, 0.92, 0.14, 3] },
+  sand: { base: 0xd6c08c, speck: [2, 0.92, 0.14, 3] },
+  asphalt: { base: 0x4d5054 },
+  cobble: { base: 0xa49b8c, grout: 0x6f685d, sett: [0.5, 0.34] },
+  stone: { base: 0xbdb5a5, grout: 0x8a8273, sett: [0.9, 0.6] },
+  wood: { base: 0xa07a4f, sett: [0.25, 0] },
+};
+/** The shader's code for a material's pattern: 0 none, 1 to 3 setts (cobble, stone, wood), 4 ruts (dirt, sand). */
+const PATTERN: Record<string, number> = { cobble: 1, stone: 2, wood: 3, dirt: 4, sand: 4 };
+
 /** Decks over water or ground (piers, bridges, decks): their surfaces are at their own heights, not on the ground. */
 export const DECKS: Record<string, number> = {
   pier: 0xa07a4f, // wood
@@ -51,8 +67,27 @@ const MIN_LIFT = 0.02;
 /** Longest side of a drawn triangle, m (the ground's grid). */
 const MAX_SIDE = 1;
 
-/** An area's corners `[x, z]` (m); `lift` above the ground, or the height itself when `level` (a deck). */
-export type Area = { colour: number; lift: number; points: [number, number][]; level?: boolean; bank?: string };
+/** An area's corners `[x, z]` (m); `lift` above the ground, or the height itself when `level` (a deck). A path's
+ *  surface names its `material` and its path's centre `line` (m, world) and `width` (m), which lay its pattern. */
+export type Area = {
+  colour: number; lift: number; points: [number, number][]; level?: boolean; bank?: string;
+  material?: string; line?: [number, number][]; width?: number;
+};
+
+/** A point's place on a path: `[q, t]`, how far along its centre line (m, from its start) and how far across it (m,
+ *  signed), against the nearest of its segments, as today's setts are laid (`l3-path.ts` `at`). */
+export function alongPath(line: [number, number][], x: number, z: number): [number, number] {
+  let best = Infinity, q = 0, t = 0, run = 0;
+  for (let i = 0; i + 1 < line.length; i++) {
+    const [ax, az] = line[i], [bx, bz] = line[i + 1], dx = bx - ax, dz = bz - az, l = Math.hypot(dx, dz);
+    if (l > 0) {
+      const k = Math.max(0, Math.min(l, ((x - ax) * dx + (z - az) * dz) / l)), px = ax + (dx * k) / l, pz = az + (dz * k) / l, d = Math.hypot(x - px, z - pz);
+      if (d < best) (best = d, q = run + k, t = ((x - ax) * -dz + (z - az) * dx) / l);
+    }
+    run += l;
+  }
+  return [q, t];
+}
 
 /** A bank's colour at a point: wet where the area meets the water (its corners lowest on the ground), the ground's own
  *  colour at its outer edge, as today's shore/1 and river/1 meshes fade them. `t` is 0 at the water, 1 on dry ground. */
@@ -77,18 +112,23 @@ const BANK_REACH = 3;
 
 /** One mesh of every area, each corner on the ground (`heightAt`); corners off the ground keep height 0. */
 export function drapeMesh(areas: Area[], heightAt: (x: number, z: number) => number | null): THREE.Mesh | null {
-  const pos: number[] = [], col: number[] = [];
+  const pos: number[] = [], col: number[] = [], pave: number[] = [];
   const c = new THREE.Color();
   for (const a of areas) {
     if (a.points.length < 3) continue;
-    c.setHex(a.colour);
+    const look = a.material ? PAVING[a.material] : undefined, code = (a.material && a.line && a.width && PATTERN[a.material]) || 0;
+    c.setHex(look?.grout ?? a.colour);
     const contour = a.points.map(([x, z]) => new THREE.Vector2(x, z));
     const lift = a.level ? a.lift : Math.max(MIN_LIFT, a.lift);
     const put = (p: THREE.Vector2) => {
       const h = heightAt(p.x, p.y) ?? 0;
       pos.push(p.x, a.level ? lift : h + lift, p.y);
       if (a.bank) bankColour(c, a.colour, a.bank, wetness(p.x, p.y, h, heightAt));
+      // today's gravel and dirt: each corner a little lighter or darker, by a hash of where it is
+      if (look?.speck) { const [n, lo, span, seed] = look.speck; c.setHex(a.colour).multiplyScalar(lo + h01(Math.round(p.x * n), Math.round(p.y * n), seed) * span); }
       col.push(c.r, c.g, c.b);
+      if (code) pave.push(...alongPath(a.line!, p.x, p.y), code, a.width!);
+      else pave.push(0, 0, 0, 0);
     };
     const split = (p: THREE.Vector2, q: THREE.Vector2, r: THREE.Vector2): void => {
       const pq = p.distanceTo(q), qr = q.distanceTo(r), rp = r.distanceTo(p), most = Math.max(pq, qr, rp);
@@ -115,11 +155,51 @@ export function drapeMesh(areas: Area[], heightAt: (x: number, z: number) => num
   const g = new THREE.BufferGeometry();
   g.setAttribute('position', new THREE.Float32BufferAttribute(pos, 3));
   g.setAttribute('color', new THREE.Float32BufferAttribute(col, 3));
+  const paved = pave.some((v, i) => i % 4 === 2 && v > 0);
+  if (paved) g.setAttribute('pave', new THREE.Float32BufferAttribute(pave, 4));
   g.computeVertexNormals();
-  const mesh = new THREE.Mesh(g, new THREE.MeshLambertMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 }));
+  const m = new THREE.MeshLambertMaterial({ vertexColors: true, polygonOffset: true, polygonOffsetFactor: -2, polygonOffsetUnits: -2 });
+  if (paved) pavingMaterial(m);
+  const mesh = new THREE.Mesh(g, m);
   mesh.receiveShadow = true;
   mesh.name = 'drapes';
   return mesh;
+}
+
+// Today's setts (roads.mesh.ts, step 2): rows `len` m along the path, `nAcross = round(w / wid)` stones across in a
+// running bond (every other row shifted half a stone), a 5 cm grout joint (3 cm between boards), each stone its own
+// tone (0.86 to 1.1 of its colour, by a hash of its row and place); slivers under 8 cm at the edges stay grout. Dirt's
+// two wheel ruts (0.22 of the width either side of the centre, 0.5 m wide) are 0.8 of its colour. The vertex colour is
+// the grout (or the surface); `pave` is each corner's `[q, t]` on the path, its pattern code and the path's width.
+const lin = (hex: number) => { const c = new THREE.Color(hex); return `vec3(${c.r.toFixed(5)},${c.g.toFixed(5)},${c.b.toFixed(5)})`; };
+const SETTS = /* glsl */`
+uint paveHash(int a,int b,int c){uint h=uint(a)*374761393u+uint(b)*668265263u+uint(c)*2147483647u;h=(h^(h>>13u))*1274126177u;h^=h>>16u;return h;}
+float paveH01(int a,int b,int c){return float(paveHash(a,b,c))/4294967296.;}
+`;
+const PAVE = /* glsl */`
+if(vPave.z>.5){
+ float q=vPave.x,t=vPave.y,w=vPave.w;int code=int(vPave.z+.5);
+ if(code==4){ if(abs(abs(t)-w*.22)<.25) diffuseColor.rgb*=.8; }
+ else{
+  vec3 stone=code==1?${lin(PAVING.cobble.base)}:code==2?${lin(PAVING.stone.base)}:${lin(PAVING.wood.base)};
+  float len=code==1?${PAVING.cobble.sett![0].toFixed(2)}:code==2?${PAVING.stone.sett![0].toFixed(2)}:${PAVING.wood.sett![0].toFixed(2)};
+  float wid=code==1?${PAVING.cobble.sett![1].toFixed(2)}:code==2?${PAVING.stone.sett![1].toFixed(2)}:w;
+  float gap=code==3?.03:.05;
+  float nA=max(1.,floor(w/wid+.5)),ww=w/nA;
+  int row=int(floor(q/len));
+  float off=code==3?0.:float(row-2*(row/2))*ww*.5;
+  float s=w*.5+off-t;int k=int(floor(s/ww));
+  float t0=min(w*.5,w*.5-float(k)*ww+off),t1=max(-w*.5,w*.5-float(k)*ww+off-ww+gap);
+  if(q-float(row)*len<len-gap&&t<t0&&t>t1&&t0-t1>=.08) diffuseColor.rgb=stone*(.86+paveH01(row,k,7)*.24);
+ }
+}
+`;
+function pavingMaterial(m: THREE.MeshLambertMaterial) {
+  m.onBeforeCompile = (sh) => {
+    sh.vertexShader = 'attribute vec4 pave;\nvarying vec4 vPave;\n' + sh.vertexShader.replace('#include <begin_vertex>', '#include <begin_vertex>\nvPave=pave;');
+    sh.fragmentShader = 'varying vec4 vPave;\n' + SETTS + sh.fragmentShader.replace('#include <color_fragment>', `#include <color_fragment>\n${PAVE}`);
+  };
+  m.customProgramCacheKey = () => 'v2-drapes-paving-1';
 }
 
 // ---------------------------------------------------------------- the turf (today's WorldEdenRealism ground class)

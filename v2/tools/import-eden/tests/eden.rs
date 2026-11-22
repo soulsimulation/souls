@@ -5,9 +5,9 @@
 
 use import_eden::json::{self, Json};
 use import_eden::{
-    F_DOORWAY, F_DOORWAYS, F_HEIGHT, F_LINE, F_LINE_WIDTH, F_NAME, F_OUTLINE, F_PLACE_KIND,
-    F_PLACE_OF, F_SILL, F_STAIRS, F_TILE_SIZE, F_TILES, F_WIDTH, FLOOR, Import, PLACE, ROOM,
-    WINDOW, base64, count, load, world_of,
+    F_DOORWAY, F_DOORWAYS, F_HEIGHT, F_LINE, F_LINE_WIDTH, F_MATERIALS, F_NAME, F_OUTLINE,
+    F_PLACE_KIND, F_PLACE_OF, F_SILL, F_STAIRS, F_TILE_SIZE, F_TILES, F_WIDTH, FLOOR, Import,
+    PLACE, ROOM, WINDOW, base64, count, load, world_of,
 };
 use replica::effects::{Header, Part};
 use replica::encode::{Name, Value};
@@ -46,7 +46,7 @@ const SMALL: &str = r#"{
      "world": [10000, 0, 20000, 90000], "scale_ppm": 1000000, "name": "test-house",
      "solids": [[0, 3000, 4000, 100, 0, 0, 2600, 1, 0]],
      "floors": [{"level": 0, "y": 100, "polygon": [[-4000, -3000], [4000, -3000], [4000, 3000], [-4000, 3000]]},
-                {"level": 1, "y": 2900, "polygon": [[-4000, -3000], [4000, -3000], [4000, 3000], [-4000, 3000]]}],
+                {"level": 1, "y": 2900, "polygon": [[-4000, -3000], [4000, -3000], [4000, 3000], [-4000, 3000]], "material": "wood"}],
      "rooms": [
        {"id": "kitchen", "name": "Kitchen", "floor": 0, "pose": [-2000, 100, 0, 0], "height": 2600, "polygon": [[-2000, -3000], [2000, -3000], [2000, 3000], [-2000, 3000]]},
        {"id": "hall", "name": "Hall", "floor": 0, "pose": [2000, 100, 0, 0], "height": 2600, "polygon": [[-2000, -3000], [2000, -3000], [2000, 3000], [-2000, 3000]]},
@@ -104,6 +104,16 @@ fn a_small_world_loads_through_commit_with_its_rooms_doorways_windows_stairs_and
             .is_empty(),
         "a window joins nothing"
     );
+
+    // #3965: a floor's surface materials, one per surface, on the floor that has one.
+    let floor = |k: &str| t.node(t.handle(im.nodes[k]).unwrap()).unwrap();
+    assert_eq!(
+        floor("e_house/floor-1").fields().get(&F_MATERIALS),
+        Some(&Value::Array(vec![Value::Text(
+            Name::new("eden:wood").unwrap()
+        )]))
+    );
+    assert_eq!(floor("e_house/floor-0").fields().get(&F_MATERIALS), None);
 
     // The inner doorway joins the two rooms; the door holds its id; the front door leads to the open ground.
     let kitchen = t.handle(im.nodes["e_house/kitchen"]).unwrap();

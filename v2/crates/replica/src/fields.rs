@@ -34,6 +34,9 @@ pub struct Reserved {
 pub const ENTRY_FIELDS: std::ops::Range<u64> = 28..80;
 /// The first number of the block new engine fields take.
 pub const ENGINE_THING_FIELDS: u64 = 100;
+/// A floor's surface materials (#3965): `[text …]`, one `eden:<material>` (`eden:cobble`, `eden:gravel` …) per surface
+/// in its `F_SURFACES` order, empty text for a surface with none; written by `import-eden` when any surface has one.
+pub const F_MATERIALS: u64 = 102;
 
 const fn r(n: u64, name: &'static str, on: On) -> Reserved {
     Reserved { n, name, on }
@@ -97,6 +100,7 @@ const RESERVED: &[Reserved] = &[
     ),
     r(crate::schedule::F_STEER, "schedule::F_STEER", On::Thing),
     r(crate::edit::DOOR_GEOMETRY, "edit::DOOR_GEOMETRY", On::Thing),
+    r(F_MATERIALS, "fields::F_MATERIALS", On::Thing),
     // Kept for fields in review (21 Nov): a place's aliases (#3904), district plans, build claims and land-use zones
     // on the zone's root (#3879, #3913), and the owner and access marks any node may carry (#3913).
     r(101, "F_ALIASES (#3904)", On::Place),
@@ -147,5 +151,6 @@ mod tests {
             );
         }
         const { assert!(crate::edit::DOOR_GEOMETRY >= ENGINE_THING_FIELDS) };
+        const { assert!(F_MATERIALS >= ENGINE_THING_FIELDS) };
     }
 }

@@ -7,7 +7,7 @@ import * as THREE from 'three';
 import type { NodeRec } from '../source/source.ts';
 import { WorldView, terrainColour } from './world.ts';
 import { WIND, setWind } from '../sky/wind.ts';
-import { DRAPES, GroundCover, bankColour, cellKind, coverSetting, drapeMesh, siteAt, wetness, type CoverGround } from './drapes.ts';
+import { DRAPES, GroundCover, PAVING, alongPath, bankColour, cellKind, coverSetting, drapeMesh, siteAt, wetness, type CoverGround } from './drapes.ts';
 
 const ROT: NodeRec['rot'] = [1 << 30, 0, 0, 0];
 const node = (o: Partial<NodeRec> & { id: string; kind: string }): NodeRec => ({ parent: null, slot: null, pos: [0, 0, 0], rot: ROT, at: null, ...o });
@@ -134,4 +134,35 @@ test('A1: what stands on the ground and every non-lawn area keep the cover off',
   assert.ok(blocked(8.5, 8.2), 'under the bench');
   assert.ok(blocked(5, 3), 'on the path');
   assert.ok(!blocked(3, 12), 'open meadow');
+});
+
+test('#3965: a path\'s surface is drawn in its material, cobble as setts laid along its centre line', () => {
+  assert.deepEqual(alongPath([[0, 0], [10, 0], [10, 10]], 4, 1), [4, 1], 'along the first leg, a metre to its side');
+  assert.deepEqual(alongPath([[0, 0], [10, 0], [10, 10]], 11, 6), [16, -1], 'along the second leg');
+  const path = (id: string, material: string, z: number) => [
+    node({ id, kind: 'eden:footpath', parent: 'g', line: [[5000, z], [15000, z]], lineWidth: 3000 }),
+    node({ id: `${id}/floor-0`, kind: 'eden:floor', parent: id, surfaces: [[40, [[5000, z - 1500], [15000, z - 1500], [15000, z + 1500], [5000, z + 1500]]]], materials: [material] }),
+  ];
+  const w = new WorldView();
+  w.apply([node({ id: 'w', kind: 'eden:world' }), pondGround(), ...path('cobble', 'cobble', 4000), ...path('gravel', 'gravel', 12000)], []);
+  w.draw(0);
+  const drape = w.group.children.find((m) => m.name === 'drapes') as THREE.Mesh;
+  const pos = drape.geometry.getAttribute('position'), col = drape.geometry.getAttribute('color'), pave = drape.geometry.getAttribute('pave');
+  assert.ok(pave, 'the setts are laid by the pave attribute');
+  const grout = new THREE.Color(PAVING.cobble.grout), gravel = new THREE.Color(PAVING.gravel.base);
+  let cobbles = 0, specks = 0;
+  for (let i = 0; i < pos.count; i++) {
+    if (pos.getZ(i) < 8) {
+      cobbles++;
+      assert.equal(pave.getZ(i), 1, 'the cobble pattern');
+      assert.ok(Math.abs(col.getX(i) - grout.r) < 1e-6, 'between the setts, the grout');
+      assert.ok(Math.abs(pave.getX(i) - (pos.getX(i) - 5)) < 1e-4 && pave.getW(i) === 3, 'along the line, the path\'s width');
+    } else {
+      specks++;
+      assert.equal(pave.getZ(i), 0, 'gravel has no setts');
+      const f = col.getX(i) / gravel.r;
+      assert.ok(f >= 0.82 - 1e-6 && f <= 1.12 + 1e-6, `gravel speckled as today's (${f})`);
+    }
+  }
+  assert.ok(cobbles > 0 && specks > 0);
 });

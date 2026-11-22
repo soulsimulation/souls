@@ -135,7 +135,8 @@ for (const e of m.entities.values()) {
   if (e.shape) rec.shape = { ...(e.shape.path ? { path: e.shape.path.map(pt) } : {}), ...(e.shape.area ? { area: e.shape.area.map(pt) } : {}), ...(e.shape.width !== undefined ? { width: mm(e.shape.width) } : {}) };
   const geo = isWorldShape ? ((v: number) => mm(v)) : S, G = isWorldShape ? pt : P;
   if (b.colliders.length) rec.solids = b.colliders.map((o) => [...G(o.c), geo(o.half[0]), geo(o.half[1]), mdeg(o.yaw), geo(o.y0), geo(o.y1), tagCode(o.tag), (o as { abs?: boolean }).abs ? 1 : 0]);
-  if (b.surfaces?.length) rec.floors = b.surfaces.map((f) => ({ level: f.level, y: geo(f.y), polygon: f.polygon.map(G), ...(f.tag ? { tag: f.tag } : {}), ...(f.abs ? { abs: true } : {}) }));
+  // #3965: a surface's material (a path's cobble, gravel …), so the page draws it as today's does.
+  if (b.surfaces?.length) rec.floors = b.surfaces.map((f) => ({ level: f.level, y: geo(f.y), polygon: f.polygon.map(G), ...(f.tag ? { tag: f.tag } : {}), ...(f.material ? { material: f.material } : {}), ...(f.abs ? { abs: true } : {}) }));
   if (b.rooms?.length) rec.rooms = b.rooms.map((r) => {
     const sl = b.slots.find((x) => x.kind === 'room' && x.id === r.id);
     const rp: Pose = sl ? { x: sl.p[0], y: sl.p[1], z: sl.p[2], yaw: sl.yaw } : { x: r.origin[0], y: r.y, z: r.origin[1], yaw: r.yaw };
