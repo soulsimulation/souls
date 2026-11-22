@@ -149,6 +149,27 @@ fn serve_base(tag: &str) -> (Run, Client) {
     (Run { world, store, path }, Client(s, ada(), 0))
 }
 
+/// The world as of now: [`base_world`] with every logged part applied.
+fn replay(run: &Run) -> Replica {
+    let mut r = base_world();
+    for p in run.log() {
+        if !p.effects.is_empty() {
+            r.apply(&p).expect("the log replays");
+        }
+    }
+    r
+}
+
+/// The body born for `soul`, by its `souls:body-of` link.
+fn body_of(run: &Run, soul: Id) -> Option<Id> {
+    let r = replay(run);
+    let t = r.tree();
+    t.links_at(soul)
+        .iter()
+        .filter(|e| t.ty(e).as_str() == "souls:body-of")
+        .find_map(|e| Some(t.link(e.link)?.1[0]))
+}
+
 /// The body's last logged place on the ground, µm.
 fn last_at(run: &Run, body: Id) -> Vec3 {
     run.log()
@@ -189,9 +210,9 @@ const WITHIN: i64 = skills::form_runner::REACH + 100_000;
 fn e1b_a2_a3_base_forms_run_on_a_thing_with_a_card_and_no_forms() {
     let (run, mut a) = serve_base("a2");
     a.act(JOIN, None, BTreeMap::new()).expect("Ada joins");
-    let body = run.body_of(ada()).expect("born");
+    let body = body_of(&run, ada()).expect("born");
     let posture = |run: &Run| {
-        let r = run.replay();
+        let r = replay(run);
         let t = r.tree();
         t.node(t.handle(body).unwrap())
             .unwrap()
