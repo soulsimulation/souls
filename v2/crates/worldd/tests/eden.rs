@@ -2662,6 +2662,25 @@ fn c34_a2_a_greenhouses_vent_and_a_chapels_nave() {
     beside.expect("the vent opened from beside its pole, done");
 }
 
+/// C22 sweep (#1960): an area that is none of a thing's rooms and that no floor of the thing stands a body near is
+/// walked to on the ground under it, as today's game walks to an area by its centre. Born beside them, a Soul crosses
+/// the botanic garden's bridge (today's e_57696e8b, `cross`: `end_a`, then `end_b`), goes up and down the office's
+/// roof stairs (e_b2780f91, `go_up` to `top`, `go_down` to `bottom`) and round the back of a house (e_0aacfcae,
+/// `go_round_back` to `back`, behind it); each ends `done`. Before, each ended `souls:no-way`: the area was put on
+/// the thing's only floor, where no body stands near it, or on none of its two floors.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn c22_an_area_off_a_things_floors_is_walked_to_on_the_ground() {
+    let cross = act_at("-3.0,0.0", "e_57696e8b", "eden:cross", "c22br");
+    let up = act_at("79.8,16.5", "e_b2780f91", "eden:go_up", "c22su");
+    let down = act_at("79.8,16.5", "e_b2780f91", "eden:go_down", "c22sd");
+    let back = act_at("219.0,95.0", "e_0aacfcae", "eden:go_round_back", "c22hb");
+    cross.expect("the bridge crossed, done");
+    up.expect("up the stairs, done");
+    down.expect("down the stairs, done");
+    back.expect("round the back of the house, done");
+}
+
 /// A Soul walks to a bed and lies in it through the gateway, then gets up, as today's soul.game lets it (parity ledger,
 /// "lying in bed", #2835): the beds of the houses west of the library, from eden-house-2's living room. A bed's side
 /// stand point beside its room's door is one the spot tables never stop a walker on; it is moved out of the doorway at
