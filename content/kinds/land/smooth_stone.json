@@ -1,0 +1,99 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:smooth_stone",
+  "owner": "thing",
+  "state": {},
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        50,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      160,
+      100,
+      130
+    ]
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "take"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": "this",
+          "into": "actor_hand",
+          "event": "taken"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "one_hand"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:smooth_stone",
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "sphere",
+          "at": [
+            0,
+            50,
+            0
+          ],
+          "r": 100,
+          "scale": [
+            800,
+            500,
+            650
+          ],
+          "segments": 7,
+          "tint": "stone"
+        }
+      ],
+      "palette": {
+        "stone": "#858b8b"
+      },
+      "tags": [
+        "land-art",
+        "item"
+      ]
+    }
+  },
+  "text": {
+    "card": "A small rounded stone to carry and set down on clear ground.",
+    "art": "art",
+    "stone": "stone",
+    "rock": "rock"
+  },
+  "card": {
+    "text": "card",
+    "category": "art",
+    "synonyms": [
+      "stone",
+      "rock"
+    ]
+  }
+}

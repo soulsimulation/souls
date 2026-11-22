@@ -253,6 +253,7 @@ fn c27_a_walk_to_naming_a_placed_area_walks_to_its_at_mm() {
                 point,
                 at,
                 on: None,
+                ..
             },
         ] => {
             assert_eq!(point.as_str(), "shade");
@@ -366,7 +367,8 @@ fn c25_every_step_shape_binds() {
         Step::WalkTo {
             point: Name::new("a").unwrap(),
             at: Vec3::new(0, 0, 500_000),
-            on: None
+            on: None,
+            approach: false
         }
     );
     assert_eq!(seat[2], Step::Rise);
@@ -381,7 +383,8 @@ fn c25_every_step_shape_binds() {
         vec![Step::WalkTo {
             point: Name::new("top").unwrap(),
             at: Vec3::new(0, 900_000, 0),
-            on: None
+            on: None,
+            approach: false
         }]
     );
     assert_eq!(
@@ -401,7 +404,8 @@ fn c25_every_step_shape_binds() {
         vec![Step::WalkTo {
             point: Name::new("room").unwrap(),
             at: Vec3::ZERO,
-            on: Some(room)
+            on: Some(room),
+            approach: false
         }]
     );
 }
@@ -642,6 +646,7 @@ fn c34_a_move_after_a_walk_to_an_area_approaches_its_point_first() {
             point,
             at,
             on: None,
+            ..
         } => {
             assert_eq!(point.as_str(), "inside", "planned on the area's floor");
             assert_eq!(
