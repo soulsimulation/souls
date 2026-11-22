@@ -124,6 +124,9 @@ const DOOR_HALF_DEPTH: i64 = 100;
 /// modelled floor may stop short of its wall's inner face (the Mars campus's Mimos: 100 mm), and its door must still
 /// meet it.
 const PASSAGE_REACH: i64 = 150;
+/// A piece that ends within this of the grown wall's face ends at the face, mm: the grid's rounding. A doorway's
+/// segment on such a piece stays on the face.
+const MEET_SHORT: i64 = 5;
 
 type P = IntPoint<i32>;
 
@@ -756,10 +759,16 @@ fn meets(
                 let cs: Vec<(i64, i64)> = part[0].iter().map(|p| door.coords(*p)).collect();
                 let mid = cs.iter().map(|c| c.1).sum::<i64>() / cs.len().max(1) as i64;
                 let side: i8 = if mid >= 0 { 1 } else { -1 };
+                // The segment lies on the grown wall's face, where a piece cut by that wall ends. A piece that stops
+                // short of the face (a modelled floor) has its segment on its own nearest edge instead, so the walk
+                // to the doorway ends on the piece (W8, #4084: an end off its piece was a route's portal, and no
+                // walker could aim at it).
                 let n = if side > 0 {
-                    door.n1 + g.d
+                    let (face, edge) = (door.n1 + g.d, cs.iter().map(|c| c.1).min());
+                    edge.filter(|e| e - face > MEET_SHORT).unwrap_or(face)
                 } else {
-                    door.n0 - g.d
+                    let (face, edge) = (door.n0 - g.d, cs.iter().map(|c| c.1).max());
+                    edge.filter(|e| face - e > MEET_SHORT).unwrap_or(face)
                 };
                 // The segment is the part of the narrowest width that reaches this piece: where a box beyond the
                 // wall leaves the piece only one side of the doorway, the middle of the whole width lies off it.
