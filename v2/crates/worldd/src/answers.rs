@@ -607,6 +607,22 @@ pub struct Config {
     pub wear: Option<Wearing>,
     /// The code hatches' modules the world ships (`<world>/hatches/*.wasm`, #3713): its forms' hatches run in them.
     pub hatches: Vec<Vec<u8>>,
+    /// Called once, on the answers thread, with the reason when it ends because the log or the text store failed
+    /// (nothing more can be answered): `worldd serve` ends the process with [`EXIT_DISK_FAILED`] there, so its
+    /// supervisor restarts the world from its log rather than leave it ticking with no answers (#4134).
+    pub halted: Option<Box<dyn FnOnce(String) + Send>>,
+}
+
+/// The exit code of a world process whose log or text store failed ([`Config::halted`]).
+pub const EXIT_DISK_FAILED: i32 = 87;
+
+/// A world process's [`Config::halted`]: says `disk-failed` and the reason, then ends the process with
+/// [`EXIT_DISK_FAILED`], so its supervisor starts the world again from its log.
+pub fn exit_on_halt() -> Box<dyn FnOnce(String) + Send> {
+    Box::new(|why| {
+        eprintln!("worldd: disk-failed: {why}");
+        std::process::exit(EXIT_DISK_FAILED);
+    })
 }
 
 #[derive(Clone)]
@@ -705,6 +721,7 @@ impl Config {
             join: None,
             wear: None,
             hatches: Vec::new(),
+            halted: None,
         }
     }
 }
@@ -942,8 +959,9 @@ struct Clock {
     measures: Option<Arc<Measures>>,
     /// K16's store, where words are kept (V1b).
     text: Arc<Store>,
-    /// The text store's records queued when the Souls the directory told of were first put off for its sync.
-    words_floor: Option<u64>,
+    /// Each Soul the directory told of that waits for the text store's sync: the records queued when it was first put
+    /// off ([`Clock::notices`], #4134).
+    put_off: BTreeMap<Id, u64>,
     /// The world node's day, night and weather (E6, #3369), when the world has them.
     sky: Option<Heavens>,
     /// The tick's length, µs: a tick fires the sky's timers due before the next tick's start (K9).
@@ -2686,7 +2704,12 @@ impl Clock {
     /// The directory's word, at a tick's start after its births (W11b): each Soul told of since the last tick that has
     /// a body here is retired when the directory retired it, or given its saved words when its body's differ, by an
     /// intent of its own taken as any intent is, under [`notice_key`]. A Soul with no body here is left alone.
-    fn notices(&mut self, now: Micros) {
+    ///
+    /// A body's words are compared as the store reads them, which is once they are on the disk (#4134): each Soul
+    /// waits, a tick at a time, until the words queued when it was first put off (its own birth's name among them)
+    /// are on the disk as the tick started, `durable`, rather than be given words it holds. Words queued later never
+    /// hold it up, and a Soul told of later waits for its own.
+    fn notices(&mut self, now: Micros, durable: u64) {
         let told = std::mem::take(&mut self.told);
         let Some((d, reply)) = self.directory.as_ref().map(|(d, r)| (d.clone(), r.clone())) else {
             return;
@@ -2694,16 +2717,18 @@ impl Clock {
         if self.life.is_none() {
             return;
         }
-        // A body's words are compared below as the store reads them, which is once they are on the disk: the Souls
-        // told of wait, a tick at a time, for the words queued when they were told of to be on it (#4134), rather
-        // than be given words they hold. Words queued later never hold them up.
-        let (queued, durable) = self.text.marks();
-        if !told.is_empty() && durable < *self.words_floor.get_or_insert(queued) {
-            self.told.extend(told);
-            return;
-        }
-        self.words_floor = None;
+        let queued = self.text.marks().0;
+        let mut ready = Vec::new();
         for soul in told {
+            let mark = *self.put_off.entry(soul).or_insert(queued);
+            if mark <= durable {
+                self.put_off.remove(&soul);
+                ready.push(soul);
+            } else {
+                self.told.insert(soul);
+            }
+        }
+        for soul in ready {
             let (verb, parameters) = if d.retired.contains(&soul) {
                 (LEAVE, BTreeMap::new())
             } else if let Some(w) = d.words.get(&soul) {
@@ -3818,9 +3843,11 @@ impl Clock {
         at[1] = mark();
         self.tick = n;
         // 0. This tick's births (C3) and the intents that waited for them; then what arrived since the last tick, and
-        // what a script set for this one, is taken now.
+        // what a script set for this one, is taken now. The words on the disk as the tick starts are what the
+        // directory's notices read by (#4134): in lockstep that is every word queued before it.
+        let words_durable = self.text.marks().1;
         self.births(now);
-        self.notices(now);
+        self.notices(now, words_durable);
         self.tell_states();
         for (bytes, reply, stamps) in std::mem::take(&mut self.pending) {
             self.arrival(&bytes, reply, stamps, now);
@@ -4171,8 +4198,17 @@ fn answer_loop<S: Storage + 'static>(
     mut follow: Option<Offer>,
     syncs: Sender<ToSync>,
     text: Arc<Store>,
+    halted: Option<Box<dyn FnOnce(String) + Send>>,
 ) {
     let trace = std::env::var_os("SOULS_JOIN_DELIVERY_TRACE").is_some_and(|v| v == "1");
+    // A failed log or text store ends the thread for good (`sim::log` rule 6), said by name and handed to `halted`.
+    let mut halted = halted;
+    let mut halt = |why: String| {
+        eprintln!("worldd: {why}, nothing more is answered");
+        if let Some(h) = halted.take() {
+            h(why);
+        }
+    };
     let mut k = 0u64;
     // Every tick handed over by now is one batch (#4134): its words and then its records go to the disk with one wait
     // each, however many ticks a slow sync let pile up, so a busy disk delays the answers by a sync or two, not by a
@@ -4192,7 +4228,7 @@ fn answer_loop<S: Storage + 'static>(
         if words > 0
             && let Err(e) = text.wait(words)
         {
-            eprintln!("worldd: the text store failed, nothing more is answered: {e}");
+            halt(format!("the text store failed: {e}"));
             return;
         }
         let mut last = None;
@@ -4228,7 +4264,7 @@ fn answer_loop<S: Storage + 'static>(
                         }
                     }
                     Err(e) => {
-                        eprintln!("worldd: the log failed, nothing more is answered: {e}");
+                        halt(format!("the log failed: {e}"));
                         return;
                     }
                 }
@@ -4243,7 +4279,7 @@ fn answer_loop<S: Storage + 'static>(
         if let Some(n) = last
             && let Err(e) = log.wait_durable(n + 1)
         {
-            eprintln!("worldd: the log failed, nothing more is answered: {e}");
+            halt(format!("the log failed: {e}"));
             return;
         }
         for (key, (t, appended, durable_part)) in keys.zip(done) {
@@ -4795,6 +4831,7 @@ pub fn start<S: Storage + 'static>(
     let answer_measures = measures.clone();
     let answer_syncs = syncs.clone();
     let answer_text = Arc::clone(&text);
+    let halted = cfg.halted.take();
     let answering = thread::Builder::new()
         .name("answers".into())
         .spawn(move || {
@@ -4808,6 +4845,7 @@ pub fn start<S: Storage + 'static>(
                 follow,
                 answer_syncs,
                 answer_text,
+                halted,
             )
         })
         .map_err(io)?;
@@ -4880,7 +4918,7 @@ pub fn start<S: Storage + 'static>(
         sky,
         tick_us,
         text,
-        words_floor: None,
+        put_off: BTreeMap::new(),
         clock: publish,
         life,
         wear: cfg.wear.take(),
@@ -5056,8 +5094,9 @@ pub fn start<S: Storage + 'static>(
                         // log) would depend on that thread's speed.
                         let live = c.replica.version();
                         c.publisher.wait_for(live, PUBLISHED_WAIT);
-                        // And the words it queued on the disk, so a tick that reads them (`notices`) reads them at
-                        // the same tick in every run; only lockstep waits, a free-running clock never does (#4134).
+                        // And the words queued on the disk, so a Soul the directory told of waits for them, or is
+                        // taken, at the same tick in every run (`notices`); only lockstep waits, a free-running clock
+                        // never does (#4134).
                         let _ = c.text.wait(c.text.marks().0);
                         let Ok(due) = ticker.due() else { break };
                         *shared.lock().unwrap_or_else(|p| p.into_inner()) = due;
@@ -5878,7 +5917,8 @@ mod tests {
     }
 
     /// #4134: an intent's words are queued and the clock ticks on while their sync is held; its answer and its tick's
-    /// records wait for the words, so a sync that never returns leaves the log with no reference to them.
+    /// records wait for the words, so a sync that never returns leaves the log with no reference to them, and the
+    /// failed store halts the answers thread by name ([`Config::halted`]).
     #[test]
     fn a4134_the_clock_ticks_on_while_the_words_sync_is_held() {
         let store = Held::new(Vec::new());
@@ -5899,6 +5939,10 @@ mod tests {
         cfg.tick = Duration::from_millis(10);
         cfg.deadline = 10_000_000;
         cfg.text = Some(Arc::new(words_store));
+        let (halt, halted) = channel();
+        cfg.halted = Some(Box::new(move |why| {
+            let _ = halt.send(why);
+        }));
         let w = start(w.replica, toggles::rules(), store.clone(), cfg).expect("the world starts");
         let mut i = toggle(pairs[2].0, pairs[2].1, 1, now() + 60_000_000);
         let said = Value::Map([(23, Value::Bytes(b"by the well".to_vec()))].into());
@@ -5914,6 +5958,11 @@ mod tests {
             "no answer before its words are on the disk"
         );
         text.0.lock().unwrap().power_cut(0);
+        // The failed store ends the answers thread by name, for the process to end (`worldd serve`).
+        let why = halted
+            .recv_timeout(Duration::from_secs(10))
+            .expect("halted");
+        assert!(why.starts_with("the text store failed"), "{why}");
         w.stop();
         assert!(
             rx.try_recv().is_err(),

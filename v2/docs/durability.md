@@ -93,6 +93,12 @@ and rolling builds (O1, O7) are not here.
     all passed 64 MiB of it, those bytes become a hole in the file (the same offsets after it) and `log.cut` names
     where it is read from. The log's copy off the machine (O3) and the archive stay the world's whole history.
 
+**Step 0, the paused writer as a timeline** (`a2_...`): a holds epoch 1, writes 0 to 2 and ships them (mark 2); a
+pauses past its lease; b claims epoch 2 from sequence 3, writes 3 and ships it (mark 3); a resumes and writes 3 to its
+own disk, unacknowledged; a ships, and the store refuses the mark (`precondition-failed`); a reader keeps epoch 1's 0
+to 2 and epoch 2's 3, and ignores epoch 1's 3 as `superseded-epoch`; c then claims epoch 3, and the reader keeps and
+ignores the same. The modelled store refuses the stale writer.
+
 ## What a served world syncs, and when
 
 14. **The clock thread never waits for a disk** (#4134; `v2/crates/worldd/src/answers.rs`). Each sync is on a
@@ -103,20 +109,16 @@ and rolling builds (O1, O7) are not here.
       disk, then appends the tick's input record and part, and the log's writer thread syncs them, once per batch.
       So the log never holds a reference to words a crash would lose.
     - **The answers** leave only after both. The tick's parts reach the views and the follower once its words are
-      on the disk. A failed sync of either file is final: nothing more is answered (`sim::log` rule 6).
+      on the disk. A failed sync of either file is final (`sim::log` rule 6): nothing more is answered, and a world
+      process ends with `disk-failed` (exit 87, `answers::EXIT_DISK_FAILED`), so its unit starts it again from its
+      log rather than leave a world that ticks and answers nothing.
     - **Checkpoints** are written and synced by their own writer thread (rule 13), each from a tick whose records
       are all on the disk.
 
     A tick never waits for a sync, so a busy disk delays answers, never the world. A tick's words read as
-    `text-unknown` until they are on the disk; the directory's word for a Soul (W11b) waits for the words queued
-    when it came, a tick at a time. A lockstep run waits for them before each tick, so its log does not depend on
-    the disk's speed.
-
-**Step 0, the paused writer as a timeline** (`a2_...`): a holds epoch 1, writes 0 to 2 and ships them (mark 2); a
-pauses past its lease; b claims epoch 2 from sequence 3, writes 3 and ships it (mark 3); a resumes and writes 3 to its
-own disk, unacknowledged; a ships, and the store refuses the mark (`precondition-failed`); a reader keeps epoch 1's 0
-to 2 and epoch 2's 3, and ignores epoch 1's 3 as `superseded-epoch`; c then claims epoch 3, and the reader keeps and
-ignores the same. The modelled store refuses the stale writer.
+    `text-unknown` until they are on the disk; the directory's word for a Soul (W11b) waits, a tick at a time, for
+    the words queued when that Soul was first put off, its own birth's name among them. A lockstep run waits for
+    every queued word before each tick, so whether such a Soul waits or is taken is the same in every run.
 
 ## What would quietly break this
 

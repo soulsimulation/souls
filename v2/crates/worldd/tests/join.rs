@@ -838,6 +838,68 @@ fn w11b_a2_saved_words_reach_the_body_as_its_own_describe() {
     run.stop();
 }
 
+/// #4134 review: Ada and Bo are born in turn while the text store's writer is held, and the directory holds the very
+/// names they joined with. Ada's name reaches the disk and Bo's sync never returns: Ada is taken and her words agree,
+/// Bo waits for his own, and neither is given words it holds (W11b: only when its body's differ).
+#[test]
+fn a4134_souls_born_while_their_words_wait_are_not_given_words_they_hold() {
+    let disk = Mem::default();
+    let text = std::sync::Arc::new(
+        sim::text::Store::open_mem(
+            disk.clone(),
+            Mem::default(),
+            replica::ids::Minter::new(worldd::words::scope(LINEAGE)),
+        )
+        .expect("a text store"),
+    );
+    let (run, mut a, mut b) = serve_on("a4134", Mem::with(Vec::new()), Some(text.clone()));
+    let hex = |w: &str| replica::encode::to_hex(w.as_bytes());
+    let file = format!(
+        "words {} {} -\nwords {} {} -\n",
+        grant(ada()),
+        hex("Ada"),
+        grant(bo()),
+        hex("Bo")
+    );
+    let directory = tell(&run, &file);
+    assert!(
+        directory.recv_timeout(Duration::from_millis(300)).is_err(),
+        "no body yet, nothing to tell"
+    );
+    let until = |what: &str, done: &dyn Fn((u64, u64)) -> bool| {
+        for _ in 0..1000 {
+            if done(text.marks()) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("{what}: {:?}", text.marks());
+    };
+    {
+        let mut d = disk.0.lock().unwrap();
+        d.stall_sync = Some(d.syncs + 2);
+    }
+    // The writer waits for the disk while the test holds it: Ada's name is queued, then Bo's a few ticks later.
+    let held = disk.0.lock().unwrap();
+    a.send(JOIN, None, p(&[(1, words("Ada"))]));
+    until("Ada's name queued", &|(q, _)| q == 1);
+    std::thread::sleep(Duration::from_millis(200));
+    b.send(JOIN, None, p(&[(1, words("Bo"))]));
+    until("Bo's name queued", &|(q, _)| q == 2);
+    std::thread::sleep(Duration::from_millis(200));
+    // Ada's name reaches the disk; Bo's is written and its sync never returns.
+    drop(held);
+    until("Ada's name on the disk", &|(_, d)| d == 1);
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(
+        text.marks(),
+        (2, 1),
+        "the directory queued no words: neither Soul was given the name it holds"
+    );
+    disk.0.lock().unwrap().power_cut(0);
+    run.stop();
+}
+
 #[test]
 fn w11b_a3_a_world_down_at_the_retire_gets_it_at_its_next_start() {
     let store = Mem::with(Vec::new());
