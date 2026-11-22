@@ -399,17 +399,50 @@ impl Sight<'_> {
     }
 
     /// Point `at` of node `node`'s frame carried onto the floor of `node` nearest its height (#3688), when `node` has
-    /// floors: `None` when it has none.
+    /// floors: `None` when it has none. A floor's heights are its surfaces' (N1's `F_SURFACES`, mm in the thing's
+    /// frame) and its rooms': every floor node stands at the thing's origin, so its place says nothing of its height
+    /// (#1960: an upper landing's door was carried onto the ground floor, where no place is within an arm of it).
     fn floor_of(&self, node: Id, at: Vec3) -> Option<(Id, Vec3)> {
-        use import_eden::FLOOR;
+        use import_eden::{FLOOR, ROOM};
+        use replica::encode::Value;
+        let mm = |v: &Value| match v {
+            Value::Uint(n) => i64::try_from(*n).ok(),
+            Value::Nint(n) => i64::try_from(*n).ok().map(|n| -1 - n),
+            _ => None,
+        };
         let floor = self
             .tree
             .children(self.tree.handle(node)?)?
             .iter()
             .filter_map(|&c| self.tree.node(c))
             .filter(|f| plain(f.kind()) == FLOOR)
-            .filter_map(|f| Some((f.id(), f.place()?)))
-            .min_by_key(|(_, p)| (p.position.y - at.y).abs())?;
+            .filter_map(|f| {
+                let place = f.place()?;
+                let surfaces = match f.fields().get(&sim::ground::scene::F_SURFACES) {
+                    Some(Value::Array(rows)) => rows.as_slice(),
+                    _ => &[],
+                };
+                let rooms = self
+                    .tree
+                    .children(self.tree.handle(f.id())?)?
+                    .iter()
+                    .filter_map(|&c| self.tree.node(c))
+                    .filter(|r| plain(r.kind()) == ROOM)
+                    .filter_map(|r| Some(r.place()?.position.y));
+                let off = surfaces
+                    .iter()
+                    .filter_map(|r| match r {
+                        Value::Array(r) => r.first().and_then(mm).map(|y| y * 1000),
+                        _ => None,
+                    })
+                    .chain(rooms)
+                    .map(|y| (y - at.y).abs())
+                    .min()
+                    .unwrap_or((place.position.y - at.y).abs());
+                Some((off, f.id(), place))
+            })
+            .min_by_key(|(off, _, _)| *off)
+            .map(|(_, id, place)| (id, place))?;
         let [w, x, y, z] = floor.1.orientation.parts();
         let back = replica::pose::Quat::new(w, -x, -y, -z).ok()?;
         let local = back.rotate(at.minus(floor.1.position).ok()?).ok()?;
@@ -687,17 +720,27 @@ impl Geometry for Sight<'_> {
         // An approach to a move's point (#3688): a point of a thing on a building with floors (an inner door) is on
         // the building's floor nearest its height, so the walk goes in to it, and once in through a link the runner
         // approaches again from that floor; on the floor the body stands on, it is aimed short of the point, on the
-        // body's side.
+        // body's side. When the body is not before the point (behind the building whose door it is), the point moved
+        // toward it may have no place within an arm (#1960): then the walk aims at the point itself, and the search
+        // for a place to stand, from the body, finds the body's side.
+        // An approach's move acts on the run's own thing: when that is a doorway's door, the walk may end in its
+        // doorway (#3688).
+        let door = self
+            .approaches
+            .contains(&body)
+            .then(|| self.walks.get(&body).map(|w| w.1))
+            .flatten();
         let (node, at) = if self.approaches.contains(&body) {
             let (node, at) = self.floor_of(node, at).unwrap_or((node, at));
             self.with_view(body, |v| {
                 let (floor, p, _) = v.on_floor(node, at)?;
                 (floor == sim::walk::node_of(me)).then(|| {
                     let short = skills::form_runner::APPROACH_SHORT;
-                    (
-                        floor,
-                        skills::form_runner::short_of(p, me.pose.position, short),
-                    )
+                    let aim = skills::form_runner::short_of(p, me.pose.position, short);
+                    match v.stand_near_door(floor, aim, reach, Some(me), door) {
+                        Some(_) => (floor, aim),
+                        None => (floor, p),
+                    }
                 })
             })
             .flatten()
@@ -706,13 +749,6 @@ impl Geometry for Sight<'_> {
             (node, at)
         };
         let mut planning = self.planning.borrow_mut();
-        // An approach's move acts on the run's own thing: when that is a doorway's door, the walk may end in its
-        // doorway (#3688).
-        let door = self
-            .approaches
-            .contains(&body)
-            .then(|| self.walks.get(&body).map(|w| w.1))
-            .flatten();
         let query = FormQuery::Walk {
             node,
             at,
