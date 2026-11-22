@@ -118,5 +118,6 @@ ignores the same. The modelled store refuses the stale writer.
 - **Comparing clocks across machines** for a lease, or counting it from the reply. A stale writer acknowledges late.
 - **Acknowledging travel at the disk.** A dead machine loses a Soul between worlds.
 - **A store that ignores the conditions.** Test each S3-compatible store; one that accepts a stale `If-Match` lets
-  two writers write.
+  two writers write. `cargo run -p directoryd --example store-check -- --env-file <unit's settings>` checks the
+  store a unit uses on one scratch key under `diag/`. R2 matches `If-Match` only on the bare ETag, without quotes.
 - **Checkpoints by time rather than by amount of log.** A busy world's restart grows without bound.
