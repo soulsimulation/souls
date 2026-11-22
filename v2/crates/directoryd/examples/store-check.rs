@@ -61,7 +61,13 @@ fn outcome<T>(r: &R<T>) -> String {
             let why = e.detail.split_once(": ").map_or("-", |(_, why)| why);
             let why: Vec<&str> = why
                 .split_whitespace()
-                .map(|w| if w.contains('.') || w.contains('/') { "<cut>" } else { w })
+                .map(|w| {
+                    if w.contains('.') || w.contains('/') {
+                        "<cut>"
+                    } else {
+                        w
+                    }
+                })
                 .collect();
             format!("refused {} ({})", e.name, why.join(" "))
         }
@@ -103,7 +109,11 @@ fn main() {
         good &= ok == want_ok;
         println!(
             "{name}: {out}{}",
-            if ok == want_ok { "" } else { "  <- not as it must" }
+            if ok == want_ok {
+                ""
+            } else {
+                "  <- not as it must"
+            }
         );
     };
 
