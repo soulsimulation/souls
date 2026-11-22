@@ -1062,7 +1062,10 @@ mod tests {
         assert_eq!(start_within(Some(eden)), Duration::from_secs(600));
         assert_eq!(start_within(None), START_WITHIN);
         assert_eq!(START_WITHIN, Duration::from_secs(30));
-        assert_eq!(start_within(Some("[Service]\nMemoryMax=8G\n")), START_WITHIN);
+        assert_eq!(
+            start_within(Some("[Service]\nMemoryMax=8G\n")),
+            START_WITHIN
+        );
         // Out of range or not a number: the unit's bound, never an unbounded wait.
         for bad in ["0", "3601", "ten", ""] {
             let t = format!("[Service]\nEnvironment=WORLD_START_WITHIN_S={bad}\n");
@@ -1091,7 +1094,10 @@ mod tests {
         let t0 = Instant::now();
         assert!(connect(&sock, Duration::from_millis(800)).is_none());
         let took = t0.elapsed();
-        assert!(took >= Duration::from_millis(800) && took < Duration::from_millis(1500), "{took:?}");
+        assert!(
+            took >= Duration::from_millis(800) && took < Duration::from_millis(1500),
+            "{took:?}"
+        );
         let _ = std::fs::remove_dir_all(&dir);
     }
 }
