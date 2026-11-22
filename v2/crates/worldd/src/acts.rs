@@ -1652,12 +1652,6 @@ impl Acts {
                     continue;
                 }
             };
-            for (k, n) in args.slots.iter().filter(|(k, _)| counted(k)) {
-                all.insert(
-                    k.clone(),
-                    skills::form_runner::Arg::Int(i64::try_from(*n).unwrap_or(i64::MAX)),
-                );
-            }
             let mut ambiguous = None;
             for (key, value) in counts.iter().chain(&args.values) {
                 if all.insert(key.clone(), value.clone()).is_some() {
