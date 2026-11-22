@@ -1,0 +1,2308 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:slider_crank_trainer",
+  "owner": "thing",
+  "state": {
+    "phase": {
+      "n": 28,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 15,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        -200,
+        0,
+        650
+      ],
+      "yaw_mdeg": 180000
+    },
+    "crank": {
+      "role": "contact",
+      "at_mm": [
+        -200,
+        1100,
+        100
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1200,
+      1450,
+      440
+    ]
+  },
+  "forms": {
+    "forward_00": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 0,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 1,
+          "event": "indexed"
+        }
+      ]
+    },
+    "forward_01": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 1,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 2,
+          "event": "indexed"
+        }
+      ]
+    },
+    "forward_02": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 2,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 3,
+          "event": "indexed"
+        }
+      ]
+    },
+    "forward_03": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 3,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 4,
+          "event": "indexed"
+        }
+      ]
+    },
+    "forward_04": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 4,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 5,
+          "event": "indexed"
+        }
+      ]
+    },
+    "forward_05": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 5,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 6,
+          "event": "indexed"
+        }
+      ]
+    },
+    "forward_06": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 6,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 7,
+          "event": "indexed"
+        }
+      ]
+    },
+    "forward_07": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 7,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 8,
+          "event": "indexed"
+        }
+      ]
+    },
+    "forward_08": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 8,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 9,
+          "event": "indexed"
+        }
+      ]
+    },
+    "forward_09": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 9,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 10,
+          "event": "indexed"
+        }
+      ]
+    },
+    "forward_10": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 10,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 11,
+          "event": "indexed"
+        }
+      ]
+    },
+    "forward_11": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 11,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 12,
+          "event": "indexed"
+        }
+      ]
+    },
+    "forward_12": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 12,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 13,
+          "event": "indexed"
+        }
+      ]
+    },
+    "forward_13": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 13,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 14,
+          "event": "indexed"
+        }
+      ]
+    },
+    "forward_14": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 14,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 15,
+          "event": "indexed"
+        }
+      ]
+    },
+    "forward_15": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 15,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 0,
+          "event": "indexed"
+        }
+      ]
+    },
+    "backward_00": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 0,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 15,
+          "event": "indexed"
+        }
+      ]
+    },
+    "backward_01": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 1,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 0,
+          "event": "indexed"
+        }
+      ]
+    },
+    "backward_02": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 2,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 1,
+          "event": "indexed"
+        }
+      ]
+    },
+    "backward_03": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 3,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 2,
+          "event": "indexed"
+        }
+      ]
+    },
+    "backward_04": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 4,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 3,
+          "event": "indexed"
+        }
+      ]
+    },
+    "backward_05": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 5,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 4,
+          "event": "indexed"
+        }
+      ]
+    },
+    "backward_06": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 6,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 5,
+          "event": "indexed"
+        }
+      ]
+    },
+    "backward_07": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 7,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 6,
+          "event": "indexed"
+        }
+      ]
+    },
+    "backward_08": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 8,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 7,
+          "event": "indexed"
+        }
+      ]
+    },
+    "backward_09": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 9,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 8,
+          "event": "indexed"
+        }
+      ]
+    },
+    "backward_10": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 10,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 9,
+          "event": "indexed"
+        }
+      ]
+    },
+    "backward_11": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 11,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 10,
+          "event": "indexed"
+        }
+      ]
+    },
+    "backward_12": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 12,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 11,
+          "event": "indexed"
+        }
+      ]
+    },
+    "backward_13": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 13,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 12,
+          "event": "indexed"
+        }
+      ]
+    },
+    "backward_14": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 14,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 13,
+          "event": "indexed"
+        }
+      ]
+    },
+    "backward_15": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 15,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "crank"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "crank"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 14,
+          "event": "indexed"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:slider_crank_trainer",
+    "table": [
+      {
+        "part": "crank",
+        "field": "phase",
+        "do": "rotate",
+        "axis": "z",
+        "at": {
+          "0": 0,
+          "1": 22500,
+          "2": 45000,
+          "3": 67500,
+          "4": 90000,
+          "5": 112500,
+          "6": 135000,
+          "7": 157500,
+          "8": 180000,
+          "9": 202500,
+          "10": 225000,
+          "11": 247500,
+          "12": 270000,
+          "13": 292500,
+          "14": 315000,
+          "15": 337500
+        }
+      },
+      {
+        "part": "crank_pin",
+        "field": "phase",
+        "do": "rotate",
+        "axis": "z",
+        "at": {
+          "0": 0,
+          "1": 22500,
+          "2": 45000,
+          "3": 67500,
+          "4": 90000,
+          "5": 112500,
+          "6": 135000,
+          "7": 157500,
+          "8": 180000,
+          "9": 202500,
+          "10": 225000,
+          "11": 247500,
+          "12": 270000,
+          "13": 292500,
+          "14": 315000,
+          "15": 337500
+        }
+      },
+      {
+        "part": "rod",
+        "field": "phase",
+        "do": "slide",
+        "axis": "x",
+        "at": {
+          "0": 0,
+          "1": -9,
+          "2": -35,
+          "3": -74,
+          "4": -120,
+          "5": -166,
+          "6": -205,
+          "7": -231,
+          "8": -240,
+          "9": -231,
+          "10": -205,
+          "11": -166,
+          "12": -120,
+          "13": -74,
+          "14": -35,
+          "15": -9
+        }
+      },
+      {
+        "part": "rod",
+        "field": "phase",
+        "do": "slide",
+        "axis": "y",
+        "at": {
+          "0": 0,
+          "1": 46,
+          "2": 85,
+          "3": 111,
+          "4": 120,
+          "5": 111,
+          "6": 85,
+          "7": 46,
+          "8": 0,
+          "9": -46,
+          "10": -85,
+          "11": -111,
+          "12": -120,
+          "13": -111,
+          "14": -85,
+          "15": -46
+        }
+      },
+      {
+        "part": "rod",
+        "field": "phase",
+        "do": "rotate",
+        "axis": "z",
+        "at": {
+          "0": 0,
+          "1": -7329,
+          "2": -13633,
+          "3": -17936,
+          "4": -19471,
+          "5": -17936,
+          "6": -13633,
+          "7": -7329,
+          "8": 0,
+          "9": 7329,
+          "10": 13633,
+          "11": 17936,
+          "12": 19471,
+          "13": 17936,
+          "14": 13633,
+          "15": 7329
+        }
+      },
+      {
+        "part": "slider",
+        "field": "phase",
+        "do": "slide",
+        "axis": "x",
+        "at": {
+          "0": 0,
+          "1": -12,
+          "2": -45,
+          "3": -92,
+          "4": -141,
+          "5": -183,
+          "6": -215,
+          "7": -234,
+          "8": -240,
+          "9": -234,
+          "10": -215,
+          "11": -183,
+          "12": -141,
+          "13": -92,
+          "14": -45,
+          "15": -12
+        }
+      },
+      {
+        "part": "slider_pin",
+        "field": "phase",
+        "do": "slide",
+        "axis": "x",
+        "at": {
+          "0": 0,
+          "1": -12,
+          "2": -45,
+          "3": -92,
+          "4": -141,
+          "5": -183,
+          "6": -215,
+          "7": -234,
+          "8": -240,
+          "9": -234,
+          "10": -215,
+          "11": -183,
+          "12": -141,
+          "13": -92,
+          "14": -45,
+          "15": -12
+        }
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            40,
+            0
+          ],
+          "size": [
+            1200,
+            80,
+            440
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -500,
+            690,
+            -110
+          ],
+          "size": [
+            70,
+            1220,
+            70
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            500,
+            690,
+            -110
+          ],
+          "size": [
+            70,
+            1220,
+            70
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            650,
+            -110
+          ],
+          "size": [
+            1000,
+            70,
+            70
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -200,
+            1040,
+            -110
+          ],
+          "size": [
+            100,
+            120,
+            70
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -200,
+            1100,
+            -40
+          ],
+          "r": 24,
+          "h": 100,
+          "segments": 32,
+          "pitch": 90000,
+          "tint": "shaft"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -200,
+            1100,
+            -110
+          ],
+          "size": [
+            100,
+            70,
+            70
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -140,
+            1100,
+            0
+          ],
+          "size": [
+            120,
+            30,
+            18
+          ],
+          "tint": "crank",
+          "role": "crank",
+          "pivot": [
+            -200,
+            1100,
+            0
+          ]
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -200,
+            1100,
+            0
+          ],
+          "r": 32,
+          "h": 18,
+          "segments": 32,
+          "pitch": 90000,
+          "tint": "crank",
+          "role": "crank",
+          "pivot": [
+            -200,
+            1100,
+            0
+          ]
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -80,
+            1100,
+            0
+          ],
+          "r": 24,
+          "h": 18,
+          "segments": 32,
+          "pitch": 90000,
+          "tint": "crank",
+          "role": "crank",
+          "pivot": [
+            -200,
+            1100,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -200,
+            1126,
+            16
+          ],
+          "size": [
+            10,
+            12,
+            8
+          ],
+          "tint": "index",
+          "role": "crank",
+          "pivot": [
+            -200,
+            1100,
+            0
+          ]
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -80,
+            1100,
+            14
+          ],
+          "r": 12,
+          "h": 64,
+          "segments": 32,
+          "pitch": 90000,
+          "tint": "pin_a",
+          "role": "crank_pin",
+          "pivot": [
+            -200,
+            1100,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            100,
+            1100,
+            28
+          ],
+          "size": [
+            360,
+            26,
+            18
+          ],
+          "tint": "rod",
+          "role": "rod",
+          "pivot": [
+            -80,
+            1100,
+            28
+          ]
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -80,
+            1100,
+            28
+          ],
+          "r": 23,
+          "h": 18,
+          "segments": 32,
+          "pitch": 90000,
+          "tint": "rod",
+          "role": "rod",
+          "pivot": [
+            -80,
+            1100,
+            28
+          ]
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            280,
+            1100,
+            28
+          ],
+          "r": 23,
+          "h": 18,
+          "segments": 32,
+          "pitch": 90000,
+          "tint": "rod",
+          "role": "rod",
+          "pivot": [
+            -80,
+            1100,
+            28
+          ]
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            280,
+            1100,
+            28
+          ],
+          "r": 12,
+          "h": 72,
+          "segments": 32,
+          "pitch": 90000,
+          "tint": "pin_b",
+          "role": "slider_pin",
+          "pivot": [
+            280,
+            1100,
+            66
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            280,
+            1100,
+            66
+          ],
+          "size": [
+            80,
+            100,
+            42
+          ],
+          "tint": "slider",
+          "role": "slider",
+          "pivot": [
+            280,
+            1100,
+            66
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            280,
+            1100,
+            91
+          ],
+          "size": [
+            12,
+            60,
+            8
+          ],
+          "tint": "index",
+          "role": "slider",
+          "pivot": [
+            280,
+            1100,
+            66
+          ]
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -200,
+            1100,
+            70
+          ],
+          "r": 20,
+          "h": 120,
+          "segments": 32,
+          "pitch": 90000,
+          "tint": "shaft"
+        },
+        {
+          "kind": "box",
+          "at": [
+            160,
+            1040,
+            66
+          ],
+          "size": [
+            480,
+            20,
+            50
+          ],
+          "tint": "guide"
+        },
+        {
+          "kind": "box",
+          "at": [
+            160,
+            1160,
+            66
+          ],
+          "size": [
+            480,
+            20,
+            50
+          ],
+          "tint": "guide"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -65,
+            860,
+            66
+          ],
+          "size": [
+            30,
+            340,
+            50
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -65,
+            1000,
+            66
+          ],
+          "size": [
+            30,
+            100,
+            50
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -65,
+            1185,
+            66
+          ],
+          "size": [
+            30,
+            30,
+            50
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            385,
+            860,
+            66
+          ],
+          "size": [
+            30,
+            340,
+            50
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            385,
+            1000,
+            66
+          ],
+          "size": [
+            30,
+            100,
+            50
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            385,
+            1185,
+            66
+          ],
+          "size": [
+            30,
+            30,
+            50
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -200,
+            1250,
+            0
+          ],
+          "size": [
+            14,
+            14,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -50,
+            1100,
+            0
+          ],
+          "size": [
+            14,
+            14,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -200,
+            950,
+            0
+          ],
+          "size": [
+            14,
+            14,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -350,
+            1100,
+            0
+          ],
+          "size": [
+            14,
+            14,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            40,
+            1207,
+            66
+          ],
+          "size": [
+            8,
+            24,
+            20
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            280,
+            1207,
+            66
+          ],
+          "size": [
+            8,
+            24,
+            20
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -260,
+            1380,
+            0
+          ],
+          "size": [
+            60,
+            8,
+            12
+          ],
+          "tint": "crank"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -286,
+            1355,
+            0
+          ],
+          "size": [
+            8,
+            50,
+            12
+          ],
+          "tint": "crank"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -260,
+            1330,
+            0
+          ],
+          "size": [
+            60,
+            8,
+            12
+          ],
+          "tint": "crank"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1355,
+            0
+          ],
+          "size": [
+            8,
+            58,
+            12
+          ],
+          "tint": "rod",
+          "roll": 0
+        },
+        {
+          "kind": "box",
+          "at": [
+            23,
+            1380,
+            0
+          ],
+          "size": [
+            46,
+            8,
+            12
+          ],
+          "tint": "rod",
+          "roll": 0
+        },
+        {
+          "kind": "box",
+          "at": [
+            46,
+            1367,
+            0
+          ],
+          "size": [
+            8,
+            26,
+            12
+          ],
+          "tint": "rod",
+          "roll": 0
+        },
+        {
+          "kind": "box",
+          "at": [
+            23,
+            1355,
+            0
+          ],
+          "size": [
+            46,
+            8,
+            12
+          ],
+          "tint": "rod",
+          "roll": 0
+        },
+        {
+          "kind": "box",
+          "at": [
+            32,
+            1338,
+            0
+          ],
+          "size": [
+            44,
+            8,
+            12
+          ],
+          "tint": "rod",
+          "roll": -45000
+        },
+        {
+          "kind": "box",
+          "at": [
+            260,
+            1380,
+            0
+          ],
+          "size": [
+            52,
+            8,
+            12
+          ],
+          "tint": "slider"
+        },
+        {
+          "kind": "box",
+          "at": [
+            238,
+            1367,
+            0
+          ],
+          "size": [
+            8,
+            26,
+            12
+          ],
+          "tint": "slider"
+        },
+        {
+          "kind": "box",
+          "at": [
+            260,
+            1355,
+            0
+          ],
+          "size": [
+            52,
+            8,
+            12
+          ],
+          "tint": "slider"
+        },
+        {
+          "kind": "box",
+          "at": [
+            282,
+            1342,
+            0
+          ],
+          "size": [
+            8,
+            26,
+            12
+          ],
+          "tint": "slider"
+        },
+        {
+          "kind": "box",
+          "at": [
+            260,
+            1330,
+            0
+          ],
+          "size": [
+            52,
+            8,
+            12
+          ],
+          "tint": "slider"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1355,
+            -20
+          ],
+          "size": [
+            1070,
+            100,
+            28
+          ],
+          "tint": "back"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -500,
+            1300,
+            -75
+          ],
+          "size": [
+            70,
+            80,
+            140
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            500,
+            1300,
+            -75
+          ],
+          "size": [
+            70,
+            80,
+            140
+          ],
+          "tint": "frame"
+        }
+      ],
+      "palette": {
+        "frame": "#35424c",
+        "back": "#182b35",
+        "crank": "#407faa",
+        "rod": "#e9bd57",
+        "slider": "#65c3ad",
+        "index": "#fff4b7",
+        "reference": "#ef4e49",
+        "shaft": "#aebbc4",
+        "pin_a": "#e98252",
+        "pin_b": "#b5a3ec",
+        "guide": "#639d9c"
+      },
+      "tags": [
+        "tool",
+        "machine",
+        "linkage",
+        "exhibit"
+      ]
+    }
+  },
+  "text": {
+    "work": "work",
+    "card": "Turn an indexed crank, rigid connecting rod and straight-guided slider.",
+    "slider_crank": "slider crank",
+    "linkage": "connecting rod linkage",
+    "wrong_phase": "Choose the turn matching the current phase.",
+    "free_hand": "Put down an object so a hand is free for the shaft control.",
+    "howto_turn": "Use the forward or backward offer matching the current phase. Blue C is the crank, gold R the rigid rod and green S the slider. Forward turns counterclockwise viewed from the front, in sixteen 22.5 degree steps; the pale crank index moves against four fixed red references. The orange crank pin and lavender slider pin span the separated crank and rod planes. A 120 mm crank radius and unchanged 360 mm pin-center rod give 240 mm slider travel along fixed rails. Red marks above the guide show both travel endpoints. Only sixteen endpoint configurations are represented: the rod is not resized, but no intermediate constraint closure, physical force, torque, dead-point drive, engine, pump, output, loose-item custody or team authority is simulated. Turning through a dead point is an indexed depiction, not a force demonstration."
+  },
+  "card": {
+    "text": "card",
+    "category": "work",
+    "synonyms": [
+      "slider_crank",
+      "linkage"
+    ]
+  },
+  "howtos": {
+    "turn": {
+      "text": "howto_turn",
+      "steps": [
+        {
+          "form": "forward_00"
+        },
+        {
+          "form": "backward_01"
+        }
+      ]
+    }
+  }
+}
