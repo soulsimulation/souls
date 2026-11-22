@@ -87,11 +87,16 @@ impl Projection {
                 .handle(thing)
                 .and_then(|h| preview.tree().node(h))
             {
-                let kind = plain(n.kind().as_str());
-                if let Some(entry) = entries.get(kind) {
-                    let one = Tree::start(thing, n.kind().clone());
-                    let (slots, _) =
-                        import_eden::body_slots(&one, &[(kind.to_owned(), entry.clone())]);
+                // The entry the thing names in field 27 (a Mars seat borrows `eden:chair`), else its kind's: a moved
+                // seat keeps its places as start-up gave them, at its own slots.
+                let entry_kind = import_eden::entry_name(n.kind().as_str(), n.fields());
+                if let Some(entry) = entries.get(entry_kind) {
+                    let slots = import_eden::body_slots_of(
+                        thing,
+                        n.kind().as_str(),
+                        n.fields(),
+                        &[(entry_kind.to_owned(), entry.clone())],
+                    );
                     for slot in slots {
                         let Some((floor, point, facing)) =
                             on_floor(preview.tree(), ground, thing, slot.at)
