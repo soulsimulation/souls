@@ -1,0 +1,1893 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:ferry_puzzle_board",
+  "owner": "thing",
+  "state": {
+    "configuration": {
+      "n": 28,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 15,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "claimed": {
+      "n": 29,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        950
+      ],
+      "yaw_mdeg": 180000
+    },
+    "board": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        850,
+        400
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1100,
+      960,
+      1000
+    ]
+  },
+  "forms": {
+    "cross_0_to_5_goat": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "configuration",
+          "is": 0,
+          "says": "wrong_configuration"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "configuration",
+          "to": 5,
+          "event": "crossing_completed"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "cross_2_to_7_goat": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "configuration",
+          "is": 2,
+          "says": "wrong_configuration"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "configuration",
+          "to": 7,
+          "event": "crossing_completed"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "cross_2_to_11_cabbage": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "configuration",
+          "is": 2,
+          "says": "wrong_configuration"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "configuration",
+          "to": 11,
+          "event": "crossing_completed"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "cross_4_to_5_alone": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "configuration",
+          "is": 4,
+          "says": "wrong_configuration"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "configuration",
+          "to": 5,
+          "event": "crossing_completed"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "cross_4_to_7_wolf": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "configuration",
+          "is": 4,
+          "says": "wrong_configuration"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "configuration",
+          "to": 7,
+          "event": "crossing_completed"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "cross_4_to_13_cabbage": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "configuration",
+          "is": 4,
+          "says": "wrong_configuration"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "configuration",
+          "to": 13,
+          "event": "crossing_completed"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "cross_5_to_4_alone": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "configuration",
+          "is": 5,
+          "says": "wrong_configuration"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "configuration",
+          "to": 4,
+          "event": "crossing_completed"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "cross_5_to_0_goat": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "configuration",
+          "is": 5,
+          "says": "wrong_configuration"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "configuration",
+          "to": 0,
+          "event": "crossing_completed"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "cross_7_to_4_wolf": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "configuration",
+          "is": 7,
+          "says": "wrong_configuration"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "configuration",
+          "to": 4,
+          "event": "crossing_completed"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "cross_7_to_2_goat": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "configuration",
+          "is": 7,
+          "says": "wrong_configuration"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "configuration",
+          "to": 2,
+          "event": "crossing_completed"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "cross_8_to_11_wolf": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "configuration",
+          "is": 8,
+          "says": "wrong_configuration"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "configuration",
+          "to": 11,
+          "event": "crossing_completed"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "cross_8_to_13_goat": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "configuration",
+          "is": 8,
+          "says": "wrong_configuration"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "configuration",
+          "to": 13,
+          "event": "crossing_completed"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "cross_10_to_11_alone": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "configuration",
+          "is": 10,
+          "says": "wrong_configuration"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "configuration",
+          "to": 11,
+          "event": "crossing_completed"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "cross_10_to_15_goat": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "configuration",
+          "is": 10,
+          "says": "wrong_configuration"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "configuration",
+          "to": 15,
+          "event": "crossing_completed"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "cross_11_to_10_alone": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "configuration",
+          "is": 11,
+          "says": "wrong_configuration"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "configuration",
+          "to": 10,
+          "event": "crossing_completed"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "cross_11_to_8_wolf": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "configuration",
+          "is": 11,
+          "says": "wrong_configuration"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "configuration",
+          "to": 8,
+          "event": "crossing_completed"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "cross_11_to_2_cabbage": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "configuration",
+          "is": 11,
+          "says": "wrong_configuration"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "configuration",
+          "to": 2,
+          "event": "crossing_completed"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "cross_13_to_8_goat": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "configuration",
+          "is": 13,
+          "says": "wrong_configuration"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "configuration",
+          "to": 8,
+          "event": "crossing_completed"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "cross_13_to_4_cabbage": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "configuration",
+          "is": 13,
+          "says": "wrong_configuration"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "configuration",
+          "to": 4,
+          "event": "crossing_completed"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "cross_15_to_10_goat": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "configuration",
+          "is": 15,
+          "says": "wrong_configuration"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "configuration",
+          "to": 10,
+          "event": "crossing_completed"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "reset": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "configuration",
+          "to": 0,
+          "event": "layout_reset"
+        },
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": false,
+          "event": "feedback_cleared"
+        }
+      ]
+    },
+    "claim_solved": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "configuration",
+          "is": 15,
+          "says": "incomplete"
+        },
+        {
+          "need": "state",
+          "field": "claimed",
+          "is": false,
+          "says": "already_claimed"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "claimed",
+          "to": true,
+          "event": "puzzle_claimed"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:ferry_puzzle_board",
+    "table": [
+      {
+        "part": "ferryman",
+        "field": "configuration",
+        "do": "slide",
+        "axis": "x",
+        "at": {
+          "0": -330,
+          "1": 330,
+          "2": -330,
+          "3": 330,
+          "4": -330,
+          "5": 330,
+          "6": -330,
+          "7": 330,
+          "8": -330,
+          "9": 330,
+          "10": -330,
+          "11": 330,
+          "12": -330,
+          "13": 330,
+          "14": -330,
+          "15": 330
+        }
+      },
+      {
+        "part": "wolf",
+        "field": "configuration",
+        "do": "slide",
+        "axis": "x",
+        "at": {
+          "0": -330,
+          "1": -330,
+          "2": 330,
+          "3": 330,
+          "4": -330,
+          "5": -330,
+          "6": 330,
+          "7": 330,
+          "8": -330,
+          "9": -330,
+          "10": 330,
+          "11": 330,
+          "12": -330,
+          "13": -330,
+          "14": 330,
+          "15": 330
+        }
+      },
+      {
+        "part": "goat",
+        "field": "configuration",
+        "do": "slide",
+        "axis": "x",
+        "at": {
+          "0": -330,
+          "1": -330,
+          "2": -330,
+          "3": -330,
+          "4": 330,
+          "5": 330,
+          "6": 330,
+          "7": 330,
+          "8": -330,
+          "9": -330,
+          "10": -330,
+          "11": -330,
+          "12": 330,
+          "13": 330,
+          "14": 330,
+          "15": 330
+        }
+      },
+      {
+        "part": "cabbage",
+        "field": "configuration",
+        "do": "slide",
+        "axis": "x",
+        "at": {
+          "0": -330,
+          "1": -330,
+          "2": -330,
+          "3": -330,
+          "4": -330,
+          "5": -330,
+          "6": -330,
+          "7": -330,
+          "8": 330,
+          "9": 330,
+          "10": 330,
+          "11": 330,
+          "12": 330,
+          "13": 330,
+          "14": 330,
+          "15": 330
+        }
+      },
+      {
+        "part": "claimed",
+        "field": "claimed",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      }
+    ],
+    "shape": {
+      "round": 2,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            790,
+            0
+          ],
+          "size": [
+            1080,
+            40,
+            960
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -480,
+            385,
+            -420
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -480,
+            385,
+            420
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            480,
+            385,
+            -420
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            480,
+            385,
+            420
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            817,
+            0
+          ],
+          "size": [
+            1010,
+            14,
+            890
+          ],
+          "tint": "river"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -330,
+            829,
+            0
+          ],
+          "size": [
+            300,
+            10,
+            860
+          ],
+          "tint": "bank"
+        },
+        {
+          "kind": "box",
+          "at": [
+            330,
+            829,
+            0
+          ],
+          "size": [
+            300,
+            10,
+            860
+          ],
+          "tint": "bank"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            835,
+            -450
+          ],
+          "size": [
+            1060,
+            32,
+            20
+          ],
+          "tint": "rim"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            835,
+            450
+          ],
+          "size": [
+            1060,
+            32,
+            20
+          ],
+          "tint": "rim"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -520,
+            835,
+            0
+          ],
+          "size": [
+            20,
+            32,
+            910
+          ],
+          "tint": "rim"
+        },
+        {
+          "kind": "box",
+          "at": [
+            520,
+            835,
+            0
+          ],
+          "size": [
+            20,
+            32,
+            910
+          ],
+          "tint": "rim"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -354,
+            843,
+            -390
+          ],
+          "size": [
+            8,
+            5,
+            60
+          ],
+          "tint": "ink",
+          "yaw": 180000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -330,
+            843,
+            -390
+          ],
+          "size": [
+            8,
+            5,
+            77
+          ],
+          "tint": "ink",
+          "yaw": 38660
+        },
+        {
+          "kind": "box",
+          "at": [
+            -306,
+            843,
+            -390
+          ],
+          "size": [
+            8,
+            5,
+            60
+          ],
+          "tint": "ink",
+          "yaw": 180000
+        },
+        {
+          "kind": "box",
+          "at": [
+            306,
+            843,
+            -390
+          ],
+          "size": [
+            8,
+            5,
+            60
+          ],
+          "tint": "ink",
+          "yaw": 180000
+        },
+        {
+          "kind": "box",
+          "at": [
+            330,
+            843,
+            -420
+          ],
+          "size": [
+            8,
+            5,
+            48
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            325,
+            843,
+            -392
+          ],
+          "size": [
+            8,
+            5,
+            39
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            850,
+            -250
+          ],
+          "size": [
+            150,
+            20,
+            110
+          ],
+          "tint": "ferry",
+          "role": "ferryman"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            885,
+            -250
+          ],
+          "size": [
+            32,
+            50,
+            32
+          ],
+          "tint": "pawn",
+          "role": "ferryman"
+        },
+        {
+          "kind": "sphere",
+          "at": [
+            0,
+            925,
+            -250
+          ],
+          "r": 25,
+          "tint": "pawn",
+          "role": "ferryman"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            850,
+            -65
+          ],
+          "size": [
+            150,
+            22,
+            120
+          ],
+          "tint": "wolf",
+          "role": "wolf"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -22,
+            865,
+            -65
+          ],
+          "size": [
+            8,
+            5,
+            61
+          ],
+          "tint": "ink",
+          "role": "wolf",
+          "yaw": 11310
+        },
+        {
+          "kind": "box",
+          "at": [
+            -8,
+            865,
+            -50
+          ],
+          "size": [
+            8,
+            5,
+            34
+          ],
+          "tint": "ink",
+          "role": "wolf",
+          "yaw": 151928
+        },
+        {
+          "kind": "box",
+          "at": [
+            8,
+            865,
+            -50
+          ],
+          "size": [
+            8,
+            5,
+            34
+          ],
+          "tint": "ink",
+          "role": "wolf",
+          "yaw": 28072
+        },
+        {
+          "kind": "box",
+          "at": [
+            22,
+            865,
+            -65
+          ],
+          "size": [
+            8,
+            5,
+            61
+          ],
+          "tint": "ink",
+          "role": "wolf",
+          "yaw": 168690
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            850,
+            120
+          ],
+          "size": [
+            150,
+            22,
+            120
+          ],
+          "tint": "goat",
+          "role": "goat"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            865,
+            90
+          ],
+          "size": [
+            8,
+            5,
+            48
+          ],
+          "tint": "ink",
+          "role": "goat",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -24,
+            865,
+            120
+          ],
+          "size": [
+            8,
+            5,
+            60
+          ],
+          "tint": "ink",
+          "role": "goat"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            865,
+            150
+          ],
+          "size": [
+            8,
+            5,
+            48
+          ],
+          "tint": "ink",
+          "role": "goat",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            24,
+            865,
+            135
+          ],
+          "size": [
+            8,
+            5,
+            30
+          ],
+          "tint": "ink",
+          "role": "goat",
+          "yaw": 180000
+        },
+        {
+          "kind": "box",
+          "at": [
+            13,
+            865,
+            120
+          ],
+          "size": [
+            8,
+            5,
+            21
+          ],
+          "tint": "ink",
+          "role": "goat",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            850,
+            305
+          ],
+          "size": [
+            150,
+            22,
+            120
+          ],
+          "tint": "cabbage",
+          "role": "cabbage"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            865,
+            275
+          ],
+          "size": [
+            8,
+            5,
+            48
+          ],
+          "tint": "ink",
+          "role": "cabbage",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -24,
+            865,
+            305
+          ],
+          "size": [
+            8,
+            5,
+            60
+          ],
+          "tint": "ink",
+          "role": "cabbage"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            865,
+            335
+          ],
+          "size": [
+            8,
+            5,
+            48
+          ],
+          "tint": "ink",
+          "role": "cabbage",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            845,
+            395
+          ],
+          "size": [
+            200,
+            14,
+            25
+          ],
+          "tint": "green",
+          "role": "claimed"
+        }
+      ],
+      "palette": {
+        "wood": "#75543b",
+        "river": "#7ea6bb",
+        "bank": "#e1d6aa",
+        "rim": "#bb9766",
+        "ink": "#172d38",
+        "ferry": "#d45142",
+        "pawn": "#ffd8b1",
+        "wolf": "#aeb8c9",
+        "goat": "#edc87a",
+        "cabbage": "#88bc7c",
+        "green": "#43c96b"
+      },
+      "tags": [
+        "puzzle",
+        "ferry",
+        "symbolic",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "card": "Solve a symbolic ferry puzzle without leaving unsafe token pairs unattended.",
+    "puzzle": "puzzle",
+    "ferry": "ferry puzzle",
+    "crossing": "river crossing puzzle",
+    "wrong_configuration": "Choose a crossing offered for the current token configuration; its cargo must share the ferryman bank and leave both banks safe.",
+    "hands_empty": "Put down what you hold before changing the puzzle board.",
+    "incomplete": "Bring the ferryman and all three symbolic tokens to the far bank before claiming.",
+    "already_claimed": "This completed puzzle has already been claimed.",
+    "start": "The banks are N (near, left) and F (far, right). The red boat and upright pawn mark the ferryman; W is wolf, G goat and C cabbage. These are symbolic board pieces, not living animals or a transport vehicle. Without the ferryman, wolf cannot share a bank with goat, nor goat with cabbage. Each offered crossing switches ferryman and at most one same-bank token; only safe resulting layouts are offered. Configuration bits on the far bank are ferryman 1, wolf 2, goat 4 and cabbage 8. Start by carrying goat, returning alone, carrying wolf and returning goat.",
+    "finish": "After those first four crossings, carry cabbage, return alone, carry goat, then claim the all-far layout for green feedback. Reset returns all pieces to N. State commits at native hand contact; pieces change bank positions discretely. No simulated water, boat trip, living animals, drawn travel or precise individual-piece contact is claimed."
+  },
+  "card": {
+    "text": "card",
+    "category": "puzzle",
+    "synonyms": [
+      "ferry",
+      "crossing"
+    ]
+  },
+  "howtos": {
+    "begin": {
+      "text": "start",
+      "steps": [
+        {
+          "form": "cross_0_to_5_goat"
+        },
+        {
+          "form": "cross_5_to_4_alone"
+        },
+        {
+          "form": "cross_4_to_7_wolf"
+        },
+        {
+          "form": "cross_7_to_2_goat"
+        }
+      ]
+    },
+    "finish": {
+      "text": "finish",
+      "steps": [
+        {
+          "form": "cross_2_to_11_cabbage"
+        },
+        {
+          "form": "cross_11_to_10_alone"
+        },
+        {
+          "form": "cross_10_to_15_goat"
+        },
+        {
+          "form": "claim_solved"
+        }
+      ]
+    }
+  }
+}
