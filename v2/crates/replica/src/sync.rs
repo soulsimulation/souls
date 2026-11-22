@@ -157,7 +157,9 @@ pub struct Descent {
     taken: Vec<Vec<u8>>,
 }
 
-/// A client's copy of its scope: each scope node's hash, and the records it reaches, by hash.
+/// A client's copy of its scope: each scope node's hash, and the records it reaches, by hash. A record the world
+/// withheld (empty bytes in its answer: under a closed container this asker may not see into, #3915) is held as
+/// withheld: a leaf the copy never reads.
 #[derive(Clone, Default)]
 pub struct Copy {
     roots: BTreeMap<Id, Vec<u8>>,
@@ -166,6 +168,9 @@ pub struct Copy {
 
 /// Checks a record against the hash that named it (rule 3) and gives its children's hashes (field 10).
 fn check(want: &[u8], bytes: &[u8]) -> R<Vec<Vec<u8>>> {
+    if bytes.is_empty() {
+        return Ok(Vec::new());
+    }
     let Ok(d) = decode(bytes) else {
         return refuse("sync-record", "not a record");
     };
@@ -207,9 +212,18 @@ impl Copy {
         &self.roots
     }
 
-    /// The record a hash names, if held.
+    /// Whether the record a hash names is held, and not withheld: a withheld one is asked for again at every sync,
+    /// since whether it may be seen is not in its hash (who may see into its container can change).
+    fn holds(&self, hash: &[u8]) -> bool {
+        self.records.get(hash).is_some_and(|b| !b.is_empty())
+    }
+
+    /// The record a hash names, if held; none for one withheld.
     pub fn record(&self, hash: &[u8]) -> Option<&[u8]> {
-        self.records.get(hash).map(Vec::as_slice)
+        self.records
+            .get(hash)
+            .filter(|b| !b.is_empty())
+            .map(Vec::as_slice)
     }
 
     /// Rule 2: the hash of each node of `scope`, then every record not held, one round per level; then rule 3's let
@@ -253,7 +267,7 @@ impl Copy {
             if self.roots.get(id) != Some(&h) {
                 s.changed += 1;
             }
-            if !self.records.contains_key(&h) {
+            if !self.holds(&h) {
                 want.push(h.clone());
             }
             roots.insert(*id, h);
@@ -273,7 +287,7 @@ impl Copy {
         if d.want.is_empty() {
             // A child named twice in one level, or also asked for in it, is fetched once.
             d.want = std::mem::take(&mut d.next);
-            d.want.retain(|c| !self.records.contains_key(c));
+            d.want.retain(|c| !self.holds(c));
             d.want.sort();
             d.want.dedup();
         }
@@ -291,7 +305,7 @@ impl Copy {
         d.s.sent += asked.iter().map(|h| h.len() as u64).sum::<u64>();
         for (h, bytes) in asked.iter().zip(got) {
             for c in check(h, &bytes)? {
-                if !self.records.contains_key(&c) {
+                if !self.holds(&c) {
                     d.next.push(c);
                 }
             }

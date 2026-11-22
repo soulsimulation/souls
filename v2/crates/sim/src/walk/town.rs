@@ -54,7 +54,9 @@ use crate::ground::{
 };
 use crate::host::Links;
 use crate::links::turns::{Facts, ROOM, Turns, narrow};
-use crate::links::{Building, Doors, F_OPEN, Open, SquareMeet, back, floor_joins, ground_doors};
+use crate::links::{
+    Building, Doors, F_OPEN, Kind, Open, SquareMeet, back, floor_joins, ground_doors,
+};
 use crate::mover::{Body, Surface};
 use crate::routes::{HANDS, Hop, Map, Mask, Route, Scratch, Spot, on_pieces};
 use crate::spots::{Ask, CLEAR, ClassGround, Ground, Spots, Target, flat, to_segment};
@@ -304,7 +306,11 @@ fn reach(b: &Building) -> Option<[i64; 4]> {
         let m = |c: i32| i64::from(c) * 1000;
         Vec3::new(m(v[0]), m(v[1]), m(v[2]))
     });
-    let steps = b.loose.iter().flat_map(|s| [s.end.a, s.end.b]);
+    let steps = b.loose.iter().flat_map(|s| {
+        [s.end.a, s.end.b]
+            .into_iter()
+            .chain(s.stair.as_ref().map(|t| t.top))
+    });
     let mut out: Option<[i64; 4]> = None;
     for p in corners.chain(steps) {
         let w = b.place.point(p).ok()?;
@@ -642,6 +648,7 @@ impl Town {
             buildings,
             ground: *ground,
             boxes: OnceCell::new(),
+            door: None,
         };
         f(tree, &mut g)
     }
@@ -714,9 +721,18 @@ impl Town {
 
     /// The corner `body`'s line aims at next: the node it was searched on and x and z there, µm (read only).
     pub fn next_corner(&self, body: Id) -> Option<(Id, [i64; 2])> {
+        self.next_corner_toward(body).map(|(node, c, _)| (node, c))
+    }
+
+    /// [`Town::next_corner`] with the leg's end the line goes toward, x and z µm in the same node's frame: what C21's
+    /// stall watch measures a walk's progress against (a route with crossings has a leg's end short of its goal).
+    /// `None` for the leg's end of a line forgotten on a planner's thread (`Lines::forget`: aimed at no point), whose
+    /// kept corner is still given.
+    pub fn next_corner_toward(&self, body: Id) -> Option<(Id, [i64; 2], Option<[i64; 2]>)> {
         let i = self.lines.binary_search_by_key(&body, |e| e.0).ok()?;
         let l = &self.lines[i].1;
-        Some((l.node, *l.points.get(l.next)?))
+        let to = (l.to.x != i64::MIN).then_some([l.to.x, l.to.z]);
+        Some((l.node, *l.points.get(l.next)?, to))
     }
 
     /// Off the clock thread: the ground as `part` leaves the tree `base` (a copy of this town's, as it stands when
@@ -1327,7 +1343,7 @@ impl Town {
                 let owner = buildings.iter().find(|b| b.floors.contains_key(&f))?;
                 Some(owner.thing)
             }));
-            buildings[i].links.push(l);
+            buildings[i].join(l);
         }
         let reach = buildings
             .iter()
@@ -1903,6 +1919,19 @@ pub fn in_passage(
     node: Id,
     p: Vec3,
 ) -> bool {
+    in_passage_but(buildings, boxes, ground, node, p, None)
+}
+
+/// [`in_passage`], with the doorway of thing `door`'s own link not counted (#3688): a body acting on a door may stand
+/// in that door's own doorway, as no place out of it may be within an arm of the door's panel.
+pub fn in_passage_but(
+    buildings: &[Building],
+    boxes: &[Option<[i64; 4]>],
+    ground: Id,
+    node: Id,
+    p: Vec3,
+    door: Option<Id>,
+) -> bool {
     buildings.iter().enumerate().any(|(i, b)| {
         if node == ground
             && let Some(bx) = boxes.get(i)
@@ -1910,27 +1939,36 @@ pub fn in_passage(
         {
             return false;
         }
-        b.links.iter().any(|l| {
-            let ends = l.ends.iter().flatten().filter(|e| e.floor == node);
-            let mut on = false;
-            for e in ends {
-                on = true;
-                if to_segment(p, e.a, e.b) < CLEAR {
-                    return true;
+        b.links
+            .iter()
+            .filter(|l| door.is_none() || l.door != door)
+            // A step between two surfaces of one floor (a humped deck's quads, a few centimetres apart) is ground a
+            // body walks and stands on, no doorway or stair (#1960).
+            .filter(|l| !(l.kind == Kind::Step && l.nodes[0] == l.nodes[1]))
+            .any(|l| {
+                let ends = l.ends.iter().flatten().filter(|e| e.floor == node);
+                let mut on = false;
+                for e in ends {
+                    on = true;
+                    if to_segment(p, e.a, e.b) < CLEAR {
+                        return true;
+                    }
                 }
-            }
-            on && l.line.windows(2).any(|s| {
-                let (a, c) = if node == ground {
-                    (
-                        b.place.point(s[0]).unwrap_or(s[0]),
-                        b.place.point(s[1]).unwrap_or(s[1]),
-                    )
-                } else {
-                    (s[0], s[1])
-                };
-                to_segment(p, a, c) < l.width / 2 + CLEAR / 2
+                // The line is in the building's frame: read on the open ground or on the building's own floors (not
+                // on another thing's floor a step or a flight lands on).
+                on && (node == ground || b.floors.contains_key(&node))
+                    && l.line.windows(2).any(|s| {
+                        let (a, c) = if node == ground {
+                            (
+                                b.place.point(s[0]).unwrap_or(s[0]),
+                                b.place.point(s[1]).unwrap_or(s[1]),
+                            )
+                        } else {
+                            (s[0], s[1])
+                        };
+                        to_segment(p, a, c) < l.width / 2 + CLEAR / 2
+                    })
             })
-        })
     })
 }
 
@@ -1944,6 +1982,8 @@ struct Grounds<'a> {
     ground: Id,
     /// [`ground_boxes`], made at the first passage asked about.
     boxes: OnceCell<Vec<Option<[i64; 4]>>>,
+    /// A door whose own doorway is not a passage here ([`in_passage_but`]).
+    door: Option<Id>,
 }
 
 /// N5's map as the spot tables search it: the town's own (its searches keep their caches), or a view's shared map
@@ -1994,7 +2034,7 @@ impl Ground for Grounds<'_> {
         let boxes = self
             .boxes
             .get_or_init(|| ground_boxes(self.buildings, self.ground));
-        in_passage(self.buildings, boxes, self.ground, node, p)
+        in_passage_but(self.buildings, boxes, self.ground, node, p, self.door)
     }
 
     fn walk(&mut self, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64> {
@@ -2068,6 +2108,7 @@ impl World for Town {
                 buildings,
                 ground: *ground,
                 boxes: OnceCell::new(),
+                door: None,
             },
         );
         for (&size, g) in classes {
@@ -2080,6 +2121,7 @@ impl World for Town {
                     buildings: &g.buildings,
                     ground: *ground,
                     boxes: OnceCell::new(),
+                    door: None,
                 },
             );
         }
@@ -2415,9 +2457,41 @@ impl<'a> View<'a> {
         Ok(c)
     }
 
+    /// The floors the links of thing `thing` land on, its own and other things' (a flight's top on the roof it leads
+    /// to, `crate::links::floor_joins`), the open ground left out: each link that can be crossed, its ends' floors.
+    pub fn floors_reached(&self, thing: Id) -> Vec<Id> {
+        let mut out: Vec<Id> = Vec::new();
+        let ends = self
+            .buildings
+            .iter()
+            .filter(|b| b.thing == thing)
+            .flat_map(|b| &b.links)
+            .filter(|l| l.blocked.is_none())
+            .flat_map(|l| l.ends.iter().flatten());
+        for e in ends {
+            if e.floor != self.ground && !out.contains(&e.floor) {
+                out.push(e.floor);
+            }
+        }
+        out
+    }
+
     /// Where a body may stand within `reach` of `at` (µm, `node`'s frame) to act there, for `from` (C15, #3447):
     /// [`crate::spots::within`] over this town's ground.
     pub fn stand_near(&self, node: Id, at: Vec3, reach: i64, from: Option<&Body>) -> Option<Vec3> {
+        self.stand_near_door(node, at, reach, from, None)
+    }
+
+    /// [`View::stand_near`] for a move at thing `door`: when it is a doorway's door, a place in that doorway counts
+    /// (#3688), so a knock from a room whose floor stops short of the door reaches its panel.
+    pub fn stand_near_door(
+        &self,
+        node: Id,
+        at: Vec3,
+        reach: i64,
+        from: Option<&Body>,
+        door: Option<Id>,
+    ) -> Option<Vec3> {
         let from = from.map(|b| (node_of(b), b.pose.position));
         let mut scratch = self.scratch.borrow_mut();
         let (tree, surfaces, buildings, ground) =
@@ -2429,6 +2503,7 @@ impl<'a> View<'a> {
             buildings,
             ground,
             boxes: OnceCell::new(),
+            door,
         };
         crate::spots::within(&mut g, Target::new(node, at), reach, from)
     }

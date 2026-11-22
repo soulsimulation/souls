@@ -27,7 +27,7 @@ use futures_util::{SinkExt, StreamExt};
 use gatewayd::receipts::Receipts;
 use gatewayd::token::{Grant, Token, Tokens};
 use gatewayd::{Gateway, Log, resume, socket, world_link};
-use replica::edit::wire::{VERB, parameters};
+use replica::edit::wire::{Asked, VERB, parameters, parameters_of};
 use replica::edit::{Op, Ref, Spot};
 use replica::effects::Actor;
 use replica::encode::{Name, Value, decode, encode, from_hex};
@@ -700,6 +700,7 @@ async fn g1f_a2_doorway_commits_owned_metadata_and_removal_guards_the_last_way_o
         "the route crosses this exact new passage"
     );
     let edit = Edit {
+        claim: None,
         intent: Id::new(Scope([0xde; 16]), 1).unwrap(),
         actor,
         planned: open.version(),
@@ -1505,3 +1506,140 @@ async fn g1f_a1_committed_seat_is_usable_and_occupied_removal_is_refused() {
 
 #[path = "edit_served/k18d.rs"]
 mod k18d;
+
+/// An undo or a redo (or a build's step), as souls-god sends it (#3694).
+fn asked_intent(w: &Seeded, actor: Actor, sequence: u64, planned: u64, asked: &Asked) -> Vec<u8> {
+    let i = Intent {
+        actor,
+        verb: Name::new(VERB).unwrap(),
+        target: None,
+        parameters: parameters_of(asked),
+        sequence,
+        basis: basis(w.root.scope(), planned),
+        expiry: i64::MAX,
+        resources: Vec::new(),
+        fallbacks: Vec::new(),
+        replaces: None,
+        body: None,
+        reflex: false,
+    };
+    encode(&i.to_value()).unwrap()
+}
+
+/// #3694 A1, A3: undo and redo step the served world's edit history through a real gateway, a build's step is one
+/// batch of its history, and an undo that would bring a wall back onto a Soul is refused by BUILDSAFE's name.
+#[tokio::test(flavor = "multi_thread")]
+async fn g4_undo_and_redo_on_the_wire_and_buildsafe_refuses_an_undo_onto_a_soul() {
+    let d = scratch("g4-undo");
+    let w = seed(&d, &testworld::generate(1, 0).unwrap().text, 1, (-40, 30));
+    let (id, creator) = creator(0xc3);
+    static_creator(&w, id);
+    let socket = d.join("s");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 60);
+    let (url, tokens) = gateway(&socket, &[creator]).await;
+    let mut ws = sign_in(&url, &tokens[0]).await;
+    let (mut sequence, mut version) = (0, 0);
+    let mut go = async |ws: &mut Ws, asked: Asked| {
+        sequence += 1;
+        let got = send(ws, asked_intent(&w, creator, sequence, version, &asked))
+            .await
+            .0;
+        version = got.version;
+        got
+    };
+
+    // Nothing to undo or redo yet.
+    let got = go(&mut ws, Asked::Undo).await;
+    assert_eq!((got.kind, got.reason.as_str()), (2, "undo.nothing"));
+    let got = go(&mut ws, Asked::Redo).await;
+    assert_eq!((got.kind, got.reason.as_str()), (2, "undo.nothing-to-redo"));
+
+    // A build's step: one wall, kept as step "shell" of build "hut".
+    let step = Some(("hut".to_owned(), "the shell".to_owned()));
+    let got = go(&mut ws, Asked::Batch(vec![wall(&w, -30 * M, 30 * M)], step)).await;
+    assert_eq!(got.kind, 1, "the step commits: {got:?}");
+    let placed = got.names[&1];
+    let got = go(&mut ws, Asked::Undo).await;
+    println!("A1: undo of the step: {got:?}");
+    assert_eq!(got.kind, 1, "the step is undone: {got:?}");
+    let got = go(&mut ws, Asked::Redo).await;
+    println!("A1: redo: {got:?}");
+    assert_eq!(got.kind, 1, "and redone: {got:?}");
+    // The redo gives the wall back with its id: removing it by that id commits.
+    let got = go(
+        &mut ws,
+        Asked::Batch(
+            vec![Op::Remove {
+                node: Ref::Node(placed),
+            }],
+            None,
+        ),
+    )
+    .await;
+    assert_eq!(got.kind, 1, "the redone wall has its first id: {got:?}");
+
+    // A3: the Soul walks to where the wall stood; undoing its removal would bury it, and is refused by name.
+    let mut souls = connect_socket(&socket);
+    walk(&mut souls, &w, w.souls[0], 1, -30 * M, 30 * M);
+    souls
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    assert_eq!(socket_answer(&mut souls).kind, 1, "the walk ends");
+    let got = go(&mut ws, Asked::Undo).await;
+    println!("A3: undo onto the Soul: {got:?}");
+    assert_eq!((got.kind, got.reason.as_str()), (2, "edit.would-bury"));
+    // Refused, nothing changed: the Soul walks off and the same undo commits.
+    walk(&mut souls, &w, w.souls[0], 2, -36 * M, 30 * M);
+    assert_eq!(socket_answer(&mut souls).kind, 1, "the walk ends");
+    let got = go(&mut ws, Asked::Undo).await;
+    assert_eq!(
+        got.kind, 1,
+        "the undo commits once the Soul is gone: {got:?}"
+    );
+}
+
+/// #3958: a creator's move of a thing far off the open ground (100 km east), sent straight to the world with no
+/// client check, is answered (refused by name or done), and the creator's next edit is answered too.
+#[tokio::test(flavor = "multi_thread")]
+async fn a_move_far_off_the_ground_is_answered_and_so_is_the_next_edit() {
+    let d = scratch("far-move");
+    let w = seed(&d, &testworld::generate(1, 0).unwrap().text, 1, (-40, 30));
+    let bucket = d.join("bucket");
+    let (c, creator) = creator(0xc0);
+    record(&bucket, &w, c);
+    let socket = d.join("s");
+    let s = serve(&w, &socket, &bucket);
+    s.line("listening ", 60);
+    let (url, tokens) = gateway(&socket, &[creator]).await;
+    let mut ws = sign_in(&url, &tokens[0]).await;
+    let (placed, _) = send(
+        &mut ws,
+        edit_intent(&w, creator, 1, 0, wall(&w, -30 * M, 30 * M)),
+    )
+    .await;
+    assert_eq!(placed.kind, 1, "the wall commits: {placed:?}");
+    let far = Op::Move {
+        node: Ref::Node(placed.names[&1]),
+        at: Spot {
+            slot: None,
+            position: Vec3::new(100_000 * 1_000 * 1_000, 0, 0),
+            orientation: Quat::IDENTITY,
+            support: Support::None,
+        },
+    };
+    let (moved, took) = send(&mut ws, edit_intent(&w, creator, 2, placed.version, far)).await;
+    println!("#3958: the far move: {moved:?} in {took:?}");
+    assert_eq!(
+        (moved.kind, moved.reason.as_str()),
+        (2, "edit.off-ground"),
+        "the far move is refused by name, not timed out"
+    );
+    let (next, took) = send(
+        &mut ws,
+        edit_intent(&w, creator, 3, moved.version, wall(&w, -25 * M, 30 * M)),
+    )
+    .await;
+    println!("#3958: the next edit: {next:?} in {took:?}");
+    assert_eq!(next.kind, 1, "the next edit commits: {next:?}");
+}
