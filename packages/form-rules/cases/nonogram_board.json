@@ -1,0 +1,4982 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "All20 forms and every exact cell/claim, hands and reach guard. Reach cases are evaluator-level.",
+  "cases": [
+    {
+      "name": "fill_r1c1_ready",
+      "act": {
+        "this": "p1",
+        "form": "fill_r1c1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "fill_r1c1_need_0",
+      "act": {
+        "this": "p1",
+        "form": "fill_r1c1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": true,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "fill_r1c1_need_1",
+      "act": {
+        "this": "p1",
+        "form": "fill_r1c1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "fill_r1c1_need_2",
+      "act": {
+        "this": "p1",
+        "form": "fill_r1c1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "erase_r1c1_ready",
+      "act": {
+        "this": "p1",
+        "form": "erase_r1c1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": true,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "erase_r1c1_need_0",
+      "act": {
+        "this": "p1",
+        "form": "erase_r1c1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "erase_r1c1_need_1",
+      "act": {
+        "this": "p1",
+        "form": "erase_r1c1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": true,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "erase_r1c1_need_2",
+      "act": {
+        "this": "p1",
+        "form": "erase_r1c1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": true,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "fill_r1c2_ready",
+      "act": {
+        "this": "p1",
+        "form": "fill_r1c2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "fill_r1c2_need_0",
+      "act": {
+        "this": "p1",
+        "form": "fill_r1c2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": true,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "fill_r1c2_need_1",
+      "act": {
+        "this": "p1",
+        "form": "fill_r1c2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "fill_r1c2_need_2",
+      "act": {
+        "this": "p1",
+        "form": "fill_r1c2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "erase_r1c2_ready",
+      "act": {
+        "this": "p1",
+        "form": "erase_r1c2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": true,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "erase_r1c2_need_0",
+      "act": {
+        "this": "p1",
+        "form": "erase_r1c2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "erase_r1c2_need_1",
+      "act": {
+        "this": "p1",
+        "form": "erase_r1c2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": true,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "erase_r1c2_need_2",
+      "act": {
+        "this": "p1",
+        "form": "erase_r1c2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": true,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "fill_r1c3_ready",
+      "act": {
+        "this": "p1",
+        "form": "fill_r1c3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "fill_r1c3_need_0",
+      "act": {
+        "this": "p1",
+        "form": "fill_r1c3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": true,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "fill_r1c3_need_1",
+      "act": {
+        "this": "p1",
+        "form": "fill_r1c3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "fill_r1c3_need_2",
+      "act": {
+        "this": "p1",
+        "form": "fill_r1c3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "erase_r1c3_ready",
+      "act": {
+        "this": "p1",
+        "form": "erase_r1c3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": true,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "erase_r1c3_need_0",
+      "act": {
+        "this": "p1",
+        "form": "erase_r1c3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "erase_r1c3_need_1",
+      "act": {
+        "this": "p1",
+        "form": "erase_r1c3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": true,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "erase_r1c3_need_2",
+      "act": {
+        "this": "p1",
+        "form": "erase_r1c3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": true,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "fill_r2c1_ready",
+      "act": {
+        "this": "p1",
+        "form": "fill_r2c1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "fill_r2c1_need_0",
+      "act": {
+        "this": "p1",
+        "form": "fill_r2c1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": true,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "fill_r2c1_need_1",
+      "act": {
+        "this": "p1",
+        "form": "fill_r2c1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "fill_r2c1_need_2",
+      "act": {
+        "this": "p1",
+        "form": "fill_r2c1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "erase_r2c1_ready",
+      "act": {
+        "this": "p1",
+        "form": "erase_r2c1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": true,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "erase_r2c1_need_0",
+      "act": {
+        "this": "p1",
+        "form": "erase_r2c1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "erase_r2c1_need_1",
+      "act": {
+        "this": "p1",
+        "form": "erase_r2c1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": true,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "erase_r2c1_need_2",
+      "act": {
+        "this": "p1",
+        "form": "erase_r2c1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": true,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "fill_r2c2_ready",
+      "act": {
+        "this": "p1",
+        "form": "fill_r2c2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "fill_r2c2_need_0",
+      "act": {
+        "this": "p1",
+        "form": "fill_r2c2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": true,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "fill_r2c2_need_1",
+      "act": {
+        "this": "p1",
+        "form": "fill_r2c2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "fill_r2c2_need_2",
+      "act": {
+        "this": "p1",
+        "form": "fill_r2c2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "erase_r2c2_ready",
+      "act": {
+        "this": "p1",
+        "form": "erase_r2c2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": true,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "erase_r2c2_need_0",
+      "act": {
+        "this": "p1",
+        "form": "erase_r2c2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "erase_r2c2_need_1",
+      "act": {
+        "this": "p1",
+        "form": "erase_r2c2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": true,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "erase_r2c2_need_2",
+      "act": {
+        "this": "p1",
+        "form": "erase_r2c2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": true,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "fill_r2c3_ready",
+      "act": {
+        "this": "p1",
+        "form": "fill_r2c3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "fill_r2c3_need_0",
+      "act": {
+        "this": "p1",
+        "form": "fill_r2c3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": true,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "fill_r2c3_need_1",
+      "act": {
+        "this": "p1",
+        "form": "fill_r2c3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "fill_r2c3_need_2",
+      "act": {
+        "this": "p1",
+        "form": "fill_r2c3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "erase_r2c3_ready",
+      "act": {
+        "this": "p1",
+        "form": "erase_r2c3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": true,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "erase_r2c3_need_0",
+      "act": {
+        "this": "p1",
+        "form": "erase_r2c3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "erase_r2c3_need_1",
+      "act": {
+        "this": "p1",
+        "form": "erase_r2c3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": true,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "erase_r2c3_need_2",
+      "act": {
+        "this": "p1",
+        "form": "erase_r2c3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": true,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "fill_r3c1_ready",
+      "act": {
+        "this": "p1",
+        "form": "fill_r3c1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "fill_r3c1_need_0",
+      "act": {
+        "this": "p1",
+        "form": "fill_r3c1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": true,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "fill_r3c1_need_1",
+      "act": {
+        "this": "p1",
+        "form": "fill_r3c1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "fill_r3c1_need_2",
+      "act": {
+        "this": "p1",
+        "form": "fill_r3c1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "erase_r3c1_ready",
+      "act": {
+        "this": "p1",
+        "form": "erase_r3c1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": true,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "erase_r3c1_need_0",
+      "act": {
+        "this": "p1",
+        "form": "erase_r3c1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "erase_r3c1_need_1",
+      "act": {
+        "this": "p1",
+        "form": "erase_r3c1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": true,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "erase_r3c1_need_2",
+      "act": {
+        "this": "p1",
+        "form": "erase_r3c1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": true,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "fill_r3c2_ready",
+      "act": {
+        "this": "p1",
+        "form": "fill_r3c2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "fill_r3c2_need_0",
+      "act": {
+        "this": "p1",
+        "form": "fill_r3c2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": true,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "fill_r3c2_need_1",
+      "act": {
+        "this": "p1",
+        "form": "fill_r3c2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "fill_r3c2_need_2",
+      "act": {
+        "this": "p1",
+        "form": "fill_r3c2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "erase_r3c2_ready",
+      "act": {
+        "this": "p1",
+        "form": "erase_r3c2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": true,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "erase_r3c2_need_0",
+      "act": {
+        "this": "p1",
+        "form": "erase_r3c2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "erase_r3c2_need_1",
+      "act": {
+        "this": "p1",
+        "form": "erase_r3c2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": true,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "erase_r3c2_need_2",
+      "act": {
+        "this": "p1",
+        "form": "erase_r3c2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": true,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "fill_r3c3_ready",
+      "act": {
+        "this": "p1",
+        "form": "fill_r3c3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "fill_r3c3_need_0",
+      "act": {
+        "this": "p1",
+        "form": "fill_r3c3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": true,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "fill_r3c3_need_1",
+      "act": {
+        "this": "p1",
+        "form": "fill_r3c3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "fill_r3c3_need_2",
+      "act": {
+        "this": "p1",
+        "form": "fill_r3c3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "erase_r3c3_ready",
+      "act": {
+        "this": "p1",
+        "form": "erase_r3c3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": true,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "erase_r3c3_need_0",
+      "act": {
+        "this": "p1",
+        "form": "erase_r3c3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "erase_r3c3_need_1",
+      "act": {
+        "this": "p1",
+        "form": "erase_r3c3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": true,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "erase_r3c3_need_2",
+      "act": {
+        "this": "p1",
+        "form": "erase_r3c3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": true,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "reset_ready",
+      "act": {
+        "this": "p1",
+        "form": "reset"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": true,
+              "r1c2": true,
+              "r1c3": true,
+              "r2c1": true,
+              "r2c2": true,
+              "r2c3": true,
+              "r3c1": true,
+              "r3c2": true,
+              "r3c3": true,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "reset_need_0",
+      "act": {
+        "this": "p1",
+        "form": "reset"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": true,
+              "r1c2": true,
+              "r1c3": true,
+              "r2c1": true,
+              "r2c2": true,
+              "r2c3": true,
+              "r3c1": true,
+              "r3c2": true,
+              "r3c3": true,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "reset_need_1",
+      "act": {
+        "this": "p1",
+        "form": "reset"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": true,
+              "r1c2": true,
+              "r1c3": true,
+              "r2c1": true,
+              "r2c2": true,
+              "r2c3": true,
+              "r3c1": true,
+              "r3c2": true,
+              "r3c3": true,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "claim_solved_ready",
+      "act": {
+        "this": "p1",
+        "form": "claim_solved"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": true,
+              "r1c3": false,
+              "r2c1": true,
+              "r2c2": true,
+              "r2c3": true,
+              "r3c1": false,
+              "r3c2": true,
+              "r3c3": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "claim_solved_need_0",
+      "act": {
+        "this": "p1",
+        "form": "claim_solved"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": true,
+              "r1c2": true,
+              "r1c3": false,
+              "r2c1": true,
+              "r2c2": true,
+              "r2c3": true,
+              "r3c1": false,
+              "r3c2": true,
+              "r3c3": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "claim_solved_need_1",
+      "act": {
+        "this": "p1",
+        "form": "claim_solved"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r2c1": true,
+              "r2c2": true,
+              "r2c3": true,
+              "r3c1": false,
+              "r3c2": true,
+              "r3c3": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "claim_solved_need_2",
+      "act": {
+        "this": "p1",
+        "form": "claim_solved"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": true,
+              "r1c3": true,
+              "r2c1": true,
+              "r2c2": true,
+              "r2c3": true,
+              "r3c1": false,
+              "r3c2": true,
+              "r3c3": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "claim_solved_need_3",
+      "act": {
+        "this": "p1",
+        "form": "claim_solved"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": true,
+              "r1c3": false,
+              "r2c1": false,
+              "r2c2": true,
+              "r2c3": true,
+              "r3c1": false,
+              "r3c2": true,
+              "r3c3": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "claim_solved_need_4",
+      "act": {
+        "this": "p1",
+        "form": "claim_solved"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": true,
+              "r1c3": false,
+              "r2c1": true,
+              "r2c2": false,
+              "r2c3": true,
+              "r3c1": false,
+              "r3c2": true,
+              "r3c3": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 4,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "claim_solved_need_5",
+      "act": {
+        "this": "p1",
+        "form": "claim_solved"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": true,
+              "r1c3": false,
+              "r2c1": true,
+              "r2c2": true,
+              "r2c3": false,
+              "r3c1": false,
+              "r3c2": true,
+              "r3c3": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 5,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "claim_solved_need_6",
+      "act": {
+        "this": "p1",
+        "form": "claim_solved"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": true,
+              "r1c3": false,
+              "r2c1": true,
+              "r2c2": true,
+              "r2c3": true,
+              "r3c1": true,
+              "r3c2": true,
+              "r3c3": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 6,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "claim_solved_need_7",
+      "act": {
+        "this": "p1",
+        "form": "claim_solved"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": true,
+              "r1c3": false,
+              "r2c1": true,
+              "r2c2": true,
+              "r2c3": true,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 7,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "claim_solved_need_8",
+      "act": {
+        "this": "p1",
+        "form": "claim_solved"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": true,
+              "r1c3": false,
+              "r2c1": true,
+              "r2c2": true,
+              "r2c3": true,
+              "r3c1": false,
+              "r3c2": true,
+              "r3c3": true,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 8,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "claim_solved_need_9",
+      "act": {
+        "this": "p1",
+        "form": "claim_solved"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": true,
+              "r1c3": false,
+              "r2c1": true,
+              "r2c2": true,
+              "r2c3": true,
+              "r3c1": false,
+              "r3c2": true,
+              "r3c3": false,
+              "claimed": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 9,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "claim_solved_need_10",
+      "act": {
+        "this": "p1",
+        "form": "claim_solved"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": true,
+              "r1c3": false,
+              "r2c1": true,
+              "r2c2": true,
+              "r2c3": true,
+              "r3c1": false,
+              "r3c2": true,
+              "r3c3": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 10,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "claim_solved_need_11",
+      "act": {
+        "this": "p1",
+        "form": "claim_solved"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nonogram_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": true,
+              "r1c3": false,
+              "r2c1": true,
+              "r2c2": true,
+              "r2c3": true,
+              "r3c1": false,
+              "r3c2": true,
+              "r3c3": false,
+              "claimed": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              470
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 11,
+        "reason": "out_of_reach"
+      }
+    }
+  ]
+}
