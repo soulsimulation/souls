@@ -850,7 +850,7 @@ impl Sight<'_> {
     /// when the entry names neither.
     fn reach_in_slot(&self, body: Id, target: Id, slot: u64, point: &Name) -> Option<i64> {
         let n = self.tree.node(self.tree.handle(target)?)?;
-        let entry = self.kinds.get(plain(n.kind()))?;
+        let entry = self.kinds.get(entry_of(&n))?;
         let held = entry
             .get("slots")
             .and_then(Json::obj)?
