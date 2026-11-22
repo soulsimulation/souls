@@ -60,7 +60,7 @@
       ],
       "steps": [
         {
-          "step": "take",
+          "step": "move",
           "move": "touch",
           "at": "grip"
         }
