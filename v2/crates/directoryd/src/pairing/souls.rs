@@ -81,7 +81,77 @@ fn store<T>(r: rusqlite::Result<T>) -> Result<T, &'static str> {
     r.map_err(|_| "store")
 }
 
+/// One of a world's recent visitors (#3702): what its creator may read, nothing of the owner's account or device.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct Visitor {
+    /// The Soul's grant, `soul-<scope hex>-<n>`.
+    pub soul: String,
+    pub name: Option<String>,
+    /// When it last arrived (its latest approved pairing for the world), seconds.
+    pub arrived: u64,
+    /// An agent holds it now.
+    pub connected: bool,
+}
+
 impl Pairing {
+    /// The Souls most recently paired for `world`, newest first, at most `most`; retired Souls are left out.
+    pub fn visitors(&self, world: &str, most: usize) -> Result<Vec<Visitor>, &'static str> {
+        let db = self.db.lock().expect("the store");
+        let mut q = store(db.prepare(
+            "SELECT r.grant_text, MAX(r.created_at), p.name, ps.device IS NOT NULL
+               FROM pair_requests_v1 r JOIN pair_request_worlds_v1 w ON w.code = r.code
+               LEFT JOIN soul_profiles_v1 p ON p.grant_text = r.grant_text
+               LEFT JOIN paired_souls_v1 ps ON ps.grant_text = r.grant_text
+              WHERE w.world = ?1 AND r.state IN ('approved', 'delivered') AND r.scope = 'soul' AND r.grant_text IS NOT NULL
+                AND p.retired_at IS NULL
+              GROUP BY r.grant_text ORDER BY 2 DESC, 1 LIMIT ?2",
+        ))?;
+        let rows = store(q.query_map(params![world, most as i64], |r| {
+            Ok(Visitor {
+                soul: r.get(0)?,
+                arrived: r.get::<_, i64>(1)?.max(0) as u64,
+                name: r.get(2)?,
+                connected: r.get(3)?,
+            })
+        }))?;
+        store(rows.collect())
+    }
+
+    /// The world the request with this poll `secret` named, if it named one (#3702: its welcome goes with the token).
+    pub fn world_by_secret(&self, secret: &str) -> Option<String> {
+        let hash = to_hex(&sha256(secret.as_bytes()));
+        self.db
+            .lock()
+            .expect("the store")
+            .query_row(
+                "SELECT w.world FROM pair_requests_v1 r JOIN pair_request_worlds_v1 w ON w.code = r.code
+                 WHERE r.secret_hash = ?1",
+                params![hash],
+                |r| r.get(0),
+            )
+            .optional()
+            .ok()
+            .flatten()
+    }
+
+    /// The creator grant a paired creator's `token` is for (`creator-<scope hex>-<n>`), or none.
+    pub fn creator_by_token(&self, token: &str) -> Option<String> {
+        let hash = to_hex(&sha256(token.as_bytes()));
+        self.db
+            .lock()
+            .expect("the store")
+            .query_row(
+                "SELECT grant_text FROM paired_souls_v1 WHERE token_hash = ?1
+                 UNION SELECT grant_text FROM paired_world_tokens_v1 WHERE token_hash = ?1 LIMIT 1",
+                params![hash],
+                |r| r.get::<_, String>(0),
+            )
+            .optional()
+            .ok()
+            .flatten()
+            .filter(|g| g.starts_with("creator-"))
+    }
+
     /// Keeps the world a pending request (by its code) was made for.
     pub fn ask_world(&self, code: &str, world: &str) -> Result<(), &'static str> {
         if !is_world(world) {
@@ -382,11 +452,39 @@ impl Pairing {
         std::fs::rename(tmp, file)
     }
 
-    /// `account` sets its Soul's name and description.
+    /// Whether `account` holds as many unretired Souls as one account may (#3720).
+    pub(super) fn at_soul_cap(&self, account: &str) -> Result<bool, &'static str> {
+        let held: i64 = store(self.db.lock().expect("the store").query_row(
+            "SELECT COUNT(*) FROM paired_souls_v1 s LEFT JOIN soul_profiles_v1 p ON p.grant_text = s.grant_text
+             WHERE s.account = ?1 AND s.grant_text LIKE 'soul-%' AND p.retired_at IS NULL",
+            params![account],
+            |r| r.get(0),
+        ))?;
+        Ok(usize::try_from(held).unwrap_or(usize::MAX) >= self.soul_cap)
+    }
+
+    /// Whether another unretired Soul of `grant`'s world is already called `name`, ignoring case (#3720, today's
+    /// `name-taken`). A Soul with no world is checked against the other Souls with none.
+    fn name_taken(&self, grant: &str, name: &str) -> Result<bool, &'static str> {
+        store(self.db.lock().expect("the store").query_row(
+            "SELECT EXISTS(SELECT 1 FROM soul_profiles_v1 o WHERE o.grant_text <> ?1 AND o.retired_at IS NULL
+               AND o.name = ?2 COLLATE NOCASE
+               AND o.world IS (SELECT world FROM soul_profiles_v1 WHERE grant_text = ?1))",
+            params![grant, name],
+            |r| r.get(0),
+        ))
+    }
+
+    /// `account` sets its Soul's name and description. A name another Soul of its world has is refused `name-taken`.
     pub fn set_profile(&self, account: &str, grant: &str, p: &Profile) -> Result<(), &'static str> {
         self.owned(account, grant)?;
         if p.name.as_deref().is_some_and(|n| !is_name(n)) {
             return Err("name");
+        }
+        if let Some(n) = p.name.as_deref()
+            && self.name_taken(grant, n)?
+        {
+            return Err("name-taken");
         }
         if p.description.as_deref().is_some_and(|d| {
             d.chars().count() > DESCRIPTION_MOST || d.chars().any(char::is_control)
@@ -442,6 +540,54 @@ impl Pairing {
             )
             .map(|_| ())
             .map_err(|_| "store".to_string())
+    }
+
+    /// The account and grant of the paired Soul whose agent holds `token` (#3707): `unknown-token` for none.
+    pub fn token_owner(&self, token: &str) -> Result<(String, String), &'static str> {
+        let hash = to_hex(&sha256(token.as_bytes()));
+        store(
+            self.db
+                .lock()
+                .expect("the store")
+                .query_row(
+                    "SELECT account, grant_text FROM paired_souls_v1 WHERE token_hash = ?1",
+                    params![hash],
+                    |r| Ok((r.get(0)?, r.get(1)?)),
+                )
+                .optional(),
+        )?
+        .ok_or("unknown-token")
+    }
+
+    /// `account`'s Soul as its list shows it, by its grant (#3707).
+    pub fn mine_one(&self, account: &str, grant: &str) -> Result<Mine, &'static str> {
+        self.owned(account, grant)?;
+        self.mine(account)?
+            .into_iter()
+            .find(|m| m.soul == grant)
+            .ok_or("unknown-soul")
+    }
+
+    /// `account` clears its Soul's picture: the page draws its own again (today's `profile photo auto`, #3707).
+    pub fn clear_picture(&self, account: &str, grant: &str) -> Result<(), &'static str> {
+        self.owned(account, grant)?;
+        store(self.db.lock().expect("the store").execute(
+            "DELETE FROM soul_pictures_v1 WHERE grant_text = ?1",
+            params![grant],
+        ))
+        .map(|_| ())
+    }
+
+    /// An agent signed in to `account` asks for its Soul `grant` to be retired (#3707): as [`Pairing::ask_retire`],
+    /// nothing changes but the ask, which the owner's list shows until the owner confirms.
+    pub fn ask_retire_of(&self, account: &str, grant: &str) -> Result<(), &'static str> {
+        self.owned(account, grant)?;
+        store(self.db.lock().expect("the store").execute(
+            "INSERT INTO soul_profiles_v1(grant_text, retire_asked) VALUES (?1, 1)
+             ON CONFLICT(grant_text) DO UPDATE SET retire_asked = 1",
+            params![grant],
+        ))
+        .map(|_| ())
     }
 
     /// The agent holding a Soul's `token` asks for it to be retired. Nothing changes but the ask, which the owner's

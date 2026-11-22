@@ -425,3 +425,90 @@ fn a_second_thing_in_a_held_slot_is_left_out_of_it_and_reported() {
     let s = a.slice(&im.tree, 1 << 20);
     assert!(s.pass_ended && s.faults.is_empty(), "{:?}", s.faults);
 }
+
+#[test]
+fn a_stair_from_a_floor_to_itself_is_noted_not_linked() {
+    // A step between two surfaces of one level (the Mars campus's Chiba deck) once refused the whole import (link-self).
+    let text = SMALL.replace(
+        r#"{"id": "stairs", "kind": "stairs", "from": 0, "to": 1, "path": [[3000, -2000], [3000, 2000]], "width": 900, "y0": 100, "y1": 2900}"#,
+        r#"{"id": "stairs", "kind": "stairs", "from": 0, "to": 1, "path": [[3000, -2000], [3000, 2000]], "width": 900, "y0": 100, "y1": 2900},
+     {"id": "step", "kind": "stairs", "from": 1, "to": 1, "path": [[0, 0], [0, 500]], "width": 900, "y0": 2900, "y1": 2916}"#,
+    );
+    assert_ne!(text, SMALL);
+    let im = load(&text).expect("loads");
+    assert_eq!(
+        im.notes,
+        vec!["e_house: a stair on floor 1 to itself, not linked".to_owned()]
+    );
+    let (rows, ..) = count(&im);
+    let stairs = rows.iter().find(|r| r.what == "stairs (links)").unwrap();
+    assert_eq!(stairs.tree, 1);
+}
+
+/// A thing that names another kind's entry (field 27, from its world's map: a Mars sofa borrows `eden:sofa`) is found
+/// by that entry, and its seats are at its own slots (its def's geometry) with the entry's stand offsets; an entry seat
+/// it has no slot for is not offered. A thing naming no entry keeps its kind's name and the entry's own geometry.
+#[test]
+fn a_thing_borrowing_an_entry_sits_at_its_own_slots() {
+    let text = SMALL.replace(
+        r#""slot": {"room": "kitchen"},
+     "pose": [1000, 0, 500, 0], "world": [10500, 100, 21000, 90000], "scale_ppm": 1000000},"#,
+        r#""slot": {"room": "kitchen"},
+     "pose": [1000, 0, 500, 0], "world": [10500, 100, 21000, 90000], "scale_ppm": 1000000, "entry": "eden:sofa",
+     "slots": [{"n": 1, "id": "seat-1", "kind": "seat", "at": [-655, 300, 100], "yaw": 0},
+               {"n": 2, "id": "seat-2", "kind": "seat", "at": [0, 300, 100], "yaw": 0}]},"#,
+    );
+    assert_ne!(text, SMALL);
+    let im = load(&text).expect("loads");
+    let n = im
+        .tree
+        .node(im.tree.handle(im.nodes["e_chair"]).unwrap())
+        .unwrap();
+    assert_eq!(
+        import_eden::entry_name(n.kind().as_str(), n.fields()),
+        "eden:sofa"
+    );
+    let sofa = replica::rules::json::parse(
+        r#"{"kind": "eden:sofa", "slots": {
+            "seat_1": {"admits": "body", "posture": "sit", "at_mm": [-600, 520, 100], "stand": "f1"},
+            "seat_2": {"admits": "body", "posture": "sit", "at_mm": [0, 520, 100], "stand": "f2"},
+            "seat_3": {"admits": "body", "posture": "sit", "at_mm": [600, 520, 100], "stand": "f3"}},
+          "points": {"f1": {"role": "stand", "at_mm": [-600, 0, 740]}, "f2": {"role": "stand", "at_mm": [0, 0, 740]},
+                     "f3": {"role": "stand", "at_mm": [600, 0, 740]}}}"#,
+    )
+    .unwrap();
+    let (seats, all) = import_eden::body_slots(&im.tree, &[("eden:sofa".into(), sofa.clone())]);
+    assert_eq!(all, 3);
+    let got: Vec<_> = seats.iter().map(|s| (s.slot, s.at, s.stand)).collect();
+    let v = |x: i64, y: i64, z: i64| replica::pose::Vec3::new(x * 1000, y * 1000, z * 1000);
+    assert_eq!(
+        got,
+        vec![
+            (1, v(-655, 300, 100), v(-655, 0, 740)),
+            (2, v(0, 300, 100), v(0, 0, 740)),
+        ]
+    );
+    // One thing alone (a god edit's moved seat) is read the same way, from its own fields.
+    let one = import_eden::body_slots_of(
+        n.id(),
+        n.kind().as_str(),
+        n.fields(),
+        &[("eden:sofa".into(), sofa.clone())],
+    );
+    assert_eq!(one, seats);
+    // The same thing without field 27 is a `core:chair`, found by its own name: the sofa entry is not its.
+    let im = load(SMALL).expect("loads");
+    let n = im
+        .tree
+        .node(im.tree.handle(im.nodes["e_chair"]).unwrap())
+        .unwrap();
+    assert_eq!(
+        import_eden::entry_name(n.kind().as_str(), n.fields()),
+        "eden:chair"
+    );
+    assert!(
+        import_eden::body_slots(&im.tree, &[("eden:sofa".into(), sofa)])
+            .0
+            .is_empty()
+    );
+}

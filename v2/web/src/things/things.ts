@@ -6,13 +6,19 @@
 //
 // Distance detail (C12, #3683), today's WorldDistanceDetail rules per part: a part whose bounding sphere would be
 // smaller than `minRadiusPx` CSS pixels of radius is not drawn, and a small part farther than `shadowNear +
-// shadowPerMetre·radius` metres is drawn into the same model's batch that casts no shadow (instanced models; a one-off
-// shape keeps its shadow). A building's window frames
+// shadowPerMetre·radius` metres casts no shadow: an instanced model's part moves into the same model's batch that casts
+// none; a one-off shape stays where it is and is left out of its batch's shadow draws (#3787: its own shadow draw list,
+// no second batch). A building's window frames
 // and fittings go first, its walls last, as today. A part moves between its batches (near, far, hidden) only when the
 // eye has moved or things changed, with a margin so it does not flicker at the line.
+//
+// Far stand-ins (#3786), today's WorldFarStandIns on the phone tier: a shared model's small part (standins.ts) under
+// `cardRadiusPx` CSS pixels of radius is drawn in a fourth band, CARD, as a flat camera-facing card of its own picture,
+// with no shadow, so far woods and gardens keep their silhouette instead of thinning out.
 import * as THREE from 'three';
 import { glowOf, partsOf, type ModelIndex, type Part } from './models.ts';
-import { pageDetail, type DistanceDetail } from '../draw/quality-tier.ts';
+import { pageDetail, pageStandIns, type DistanceDetail } from '../draw/quality-tier.ts';
+import { cardGeometry, cardMaterial, cardMatrix, cardable, type CardCell, type CardPictures, type StandInOptions } from './standins.ts';
 import { NO_CUT, above, buildingView, cutHeight, decide, hidden, sameCut, type BuildingView, type Cut, type Storey } from './interior.ts';
 
 /** A model shared by at least this many things in the index is instanced; the rest are batched by material. */
@@ -21,8 +27,8 @@ export const SHARED = 8;
 const LOADING = 6;
 const OFF = new THREE.Color(0.22, 0.22, 0.22), ON = new THREE.Color(1, 1, 1), WHITE = new THREE.Color(1, 1, 1);
 
-/** A part's detail band: drawn and casting, drawn without a shadow, or not drawn. */
-export const NEAR = 0, FAR = 1, HIDDEN = 2;
+/** A part's detail band: drawn and casting, drawn without a shadow, not drawn, or drawn as a card (#3786). */
+export const NEAR = 0, FAR = 1, HIDDEN = 2, CARD = 3;
 /** The eye moves this far (m) before parts are sorted into bands again; and they are, at least every PASS_FRAMES. */
 const MOVE = 1, PASS_FRAMES = 60, MIN_GAP = 4;
 /** Parts sorted a frame: a pass over Eden's ~10,000 parts is spread over a few frames (about 7 ms at once on a laptop,
@@ -38,6 +44,8 @@ type Slot = {
   /** `storey`: a building's part (C10); `flame`: a static flame part (C8); `off`: hidden by the interior view or by its
    *  thing's burning fire, in whichever band's batch it is. */
   storey?: Storey; flame?: boolean; off?: boolean;
+  /** Its card's matrix while it is drawn as a card (#3786), kept until the thing moves. */
+  cardMatrix?: THREE.Matrix4;
 };
 /** `view` and `cut`: a generated building's interior view and its decision; `under`: hidden by a building's cut (the
  *  furniture of the storeys it hides). */
@@ -72,6 +80,10 @@ class Batch {
   owners: Slot[] = [];
   /** False for a FAR batch: drawn without a shadow (kept when it grows). */
   shadow = true;
+  /** False for a card batch: receives no shadow, as today's cards. */
+  receive = true;
+  /** A card batch's per-instance picture cells (the geometry's `cardCell`, grown with it). */
+  cells: THREE.InstancedBufferAttribute | null = null;
   /** A whole upload of the colours is pending (an add or a remove); a light's one slot then rides on it. */
   private whole = false;
   readonly layer: ThingLayer;
@@ -82,15 +94,27 @@ class Batch {
   private make(g: THREE.BufferGeometry, m: THREE.Material, n: number): THREE.InstancedMesh {
     const mesh = new THREE.InstancedMesh(g, m, n);
     mesh.count = 0;
+    if (this.cells) {
+      const cells = new THREE.InstancedBufferAttribute(new Float32Array(n * 4), 4);
+      cells.array.set((this.cells.array as Float32Array).subarray(0, Math.min(this.cells.array.length, n * 4)));
+      g.setAttribute('cardCell', (this.cells = cells));
+    }
     mesh.frustumCulled = false;
     mesh.castShadow = this.shadow;
-    mesh.receiveShadow = true;
+    mesh.receiveShadow = this.receive;
     mesh.instanceColor = new THREE.InstancedBufferAttribute(new Float32Array(n * 3).fill(1), 3);
     mesh.onAfterRender = () => void (this.whole = false);
     this.layer.group.add(mesh);
     return mesh;
   }
-  add(slot: Slot, matrix: THREE.Matrix4, color: THREE.Color): number {
+  /** Makes this a card batch (#3786): each instance reads its picture's cell. */
+  withCells(): this {
+    this.cells = new THREE.InstancedBufferAttribute(new Float32Array(this.mesh.instanceMatrix.count * 4), 4);
+    this.mesh.geometry.setAttribute('cardCell', this.cells);
+    this.receive = this.mesh.receiveShadow = false;
+    return this;
+  }
+  add(slot: Slot, matrix: THREE.Matrix4, color: THREE.Color, cell?: CardCell): number {
     if (this.mesh.count === this.mesh.instanceMatrix.count) {
       const old = this.mesh, grown = this.make(old.geometry, old.material as THREE.Material, old.count * 2);
       grown.instanceMatrix.array.set(old.instanceMatrix.array);
@@ -104,6 +128,7 @@ class Batch {
     this.owners[i] = slot;
     this.mesh.setMatrixAt(i, matrix);
     this.mesh.setColorAt(i, color);
+    if (this.cells && cell) (this.cells.setXYZW(i, ...cell), (this.cells.needsUpdate = true));
     this.mesh.instanceMatrix.needsUpdate = true;
     this.wholeColours();
     return i;
@@ -115,6 +140,7 @@ class Batch {
       this.mesh.getColorAt(last, c);
       this.mesh.setMatrixAt(i, m);
       this.mesh.setColorAt(i, c);
+      if (this.cells) (this.cells.setXYZW(i, this.cells.getX(last), this.cells.getY(last), this.cells.getZ(last), this.cells.getW(last)), (this.cells.needsUpdate = true));
       this.owners[i] = this.owners[last];
       this.owners[i].index = i;
     }
@@ -141,10 +167,33 @@ class Batch {
   }
 }
 
-/** One-off shapes sharing a material: one `BatchedMesh`, its geometries added once per model part. */
+/** What three's BatchedMesh keeps of its draws (three 0.187): the draw list it builds from the visible instances, and
+ *  the texture mapping each draw to its instance. Read and swapped for the shadow pass only. */
+type DrawList = {
+  _multiDrawStarts: Int32Array; _multiDrawCounts: Int32Array; _multiDrawCount: number; _indirectTexture: THREE.DataTexture;
+  _updateDrawParameters(camera: THREE.Camera, geometry: THREE.BufferGeometry, material: THREE.Material, format?: string): void;
+  _visibilityChanged: boolean;
+};
+
+/** One-off shapes sharing a material: one `BatchedMesh`, its geometries added once per model part.
+ *
+ *  #3787: an instance can be drawn without a shadow. The batch keeps a second draw list, the visible instances that
+ *  cast, and swaps it in for the shadow pass only (onBeforeShadow / onAfterShadow), rebuilt only when the batch's own
+ *  list was rebuilt or an instance's shadow changed. A second, shadowless `BatchedMesh` per material stalled a phone's
+ *  GPU for about 200 ms every few frames (#3683); this uploads one small texture when something changes. */
 class Shapes {
   mesh: THREE.BatchedMesh;
   geometries = new Map<THREE.BufferGeometry, number>();
+  /** Instances that cast no shadow (by instance id), and the shadow pass's own draw list. */
+  private noShadow = new Uint8Array(256);
+  private dirty = true;
+  private starts = new Int32Array(0);
+  private counts = new Int32Array(0);
+  private count = 0;
+  private indirect: THREE.DataTexture | null = null;
+  private saved: [Int32Array, Int32Array, number, THREE.DataTexture] | null = null;
+  /** Shadow draw lists built (for the measure and tests). */
+  rebuilds = 0;
   /** The batch's room for vertices and indices (it grows by doubling). */
   private room = [65_536, 131_072];
   constructor(layer: ThingLayer, material: THREE.Material) {
@@ -155,6 +204,60 @@ class Shapes {
     this.mesh.frustumCulled = false;
     this.mesh.castShadow = this.mesh.receiveShadow = true;
     layer.group.add(this.mesh);
+    const m = this.mesh as unknown as DrawList, update = m._updateDrawParameters;
+    m._updateDrawParameters = (...a) => {
+      if (m._visibilityChanged) this.dirty = true;
+      update.apply(m, a);
+    };
+    const before = this.mesh.onBeforeShadow;
+    this.mesh.onBeforeShadow = (...a) => {
+      before.apply(this.mesh, a);
+      this.swap();
+    };
+    this.mesh.onAfterShadow = () => {
+      if (!this.saved) return;
+      [m._multiDrawStarts, m._multiDrawCounts, m._multiDrawCount, m._indirectTexture] = this.saved;
+      this.saved = null;
+    };
+  }
+  /** Whether instance `i` casts a shadow. */
+  shadow(i: number, on: boolean): void {
+    if (i >= this.noShadow.length) {
+      const grown = new Uint8Array(Math.max(i + 1, this.noShadow.length * 2));
+      grown.set(this.noShadow);
+      this.noShadow = grown;
+    }
+    if (this.noShadow[i] === (on ? 0 : 1)) return;
+    this.noShadow[i] = on ? 0 : 1;
+    this.dirty = true;
+  }
+  /** Puts the shadow pass's draw list in place of the batch's (rebuilding it first if needed). */
+  private swap(): void {
+    const m = this.mesh as unknown as DrawList, main = m._indirectTexture, n = main.image.data!.length;
+    if (!this.indirect || this.indirect.image.data!.length !== n) {
+      this.indirect?.dispose();
+      this.indirect = new THREE.DataTexture(new Uint32Array(n), main.image.width, main.image.height, main.format as THREE.PixelFormat, main.type);
+      this.starts = new Int32Array(m._multiDrawStarts.length);
+      this.counts = new Int32Array(m._multiDrawCounts.length);
+      this.dirty = true;
+    }
+    if (this.dirty) {
+      const ids = main.image.data as Uint32Array, out = this.indirect.image.data as Uint32Array, off = this.noShadow;
+      let k = 0;
+      for (let d = 0; d < m._multiDrawCount; d++) {
+        const i = ids[d];
+        if (i < off.length && off[i]) continue;
+        this.starts[k] = m._multiDrawStarts[d];
+        this.counts[k] = m._multiDrawCounts[d];
+        out[k++] = i;
+      }
+      this.count = k;
+      this.indirect.needsUpdate = true;
+      this.dirty = false;
+      this.rebuilds++;
+    }
+    this.saved = [m._multiDrawStarts, m._multiDrawCounts, m._multiDrawCount, main];
+    [m._multiDrawStarts, m._multiDrawCounts, m._multiDrawCount, m._indirectTexture] = [this.starts, this.counts, this.count, this.indirect];
   }
   add(g: THREE.BufferGeometry, matrix: THREE.Matrix4, color: THREE.Color): number {
     let id = this.geometries.get(g);
@@ -172,6 +275,7 @@ class Shapes {
     const i = this.mesh.addInstance(id);
     this.mesh.setMatrixAt(i, matrix);
     this.mesh.setColorAt(i, color);
+    this.shadow(i, true);
     return i;
   }
   /** A light's colour on a one-off model's glow part (a `Batch` has the same). */
@@ -192,6 +296,9 @@ export type ThingLayerOptions = {
   spacing?: number;
   /** C12: distance detail; default the page's tier (`pageDetail`), none outside a browser. */
   detail?: DistanceDetail | null;
+  /** #3786: far stand-ins (default the page's: phones) and how a part's card picture is taken (none: no cards). */
+  standins?: StandInOptions | null;
+  pictures?: CardPictures;
   /** The view's height in CSS pixels and vertical field of view in degrees; default the window's and the page camera's 50. */
   view?: () => { height: number; fov: number };
 };
@@ -215,11 +322,16 @@ export class ThingLayer {
   private all: Slot[] = [];
   private allDirty = false;
   private cursor = -1;
-  private count = [0, 0, 0];
+  private count = [0, 0, 0, 0];
   private moved = 0;
   private passMs = 0;
   /** The last band pass: parts in each band, parts moved, CPU ms. */
-  readonly stats = { near: 0, far: 0, hidden: 0, moved: 0, cpuMs: 0 };
+  readonly stats = { near: 0, far: 0, hidden: 0, cards: 0, moved: 0, cpuMs: 0 };
+  readonly standins: StandInOptions | null;
+  /** Each part's picture's cell, null where it cannot be a card; and the one batch every card is drawn in. */
+  private readonly cardOf = new Map<Part, CardCell | null>();
+  private cards: Batch | null = null;
+  private snaps = 0;
   private readonly users = new Map<string, Set<Thing>>();
   private readonly models = new Map<string, Part[]>();
   private readonly pending = new Set<string>();
@@ -240,6 +352,7 @@ export class ThingLayer {
     this.spacing = opts.spacing ?? 0;
     for (const h of Object.values(opts.index.things)) this.share.set(h, (this.share.get(h) ?? 0) + 1);
     this.detail = opts.detail === undefined ? pageDetail() : opts.detail;
+    this.standins = opts.pictures ? (opts.standins === undefined ? pageStandIns() : opts.standins) : null;
     const boxMaterial = new THREE.MeshLambertMaterial({ color: 0xb8b2a6 });
     this.boxes = [new Batch(this, this.boxGeometry, boxMaterial, 1024), this.far(new Batch(this, this.boxGeometry, boxMaterial, 16))];
   }
@@ -266,17 +379,41 @@ export class ThingLayer {
     if (d <= 0) return NEAR;
     const px = (s.radius * k) / d;
     if (px < o.minRadiusPx * (s.band === HIDDEN ? 1.15 : 1)) return HIDDEN;
+    const c = this.standins;
+    if (c && px < c.cardRadiusPx * (s.band === CARD ? 1.1 : 1) && this.card(s)) return CARD;
     const line = o.shadowNear + o.shadowPerMetre * s.radius;
-    // A one-off shape stays in its casting batch: a second, shadowless `BatchedMesh` per material stalled the GPU for
-    // about 200 ms every few frames on a phone (measured, #3683); only instanced models get the FAR band.
-    if (s.part && (s.thing.view || (this.share.get(s.thing.model!) ?? 0) < SHARED)) return NEAR;
     return s.radius < o.shadowMaxRadius && d > line * (s.band === FAR ? 0.95 : 1) ? FAR : NEAR;
   }
 
+  /** A shared model's part's card, made once (its snapshot taken, a few a frame); null while it cannot be one yet. */
+  private card(s: Slot): CardCell | null {
+    const p = s.part;
+    if (!p || s.thing.view || (this.share.get(s.thing.model!) ?? 0) < SHARED) return null;
+    const known = this.cardOf.get(p);
+    if (known !== undefined) return known;
+    if (!cardable(this.standins!, p.geometry, p.material, (this.share.get(s.thing.model!) ?? 0) * this.copies)) return (this.cardOf.set(p, null), null);
+    if (this.snaps >= this.standins!.snapshotsPerFrame) return null;
+    this.snaps++;
+    let cell: CardCell | null = null;
+    try {
+      cell = this.opts.pictures!.add(p.geometry, p.material);
+    } catch {
+      cell = null;
+    }
+    // A part that cannot be photographed keeps its full detail.
+    this.cardOf.set(p, cell);
+    return cell;
+  }
+
+  /** The matrix a part is drawn with in its batch: its own, or its card's. */
+  private drawn(s: Slot): THREE.Matrix4 {
+    return s.band === CARD ? (s.cardMatrix ??= cardMatrix(s.part!.geometry.boundingBox!, s.matrix)) : s.matrix;
+  }
+
   /** Places (or moves) a thing: its frame in the world, its origin (today's id), and its boxes (one or a box a solid)
-   *  until its model, or for good when it has none. `model` names its model when its origin does not: a creator's
-   *  kind's (#3697), a hash the index knows or the key its shapes `arrive` under. */
-  set(id: string, origin: string | null, frame: THREE.Matrix4, box: THREE.Matrix4 | THREE.Matrix4[] | null, model: string | null = origin ? this.opts.index.things[origin] ?? null : null): void {
+   *  until its model, or for good when it has none. */
+  set(id: string, origin: string | null, frame: THREE.Matrix4, box: THREE.Matrix4 | THREE.Matrix4[] | null): void {
+    const model = origin ? this.opts.index.things[origin] ?? null : null;
     const boxes = box === null ? [] : Array.isArray(box) ? box : [box];
     if (!model && !boxes.length) return this.remove(id);
     for (let c = 0; c < this.copies; c++) {
@@ -308,7 +445,8 @@ export class ThingLayer {
       t.inverse = undefined;
       for (const s of t.slots) {
         if (!boxes.has(s.matrix)) s.matrix.premultiply(d);
-        if (s.batch instanceof Batch) s.batch.show(s.index, s.matrix, !t.under);
+        s.cardMatrix = undefined;
+        if (s.batch instanceof Batch) s.batch.show(s.index, this.drawn(s), !t.under);
         else (s.batch as unknown as Shapes).mesh.setMatrixAt(s.index, s.matrix);
       }
     }
@@ -358,7 +496,7 @@ export class ThingLayer {
 
   /** Applies a part's interior-view visibility in the batch it is in (none while its band hides it). */
   private visible(s: Slot): void {
-    if (s.batch instanceof Batch) s.batch.show(s.index, s.matrix, !s.off);
+    if (s.batch instanceof Batch) s.batch.show(s.index, this.drawn(s), !s.off);
     else if (s.batch) (s.batch as unknown as Shapes).mesh.setVisibleAt(s.index, !s.off);
   }
 
@@ -417,6 +555,13 @@ export class ThingLayer {
       if (s.off) this.visible(s);
       return;
     }
+    if (band === CARD) {
+      const b = (this.cards ??= this.far(new Batch(this, cardGeometry(), cardMaterial(this.opts.pictures!.texture), 1024).withCells()));
+      s.batch = b;
+      s.index = b.add(s, this.drawn(s), color, this.cardOf.get(s.part)!);
+      if (s.off) this.visible(s);
+      return;
+    }
     const parts = this.models.get(t.model!)!, k = parts.indexOf(s.part);
     if (!t.view && (this.share.get(t.model!) ?? 0) >= SHARED) {
       const all = this.instanced[band];
@@ -427,10 +572,12 @@ export class ThingLayer {
       s.batch = batches[k];
       s.index = batches[k].add(s, s.matrix, color);
     } else {
-      const all = this.batched[band];
-      const shapes = all.get(s.part.material) ?? all.set(s.part.material, band === NEAR ? new Shapes(this, s.part.material) : this.far(new Shapes(this, s.part.material))).get(s.part.material)!;
+      // One batch a material, whatever the band: a FAR shape is left out of its shadow draws (#3787).
+      const all = this.batched[NEAR];
+      const shapes = all.get(s.part.material) ?? all.set(s.part.material, new Shapes(this, s.part.material)).get(s.part.material)!;
       s.batch = shapes as unknown as Batch;
       s.index = shapes.add(s.part.geometry, s.matrix, color);
+      if (band === FAR) shapes.shadow(s.index, false);
     }
     if (s.off) this.visible(s);
   }
@@ -457,7 +604,7 @@ export class ThingLayer {
         this.allDirty = false;
       }
       this.cursor = 0;
-      this.count = [0, 0, 0];
+      this.count = [0, 0, 0, 0];
       this.moved = 0;
       this.passMs = 0;
     }
@@ -467,9 +614,12 @@ export class ThingLayer {
       if (s.gone) continue;
       const band = this.bandOf(s, k);
       if (band !== s.band) {
-        this.unplace(s);
-        s.band = band;
-        this.place(s.thing, s);
+        if (s.batch instanceof Shapes && band !== HIDDEN) (s.band = band), s.batch.shadow(s.index, band === NEAR); // stays in its batch
+        else {
+          this.unplace(s);
+          s.band = band;
+          this.place(s.thing, s);
+        }
         this.moved++;
       }
       this.count[s.band]++;
@@ -478,7 +628,7 @@ export class ThingLayer {
     this.passMs += performance.now() - t0;
     if (end < all.length) return;
     this.cursor = -1;
-    Object.assign(this.stats, { near: this.count[NEAR], far: this.count[FAR], hidden: this.count[HIDDEN], moved: this.moved, cpuMs: this.passMs });
+    Object.assign(this.stats, { near: this.count[NEAR], far: this.count[FAR], hidden: this.count[HIDDEN], cards: this.count[CARD], moved: this.moved, cpuMs: this.passMs });
   }
 
   /** Draws a thing from its model when it has arrived, as a box otherwise. */
@@ -500,11 +650,6 @@ export class ThingLayer {
     if (t.under || t.cut || this.flamesHidden.has(t.id)) this.show(t, !t.under);
   }
 
-  /** Whether a model has arrived (or failed) under this key. */
-  has(hash: string): boolean {
-    return this.models.has(hash);
-  }
-
   /** A model has arrived: its things leave their boxes for it. */
   arrive(hash: string, parts: Part[]): void {
     this.pending.delete(hash);
@@ -520,6 +665,7 @@ export class ThingLayer {
   update(eye: THREE.Vector3): void {
     this.interior(eye);
     this.frame++;
+    this.snaps = 0;
     if (this.detail) {
       const first = !this.eye;
       this.eye = (this.eye ?? new THREE.Vector3()).copy(eye);
@@ -544,7 +690,7 @@ export class ThingLayer {
       this.loading++;
       const glow = glowOf(this.opts.index.states.get(best));
       this.opts.fetch(best)
-        .then((bytes) => partsOf(bytes, glow.roles, glow.materials, this.opts.index.kinds?.get(best!)))
+        .then((bytes) => partsOf(bytes, glow.roles, glow.materials, this.opts.index.kinds?.get(best!), this.opts.index.fits?.get(best!)))
         .then((parts) => this.arrive(best, parts))
         .catch(() => (this.failed++, this.models.set(best, [])))
         .finally(() => this.loading--);
@@ -581,6 +727,7 @@ export class ThingLayer {
     for (const b of this.boxes) if (b.mesh.count) n++;
     for (const m of this.instanced) for (const bs of m.values()) for (const b of bs) if (b.mesh.count) n++;
     for (const m of this.batched) for (const s of m.values()) if (s.mesh.instanceCount) n++;
+    if (this.cards?.mesh.count) n++;
     return n;
   }
 

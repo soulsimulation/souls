@@ -10,13 +10,14 @@ import { BANKS, DECKS, DRAPES, WATER, GroundCover, drapeMesh, drapeName, turfMat
 import { asWater } from '../water/water.ts';
 import { CoursePlace, type CourseAt } from './course.ts';
 import { backdropMesh, type Backdrop } from './backdrop.ts';
+import type { GroundTile } from './lod.ts';
 
 const UM = 1e-6, MM = 1e-3;
 export const STRUCTURE = new Set(['souls:place', 'eden:world', 'eden:ground', 'eden:floor', 'eden:room', 'eden:window', 'eden:place', 'eden:doorway', 'souls:kind']);
 const plain = (kind: string) => kind.split('@')[0];
 /** A body: one with a motion sample, or a body kind standing still since it joined (no motion published yet). */
 const BODY = /(^|:)(body|soul)$/;
-const isBody = (n: NodeRec) => n.at !== null || BODY.test(plain(n.kind));
+export const isBody = (n: NodeRec) => n.at !== null || BODY.test(plain(n.kind));
 /** Terrain vertices kept per tile side: every one, so what stands on the ground meets the ground as drawn (an 8 m
  *  grid left things on hills up to metres above it). */
 const TERRAIN_STEP = 1;
@@ -112,6 +113,9 @@ export class WorldView {
   /** Bodies as V6's crowd once its body files have loaded; capsules until then. */
   private crowdBodies: CrowdBodies | null = null;
   private terrainDone = false;
+  /** The ground as one mesh and where each tile is in it (#3785: lod.ts draws it in sectors with distance levels). */
+  terrainMesh: THREE.Mesh | null = null;
+  readonly terrainTiles: GroundTile[] = [];
   /** The drawn ground's tiles, for `heightAt`. */
   private ground: { side: number; tiles: Map<string, { n: number; k: number; h: DataView }> } | null = null;
   /** C12 (#3683): the far backdrop beyond the ground's edge. */
@@ -121,8 +125,8 @@ export class WorldView {
   extent: [number, number, number, number] | null = null;
   /** False when V8's thing layer draws the things instead of these boxes. */
   drawThings = true;
-  /** Things another layer draws while these boxes draw the rest: a creator's kinds' shapes (#3697). */
-  drawnElsewhere: ((n: NodeRec) => boolean) | null = null;
+  /** #3871: things drawn from their kind's entry (kinds/layer.ts), which get no box. */
+  private elsewhere = new Set<string>();
   /** #3603: the replica's `courseAt` once the page has loaded it; until then a course node stands where it was placed. */
   courseAt: CourseAt | null = null;
   /** Called once, when the first node with a course arrives (the page loads `courseAt` then). */
@@ -178,6 +182,7 @@ export class WorldView {
     for (const id of removed) {
       this.nodes.delete(id);
       this.courses.delete(id);
+      this.elsewhere.delete(id);
       if (this.tracks.delete(id)) this.bodyIds = this.bodyIds.filter((b) => b !== id);
       else this.thingsDirty = this.coverDirty = true;
     }
@@ -253,6 +258,7 @@ export class WorldView {
     const side = (ground.tileSize ?? 64_000) * MM;
     let ext: [number, number, number, number] = [Infinity, Infinity, -Infinity, -Infinity];
     const tiles: THREE.BufferGeometry[] = [];
+    let vertexStart = 0, indexStart = 0;
     this.ground = { side, tiles: new Map() };
     const list = (ground.tiles ?? []).map(([tx, tz, heights, classes]) => {
       const n = Math.round(Math.sqrt(classes.length));
@@ -288,6 +294,8 @@ export class WorldView {
       g.setIndex(index);
       g.computeVertexNormals();
       tiles.push(g); // V8: one draw for the ground, not one a tile (Eden has 256)
+      this.terrainTiles.push({ tx, tz, vertexStart, vertexCount: (m + 1) * (m + 1), indexStart, indexCount: index.length });
+      (vertexStart += (m + 1) * (m + 1)), (indexStart += index.length);
       ext = [Math.min(ext[0], tx * side), Math.min(ext[1], tz * side), Math.max(ext[2], (tx + 1) * side), Math.max(ext[3], (tz + 1) * side)];
     }
     if (tiles.length) {
@@ -296,6 +304,7 @@ export class WorldView {
       mesh.receiveShadow = true;
       mesh.name = 'terrain';
       this.group.add(mesh);
+      this.terrainMesh = mesh;
     }
     if (Number.isFinite(ext[0])) {
       this.extent = ext;
@@ -348,7 +357,7 @@ export class WorldView {
     const tags: number[] = [];
     const moving = new Set(this.moving());
     for (const n of this.nodes.values()) {
-      if (isBody(n) || STRUCTURE.has(plain(n.kind)) || moving.has(n.id) || this.drawnElsewhere?.(n)) continue;
+      if (isBody(n) || STRUCTURE.has(plain(n.kind)) || moving.has(n.id)) continue;
       const f = this.frame(n.id);
       for (const [local, tag] of this.boxesOf(n)) {
         boxes.push(f.clone().multiply(local));
@@ -388,8 +397,16 @@ export class WorldView {
     });
   }
 
-  /** A thing's boxes in its own frame, with their tags: its solids, or a half-metre box when it has none. */
+  /** #3871: the thing is drawn from its kind's entry now, so its box goes. */
+  drawnElsewhere(id: string): void {
+    this.elsewhere.add(id);
+    this.thingsDirty = true;
+  }
+
+  /** A thing's boxes in its own frame, with their tags: its solids, or a half-metre box when it has none (none when it
+   *  is drawn elsewhere). */
   private boxesOf(n: NodeRec): [THREE.Matrix4, number][] {
+    if (this.elsewhere.has(n.id)) return [];
     const s = (n.scale ?? 1_000_000) / 1_000_000;
     const solids = n.solids?.length ? n.solids : [[0, 0, 250, 250, 0, 0, 500, 0, 0]];
     return solids.map(([cx, cz, hx, hz, yaw, y0, y1, tag]) => [new THREE.Matrix4().compose(

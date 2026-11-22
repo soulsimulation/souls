@@ -16,7 +16,8 @@
 //!   An entry whose `roles` name two or more roles is also an activity kind (C30, [`activity_kinds`]).
 //!   `moves.json`, when there, is each move's reach (`{<move>: {reach_mm}}`).
 //! - `log`: K4's log. Its first record is the import's part, every node and link the loader committed, so the log
-//!   holds the world from empty and a stream written from it draws the whole world.
+//!   holds the world from empty and a stream written from it draws the whole world. Once compacted (`compactor`,
+//!   #3837), the bytes before `log.cut` are a hole and the log is read from the cut.
 //! - `checkpoints/`: K5's, taken by K18c's rule; a start resumes from the newest that verifies.
 //! - `tokens`: the gateway's tokens file, `<grant> <sha-256 hex>` per Soul, never a token. `souls.tokens` (mode 0600)
 //!   holds the Souls' tokens themselves, for a local client; it is never copied off the machine.
@@ -30,8 +31,11 @@
 //!   `$WORLDD_SOCKET` names another (a placed world's: a socket's path is at most 108 bytes, and a world folder's
 //!   name is 67). `health.json`: O4's.
 //!
-//! **A start** reads the log through once (its records feed the stream from record 0), then hands it to K18's loop
-//! (`answers::start`), which restores the newest checkpoint and replays the records after it. It prints `worldd:
+//! **A start** reads the log through once from its cut (its records feed the stream from its own cursor), restores
+//! the newest checkpoint and builds the towns and the views' hub from it and the records after it (#3837), then hands
+//! the log to K18's loop (`answers::start`), which restores the same checkpoint and replays the same records. With no
+//! checkpoint the log is read and replayed from record 0; a compacted log with none that verifies is refused
+//! (`log-compacted-past-checkpoint`). It prints `worldd:
 //! started at tick <n> state <hash>`: after a SIGKILL that hash is the last logged tick's (K18's A3), bodies included.
 //! Each record the loop syncs comes back on [`answers::Config::synced`] and goes to the public observer, off the clock
 //! thread. No body stands on a first start; after it, each body the log has stands where the log last had it.
@@ -402,11 +406,173 @@ fn with_punts(facts: &str) -> R<String> {
     Ok(f.to_json())
 }
 
+/// The facts with a kind for each entry kind the facts do not already name, so a creator can place a thing of any
+/// kind the world has an entry for, not only of the kinds its seeded things use (#1960). A thing's kind must be pinned
+/// in the world's header to be placed or made, and a seeded world pins only the kinds of its things. Each added kind
+/// is a point thing with no mesh (as #3703's made notice is, by the same ref and hash), so the same entries give the
+/// same kinds and every start of the world builds the same header.
+fn with_entry_kinds(facts: &str, entries: &[(String, Json)]) -> R<String> {
+    let mut f = json::parse(facts).map_err(|e| format!("the facts: {e:?}"))?;
+    let named: std::collections::BTreeSet<String> = f
+        .get("kinds")
+        .and_then(Json::arr)
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|k| {
+            k.get("name")
+                .and_then(Json::str)
+                .map(import_eden::kind_name)
+        })
+        .collect();
+    let add: Vec<Json> = entries
+        .iter()
+        .map(|(k, _)| k.as_str())
+        .filter(|k| !named.contains(*k) && Name::new(k).is_some())
+        .collect::<std::collections::BTreeSet<_>>()
+        .into_iter()
+        .map(|k| {
+            Json::Obj(
+                [
+                    ("ref", Json::s(&format!("made-{}@1", k.replace(':', "-")))),
+                    (
+                        "hash",
+                        Json::s(&to_hex(&sha256(format!("souls/made/{k}").as_bytes()))),
+                    ),
+                    ("name", Json::s(k)),
+                    ("form", Json::s("point")),
+                    ("layer", Json::s("decor")),
+                    ("door", Json::Bool(false)),
+                    ("mesh", Json::Bool(false)),
+                    ("slots", Json::Int(0)),
+                ]
+                .into_iter()
+                .map(|(k, v)| (k.to_owned(), v))
+                .collect(),
+            )
+        })
+        .collect();
+    if add.is_empty() {
+        return Ok(facts.to_owned());
+    }
+    let Json::Obj(top) = &mut f else {
+        return Err("the facts are not an object".into());
+    };
+    match top.iter_mut().find(|(k, _)| k == "kinds") {
+        Some((_, Json::Arr(a))) => a.extend(add),
+        _ => return Err("the facts have no 'kinds' list".into()),
+    }
+    Ok(f.to_json())
+}
+
+/// The facts with the courses of the rides `entries` declare (#3691): each thing on the ground whose kind's entry has a
+/// `ride` that flies a loop from its stop (`sim::courses::rides`, read from the ride's data, never its kind's name) gets
+/// its course, over the terrain beneath it. The `k`th such thing in the facts' order starts its lap `k` minutes in, so
+/// rides that stand together do not fly together. The same facts and entries give the same courses at every serve.
+fn with_rides(facts: &str, entries: &[(String, Json)]) -> R<String> {
+    let rides: BTreeMap<&str, sim::courses::rides::Ride> = entries
+        .iter()
+        .filter_map(|(k, e)| Some((k.as_str(), sim::courses::rides::Ride::of(e)?)))
+        .filter(|(_, r)| r.loops_aloft())
+        .collect();
+    if rides.is_empty() {
+        return Ok(facts.to_owned());
+    }
+    let im = import_eden::load(facts)?;
+    let Some(&ground) = im.nodes.get("ground") else {
+        return Ok(facts.to_owned());
+    };
+    let terrain = sim::ground::Terrain::of(&im.tree, ground)?;
+    let mut f = json::parse(facts).map_err(|e| format!("the facts: {e:?}"))?;
+    let Json::Obj(top) = &mut f else {
+        return Err("the facts are not an object".into());
+    };
+    // A kind's name as the entries name it, by its def's ref.
+    let names: BTreeMap<String, String> = top
+        .iter()
+        .find(|(k, _)| k == "kinds")
+        .and_then(|(_, v)| v.arr())
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|k| {
+            Some((
+                k.get("ref")?.str()?.to_owned(),
+                import_eden::kind_name(k.get("name")?.str()?),
+            ))
+        })
+        .collect();
+    let int = |n: i64| Json::Int(i128::from(n));
+    let num = |v: Option<&Json>| match v {
+        Some(Json::Int(n)) => i64::try_from(*n).ok(),
+        _ => None,
+    };
+    let Some((_, Json::Arr(things))) = top.iter_mut().find(|(k, _)| k == "things") else {
+        return Err("the facts have no 'things' list".into());
+    };
+    let mut k = 0;
+    for t in things.iter_mut() {
+        let on_ground = matches!(t.get("parent"), None | Some(Json::Null));
+        let Some(ride) = t
+            .get("def")
+            .and_then(Json::str)
+            .and_then(|d| names.get(d))
+            .and_then(|n| rides.get(n.as_str()))
+        else {
+            continue;
+        };
+        let Some([x, y, z]) = t
+            .get("world")
+            .and_then(Json::arr)
+            .and_then(|w| Some([num(w.first())?, num(w.get(1))?, num(w.get(2))?]))
+        else {
+            continue;
+        };
+        if !on_ground || t.get("course").is_some() {
+            continue;
+        }
+        let home = Vec3::new(x * 1000, y * 1000, z * 1000);
+        let t0 = k * 60_000_000;
+        let Some(c) = sim::courses::rides::course(
+            ride,
+            home,
+            |x, z| terrain.as_ref().and_then(|g| g.height_at(x, z)),
+            t0,
+        ) else {
+            continue;
+        };
+        k += 1;
+        println!(
+            "ride: {} at {:.3},{:.3} m, loop {} us from {} us",
+            t.get("name").and_then(Json::str).unwrap_or("?"),
+            home.x as f64 / 1e6,
+            home.z as f64 / 1e6,
+            c.load().map_or(0, |t| t.period),
+            c.t0
+        );
+        let stations = c
+            .stations
+            .iter()
+            .map(|s| Json::Arr(vec![int(s.at.x), int(s.at.y), int(s.at.z), int(s.dwell)]))
+            .collect();
+        let Json::Obj(kv) = t else { continue };
+        kv.push((
+            "course".to_owned(),
+            Json::Obj(vec![
+                ("stations".to_owned(), Json::Arr(stations)),
+                ("shape".to_owned(), int(1)),
+                ("speed".to_owned(), int(c.speed)),
+                ("t0".to_owned(), int(c.t0)),
+                ("within".to_owned(), int(c.within)),
+            ]),
+        ));
+    }
+    Ok(f.to_json())
+}
+
 /// The rowing punt's def (#3603): today's `rowing-punt`, a kind the world adds.
 const PUNT_REF: &str = "core-rowing-punt@1";
 
 fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
-    let facts = &with_punts(facts)?;
+    let facts = &with_entry_kinds(&with_rides(&with_punts(facts)?, entries)?, entries)?;
     let mut im = import_eden::load(facts)?;
     stamp("facts");
     for (k, id) in (0..).map_while(|k| Some((k, *im.nodes.get(&format!("e_punt{k}"))?))) {
@@ -658,6 +824,44 @@ fn entries(dir: &Path, out: &mut Vec<(String, Json)>) -> R<()> {
     Ok(())
 }
 
+/// The code hatches' modules a world ships (#3713): every `.wasm` file in `dir`, in name order, each checked as
+/// `replica::hatch` loads a module (refused by name, so a bad module stops the boot, not an act).
+fn hatches(dir: &Path) -> R<Vec<Vec<u8>>> {
+    let mut out = Vec::new();
+    if !dir.is_dir() {
+        return Ok(out);
+    }
+    let mut paths = Vec::new();
+    wasm_files(dir, &mut paths)?;
+    for p in paths {
+        let bytes = std::fs::read(&p).map_err(io(&p))?;
+        let mut named = vec![replica::ids::SHA2_256, 32];
+        named.extend(sha256(&bytes));
+        replica::hatch::Loaded::load(&bytes, &named)
+            .map_err(|r| format!("{}: {}: {}", p.display(), r.name, r.detail))?;
+        out.push(bytes);
+    }
+    println!("hatches: {} modules", out.len());
+    Ok(out)
+}
+
+/// Every `.wasm` file under `dir`, sorted.
+fn wasm_files(dir: &Path, out: &mut Vec<PathBuf>) -> R<()> {
+    let mut paths: Vec<PathBuf> = std::fs::read_dir(dir)
+        .map_err(io(dir))?
+        .filter_map(|e| Some(e.ok()?.path()))
+        .collect();
+    paths.sort();
+    for p in paths {
+        if p.is_dir() {
+            wasm_files(&p, out)?;
+        } else if p.extension().is_some_and(|x| x == "wasm") {
+            out.push(p);
+        }
+    }
+    Ok(())
+}
+
 fn humanoid() -> R<Family> {
     let n = |s: &str| Name::new(s).ok_or_else(|| format!("a name: {s}"));
     let leg = |s: &str| -> R<Resource> {
@@ -770,6 +974,22 @@ fn seed_in(args: &[String]) -> R<String> {
             std::fs::write(&p, v.to_json()).map_err(io(&p))?;
         }
         println!("entries: {}", found.len());
+        // The code hatches' modules shipped beside the entries (#3713), each kept under the hash it is named by.
+        let mut modules = Vec::new();
+        if let Some(e) = arg(args, "--entries") {
+            wasm_files(Path::new(e), &mut modules)?;
+        }
+        if !modules.is_empty() {
+            std::fs::create_dir_all(dir.join("hatches")).map_err(io(&dir))?;
+        }
+        for m in &modules {
+            let bytes = std::fs::read(m).map_err(io(m))?;
+            let p = dir
+                .join("hatches")
+                .join(format!("1220{}.wasm", to_hex(&sha256(&bytes))));
+            std::fs::write(&p, &bytes).map_err(io(&p))?;
+        }
+        println!("hatches: {}", modules.len());
     }
     // The Souls: ids of a scope of their own (not the tree's minter's), a token each.
     let name = instance(built.root);
@@ -859,101 +1079,6 @@ fn souls(meta: &Json) -> R<Vec<(Id, i64, i64)>> {
             }
         })
         .collect()
-}
-
-/// The seats the world's entries `kinds` declare on its things ([`import_eden::body_slots`]), each placed on the floor a
-/// body stands on: its point and facing there, and its stand point in the slot's frame. A stand point a body cannot
-/// stand on (under a table, against a wall) is moved to the nearest place within a form's reach of it where a body
-/// can (C15's rule, `skills::form_runner::REACH`), so a rise always sets the body down on clear ground; one in a
-/// doorway's clearance is moved out of it ([`out_of_passage`]), so the gateway's walk to the seat ends at it. Returns the
-/// seats, the things they are on, the count of every body slot on those things, the seats that could not be placed (no
-/// floor above the thing) and the stand points moved.
-fn places(town: &mut Town, kinds: &[(String, Json)]) -> (Vec<PlaceAt>, usize, usize, usize, usize) {
-    let (found, all) = import_eden::body_slots(&town.tree, kinds);
-    let (buildings, ground) = (town.buildings.clone(), town.ground);
-    let view = town.view();
-    let (mut out, mut moved) = (Vec::new(), 0);
-    for s in &found {
-        let Some((floor, point, facing)) = view.on_floor(s.thing, s.at) else {
-            continue;
-        };
-        let mut place = PlaceAt {
-            thing: s.thing,
-            place: replica::moves::Place {
-                slot: s.slot,
-                height: s.at.y.max(0),
-                stand: [s.stand.x - s.at.x, s.stand.z - s.at.z],
-            },
-            point,
-            facing,
-            floor,
-        };
-        // The stand point on the floor, at the floor's height under the seat.
-        let stand = place.stand().map(|p| Vec3::new(p.x, point.y - s.at.y, p.z));
-        let [w, x, y, z] = facing.parts();
-        let back = replica::pose::Quat::new(w, -x, -y, -z);
-        // A stand point in a doorway's clearance is one the spot tables never give a walker (N9): a walk to it ends
-        // a ring out, beyond the sit's reach, so it is moved out of the doorway as a blocked one is moved clear.
-        let passage = |p: Vec3| sim::walk::town::in_passage(&buildings, &[], ground, floor, p);
-        let clear = stand.ok().and_then(|stand| {
-            if view.stand_near(floor, stand, 1, None).is_none() {
-                view.stand_near(floor, stand, skills::form_runner::REACH, None)
-            } else if passage(stand) {
-                out_of_passage(&view, floor, stand, point, &passage)
-            } else {
-                None
-            }
-        });
-        if let (Some(clear), Ok(back)) = (clear, back)
-            && let Ok(d) = back.rotate(Vec3::new(clear.x - point.x, 0, clear.z - point.z))
-        {
-            place.place.stand = [d.x, d.z];
-            moved += 1;
-        }
-        out.push(place);
-    }
-    let left = found.len() - out.len();
-    let mut things: Vec<Id> = out.iter().map(|p| p.thing).collect();
-    things.dedup();
-    (out, things.len(), all, left, moved)
-}
-
-/// The nearest place to `at` (µm, `floor`'s frame) within [`skills::form_runner::REACH`] where a body may stand, that
-/// is out of every doorway and stair (`passage`) and no nearer the slot's point `slot_at` than `at` is (so not into the
-/// thing: a bed's mattress is not a solid), on [`sim::spots::within`]'s rings; `None` when none is.
-fn out_of_passage(
-    view: &sim::walk::town::View<'_>,
-    floor: Id,
-    at: Vec3,
-    slot_at: Vec3,
-    passage: &dyn Fn(Vec3) -> bool,
-) -> Option<Vec3> {
-    let pitch = sim::spots::REACH_PITCH;
-    let mut best: Option<(i64, Vec3)> = None;
-    for ring in 1..=skills::form_runner::REACH / pitch {
-        let n = 6_283 * ring / 1_000;
-        for k in 0..n {
-            let Ok(off) = replica::pose::Quat::from_yaw_mdeg(k * 360_000 / n)
-                .and_then(|q| q.rotate(Vec3::new(0, 0, ring * pitch)))
-            else {
-                continue;
-            };
-            let Some(p) =
-                view.stand_near(floor, Vec3::new(at.x + off.x, at.y, at.z + off.z), 1, None)
-            else {
-                continue;
-            };
-            let gap = sim::spots::flat(p, at);
-            let out = sim::spots::flat(p, slot_at) >= sim::spots::flat(at, slot_at);
-            if out && !passage(p) && best.is_none_or(|b| gap < b.0) {
-                best = Some((gap, p));
-            }
-        }
-        if best.is_some() {
-            break;
-        }
-    }
-    best.map(|b| b.1)
 }
 
 /// Original B15 birth choice reader: only admitted exact hashes enter the canonical body.
@@ -1394,6 +1519,22 @@ struct Off {
     parts: u64,
     based: bool,
     archive_base: u64,
+    /// The log compactor's floors from here (#3837): the shipper's marks, and how far the archive has closed.
+    mark: shipping::Mark,
+    floor: Option<crate::compactor::Archive>,
+}
+
+impl Off {
+    /// A part for an archive that numbers parts (not a fork's): numbered, and its record kept for the compactor.
+    fn part(&mut self, record: u64, bytes: &[u8]) {
+        if let Some(a) = &self.archive {
+            if let Some(crate::compactor::Archive::Parts(p)) = &self.floor {
+                p.sent(record, self.parts);
+            }
+            let _ = a.send((self.parts, bytes.to_vec()));
+            self.parts += 1;
+        }
+    }
 }
 
 impl Off {
@@ -1415,8 +1556,7 @@ impl Off {
                     let _ = a.send((record, bytes.to_vec()));
                 }
             } else if !input {
-                let _ = a.send((self.parts, bytes.to_vec()));
-                self.parts += 1;
+                self.part(record, bytes);
             }
         }
     }
@@ -1441,9 +1581,13 @@ fn archiving(
     open: impl FnOnce() -> Result<Archiver<Again>, Refusal> + Send + 'static,
     rx: Receiver<(u64, Vec<u8>)>,
     text: Arc<sim::text::Store>,
+    closed: impl Fn(u64) + Send + 'static,
 ) -> std::thread::JoinHandle<Result<(), Refusal>> {
     std::thread::spawn(move || {
         let mut a = open()?;
+        // How far its closed objects reach, for the log's compactor (#3837).
+        let publish = |a: &Archiver<Again>| closed(a.durable_cursor());
+        publish(&a);
         let mut indexed = a.shelf.writes.bundles;
         let (mut fresh, mut viewed) = (false, std::time::Instant::now());
         loop {
@@ -1470,6 +1614,7 @@ fn archiving(
                 a.shelf.flush()?;
                 indexed = a.shelf.writes.bundles;
             }
+            publish(&a);
             if fresh && viewed.elapsed() >= VIEWS_EVERY {
                 a.publish_open()?;
                 for (k, v) in a.open_views()? {
@@ -1621,6 +1766,8 @@ fn fork_archive_base<S: Store>(
 /// Already captured recovery source and the same authoritative text Store, kept together at startup.
 struct SourceContext<'a> {
     recovered: &'a sim::log::Recovered,
+    /// The archive's first part number after the log's cut (the cut file's note; 0 for a log never compacted).
+    parts_from: u64,
     checkpoint: Option<&'a [u8]>,
     text: Arc<sim::text::Store>,
 }
@@ -1637,6 +1784,7 @@ fn off_machine(
 ) -> R<Off> {
     let SourceContext {
         recovered,
+        parts_from,
         checkpoint,
         text,
     } = source;
@@ -1682,7 +1830,7 @@ fn off_machine(
     )
     .map_err(refusal)?
     .checkpoints(&dir.join("checkpoints"), shipping::CHECKPOINT_GAP_US);
-    let (ship, _, h) = shipper.spawn();
+    let (ship, mark, h) = shipper.spawn();
     report("the shipper", h);
     let mut based = false;
     let mut archive_base = 0;
@@ -1694,6 +1842,7 @@ fn off_machine(
         public: dir.join("history"),
         header: built.header.stored().to_vec(),
     };
+    let mut archive_floor = None;
     let archive = if let Some(base) = fork_base {
         // The opened archive's base is this one: `fork_archive_base` read the stored head's base, as the open does.
         based = true;
@@ -1714,7 +1863,13 @@ fn off_machine(
             Ok(a)
         };
         let (tx, rx) = channel();
-        report("the archiver", archiving(open, rx, Arc::clone(&text)));
+        let closed = Arc::new(std::sync::atomic::AtomicU64::new(archive_base));
+        archive_floor = Some(crate::compactor::Archive::Records(Arc::clone(&closed)));
+        let publish = move |n| closed.store(n, std::sync::atomic::Ordering::Relaxed);
+        report(
+            "the archiver",
+            archiving(open, rx, Arc::clone(&text), publish),
+        );
         Some(tx)
     } else if let Some(kind) = built
         .header
@@ -1729,9 +1884,13 @@ fn off_machine(
         let a = Archiver::open(again.clone(), "", &built.header, zone, kind).map_err(refusal)?;
         again.restore_public().map_err(refusal)?;
         let (tx, rx) = channel();
+        let parts = Arc::new(crate::compactor::Parts::new(parts_from));
+        let reach = Arc::clone(&parts);
+        let publish = move |n| reach.durable.store(n, std::sync::atomic::Ordering::Relaxed);
+        archive_floor = Some(crate::compactor::Archive::Parts(parts));
         report(
             "the archiver",
-            archiving(move || Ok(a), rx, Arc::clone(&text)),
+            archiving(move || Ok(a), rx, Arc::clone(&text), publish),
         );
         Some(tx)
     } else {
@@ -1740,24 +1899,25 @@ fn off_machine(
     let mut off = Off {
         ship,
         archive,
-        parts: 0,
+        parts: parts_from,
         based,
         archive_base,
+        mark,
+        floor: archive_floor,
     };
     for (k, bytes) in records.iter().enumerate() {
         let record = first + k as u64;
         let input = recorder::is_input(bytes);
         if record >= from {
             off.take(record, bytes, input);
-        } else if let Some(a) = &off.archive {
-            if off.based {
-                if record >= off.archive_base {
-                    let _ = a.send((record, bytes.clone()));
-                }
-            } else if !input {
-                let _ = a.send((off.parts, bytes.clone()));
-                off.parts += 1;
+        } else if off.based {
+            if let Some(a) = &off.archive
+                && record >= off.archive_base
+            {
+                let _ = a.send((record, bytes.clone()));
             }
+        } else if !input {
+            off.part(record, bytes);
         }
     }
     Ok(off)
@@ -1794,9 +1954,10 @@ fn creator(spec: &str, built: &Built) -> R<Arc<Creator>> {
     Ok(creator)
 }
 
-/// `worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] [--store <store>] [--machine
-/// <name>] [--rate <num>/<den>]`: runs the world until killed. A checkpoint is taken each `--checkpoint-every` bytes
-/// of log (default 8 MiB). The clock's rate is world µs per real µs (default 1/1); a start whose rate differs from the
+/// `worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] [--compact-after <bytes>]
+/// [--store <store>] [--machine <name>] [--rate <num>/<den>]`: runs the world until killed. A checkpoint is taken each
+/// `--checkpoint-every` bytes of log (default 8 MiB); the log is compacted once every reader has passed at least
+/// `--compact-after` bytes of it (default 64 MiB, `compactor`). The clock's rate is world µs per real µs (default 1/1); a start whose rate differs from the
 /// last logged applies a new mapping, and the mapping in force is on the zone root for every copy (E7b, #3516).
 pub fn run(args: &[String]) -> i32 {
     match serve(args) {
@@ -1812,8 +1973,8 @@ fn serve(args: &[String]) -> R<()> {
     let _ = STARTED.set(std::time::Instant::now());
     stamp("launch");
     let dir = PathBuf::from(arg(args, "--dir").ok_or(
-        "usage: worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] [--store <store>] \
-         [--machine <name>] [--directory <file>] [--rate <num>/<den>]",
+        "usage: worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] \
+         [--compact-after <bytes>] [--store <store>] [--machine <name>] [--directory <file>] [--rate <num>/<den>]",
     )?);
     let socket = arg(args, "--socket")
         .map(PathBuf::from)
@@ -1945,21 +2106,67 @@ fn serve(args: &[String]) -> R<()> {
         let towns = Town::with_planner(live.tree().frozen(), built.ground, doors)
             .map_err(|e| format!("the fork's town: {e}"))?;
         stamp("town and planner");
-        (initial, record, observer, Some(checkpoint), towns)
+        let resumed = initial.frozen();
+        (
+            initial,
+            Some((resumed, record)),
+            observer,
+            Some(checkpoint),
+            towns,
+        )
     } else {
         let initial = Replica::start(built.header.stored()).map_err(refusal)?;
-        let towns = recovered_towns(&built, &initial, &found.records)?;
-        (initial, 0, None, None, towns)
+        // The newest checkpoint that verifies (K5) is where the engine resumes (`answers::start`), so the towns and
+        // the views' hub start from it too, with only the log after it applied: a restart's work follows the log
+        // since the last checkpoint, never the world's age (#3837). Without one, the log from record 0.
+        let restored = match dir.join("checkpoints") {
+            d if d.is_dir() => sim::checkpoint::restore(&d).map_err(refusal)?,
+            _ => None,
+        };
+        match restored {
+            Some(r) => {
+                if r.root.version.lineage != built.header.lineage
+                    || r.root.version.zone != built.header.zone
+                {
+                    return Err("checkpoint-world-mismatch".into());
+                }
+                if found.first > r.root.record {
+                    return Err(format!(
+                        "log-compacted-past-checkpoint: the log is kept from record {}, the checkpoint is at {}",
+                        found.first, r.root.record
+                    ));
+                }
+                stamp("checkpoint restore");
+                let record = r.root.record;
+                let at =
+                    Replica::restored(initial.header().clone(), r.tree, r.root.version.sequence);
+                let towns = recovered_towns(&built, &at, found.after(record))?;
+                (initial, Some((at, record)), None, None, towns)
+            }
+            None if found.first > 0 => {
+                return Err(format!(
+                    "log-compacted-past-checkpoint: the log is kept from record {} and no checkpoint verifies",
+                    found.first
+                ));
+            }
+            None => {
+                let towns = recovered_towns(&built, &initial, &found.records)?;
+                (initial, None, None, None, towns)
+            }
+        }
     };
-    let (initial, base_record, stream_mapping, checkpoint, (mut town, mut planner)) = started;
+    // `resumed` is the engine's starting point (a checkpoint's tree and record) when it differs from the stream's.
+    let (initial, resumed, stream_mapping, checkpoint, (mut town, mut planner)) = started;
+    let base_record = resumed.as_ref().map_or(0, |(_, r)| *r);
     town.prepare_classes(catalogue.classes())
         .map_err(|e| format!("body-classes: {e}"))?;
     planner
         .prepare_classes(catalogue.classes())
         .map_err(|e| format!("body-classes: {e}"))?;
     stamp("body classes");
-    let (places, things, all, left, moved) = places(&mut town, &kinds);
+    let (places, things, all, left, moved) = worldd::places::register(&mut town, &kinds);
     stamp("places to sit placed");
+    let closed_kinds = worldd::closed::Closed::of(&kinds);
     println!(
         "places to sit or lie: {} registered on {} things; {all} body slots declared; {left} with no floor; {moved} stand points \
          moved to clear ground",
@@ -2001,6 +2208,9 @@ fn serve(args: &[String]) -> R<()> {
                 &dir,
                 SourceContext {
                     recovered: &found,
+                    parts_from: sim::log::compact::read_cut(&log_path)
+                        .map_err(refusal)?
+                        .map_or(0, |c| c.note),
                     checkpoint: checkpoint.as_deref(),
                     text: Arc::clone(&text),
                 },
@@ -2008,14 +2218,20 @@ fn serve(args: &[String]) -> R<()> {
         }
         None => None,
     };
+    let off_floors = off.as_ref().map(|o| (o.mark.clone(), o.floor.clone()));
     let (tx, synced) = channel();
     imported_births(&dir, initial.header(), &catalogue, &mut born)?;
     let mut cfg = Config::new(built.header.lineage, EPOCH);
     cfg.public_names = Arc::clone(&built.public_names);
+    cfg.closed = closed_kinds.clone();
     let every = arg(args, "--checkpoint-every").map_or(Ok(EVERY), |n| {
         n.parse::<u64>().map_err(|_| "--checkpoint-every <bytes>")
     })?;
     cfg.checkpoints = Some((dir.join("checkpoints"), every));
+    let compact_after = arg(args, "--compact-after")
+        .map_or(Ok(crate::compactor::MIN_DEAD), |n| {
+            n.parse::<u64>().map_err(|_| "--compact-after <bytes>")
+        })?;
     cfg.health = Some(dir.join("health.json"));
     cfg.rate = Some(match arg(args, "--rate") {
         Some(r) => r
@@ -2029,7 +2245,8 @@ fn serve(args: &[String]) -> R<()> {
     // Gateway subscriptions have their own off-clock tier, apart from the filesystem stream below. Restore its
     // body, ownership and activity membership indexes before the answers thread can hand it any live part.
     let mut hub = worldd::views::subscription::Hub::with_words(text);
-    hub.seed(initial.tree());
+    hub.closed(&closed_kinds);
+    hub.seed(resumed.as_ref().map_or(initial.tree(), |(at, _)| at.tree()));
     let feed = worldd::views::served::start_with(hub).map_err(refusal)?;
     for bytes in found.after(base_record) {
         if !recorder::is_input(bytes) {
@@ -2049,6 +2266,7 @@ fn serve(args: &[String]) -> R<()> {
     cfg.synced = Some(tx);
     // E6's day, night and weather on Eden's calendar, written at the first tick of a world whose node holds none (C5).
     cfg.sky = Some(eden_sky(built.header.lineage));
+    cfg.hatches = hatches(&dir.join("hatches"))?;
     // The engine's own acts (C2) and the activities they run (C30).
     cfg.engine = Some((built.rules.clone(), built.activities.clone()));
     // With a directory, its authoritative creator (including none) is always used; static metadata is only the
@@ -2121,7 +2339,9 @@ fn serve(args: &[String]) -> R<()> {
         header: &built.header,
         key,
         initial: initial.frozen(),
-        record: base_record,
+        // A normal world's stream keeps its own source, the world as built and the log from its own cursor; only a
+        // fork's starts from the fork's checkpoint.
+        record: if checkpoint.is_some() { base_record } else { 0 },
         checkpoint,
         text: cfg_text,
         names: Some(Arc::clone(&built.public_names)),
@@ -2148,6 +2368,20 @@ fn serve(args: &[String]) -> R<()> {
     println!(
         "restart: checkpoint {:?}, {} records read, {} applied",
         world.restart.checkpoint, world.restart.read, world.restart.applied
+    );
+    // The log's compactor (#3837): the bytes every reader has passed go back to the disk.
+    let stream_floor = Arc::new(std::sync::atomic::AtomicU64::new(0));
+    let (shipped, archive_floor) = off_floors.map_or((None, None), |(m, a)| (Some(m), a));
+    crate::compactor::spawn(
+        log_path.clone(),
+        world.durable.clone(),
+        crate::compactor::Floors {
+            checkpoints: dir.join("checkpoints"),
+            stream: Arc::clone(&stream_floor),
+            shipped,
+            archive: archive_floor,
+        },
+        compact_after,
     );
     let door = world.door();
     // The directory's word on the Souls (W11b): its file read now, before any intent is served, and again on a change.
@@ -2237,6 +2471,10 @@ fn serve(args: &[String]) -> R<()> {
                     }
                 }
                 writer.flush()?;
+                let published = |w: &view_out::PublicWriter<_>| {
+                    stream_floor.store(w.durable_cursor(), std::sync::atomic::Ordering::Relaxed)
+                };
+                published(&writer);
                 stamp("public stream");
                 let _ = ready_tx.send(());
                 drop(stream_found);
@@ -2260,6 +2498,7 @@ fn serve(args: &[String]) -> R<()> {
                         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                     }
                     writer.idle(answers::now())?;
+                    published(&writer);
                 }
             })();
             if let Err(e) = result {
@@ -2668,6 +2907,8 @@ mod tests {
             parts: 0,
             based: true,
             archive_base: 4,
+            mark: shipping::Mark::default(),
+            floor: None,
         };
         for (record, bytes, is_input) in [
             (0, &part, false),
@@ -2692,6 +2933,8 @@ mod tests {
             parts: 0,
             based: false,
             archive_base: 4,
+            mark: shipping::Mark::default(),
+            floor: None,
         };
         for (record, bytes, is_input) in
             [(10, &input, true), (11, &part, false), (12, &part, false)]
@@ -3250,6 +3493,76 @@ mod tests {
         assert!(cloned.iter().any(|a| !a.contains("None None")));
         assert_eq!(cloned, assembled);
         assert_eq!(ask(&mut town), assembled);
+    }
+
+    /// #1960: a creator places a thing of a kind the world has an entry for but no seeded thing of. Without the
+    /// entry, the kind is not pinned and the place is refused `edit.kind-unknown`; with it, the place commits.
+    #[test]
+    fn a_creator_places_an_entry_kind_no_seeded_thing_uses() {
+        use replica::edit::{Edit, Op, Ref, Spot, World, check};
+        use replica::pose::{Quat, Support};
+        let facts = testworld::generate(1, 0).expect("test world").text;
+        let entry = || {
+            vec![(
+                "testworld:planter".to_owned(),
+                replica::rules::json::parse(r#"{"kind":"testworld:planter"}"#).expect("an entry"),
+            )]
+        };
+        let attempt = |entries: &[(String, Json)]| {
+            let built = build(&facts, entries).expect("builds");
+            let pinned = built
+                .rules
+                .kinds
+                .keys()
+                .find(|k| plain(k) == "testworld:planter")
+                .cloned();
+            let start = Replica::start(built.header.stored()).expect("a replica");
+            let mut live = start.frozen();
+            live.apply(&replica::effects::Part::read(&built.part).expect("the part"))
+                .expect("applies");
+            let creator = Id::new(Scope([0xc0; 16]), 1).expect("an id");
+            let world = World {
+                creator,
+                kinds: built.rules.kinds.clone(),
+            };
+            let kind = Name::new(
+                pinned
+                    .as_deref()
+                    .unwrap_or(&format!("testworld:planter@1220{}", "00".repeat(32))),
+            )
+            .expect("a name");
+            let edit = Edit {
+                intent: Id::new(Scope([0x11; 16]), 1).expect("an id"),
+                actor: replica::effects::Actor::Creator(creator),
+                planned: live.version(),
+                ops: vec![Op::Place {
+                    name: 0,
+                    kind,
+                    parent: Ref::Node(built.ground),
+                    at: Spot {
+                        slot: None,
+                        position: Vec3::new(0, 0, 0),
+                        orientation: Quat::IDENTITY,
+                        support: Support::None,
+                    },
+                    audience: Audience::Everyone,
+                    fields: BTreeMap::new(),
+                }],
+                claim: None,
+            };
+            (pinned.is_some(), check(edit, &live, &world).map(|_| ()))
+        };
+        let (pinned, without) = attempt(&[]);
+        assert!(!pinned, "the seeded test world has no planter");
+        assert_eq!(without.expect_err("refused").name, "edit.kind-unknown");
+        let (pinned, with) = attempt(&entry());
+        assert!(pinned, "the entry's kind is pinned");
+        with.expect("the place commits");
+        // The same entries give the same header: every start of the world agrees.
+        assert_eq!(
+            build(&facts, &entry()).unwrap().header.hash(),
+            build(&facts, &entry()).unwrap().header.hash()
+        );
     }
 
     #[test]

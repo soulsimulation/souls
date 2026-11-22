@@ -50,7 +50,7 @@ and are covered by its hash; 20 and up sit beside it under their own hash.
 | 3 | `state` | Fields: `n` (a stable number), `type` (`bool`, `enum` with `values`, `int` with `unit`, `duration` in µs, `text` by reference, `list`, `schedule`, `timed`), `default`, `audience` (a rule); an `int` or `timed` value may have `min` / `max` (below) |
 | 4 | `links` | Link types this kind takes part in: `n`, `from` (`soul`, `body`, `thing`, `place` or a kind), `most`, `most_per`, `per`, `audience` (below). A body's family declares `soul`, its link to its Soul |
 | 5 | `points` | Named places in the thing's own frame: `role` (`stand`, `grip`, `contact`, `outlet`), `at_mm`, `yaw_mdeg` |
-| 6 | `slots` | The children it admits: `admits` (`body`, `thing`), `kinds` (the kinds a thing slot takes; none listed takes any), `posture` (`sit`, `lie`), `most`, `at_mm`, `stand` (a stand point), `fits_mm`, and for a row of places `row`, `place`, `end` (below) |
+| 6 | `slots` | The children it admits: `admits` (`body`, `thing`), `kinds` (the kinds a thing slot takes; none listed takes any), `posture` (`sit`, `lie`), `most`, `at_mm`, `stand` (a stand point), `board_mm` (a body's slot: when no body can stand at or near its stand point, as by a boat afloat, how far from the slot the clear ground it is got onto from may be; the step onto the slot crosses no other solid), `fits_mm`, and for a row of places `row`, `place`, `end` (below) |
 | 7 | `geometry` | `bounds_mm`: [width, height, depth], the box every point and slot lies in (below) |
 | 8 | `forms` | What can be done with it (below) |
 | 9 | `closed` | The fields and children that take the container's audience until it is opened (SA-F8, [#2849](https://github.com/soulsimulation/souls/issues/2849)) |
@@ -115,7 +115,7 @@ a named part of its surroundings: a tree's shade, a river's bank. A placed area 
 point, so a body can be sent to it. Names are one list with points and slots. Refused: an area that says nothing; a
 posture both allowed and forbidden; a forbidden posture the kind's own slot seats; and an area that only repeats what
 the kind's slots already say (the check gate reports it under `shape`). A bed (`content/kinds/rest/bed.json`) allows
-lying on it and sitting on its edge; a piano forbids sitting and lying; a tree declares its shade. A rug or a lawn needs
+lying on it and sitting on its edge; a piano forbids lying on it and seats its pianist at the bench; a tree declares its shade. A rug or a lawn needs
 no area (a body sits on the ground, SA-G3), and a thing that hangs uses a hang slot (SA-D3). Cases are data
 (`tools/entry/cases/areas.json`). Section 16 is meaning, so covered by the hash.
 
@@ -296,6 +296,10 @@ two known uses are data (`tools/entry/cases/hatch.json`). No function is written
   be described with `select`: a candidate set (`of`: `things` or `free_slots`, optional `kind`, `in`: `this`,
   `here` or `parent`), an `anchor` (`me`, `this`), an `order` (`nearest`, `furthest`) and a `rank` (1, 2, ... or
   `last`), the same closed list as Engine v2 E2 ([#2709](https://github.com/soulsimulation/souls/issues/2709)).
+  A `thing` argument the act leaves out is bound by its selector when the act commits (#3914): `in: this` the
+  thing's own children, `here` those of the node the actor is in, `parent` those of the thing's parent, never the
+  thing, the actor or a body; by squared distance from the anchor, ties by id; then the rank. None qualifying is
+  refused by name: `none_selected` in the rules (`@souls/form-rules`), `thing.none-selected` from the world.
   Anywhere a point, slot or value is expected, `{"arg": <name>}` uses an argument. Two more types are a **choice from
   the form's own closed list**, `of`: `field` (two or more of this kind's state fields, of one type) and `value` (two
   or more values). A `set` or a `state` need may name a field argument as its `field`, and a value argument as its

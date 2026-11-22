@@ -155,6 +155,15 @@ pub fn kind_name(t: &str) -> String {
     }
 }
 
+/// The name a thing's Soul Actions entry goes by, as the world's entries are keyed: the entry it names in field 27
+/// ([`F_ENTRY`], from its world's map: a Mars chair borrows `eden:chair`), else its own kind's plain name.
+pub fn entry_name<'a>(kind: &'a str, fields: &'a BTreeMap<u64, Value>) -> &'a str {
+    match fields.get(&F_ENTRY) {
+        Some(Value::Text(e)) => plain(e.as_str()),
+        _ => plain(kind),
+    }
+}
+
 /// `eden:<word>` for a label of lower-case letters, digits, `-` and `_` that starts with a letter.
 fn label(t: &str) -> Option<Name> {
     let ok = t.bytes().next().is_some_and(|b| b.is_ascii_lowercase())
@@ -771,6 +780,13 @@ pub fn load(text: &str) -> R<Import> {
             let (lo, hi) = (int(st, "from")?, int(st, "to")?);
             let a = b.node(&format!("{id}/floor-{lo}"))?;
             let z = b.node(&format!("{id}/floor-{hi}"))?;
+            // A step between two surfaces of one level (a deck's pieces a few mm apart) joins a floor to itself: the
+            // floor already holds both surfaces, so there is nothing to link.
+            if a == z {
+                b.notes
+                    .push(format!("{id}: a stair on floor {lo} to itself, not linked"));
+                continue;
+            }
             let link = b.id()?;
             let ty = match s(st, "kind")? {
                 "stairs" => "eden:stairs",
@@ -1471,16 +1487,48 @@ pub struct BodySlot {
     pub at: Vec3,
     /// The slot's stand point (the point its `stand` names), where a body stands to take it and is set back.
     pub stand: Vec3,
+    /// The slot's boarding reach, µm (its `board_mm`; 0 when it has none): when no body can stand at or near its stand
+    /// point (a boat's side afloat), how far from the slot the clear ground it is got onto from may be.
+    pub board: i64,
 }
 
 /// Every slot that admits a body ([`BodySlot`]) on the things of `tree` whose kind's entry (`entries`, `(kind,
 /// souls-entry/1 entry)` as `worldd seed` reads them) declares one, by thing id and slot (C19, #3457: a sofa's three,
-/// a bed's two); and the count of every such slot on those things. A slot with no stand point, or a point not in whole
+/// a bed's two), the entry being the one the thing names ([`entry_name`]); and the count of every such slot on those things. A slot with no stand point, or a point not in whole
 /// millimetres, is left out.
 pub fn body_slots(
     tree: &Tree,
     entries: &[(String, replica::rules::json::Value)],
 ) -> (Vec<BodySlot>, usize) {
+    let by_kind = body_slots_by_kind(entries);
+    let (mut out, mut all) = (Vec::new(), 0);
+    let mut next = vec![tree.root()];
+    while let Some(h) = next.pop() {
+        next.extend(tree.children(h).unwrap_or(&[]).iter().copied());
+        let Some(n) = tree.node(h) else { continue };
+        all += slots_on(&by_kind, n.id(), n.kind().as_str(), n.fields(), &mut out);
+    }
+    out.sort_by_key(|s| (s.thing, s.slot));
+    (out, all)
+}
+
+/// [`body_slots`] for one thing, `id` of `kind` with its `fields` (a god edit's moved or placed thing): the entry it
+/// names in field 27, else its kind's, and its own slots when it borrows another kind's entry.
+pub fn body_slots_of(
+    id: Id,
+    kind: &str,
+    fields: &BTreeMap<u64, Value>,
+    entries: &[(String, replica::rules::json::Value)],
+) -> Vec<BodySlot> {
+    let mut out = Vec::new();
+    slots_on(&body_slots_by_kind(entries), id, kind, fields, &mut out);
+    out
+}
+
+/// Each kind's body slots, in the entry's order: (number, lie, at, stand, boarding reach).
+type ByKind<'a> = BTreeMap<&'a str, Vec<(u64, bool, Vec3, Vec3, i64)>>;
+
+fn body_slots_by_kind(entries: &[(String, replica::rules::json::Value)]) -> ByKind<'_> {
     use replica::rules::json::Value as J;
     let um = |v: Option<&J>| -> Option<Vec3> {
         match v.and_then(J::arr)? {
@@ -1492,8 +1540,7 @@ pub fn body_slots(
             _ => None,
         }
     };
-    // Each kind's body slots, in the entry's order: (number, lie, at, stand).
-    let mut by_kind: BTreeMap<&str, Vec<(u64, bool, Vec3, Vec3)>> = BTreeMap::new();
+    let mut by_kind = BTreeMap::new();
     for (kind, e) in entries {
         let slots = e.get("slots").and_then(J::obj).unwrap_or(&[]);
         let found: Vec<_> = (1u64..)
@@ -1503,30 +1550,54 @@ pub fn body_slots(
                 let stand = d.get("stand").and_then(J::str)?;
                 let stand = um(e.get("points")?.get(stand)?.get("at_mm"))?;
                 let lie = d.get("posture").and_then(J::str) == Some("lie");
-                Some((n, lie, um(d.get("at_mm"))?, stand))
+                let board = match d.get("board_mm") {
+                    Some(J::Int(mm)) => i64::try_from(*mm).ok()?.saturating_mul(1000),
+                    _ => 0,
+                };
+                Some((n, lie, um(d.get("at_mm"))?, stand, board))
             })
             .collect();
         if !found.is_empty() {
             by_kind.insert(plain(kind), found);
         }
     }
-    let (mut out, mut all) = (Vec::new(), 0);
-    let mut next = vec![tree.root()];
-    while let Some(h) = next.pop() {
-        next.extend(tree.children(h).unwrap_or(&[]).iter().copied());
-        let Some(n) = tree.node(h) else { continue };
-        let Some(found) = by_kind.get(plain(n.kind().as_str())) else {
-            continue;
+    by_kind
+}
+
+/// The body slots of one thing onto `out`; returns how many its entry declares.
+fn slots_on(
+    by_kind: &ByKind<'_>,
+    id: Id,
+    kind: &str,
+    fields: &BTreeMap<u64, Value>,
+    out: &mut Vec<BodySlot>,
+) -> usize {
+    let entry = entry_name(kind, fields);
+    let Some(found) = by_kind.get(entry) else {
+        return 0;
+    };
+    // A thing that borrows another kind's entry (field 27: a Mars chair names `eden:chair`) has its own shape: each
+    // seat is at the thing's own slot of that number (field 13, its def's geometry), its stand point kept at the
+    // entry's offset from the seat, on the floor. An entry seat the thing has no slot for is not offered.
+    let borrowed = entry != plain(kind);
+    out.extend(found.iter().filter_map(|&(slot, lie, at, stand, board)| {
+        let (at, stand) = if borrowed {
+            let own = slot_point(fields, slot)?;
+            (
+                own,
+                Vec3::new(own.x + stand.x - at.x, stand.y, own.z + stand.z - at.z),
+            )
+        } else {
+            (at, stand)
         };
-        all += found.len();
-        out.extend(found.iter().map(|&(slot, lie, at, stand)| BodySlot {
-            thing: n.id(),
+        Some(BodySlot {
+            thing: id,
             slot,
             lie,
             at,
             stand,
-        }));
-    }
-    out.sort_by_key(|s| (s.thing, s.slot));
-    (out, all)
+            board,
+        })
+    }));
+    found.len()
 }

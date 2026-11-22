@@ -18,7 +18,9 @@
 //!   `description`, `picture` (a `data:` URL) and `retire_asked`. Signed in: `POST /v1/account/souls/profile`
 //!   `{soul, name?, description?}`, `POST /v1/account/souls/picture` `{soul, picture: <base64url>}` and
 //!   `POST /v1/account/souls/retire` `{soul, confirm: true}`. The agent asks a retire with
-//!   `POST /v1/pair/retire` `{token}`, which changes nothing until the owner's retire.
+//!   `POST /v1/pair/retire` `{token}`, which changes nothing until the owner's retire. The agent sets its Soul's profile
+//!   with `POST /v1/pair/profile` `{token, name?, description?, picture?}` (`picture: null` clears it), answered with
+//!   the Soul's row, its picture as its format (#3707).
 //!
 //! The log line notes a refusal's name or a short hash of the account, never a token, secret, code or name.
 
@@ -187,15 +189,21 @@ pub fn route(
                 Some((Poll::Refused(name, device), _)) => {
                     json(200, json!({"refused": name, "device": device}), name)
                 }
-                // R18: a former Soul's answer says its former id back.
-                Some((Poll::Token { token, grant }, secret)) => match p.former_by_secret(&secret) {
-                    Some(former) => json(
-                        200,
-                        json!({"token": token, "grant": grant, "former": former}),
-                        "delivered",
-                    ),
-                    None => json(200, json!({"token": token, "grant": grant}), "delivered"),
-                },
+                Some((Poll::Token { token, grant }, secret)) => {
+                    let mut answer = json!({"token": token, "grant": grant});
+                    // R18: a former Soul's answer says its former id back.
+                    if let Some(former) = p.former_by_secret(&secret) {
+                        answer["former"] = json!(former);
+                    }
+                    // #3702: a Soul arriving in a world is given the world's welcome, when it has one.
+                    let welcome = p
+                        .world_by_secret(&secret)
+                        .and_then(|w| app.worlds.as_ref()?.welcome_of(&w).ok().flatten());
+                    if let Some(w) = welcome.filter(|_| grant.starts_with("soul-")) {
+                        answer["welcome"] = json!(w);
+                    }
+                    json(200, answer, "delivered")
+                }
             }
         }
         ("POST", "/v1/pair/show" | "/v1/pair/approve") => {
@@ -269,6 +277,47 @@ pub fn route(
                     Err((e @ "unknown-code", _)) => refuse(404, e),
                     Err((e, device)) => json(409, json!({"refused": e, "device": device}), e),
                 }
+            }
+        }
+        // #3707: the agent sets its Soul's profile with the Soul's own token, as the page does signed in: `name`,
+        // `description`, `picture` (base64url PNG or JPEG; `null` clears it). With none of them it only reads.
+        ("POST", "/v1/pair/profile") => {
+            let b = body();
+            let Some(token) = text(&b, "token") else {
+                return Some(refuse(400, "request"));
+            };
+            let (account, soul) = match p.token_owner(&token) {
+                Ok(o) => o,
+                Err(e @ "store") => return Some(refuse(500, e)),
+                Err(e) => return Some(refuse(401, e)),
+            };
+            let note = format!("account#{}", correlate(&account));
+            let profile = Profile {
+                name: text(&b, "name"),
+                description: text(&b, "description"),
+            };
+            let mut done = Ok(());
+            if profile.name.is_some() || profile.description.is_some() {
+                done = p
+                    .set_profile(&account, &soul, &profile)
+                    .map_err(str::to_string);
+            }
+            done = done.and_then(|()| match b.get("picture") {
+                None => Ok(()),
+                Some(Value::Null) => p.clear_picture(&account, &soul).map_err(str::to_string),
+                Some(v) => match v.as_str().and_then(from_b64url) {
+                    Some(file) => p.set_picture(&account, &soul, &file),
+                    None => Err("picture".into()),
+                },
+            });
+            match done.and_then(|()| p.mine_one(&account, &soul).map_err(str::to_string)) {
+                Ok(m) => {
+                    let mut row = listed(&m);
+                    row["picture"] = json!(m.picture.as_ref().map(|(format, _)| format));
+                    json(200, json!({ "ok": true, "profile": row }), note)
+                }
+                Err(e) if e == "store" || e == "souls-file" => refuse(500, &e),
+                Err(e) => refuse(400, &e),
             }
         }
         ("POST", "/v1/pair/retire") => match text(&body(), "token").map(|t| p.ask_retire(&t)) {

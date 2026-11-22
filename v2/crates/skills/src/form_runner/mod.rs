@@ -52,7 +52,8 @@
 //!
 //! - **The hatch** (F8, #2823). A form whose rule data cannot express carries one pure function, named by its module's
 //!   hash ([`bind_hatch`]); [`run_hatch`] runs it on its declared reads in `replica`'s one interpreter, so the world,
-//!   the daemon and a page give the same verdict at the same counted steps.
+//!   the daemon and a page give the same verdict at the same counted steps. A hatch may answer several fields (a
+//!   board's pieces, whose turn, the phase): with a yes, their new values, checked against their definitions.
 //!
 //! - **Turned things** (C13, #3440). A kind's points are in its own axes; the world turns a run's walk points by the
 //!   node's orientation in the tree before the run starts ([`turn`]), so a thing turned 90 degrees is walked to on its
@@ -91,7 +92,7 @@ use std::collections::BTreeMap;
 use replica::effects::Refusal;
 use replica::encode::{self, Name};
 use replica::hatch::Loaded;
-use replica::host::{Answers, Hatch, Host, Progress, Skill};
+use replica::host::{Answers, Hatch, Host, Progress, Read, Skill};
 use replica::ids::Id;
 use replica::pose::{Quat, Vec3};
 use replica::rules::json::Value;
@@ -108,11 +109,14 @@ use crate::route::{Leg, Route};
 /// (`on`), whose place the runner reads when the step starts.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Step {
-    /// Walk to a point of the node (or of thing `on`), µm in its frame.
+    /// Walk to a point of the node (or of thing `on`), µm in its frame. An `approach` is the walk the binding adds
+    /// before a form's first move at a point ([`approach`]): when the world finds no way, the move is tried from where
+    /// the body stands.
     WalkTo {
         point: Name,
         at: Vec3,
         on: Option<Id>,
+        approach: bool,
     },
     /// A move by name toward a point of the node (or of thing `on`); with no point, the move's own contact.
     Move {
@@ -144,6 +148,16 @@ pub enum Step {
 /// How far from a point a walk to it may end, µm, when a body cannot stand on the point itself (C15, #3447): an arm
 /// (the longest reach a move may state) and a body, as today's engine counts a stand point's reach.
 pub const REACH: i64 = replica::moves::REACH_MOST + 600_000;
+
+/// How far from its aim the place an approach walk ([`approach`]) goes to may be, µm: an arm, a move's usual reach
+/// (`content/moves`), as today's game looks for clear ground about the hand's point.
+pub const APPROACH_REACH: i64 = 600_000;
+
+/// How far short of the move's point, toward the body, the world aims an approach walk when the point lies on the
+/// floor the body stands on ([`short_of`]), µm: a door's handle stands in its doorway, where no body stops, so the
+/// walk aims at the clear ground before the door on the body's own side, as today's game finds clear ground by the
+/// hand's point.
+pub const APPROACH_SHORT: i64 = 500_000;
 
 /// How far from a seat's stand point the place a walk before a `sit` or `lie` step goes to may be (C17, #3453), µm:
 /// the sit's and the lie's own reach (B2's data, a body's 0.6 m) less how near the walk comes to its end
@@ -337,7 +351,12 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
                         return refuse("step-malformed", "walk_to.point: a name");
                     };
                     let (point, at, on) = aim(entry, p, args, "walk_to.point")?;
-                    Ok(Step::WalkTo { point, at, on })
+                    Ok(Step::WalkTo {
+                        point,
+                        at,
+                        on,
+                        approach: false,
+                    })
                 }
                 "take" | "put" if s.get("move").is_none() && s.get("at").is_none() => {
                     Ok(Step::Hand)
@@ -407,6 +426,7 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
             }
         })
         .collect::<Result<Vec<_>, _>>()?;
+    approach(entry, f, &mut bound)?;
     approach_in_areas(entry, &mut bound)?;
     if let Some((_, slot)) = stand_in(entry, f, args)? {
         bound.push(Step::Sit {
@@ -419,6 +439,54 @@ pub fn bind_with(entry: &Value, form: &str, args: &Args) -> Result<Vec<Step>, Re
         bound.insert(0, Step::Rise);
     }
     Ok(bound)
+}
+
+/// A form that starts with a move at one of the thing's points, with no walk before it (a door's `open` at its
+/// handle, a lamp's `switch_on` at its switch), first walks to that point: the planner stops at the nearest place
+/// within reach of it where a body may stand, as today's game walks to the stand point nearest the hand's point, else
+/// the nearest clear ground, before it acts (0.131 parity, #3688). A form whose thing is in the actor's hand
+/// (`held_by_actor`: a cup's sip, a kettle's pour) does not walk.
+fn approach(entry: &Value, f: &Value, bound: &mut Vec<Step>) -> Result<(), Refusal> {
+    let held = f
+        .get("needs")
+        .and_then(Value::arr)
+        .unwrap_or(&[])
+        .iter()
+        .any(|n| n.get("need").and_then(Value::str) == Some("held_by_actor"));
+    let Some(k) = bound.iter().position(|s| !matches!(s, Step::Wait(_))) else {
+        return Ok(());
+    };
+    if let Step::Move {
+        at: Some(p),
+        on: None,
+        ..
+    } = &bound[k]
+        && !held
+    {
+        let to = point(entry, p.as_str())?;
+        let step = Step::WalkTo {
+            point: p.clone(),
+            at: Vec3::new(to.x, 0, to.z),
+            on: None,
+            approach: true,
+        };
+        bound.insert(k, step);
+    }
+    Ok(())
+}
+
+/// Point `to` moved `by` µm toward `from` across x and z, or left where it is when `from` is nearer than that.
+pub fn short_of(to: Vec3, from: Vec3, by: i64) -> Vec3 {
+    let (dx, dz) = (
+        i128::from(from.x) - i128::from(to.x),
+        i128::from(from.z) - i128::from(to.z),
+    );
+    let len = (dx * dx + dz * dz).isqrt();
+    if len <= i128::from(by) {
+        return to;
+    }
+    let step = |d: i128| i64::try_from(d * i128::from(by) / len).unwrap_or(0);
+    Vec3::new(to.x + step(dx), to.y, to.z + step(dz))
 }
 
 /// An area is a place to be in, not a point to act from (C34, #3599): a move at a point of the thing right after a walk
@@ -450,6 +518,7 @@ fn approach_in_areas(entry: &Value, bound: &mut Vec<Step>) -> Result<(), Refusal
                 point: area.clone(),
                 at: Vec3::new(to.x, floor.y, to.z),
                 on: None,
+                approach: false,
             };
             bound.insert(k, step);
             k += 1;
@@ -538,6 +607,7 @@ pub fn turn(steps: &mut [Step], q: Quat) -> Result<(), Refusal> {
             point,
             at,
             on: None,
+            ..
         } = s
         {
             *at = q.rotate(*at).map_err(|e| Refusal {
@@ -1124,7 +1194,7 @@ fn link(entry: &Value, change: &str, e: &Value) -> Result<Effect, Refusal> {
 
 /// Binds form `form`'s hatch (F8, #2823), if it has one, into T9's shape (`replica::host::Hatch`, which refuses by
 /// name): `{"module": "prov-<multihash hex>", "reads": [{"field": name} | {"arg": name}], "steps_most": n, "answers":
-/// "verdict" | {"field": name}, "why": key}`. A read of a field the kind does not declare is `field-unknown`.
+/// "verdict" | {"field": name} | {"fields": [name, ...]}, "why": key}`. A read of a field the kind does not declare is `field-unknown`.
 pub fn bind_hatch(entry: &Value, form: &str) -> Result<Option<Hatch>, Refusal> {
     let Some(f) = entry.get("forms").and_then(|fs| fs.get(form)) else {
         return refuse("form-unknown", form);
@@ -1184,15 +1254,43 @@ pub fn bind_hatch(entry: &Value, form: &str) -> Result<Option<Hatch>, Refusal> {
     }
     let answers = match h.get("answers") {
         Some(a) if a.str() == Some("verdict") => [(1, encode::Value::Uint(1))].into(),
-        Some(a) => match a.get("field").and_then(Value::str) {
-            Some(f) => [
+        Some(a) => match (
+            a.get("field").and_then(Value::str),
+            a.get("fields").and_then(Value::arr),
+        ) {
+            (Some(f), None) => [
                 (1, encode::Value::Uint(2)),
                 (2, encode::Value::Uint(field(f)?)),
             ]
             .into(),
-            None => return refuse("hatch-not-a-record", "answers is verdict or {field}"),
+            (None, Some(fs)) => [
+                (1, encode::Value::Uint(3)),
+                (
+                    2,
+                    encode::Value::Array(
+                        fs.iter()
+                            .map(|f| match f.str() {
+                                Some(f) => field(f).map(encode::Value::Uint),
+                                None => refuse("hatch-not-a-record", "fields are names"),
+                            })
+                            .collect::<Result<_, _>>()?,
+                    ),
+                ),
+            ]
+            .into(),
+            _ => {
+                return refuse(
+                    "hatch-not-a-record",
+                    "answers is verdict, {field} or {fields}",
+                );
+            }
         },
-        None => return refuse("hatch-not-a-record", "answers is verdict or {field}"),
+        None => {
+            return refuse(
+                "hatch-not-a-record",
+                "answers is verdict, {field} or {fields}",
+            );
+        }
     };
     let steps = match h.get("steps_most") {
         Some(Value::Int(n)) => u64::try_from(*n).unwrap_or(0),
@@ -1212,25 +1310,62 @@ pub fn bind_hatch(entry: &Value, form: &str) -> Result<Option<Hatch>, Refusal> {
     .map(Some)
 }
 
-/// A read's value as the hatch's words: a whole number is one word, a list or a record its parts' words in order.
-fn words(v: &encode::Value, into: &mut Vec<i64>) -> Result<(), Refusal> {
+/// Field `n` of `entry`'s `state`: its name and definition.
+fn field_def(entry: &Value, n: u64) -> Option<(&str, &Value)> {
+    entry
+        .get("state")
+        .and_then(Value::obj)?
+        .iter()
+        .find(|(_, d)| matches!(d.get("n"), Some(Value::Int(m)) if *m == i128::from(n)))
+        .map(|(k, d)| (k.as_str(), d))
+}
+
+/// A definition's enum values, bare.
+fn enum_values(def: Option<&Value>) -> Option<&[Value]> {
+    def.filter(|d| d.get("type").and_then(Value::str) == Some("enum"))
+        .and_then(|d| d.get("values"))
+        .and_then(Value::arr)
+}
+
+/// A read's value as the hatch's words: a whole number is one word, an enum's value its place in the field's
+/// `values` (from 0), a list or a record its parts' words in order. `def` is the field's definition, when a field.
+fn words(v: &encode::Value, def: Option<&Value>, into: &mut Vec<i64>) -> Result<(), Refusal> {
     let not = || Refusal {
         name: "hatch-read-not-a-number",
-        detail: "a hatch reads whole numbers, lists and records of them".into(),
+        detail: "a hatch reads whole numbers, enums, lists and records of them".into(),
     };
+    let of = def.and_then(|d| d.get("of")).and_then(Value::obj);
     match v {
         encode::Value::Uint(n) => into.push(i64::try_from(*n).map_err(|_| not())?),
         encode::Value::Nint(n) => into.push(-1 - i64::try_from(*n).map_err(|_| not())?),
-        encode::Value::Array(vs) => vs.iter().try_for_each(|v| words(v, into))?,
-        encode::Value::Map(m) => m.values().try_for_each(|v| words(v, into))?,
-        encode::Value::Bytes(_) | encode::Value::Text(_) => return Err(not()),
+        encode::Value::Text(t) => {
+            let bare = t.as_str().split_once(':').map_or(t.as_str(), |(_, b)| b);
+            let at = enum_values(def)
+                .and_then(|vs| vs.iter().position(|x| x.str() == Some(bare)))
+                .ok_or_else(not)?;
+            into.push(at as i64);
+        }
+        encode::Value::Array(vs) => vs.iter().try_for_each(|v| words(v, def, into))?,
+        // A list's record: each part by its definition, in the list's `of` order.
+        encode::Value::Map(m) => m.iter().try_for_each(|(k, v)| {
+            let part = of
+                .and_then(|o| o.get(usize::try_from(*k).ok()?.checked_sub(1)?))
+                .map(|(_, d)| d);
+            words(v, part, into)
+        })?,
+        encode::Value::Bytes(_) => return Err(not()),
     }
     Ok(())
 }
 
-/// The words a hatch is given for the values of its declared reads, in order (`replica::hatch`'s calling convention):
-/// `hatch-reads-differ` when their number is not the declared one, `hatch-read-not-a-number` for text or bytes.
-pub fn hatch_words(hatch: &Hatch, reads: &[encode::Value]) -> Result<Vec<Vec<i64>>, Refusal> {
+/// The words a hatch is given for the values of its declared reads, in order (`replica::hatch`'s calling convention),
+/// a field's read by its definition in `entry`: `hatch-reads-differ` when their number is not the declared one,
+/// `hatch-read-not-a-number` for text or bytes.
+pub fn hatch_words(
+    entry: &Value,
+    hatch: &Hatch,
+    reads: &[encode::Value],
+) -> Result<Vec<Vec<i64>>, Refusal> {
     if reads.len() != hatch.reads.len() {
         return refuse(
             "hatch-reads-differ",
@@ -1239,42 +1374,225 @@ pub fn hatch_words(hatch: &Hatch, reads: &[encode::Value]) -> Result<Vec<Vec<i64
     }
     reads
         .iter()
-        .map(|v| {
+        .zip(&hatch.reads)
+        .map(|(v, r)| {
+            let def = match r {
+                Read::Field(n) => field_def(entry, *n).map(|(_, d)| d),
+                Read::Argument(_) => None,
+            };
             let mut w = Vec::new();
-            words(v, &mut w).map(|()| w)
+            words(v, def, &mut w).map(|()| w)
         })
         .collect()
 }
 
-/// A hatch's verdict and the steps it took. A no refuses the act with the hatch's `why` (`hatch-said-no`).
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+/// A whole number as a value.
+fn int_value(n: i64) -> encode::Value {
+    match u64::try_from(n) {
+        Ok(u) => encode::Value::Uint(u),
+        Err(_) => encode::Value::Nint(n.unsigned_abs() - 1),
+    }
+}
+
+/// A field's default, from its definition in the entry, as the value it would hold: a whole number or bool, an
+/// enum's value by name, a list's records. Anything else is `hatch-read-not-a-number`.
+fn default_value(entry: &Value, def: &Value, d: &Value) -> Result<encode::Value, Refusal> {
+    let not = || Refusal {
+        name: "hatch-read-not-a-number",
+        detail: "a hatch reads whole numbers, enums, lists and records of them".into(),
+    };
+    Ok(match d {
+        Value::Int(n) => int_value(i64::try_from(*n).map_err(|_| not())?),
+        Value::Bool(b) => encode::Value::Uint(u64::from(*b)),
+        Value::Str(v) => {
+            encode::Value::Text(Name::new(&format!("{}:{v}", namespace(entry))).ok_or_else(not)?)
+        }
+        Value::Arr(rs) => {
+            let of = def.get("of").and_then(Value::obj).unwrap_or(&[]);
+            encode::Value::Array(
+                rs.iter()
+                    .map(|r| {
+                        (1u64..)
+                            .zip(of)
+                            .map(|(k, (part, pd))| {
+                                Ok((k, default_value(entry, pd, r.get(part).ok_or_else(not)?)?))
+                            })
+                            .collect::<Result<BTreeMap<_, _>, Refusal>>()
+                            .map(encode::Value::Map)
+                    })
+                    .collect::<Result<_, _>>()?,
+            )
+        }
+        _ => return Err(not()),
+    })
+}
+
+/// The values of a hatch's declared reads, in order, for `run_hatch`: a field's from `fields` (the node's, by number),
+/// else its default; an argument's from `args`, a whole number (`arg-missing` when the act gave none,
+/// `hatch-read-not-a-number` for any other).
+pub fn hatch_reads(
+    entry: &Value,
+    hatch: &Hatch,
+    fields: &BTreeMap<u64, encode::Value>,
+    args: &Args,
+) -> Result<Vec<encode::Value>, Refusal> {
+    hatch
+        .reads
+        .iter()
+        .map(|r| match r {
+            Read::Field(n) => match fields.get(n) {
+                Some(v) => Ok(v.clone()),
+                None => {
+                    let Some((name, def)) = field_def(entry, *n) else {
+                        return refuse("field-unknown", n.to_string());
+                    };
+                    match def.get("default") {
+                        Some(d) => default_value(entry, def, d),
+                        None => refuse("field-unknown", name.to_owned()),
+                    }
+                }
+            },
+            Read::Argument(a) => match args.get(a.as_str()) {
+                Some(Arg::Int(n)) => Ok(int_value(*n)),
+                Some(_) => refuse("hatch-read-not-a-number", a.as_str().to_owned()),
+                None => refuse("arg-missing", a.as_str().to_owned()),
+            },
+        })
+        .collect()
+}
+
+/// One plain value from a hatch's word, by its definition: an int or duration within its bounds, a bool 0 or 1, an
+/// enum's value by its place. Anything else is `hatch-answer-malformed`.
+fn plain_value(entry: &Value, name: &str, def: &Value, w: i64) -> Result<encode::Value, Refusal> {
+    let bad = |why: &str| refuse("hatch-answer-malformed", format!("{name}: {w}; {why}"));
+    let bound = |k: &str| match def.get(k) {
+        Some(Value::Int(n)) => Some(*n),
+        _ => None,
+    };
+    match def.get("type").and_then(Value::str) {
+        Some("int" | "duration") => {
+            let n = i128::from(w);
+            if bound("min").is_some_and(|m| n < m) || bound("max").is_some_and(|m| n > m) {
+                return bad("out of its bounds");
+            }
+            match u64::try_from(w) {
+                Ok(u) => Ok(encode::Value::Uint(u)),
+                Err(_) if def.get("type").and_then(Value::str) == Some("int") => {
+                    Ok(encode::Value::Nint(w.unsigned_abs() - 1))
+                }
+                Err(_) => bad("a duration is not negative"),
+            }
+        }
+        Some("bool") if (0..=1).contains(&w) => Ok(encode::Value::Uint(w as u64)),
+        Some("enum") => {
+            let bare = usize::try_from(w)
+                .ok()
+                .and_then(|i| enum_values(Some(def))?.get(i)?.str());
+            match bare.and_then(|b| Name::new(&format!("{}:{b}", namespace(entry)))) {
+                Some(n) => Ok(encode::Value::Text(n)),
+                None => bad("not one of its values"),
+            }
+        }
+        _ => bad("a hatch answers whole numbers, bools, enums and lists of them"),
+    }
+}
+
+/// Field `n`'s new value from the words a hatch wrote for it: one word for a plain field, a list's records' words in
+/// its `of` order, at most its `most` records. Anything else is `hatch-answer-malformed`.
+fn field_value(entry: &Value, n: u64, w: &[i64]) -> Result<encode::Value, Refusal> {
+    let Some((name, def)) = field_def(entry, n) else {
+        return refuse("field-unknown", n.to_string());
+    };
+    if def.get("type").and_then(Value::str) != Some("list") {
+        return match w {
+            [w] => plain_value(entry, name, def, *w),
+            _ => refuse(
+                "hatch-answer-malformed",
+                format!("{name}: {} words; one", w.len()),
+            ),
+        };
+    }
+    let of = def.get("of").and_then(Value::obj).unwrap_or(&[]);
+    let most = match def.get("most") {
+        Some(Value::Int(m)) => usize::try_from(*m).unwrap_or(0),
+        _ => 0,
+    };
+    if of.is_empty() || !w.len().is_multiple_of(of.len()) || w.len() / of.len() > most {
+        return refuse(
+            "hatch-answer-malformed",
+            format!(
+                "{name}: {} words; records of {} words, at most {most}",
+                w.len(),
+                of.len()
+            ),
+        );
+    }
+    w.chunks(of.len())
+        .map(|r| {
+            (1u64..)
+                .zip(of.iter().zip(r))
+                .map(|(k, ((part, d), w))| Ok((k, plain_value(entry, part, d, *w)?)))
+                .collect::<Result<BTreeMap<_, _>, Refusal>>()
+                .map(encode::Value::Map)
+        })
+        .collect::<Result<Vec<_>, _>>()
+        .map(encode::Value::Array)
+}
+
+/// A hatch's verdict, the steps it took and, with a yes, the fields it answered with their new values, in its
+/// declared order. A no refuses the act with the hatch's `why` (`hatch-said-no`).
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Verdict {
     pub yes: bool,
     pub steps: u64,
+    pub sets: Vec<(u64, encode::Value)>,
 }
 
 /// Runs a form's hatch (F8) on the values of its declared reads, in order, through `module`, the hatch's module loaded
-/// by its hash: the verdict, or the hatch's own refusal (`hatch-over-budget`, `hatch-trapped`, ...). A fault is
-/// contained in the call. A hatch that answers a field's value is `hatch-answer-not-built`.
+/// by its hash, with `entry` the kind's entry: the verdict and the fields it answers, or the hatch's own refusal
+/// (`hatch-over-budget`, `hatch-trapped`, `hatch-output-malformed`, `hatch-answer-malformed`, ...). A fault is
+/// contained in the call. A hatch that answers one field (`{field}`) answers its value, always a yes.
 pub fn run_hatch(
     hatch: &Hatch,
     module: &Loaded,
+    entry: &Value,
     reads: &[encode::Value],
 ) -> Result<Verdict, Refusal> {
-    if hatch.answers != Answers::Verdict {
-        return refuse("hatch-answer-not-built", "a hatch answers a verdict");
-    }
-    let ran = module.run(&hatch_words(hatch, reads)?, hatch.steps_most)?;
-    match ran.answer {
-        0 | 1 => Ok(Verdict {
-            yes: ran.answer == 1,
+    let fields: &[u64] = match &hatch.answers {
+        Answers::Fields(fs) => fs,
+        _ => &[],
+    };
+    let (ran, written) = module.run_writing(
+        &hatch_words(entry, hatch, reads)?,
+        hatch.steps_most,
+        fields.len(),
+    )?;
+    if let Answers::Field(f) = hatch.answers {
+        return Ok(Verdict {
+            yes: true,
             steps: ran.steps,
-        }),
-        n => refuse(
-            "hatch-answer-malformed",
-            format!("{n}; a verdict is 1 or 0"),
-        ),
+            sets: vec![(f, field_value(entry, f, &[ran.answer])?)],
+        });
     }
+    let yes = match ran.answer {
+        0 | 1 => ran.answer == 1,
+        n => {
+            return refuse(
+                "hatch-answer-malformed",
+                format!("{n}; a verdict is 1 or 0"),
+            );
+        }
+    };
+    let sets = fields
+        .iter()
+        .zip(&written)
+        .map(|(f, w)| Ok((*f, field_value(entry, *f, w)?)))
+        .collect::<Result<Vec<_>, Refusal>>()?;
+    Ok(Verdict {
+        yes,
+        steps: ran.steps,
+        sets,
+    })
 }
 
 /// The refusal a hatch's no gives the act: `hatch-said-no`, with its `why`.
@@ -1377,6 +1695,9 @@ pub struct Runner {
     effected: bool,
     /// The Soul left during a move: the run ends `left` at the move's next phase boundary.
     leaving: bool,
+    /// The approach walk in progress crossed a link (into a building, #3688): when it ends, the body approaches the
+    /// point again from the floor it came onto.
+    again: bool,
 }
 
 impl Runner {
@@ -1399,6 +1720,7 @@ impl Runner {
             effect: false,
             effected: false,
             leaving: false,
+            again: false,
         }
     }
 
@@ -1421,6 +1743,12 @@ impl Runner {
         } else {
             self.steps.get(self.at)
         }
+    }
+
+    /// The step after the one in progress, if the run has not ended and there is one.
+    pub fn next_step(&self) -> Option<&Step> {
+        self.step()?;
+        self.steps.get(self.at + 1)
     }
 
     /// The number of the step in progress, if the run has not ended.
@@ -1450,7 +1778,9 @@ impl Runner {
             return self.end(host, name("done"));
         };
         match step {
-            Step::WalkTo { at, on, .. } => {
+            Step::WalkTo {
+                at, on, approach, ..
+            } => {
                 // A thing argument's place is read now, at the step's start (F14).
                 let Some(node) = host.read(on.unwrap_or(self.node)) else {
                     return self.end(host, name("node-gone"));
@@ -1465,6 +1795,7 @@ impl Runner {
                 // the nearest place within reach (C15), else to the point itself, on the ground the body stands on.
                 let reach = match self.steps.get(self.at + 1) {
                     Some(Step::Sit { .. }) => SIT_REACH,
+                    _ if approach => APPROACH_REACH,
                     _ => REACH,
                 };
                 let plan = node.parent.map_or(replica::host::WalkPlan::Unplanned, |p| {
@@ -1479,10 +1810,16 @@ impl Runner {
                         self.planning = true;
                         return Next::Planning;
                     }
+                    replica::host::WalkPlan::Legs(l) if l.is_empty() && approach => {
+                        // No way to the point: the move is tried from here, and judges its own reach.
+                        self.planning = false;
+                        return self.advance(host);
+                    }
                     replica::host::WalkPlan::Legs(l) if l.is_empty() => {
                         return self.end(host, name("souls:no-way"));
                     }
                     replica::host::WalkPlan::Legs(l) => {
+                        self.again = approach && !self.again && l.iter().any(|(_, k)| k.is_some());
                         l.into_iter().map(|(to, link)| Leg { to, link }).collect()
                     }
                     replica::host::WalkPlan::Unplanned => vec![Leg {
@@ -1550,6 +1887,7 @@ impl Runner {
 
     fn advance(&mut self, host: &mut dyn Host) -> Next {
         self.at += 1;
+        self.again = false;
         self.begin(host)
     }
 
@@ -1592,6 +1930,8 @@ impl Runner {
                 }
             }
             (Woke::Walked(p), Some(Step::WalkTo { .. })) => match p {
+                // In through a link: the approach again, from the floor the body came onto (#3688).
+                Progress::Done if self.again => self.begin(host),
                 Progress::Done => self.advance(host),
                 Progress::Failed(n) => self.end(host, n),
                 Progress::Going => Next::Sleep,

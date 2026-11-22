@@ -180,16 +180,22 @@ pub enum Read {
     Argument(Name),
 }
 
-/// What a hatch answers (rule 10): a verdict (yes, or no with a named reason) or one field's new value.
+/// The most fields one hatch may answer (rule 10).
+pub const HATCH_FIELDS_MOST: usize = 8;
+
+/// What a hatch answers (rule 10): a verdict (yes, or no with a named reason), one field's new value, or a verdict
+/// and, with a yes, the new values of up to [`HATCH_FIELDS_MOST`] fields, each once.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Answers {
     Verdict,
     Field(u64),
+    Fields(Vec<u64>),
 }
 
 /// The code hatch's shape (rule 10; SA-F9, #3000): one pure function, named by the hash of its module, its reads
 /// declared, a step limit and what it answers. `{1: module hash, 2: [read, ...], 3: steps most, 4: answers,
-/// 5: why}`, a read `{1: 1, 2: field}` or `{1: 2, 2: argument}`, answers `{1: 1}` a verdict or `{1: 2, 2: field}`.
+/// 5: why}`, a read `{1: 1, 2: field}` or `{1: 2, 2: argument}`, answers `{1: 1}` a verdict, `{1: 2, 2: field}` or
+/// `{1: 3, 2: [field, ...]}` a verdict and those fields' values.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Hatch {
     /// The module's SHA-256 multihash, 34 bytes (T3 rule 9).
@@ -255,6 +261,19 @@ impl Hatch {
             Some(Value::Map(a)) => match (a.get(&1), a.get(&2)) {
                 (Some(Value::Uint(1)), None) => Answers::Verdict,
                 (Some(Value::Uint(2)), Some(Value::Uint(f))) => Answers::Field(*f),
+                (Some(Value::Uint(3)), Some(Value::Array(fs))) => {
+                    let mut out: Vec<u64> = Vec::new();
+                    for f in fs {
+                        match f {
+                            Value::Uint(f) if !out.contains(f) => out.push(*f),
+                            _ => return not(),
+                        }
+                    }
+                    if out.is_empty() || out.len() > HATCH_FIELDS_MOST {
+                        return not();
+                    }
+                    Answers::Fields(out)
+                }
                 _ => return not(),
             },
             _ => return not(),

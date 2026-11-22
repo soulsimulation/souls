@@ -46,6 +46,14 @@ export type Lasting = { key: string; pos: [number, number, number]; area?: [numb
 export type Heard = { key: string; sound: ShotSound | LoopSound; loop: boolean; variant: number; pos: [number, number, number]; gain: number; offset: number; at: number };
 
 export const plain = (kind: string) => kind.split('@')[0];
+/** A kind's name without its namespace: the table was written from today's `core:` defs, and full Eden's import names
+ *  the same kinds `eden:` (#3690), so a kind is found by its own name under any namespace. */
+const bare = (kind: string) => plain(kind).slice(plain(kind).indexOf(':') + 1);
+const byName = <T>(t: Record<string, T>) => new Map(Object.entries(t).map(([k, v]) => [bare(k), v]));
+const KINDS_BY_NAME = byName(KINDS), FIELDS_BY_NAME = byName(FIELD_SOUNDS);
+/** The sounds of a kind (any namespace, any revision), or none. */
+export const kindSounds = (kind: string): Spec[] => KINDS[plain(kind)] ?? KINDS_BY_NAME.get(bare(kind)) ?? [];
+const fieldSounds = (kind: string) => FIELD_SOUNDS[plain(kind)] ?? FIELDS_BY_NAME.get(bare(kind));
 const hash = (s: string) => { let h = 0x811c9dc5; for (let i = 0; i < s.length; i++) { h ^= s.charCodeAt(i); h = Math.imul(h, 0x01000193); } return h >>> 0; };
 /** Loudness 0..1 at distance `d` m: a smooth fall to 0 at the radius (sound-plan's `falloff`). */
 export const falloff = (d: number, radius: number, volume: number) => (d >= radius ? 0 : volume * (1 - d / radius) ** 2);
@@ -58,7 +66,7 @@ export function soundsOf(rows: readonly Happened[], kindOf: (node: string) => st
     let shot: Shot | undefined;
     if (r.name !== undefined) shot = EVENT_SOUNDS[r.name];
     else if (r.field !== undefined) {
-      const f = FIELD_SOUNDS[plain(kindOf(r.node) ?? '')]?.[r.field];
+      const f = fieldSounds(kindOf(r.node) ?? '')?.[r.field];
       if (f && Number.isFinite(r.to)) shot = r.to ? f.on : f.off;
     }
     if (shot) out.push({ key: `${r.at}:${r.node}:${r.name ?? r.field}`, at: r.at, node: r.node, shot, variant: hash(r.node) % 4 });
@@ -91,7 +99,7 @@ export class Steps {
 
 /** A thing's lasting sounds, from its kind; `day` false hears the night's (crickets, frogs) and not the day's. */
 export function lastingOf(id: string, kind: string, pos: [number, number, number], area?: [number, number][]): Lasting[] {
-  return (KINDS[plain(kind)] ?? []).map((spec, i) => ({ key: `${id}#${i}`, pos, area, spec }));
+  return kindSounds(kind).map((spec, i) => ({ key: `${id}#${i}`, pos, area, spec }));
 }
 
 /** Distance in m from the listener to a source: a point, or an area's outline (0 inside). */

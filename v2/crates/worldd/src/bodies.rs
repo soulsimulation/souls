@@ -1649,6 +1649,7 @@ mod map_tests {
             kinds: rules.kinds,
         };
         let edit = Edit {
+            claim: None,
             intent: Id::new(Scope([0x95; 16]), 2).unwrap(),
             actor: Actor::Creator(creator),
             planned: live.version(),

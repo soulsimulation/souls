@@ -196,13 +196,14 @@ export function validateEntry(entry) {
     const p = `slots.${name}`;
     if (name in points) err(p, `"${name}" is already a point; a part's name is used once`);
     if (!isObj(s)) { err(p, 'a slot is an object'); continue; }
-    only(s, ['admits', 'posture', 'most', 'at_mm', 'stand', 'fits_mm', 'kinds', 'row', 'place', 'end'], p, err);
+    only(s, ['admits', 'posture', 'most', 'at_mm', 'stand', 'board_mm', 'fits_mm', 'kinds', 'row', 'place', 'end'], p, err);
     if (!SLOT_ADMITS.includes(s.admits)) err(`${p}.admits`, `must be one of ${SLOT_ADMITS.join(', ')}`);
     if (s.posture !== undefined && (s.admits !== 'body' || !POSTURES.includes(s.posture))) err(`${p}.posture`, `a body's slot only, one of ${POSTURES.join(', ')}`);
     if (!(isInt(s.most) && s.most > 0)) err(`${p}.most`, 'how many it admits, a whole number above zero');
     vec(s.at_mm, `${p}.at_mm`, err);
     if (s.fits_mm !== undefined) vec(s.fits_mm, `${p}.fits_mm`, err, true);
     if (s.stand !== undefined && points[s.stand]?.role !== 'stand') err(`${p}.stand`, 'names a point whose role is stand');
+    if (s.board_mm !== undefined && !(s.admits === 'body' && s.stand !== undefined && isInt(s.board_mm) && s.board_mm > 0)) err(`${p}.board_mm`, "a body's slot with a stand point only: how far from the slot, in whole millimetres above zero, the clear ground it is got onto from may be when no body can stand at its stand point (a boat afloat)");
     if (s.kinds !== undefined && !(s.admits === 'thing' && Array.isArray(s.kinds) && s.kinds.length > 0 && s.kinds.every(k => typeof k === 'string' && KIND.test(k)))) err(`${p}.kinds`, 'a thing slot only: the kinds it admits, a list of "namespace:name" (none listed admits any thing)');
   }
   rows(slots, err);
@@ -399,7 +400,7 @@ export function refilled(entry, name, count, us) {
 
 /** Areas (SA-D6, #2861): what a kind says about resting on it, or about a part of its surroundings, where its shape cannot.
  *  Engine v2 E3 (#2777) reads a declared area first, then surfaces, then shape, so a kind writes an area only where shape
- *  gives the wrong answer or none: a bed is for lying and sitting on its edge, a piano is for neither, a tree has shade.
+ *  gives the wrong answer or none: a bed is for lying and sitting on its edge, a piano is never lain on (its bench slot seats the pianist), a tree has shade.
  *  An area may carry `allows` (posture -> `on` the thing or on its `edge`), `forbids` (postures, by name), `takes` (kinds of
  *  thing that may be set down on it, Engine v2 E4) and a place: `at_mm` and `radius_mm`, whole millimetres in the thing's
  *  own frame, a named part of its surroundings a body can be sent to (`walk_to`). The spot a body or thing gets is the

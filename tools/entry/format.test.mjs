@@ -18,7 +18,7 @@ const refused = (entry, path, word) => {
 test('A1: the kettle, the bench and the lecture validate; three malformed entries are refused naming the field', () => {
   const [kettle, bench, lecture] = ENTRIES.map(load);
   for (const e of [kettle, bench, lecture]) assert.deepEqual(F.validateEntry(e), [], e.kind);
-  const hashes = F.hashKinds([kettle, bench, lecture, load('content/kinds/kitchen/tap.json')]);
+  const hashes = F.hashKinds([kettle, bench, lecture, load('content/kinds/kitchen/sink.json'), load('content/kinds/kitchen/cup.json')]);
   for (const e of [kettle, bench, lecture]) assert.match(hashes.get(e.kind).ref, /^eden:[a-z]+@prov-1220[0-9a-f]{64}$/);
 
   const a = copy(kettle); a.state.water.default = 'lukewarm';
@@ -58,7 +58,7 @@ test('A3: reordering a file\'s keys does not change the hash; changing a form do
   const reverse = v => Array.isArray(v) ? v.map(reverse) : v && typeof v === 'object' ? Object.fromEntries(Object.entries(v).reverse().map(([k, x]) => [k, reverse(x)])) : v;
   const reordered = reverse(kettle);
   assert.notEqual(JSON.stringify(reordered), JSON.stringify(kettle));
-  const hash = e => F.hashKinds([e, load('content/kinds/kitchen/tap.json')]).get('eden:kettle');
+  const hash = e => F.hashKinds([e, load('content/kinds/kitchen/sink.json'), load('content/kinds/kitchen/cup.json')]).get('eden:kettle');
   assert.equal(hash(reordered).hash, hash(kettle).hash);
   assert.equal(hash(reordered).beside, hash(kettle).beside);
 

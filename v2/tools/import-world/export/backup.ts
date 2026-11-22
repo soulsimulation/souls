@@ -15,6 +15,15 @@ import { WorldModel, coreLibrary, type AssetInfo, type Entity, type StoredDef } 
 const ROOT = resolve(import.meta.dirname, '../../../..');
 const CORE_INDEX = join(ROOT, 'worlds/core-assets/index.json');
 
+/** The repository's core assets as AssetStore reads them: the extra indexes beside the core index, then the core
+ *  index over them. The template replay (export.ts) resolves a template's core meshes with it too. */
+export function coreAssets(): Record<string, AssetInfo> {
+  const core: Record<string, AssetInfo> = {};
+  if (existsSync(CORE_INDEX)) for (const f of [...readdirSync(dirname(CORE_INDEX)).filter((n) => n.endsWith('.index.json')).sort().map((n) => join(dirname(CORE_INDEX), n)), CORE_INDEX])
+    Object.assign(core, (JSON.parse(readFileSync(f, 'utf8')) as { assets?: Record<string, AssetInfo> }).assets ?? {});
+  return core;
+}
+
 export type Upload = { sha: string; kind: string; ext: string; bytes: number; name: string | null };
 type MapRow = { def: string; entry?: string; waiting?: string; issue?: number; note?: string };
 
@@ -35,6 +44,13 @@ function open(path: string): DatabaseSync {
 /** Today's def ref and the map's `def` name one revision the same way: `core/door@2` is `core-door@2`. */
 const mapKey = (ref: string) => ref.replace(/^core\//, 'core-');
 
+/** A world map's entry for each def ref that has one (`souls-world-map/1` rows with an `entry`). */
+export function entryMap(mapPath: string): (ref: string) => string | undefined {
+  const rows = (JSON.parse(readFileSync(mapPath, 'utf8')).rows as MapRow[]).filter((r) => r.entry);
+  const by = new Map(rows.map((r) => [mapKey(r.def), r.entry!]));
+  return (ref) => by.get(mapKey(ref));
+}
+
 /** The model, the facts file's head, and what each thing adds to its record (its uploads, its entry or why none). */
 export function fromBackup(path: string, world: string, mapPath: string) {
   const db = open(path);
@@ -51,9 +67,7 @@ export function fromBackup(path: string, world: string, mapPath: string) {
 
     // The compiler's asset lookup: the repository's core index (as AssetStore reads it: the extra indexes beside it,
     // then the core index over them) and this world's uploads.
-    const core: Record<string, AssetInfo> = {};
-    if (existsSync(CORE_INDEX)) for (const f of [...readdirSync(dirname(CORE_INDEX)).filter((n) => n.endsWith('.index.json')).sort().map((n) => join(dirname(CORE_INDEX), n)), CORE_INDEX])
-      Object.assign(core, (JSON.parse(readFileSync(f, 'utf8')) as { assets?: Record<string, AssetInfo> }).assets ?? {});
+    const core = coreAssets();
     const own = new Map(uploads.map((u) => [u.sha, { tris: u.tris, bytes: u.bytes, textures: u.textures, box: JSON.parse(u.box),
       ...(u.kind === 'image' && (u.ext === 'png' || u.ext === 'jpg') ? { image: { ext: u.ext } } : {}) } as AssetInfo]));
     const assets = (sha: string) => own.get(sha) ?? core[sha];

@@ -17,6 +17,7 @@ import { skyLook, type SkyLook } from './palette.ts';
 import { Rain, hash01 } from './rain.ts';
 import { civil, localAt, readSky, type SkyFields, type SkyRecord } from './record.ts';
 import { daylightFactors, sunAt } from './sun.ts';
+import { hourTime } from './hour.ts';
 import { setWind } from './wind.ts';
 
 const WHITE = new THREE.Color(1, 1, 1);
@@ -155,6 +156,10 @@ export class WorldSky {
   readonly rain = new Rain();
   readonly dome = new SkyDome();
   state: SkyState = skyState(null, 0);
+  /** #3795: a picture's local hour, minutes after midnight (`?hour=HH:MM`), or null for the world's own time. Only the
+   *  sky, its light and the lit windows are drawn at it; the record in force and the rain keep world time. Without
+   *  one, a creator's staged hour (`souls-god time`, the record's `skyHour`) is drawn the same way. */
+  hour: number | null = null;
   /** The records read, each with the world time it holds from, in the order applied (a seek starts the list again). */
   private entries: { from: number; rec: SkyRecord }[] = [];
   private readonly scene: THREE.Scene;
@@ -199,7 +204,10 @@ export class WorldSky {
   }
   /** Draws world time `t` (µs); returns the direction toward the sun for the shadow's light. */
   update(t: number, camera: THREE.Camera): THREE.Vector3 {
-    const r = this.recordAt(t), s = (this.state = skyState(r, t));
+    const r = this.recordAt(t), worldT = t;
+    const hour = this.hour ?? (r?.skyHour != null ? r.skyHour / 60_000_000 : null);
+    if (r && hour !== null) t = hourTime(r, t, hour);
+    const s = (this.state = skyState(r, t));
     (this.scene.background as THREE.Color).copy(s.background);
     // V19c: a world with a palette or mist settings gets today's exp² fog, thickened by the weather's fog and rain
     // within its ground layer (thin from high up) and by cloud; its colour leans to the palette's horizon by day.
@@ -215,7 +223,7 @@ export class WorldSky {
     this.sun.intensity = s.sunIntensity;
     this.hemi.color.copy(s.hemiColour);
     this.hemi.intensity = s.hemiIntensity;
-    this.rain.update(t / 1e6, s.rain, s.daylight, camera, s.wind);
+    this.rain.update(worldT / 1e6, s.rain, s.daylight, camera, s.wind);
     const dir = new THREE.Vector3(...s.sun);
     if (dir.y < 0.05) dir.y = 0.05; // below the horizon: the shadow camera stays sane; its strength is ~0 anyway
     dir.normalize();

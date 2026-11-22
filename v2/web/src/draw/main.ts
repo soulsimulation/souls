@@ -13,22 +13,26 @@ import { SocketSource, chooseFollow, exchange, type Session } from '../source/so
 import { browserSession, localTestSignIn } from '../source/signin.ts';
 import { CrowdBodies, loadCrowd } from '../crowd/bodies.ts';
 import { WorldHover } from '../crowd/hover.ts';
-import { browserQuality } from './quality-tier.ts';
+import { browserQuality, pageMeshLod } from './quality-tier.ts';
+import { GroundLod, workerLevels, type Levels } from './lod.ts';
 import { WorldView } from './world.ts';
 import { support } from './support.ts';
 import { pageThings } from '../things/page.ts';
+import { rendererPictures } from '../things/standins.ts';
 import { HistoryPage, readMoment, historyLocation } from '../history/page.ts';
 import { WorldSound } from '../sound/sound.ts';
 import { pageSouls } from '../souls/page.ts';
 import { mountOwnerBox } from '../owner/box.ts';
 import { arrive } from '../worlds/arrive.ts';
-import { mountArrival } from '../arrival/card.ts';
+import { mountArrival, welcomeOf } from '../arrival/card.ts';
 import { WorldSky } from '../sky/sky.ts';
 import { Lightning } from '../sky/lightning.ts';
 import { tickWater } from '../water/water.ts';
 import { installNightLighting, nightPools, paintNightSources, setNightStrength } from './night.ts';
-import { installCapture } from '../capture/capture.ts';
+import { installCapture, shotSignal } from '../capture/capture.ts';
+import { parseHour } from '../sky/hour.ts';
 import { pageFx } from '../fx/page.ts';
+import { pageFauna } from '../atmosphere/page.ts';
 import { mountFullscreen, startWakeLock } from './screen.ts';
 
 installNightLighting(); // V19b: the lamps' night pools, before any lit material compiles
@@ -84,6 +88,7 @@ Object.assign(sun.shadow.camera, { left: -SHADOW, right: SHADOW, top: SHADOW, bo
 sun.shadow.camera.updateProjectionMatrix();
 scene.add(sun, sun.target);
 const sky = new WorldSky(scene, hemi, sun); // V19: sky, daylight and rain from the world node's record
+sky.hour = parseHour(location.search); // #3795: `?hour=HH:MM`, the sky and its light only
 const cam = new FreeCamera(canvas);
 const world = new WorldView();
 scene.add(world.group);
@@ -93,14 +98,16 @@ scene.add(lightning.group);
 // #3603: the replica's courseAt, loaded on this thread only when a node with a course (a rowing punt) arrives.
 world.onCourse = () => void import('replica').then(async (r) => { await r.default(); world.courseAt = r.courseAt; }, (e) => console.warn('courses stand still:', e));
 const clock = new PlaybackClock();
-const things = pageThings(scene, world, new URLSearchParams(location.search));
+const things = pageThings(scene, world, new URLSearchParams(location.search), undefined, rendererPictures(renderer)); // #3786: far stand-ins' pictures
 const fx = pageFx(scene, world, things, q, quality.tier === 'phone'); // C8: flames, fountain water and steam
+const fauna = pageFauna(scene, world, q); // N-V7: birds, gulls, ducks and butterflies
 const souls = pageSouls(canvas, world, new URLSearchParams(location.search)); // W4: chips, status, speech, a Soul's page
 const director = new CameraDirector(cam, canvas, world, souls, new URLSearchParams(location.search), moment !== null); // V20: broadcast, follow, find
 director.shots = new ViewShots(renderer, scene, () => things.layer?.settled ?? true); // #3738: Explore's pictures, from this page's own draw
-const hover = new WorldHover(canvas, () => cam.camera, { world, things: () => things.layer, name: (id) => souls.copy.souls.get(id)?.name ?? null, chipShown: (id) => souls.placed.some((p) => p.id === id) }); scene.add(hover.ring); // N-V20
-Object.assign(globalThis, { v2: { renderer, scene, sky, cam, director, world, things, fx, souls, support: () => support(world, (id) => things.layer?.things.has(id) ?? true) } }); // for V8's measure and support.mjs
+const hover = new WorldHover(canvas, () => cam.camera, { world, things: () => things.layer, name: (id) => souls.copy.souls.get(id)?.name ?? null, chipShown: (id) => souls.placed.some((p) => p.id === id), inspect: (h) => h.kind === 'soul' && souls.open(h.id) }); scene.add(hover.ring); // N-V20
+Object.assign(globalThis, { v2: { renderer, scene, sky, fauna, cam, director, world, things, fx, souls, support: () => support(world, (id) => things.layer?.things.has(id) ?? true) } }); // for V8's measure and support.mjs
 installCapture(globalThis as any, q, document); // G10: `shoot` names a place, Soul or thing and the camera goes there
+const shot = shotSignal(q, globalThis as any); // #3795: `?shot`'s ready signal, as today's page gives it
 // Bodies are drawn as V6's crowd from the body files under the page's `bodies` directory; capsules if they don't load.
 loadCrowd(new URLSearchParams(location.search).get('bodies') ?? './assets/bodies/').then((c) => world.attach(new CrowdBodies(c)), (e) => console.warn('bodies stay capsules:', e));
 
@@ -127,6 +134,8 @@ cam.look(new THREE.Vector3(0, 0, 0), 0.6, -0.7, 300);
 const firstFrame = arrive(worldName, status);
 // #3780: today's arrival card, the world's name on black and a light that grows with the stream, until the first frame.
 const card = mountArrival(document, worldName ?? installed?.world ?? 'Souls', q.has('shot') || moment !== null);
+// #3702: the world's welcome, its creator's words in the directory's list, on the card while it loads.
+if (installed) fetch(new URL('/v1/worlds', installed.directory), { credentials: 'omit' }).then((r) => r.json()).then((l) => card.greet(welcomeOf(l, installed.world)), () => {});
 let arrived = false, failedWith = '';
 const live = (address: string) => new StreamSource(address).start({
   pointer: (p) => ((pointer = p), card.reach('pointer')),
@@ -192,6 +201,19 @@ else if (worldName && !addressError) resolveWorld(worldName, new URLSearchParams
 );
 else card.fail(status.textContent = addressError || 'no stream: open this page with ?stream=<the stream directory> or ?world=<name>');
 
+// #3785: the ground drawn in sectors, simplified at a distance, once it has arrived (levels built in a worker).
+const meshLod = pageMeshLod();
+let groundLevels: Promise<Levels | null> | null = null, groundLod: GroundLod | null = null;
+function groundLodFrame(): void {
+  if (!meshLod) return;
+  if (!groundLod && world.terrainMesh) {
+    groundLevels ??= workerLevels(() => new Worker(new URL('./lod.worker.ts', import.meta.url), { type: 'module' }));
+    groundLod = new GroundLod(world.terrainMesh, world.terrainTiles, meshLod, (input) => groundLevels!.then((l) => (l ? l(input) : [])));
+    Object.assign((globalThis as any).v2, { groundLod });
+  }
+  groundLod?.update(cam.camera, canvas.clientHeight);
+}
+
 const secs = (us: number) => (us / 1e6).toFixed(2);
 const clockText = (us: number) => {
   const s = Math.floor(us / 1e6);
@@ -203,7 +225,7 @@ renderer.setAnimationLoop((now) => {
   const dt = now - last;
   fps = fps * 0.95 + (1000 / Math.max(1, dt)) * 0.05;
   last = now;
-  things.update(cam.camera.position);
+  things.update(cam.camera.position, cam.camera);
   // The shadow's square moves in whole texels, so standing shadows don't shimmer as the camera moves.
   const texel = (2 * SHADOW) / sun.shadow.mapSize.x, at = cam.controls.target;
   sun.target.position.set(Math.round(at.x / texel) * texel, at.y, Math.round(at.z / texel) * texel);
@@ -215,6 +237,7 @@ renderer.setAnimationLoop((now) => {
   tickWater((t ?? 0) / 1e6);
   fx?.update(t === null ? null : t / 1e6, cam.camera.position);
   setNightStrength(sky.state.daylight);
+  fauna?.update(now, t, sky.state);
   const pools = frames++ % 60 === 0 && things.layer ? nightPools(world, things.layer.opts.index, (id) => fx?.lit(id) ?? true) : null; // the lamps, once a second
   if (pools) paintNightSources(pools.sources, pools.bounds);
   const ck = near?.clock ?? clock;
@@ -223,6 +246,7 @@ renderer.setAnimationLoop((now) => {
   if (t !== null) {
     drawn = world.draw(t, cam.camera);
     things.follow(); // #3603: what rides a course, where it is now
+    things.drawKinds(t); // #3871: things drawn from their kinds, in their state now
     hover.update(now, t);
     if (!framed && drawn > 0) {
       framed = true;
@@ -232,7 +256,9 @@ renderer.setAnimationLoop((now) => {
       if (at) cam.look(at, 0.6, -0.6, 55);
     }
   }
+  groundLodFrame();
   renderer.render(scene, cam.camera);
+  shot.frame(t !== null && world.nodes.size > 0 && sky.recordAt(t) !== null && (things.layer?.settled ?? true)); // a world with no Souls draws no bodies, and is still ready
   if (!arrived && t !== null && world.nodes.size > 0) (arrived = true), card.reach('drawn');
   else if (!arrived && error && error !== failedWith) card.fail(failedWith = error);
   const c = cam.camera, fwd = c.getWorldDirection(new THREE.Vector3());
