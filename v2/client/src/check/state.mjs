@@ -24,6 +24,9 @@ export function kindsIn(dir) {
 }
 
 const plain = (v) => (typeof v === 'bigint' ? Number(v) : v instanceof Uint8Array ? Buffer.from(v).toString('hex') : v);
+/** A text field's value as the rules read it: its words' reference (`{21: id}`, K16) as the id's text once written,
+ *  null once cleared (`{}`) or never written, so a need on `is: null` tells them apart. */
+export const textValue = (v) => (v instanceof Map && v.has(21) ? idText(v.get(21)) : null);
 
 /** The copy (R5's `Copy`) as `{actor, nodes}` for `me`, walked from its roots. */
 export function stateOf(copy, kinds, me) {
@@ -33,7 +36,8 @@ export function stateOf(copy, kinds, me) {
     const bytes = copy.record(todo.pop());
     if (!bytes) continue;
     const m = decode(bytes), id = idText(m.get(1)), kind = entryKind(m);
-    const byN = Object.fromEntries(Object.entries(kinds[kind]?.state ?? {}).map(([name, def]) => [def.n, name]));
+    const state = kinds[kind]?.state ?? {};
+    const byN = Object.fromEntries(Object.entries(state).map(([name, def]) => [def.n, name]));
     const fields = {};
     const defs = kinds[kind]?.state ?? {};
     // An enum's value is held as its namespaced name (`eden:playing`); the entry's needs name it bare (#3713).
@@ -41,7 +45,8 @@ export function stateOf(copy, kinds, me) {
       for (const [n, v] of m.get(6)) {
         if (!byN[n]) continue;
         const def = defs[byN[n]];
-        fields[byN[n]] = def?.type === 'enum' && typeof v === 'string' ? v.slice(v.indexOf(':') + 1)
+        fields[byN[n]] = def?.type === 'text' ? textValue(v)
+          : def?.type === 'enum' && typeof v === 'string' ? v.slice(v.indexOf(':') + 1)
           // A list's records by their fields' names, in the entry's `of` order (`{1: square, 2: piece}`).
           : def?.type === 'list' && Array.isArray(v) ? v.map((r) => (r instanceof Map
             ? Object.fromEntries(Object.keys(def.of ?? {}).map((k, i) => [k, plain(r.get(i + 1) ?? r.get(BigInt(i + 1)))]))

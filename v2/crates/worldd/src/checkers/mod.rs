@@ -179,7 +179,19 @@ fn thing(record: &Cbor, entry: &Value) -> Value {
             Value::Int(n) => u64::try_from(*n).ok(),
             _ => None,
         });
-        if let Some(v) = n.and_then(|n| field(field(record, 6)?, n)).and_then(int) {
+        let Some(v) = n.and_then(|n| field(field(record, 6)?, n)) else {
+            continue;
+        };
+        // A text field reads its words' reference (`{21: id}`, K16) once written and null once cleared (`{}`), so
+        // a need on `is: null` tells them apart (#3911's finding).
+        if def.get("type").and_then(Value::str) == Some("text") {
+            let reference = field(v, replica::audience::REFERENCE)
+                .and_then(|r| replica::effects::read_id(r).ok());
+            fields.push((
+                name.clone(),
+                reference.map_or(Value::Null, |id| Value::s(&replica::world_model::show(id))),
+            ));
+        } else if let Some(v) = int(v) {
             fields.push((name.clone(), Value::Int(v)));
         }
     }
