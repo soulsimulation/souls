@@ -6,13 +6,15 @@
 //   weather [--kind clear|cloudy|rain|wind|fog|storm] [--clouds 0..1] [--rain 0..1] [--wind 0..1] [--minutes 5..360]
 //   sky --palette <name>
 //   strike <x,z | id>                 metres on the open ground, or a place or thing (its outline's middle, or its spot)
+//   time <HH:MM | live>               the hour the page draws the sky at, for a staged scene; the world's clock, its
+//                                     Souls' clocks and calendars never change (world time never stops or slows)
 //
 // A refusal is by name, with what was wrong, before anything is sent. Levels are today's 0 to 1 and E6's 0 to 100.
 
 import { decode, idText } from '../brief/copy.mjs';
 
 /** E6's fields on the world node (`v2/crates/replica/src/sky.rs`). */
-export const SKY = { DAY_S: 60, WEATHER_UNTIL: 65, PALETTE: 89, STRIKE: 69, WEATHER: 75, CLOUD: 76, RAIN: 77, WIND: 78 };
+export const SKY = { DAY_S: 60, WEATHER_UNTIL: 65, PALETTE: 89, HOUR: 91, STRIKE: 69, WEATHER: 75, CLOUD: 76, RAIN: 77, WIND: 78 };
 /** N1's fields on the open ground and its places (`v2/tools/import-eden`): an outline, the tile size and the tiles. */
 const OUTLINE = 11, TILE_SIZE = 24, TILES = 25;
 /** E6's kinds and each one's cloud, rain and wind (`sim::daylight`). */
@@ -91,6 +93,18 @@ export function skyOps(world, a) {
   return { ops: [{ op: 'set', node: world.id, field: SKY.PALETTE, value: `souls:${p}` }], says: `the sky's palette is ${p}` };
 }
 
+/** The set a staged hour makes (`replica::sky::F_SKY_HOUR`): µs after local midnight the page draws the sky at, or
+ *  `souls:live` for the world's own time; or a refusal. Display only: nothing in the world reads it. */
+export function hourOps(world, a) {
+  if (!world) return no('time.no-sky', 'this world\'s node has no sky');
+  if (a.speed !== undefined || a.pause !== undefined) return no('time.never-stops', 'world time never stops or changes speed: stage the hour shown with time <HH:MM>');
+  const h = String(a.hour ?? '');
+  if (h === 'live') return { ops: [{ op: 'set', node: world.id, field: SKY.HOUR, value: 'souls:live' }], says: 'the sky shows the world\'s own time' };
+  if (!/^([01]\d|2[0-3]):[0-5]\d$/.test(h)) return no('time.form', `time <HH:MM | live>, not ${h || 'nothing'}`);
+  const us = (Number(h.slice(0, 2)) * 60 + Number(h.slice(3))) * MINUTE_US;
+  return { ops: [{ op: 'set', node: world.id, field: SKY.HOUR, value: us }], says: `the sky is shown at ${h}; the world's clock is unchanged` };
+}
+
 const num = (v) => (typeof v === 'bigint' ? Number(v) : v);
 
 /** Where `at` names, in mm on the open ground: `x,z` metres, or a node's outline middle or spot. */
@@ -133,5 +147,6 @@ export function worldOps(copy, w, now) {
   if (w.verb === 'weather') return weatherOps(found.world, w, now);
   if (w.verb === 'sky') return skyOps(found.world, w);
   if (w.verb === 'strike') return strikeOps(found, w, now);
-  return no('edit.batch', `weather, sky or strike, not ${w.verb}`);
+  if (w.verb === 'time') return hourOps(found.world, w);
+  return no('edit.batch', `weather, sky, strike or time, not ${w.verb}`);
 }

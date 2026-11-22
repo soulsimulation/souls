@@ -46,6 +46,27 @@ test('A1: the sky draws night at noon with ?hour=23:00, and the world time it is
   assert.equal(sky.state.daylight, day);
 });
 
+test('staged hour: a creator\'s hour on the world node (field 91) draws the sky at it; live and malformed values draw world time; ?hour wins', () => {
+  const staged = (v: unknown) => skyFields(new Map<number, unknown>([...Object.entries(fields()).map(([k, x]) => [Number(k), x] as [number, unknown]), [F.skyHour, v]]))!;
+  assert.equal(readSky(staged(18 * HOUR + 30 * 60_000_000))!.skyHour, 18.5 * HOUR);
+  for (const live of ['souls:live', -1, 24 * HOUR, 1.5, null]) assert.equal(readSky(staged(live))!.skyHour, null, String(live));
+  const cam = new THREE.PerspectiveCamera(), noon = 12 * HOUR;
+  const sky = new WorldSky(new THREE.Scene(), new THREE.HemisphereLight(), new THREE.DirectionalLight(), false);
+  sky.apply([{ sky: fields() }]);
+  sky.update(noon, cam);
+  const day = sky.state.daylight;
+  sky.apply([{ sky: staged(23 * HOUR) }]);
+  sky.update(noon, cam);
+  assert.ok(day > 0.9 && sky.state.daylight < 0.05, `day ${day}, staged 23:00 ${sky.state.daylight}`);
+  sky.hour = 12 * 60;
+  sky.update(noon, cam);
+  assert.equal(sky.state.daylight, day, 'the address\'s ?hour is drawn over the staged hour');
+  sky.hour = null;
+  sky.apply([{ sky: staged('souls:live') }]);
+  sky.update(noon, cam);
+  assert.equal(sky.state.daylight, day, 'live draws the world\'s own time');
+});
+
 test("A1: ?shot titles the page 'loading', then 'ready' two frames after it is ready, once, with today's signal", () => {
   const events: string[] = [];
   const win = { document: { title: '' }, dispatchEvent: (e: Event) => (events.push(e.type), true) } as { document: { title: string }; dispatchEvent(e: Event): boolean; __shotReady?: boolean };
