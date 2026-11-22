@@ -488,6 +488,14 @@ fn a_thing_borrowing_an_entry_sits_at_its_own_slots() {
             (2, v(0, 300, 100), v(0, 0, 740)),
         ]
     );
+    // One thing alone (a god edit's moved seat) is read the same way, from its own fields.
+    let one = import_eden::body_slots_of(
+        n.id(),
+        n.kind().as_str(),
+        n.fields(),
+        &[("eden:sofa".into(), sofa.clone())],
+    );
+    assert_eq!(one, seats);
     // The same thing without field 27 is a `core:chair`, found by its own name: the sofa entry is not its.
     let im = load(SMALL).expect("loads");
     let n = im

@@ -34,6 +34,7 @@ export const REASONS = Object.freeze([
   'moves_by',
   'motion_unsaid',
   'needs_souls',
+  'none_selected',
   'bad_input',
 ]);
 export const MAX_HANDS = 8;
@@ -78,7 +79,9 @@ export type Need = {
   by?: string;
 };
 /** An argument's type. A `field` or `value` argument is a choice from the form's own closed list, `of`. */
-export type Takes = Record<string, { type: string; of?: string[]; select?: { of?: string } }>;
+export type Takes = Record<string, { type: string; of?: string[]; select?: Select }>;
+/** A selector (E2's closed list): the candidate set, an anchor, an order and a rank. */
+export type Select = { of?: string; kind?: string; in?: string; anchor?: string; order?: string; rank?: number | string };
 export type Form = {
   who?: unknown;
   starts?: string;
@@ -207,9 +210,13 @@ export function decide(input: Input): Verdict {
   if (!actor) return bad(-1, 'no_such_node', { node: state.actor });
   // A body's slot the caller left out, which the form selects from this thing's free slots, is chosen as the engine
   // chooses it (worldd `Acts`, #3802); none free is refused by name before any need is read.
-  const chosen = chosenSlots(kinds, act, state);
-  if ('none' in chosen) return { verdict: 'no', reason: 'slot_taken', need: -1, detail: { node: act.this, arg: chosen.none, free: 0 }, fix: null, read };
-  const args = chosen.args;
+  const chosen = chosenSlots(kinds, act, state, asker.sees);
+  if ('none' in chosen && !chosen.thing) return { verdict: 'no', reason: 'slot_taken', need: -1, detail: { node: act.this, arg: chosen.none, free: 0 }, fix: null, read };
+  if ('unknown' in chosen) return { verdict: 'unknown', need: -1, node: chosen.unknown, read };
+  // A thing its selector finds none of is told only once every need holds (worldd checks who may and reach first), so
+  // a far act is never a way to learn what a hiding place holds.
+  const noneSelected = 'none' in chosen ? chosen.none : null;
+  const args = 'args' in chosen ? chosen.args : { ...(act.args ?? {}) };
   // A field or value argument is one of the form's own choices, so a form never writes a field it does not name.
   const takes: Takes = form.takes && typeof form.takes === 'object' ? form.takes : {};
   for (const name of sorted(takes)) {
@@ -646,6 +653,7 @@ export function decide(input: Input): Verdict {
     if (out.ok === false) return typeof n.says === 'string' && out.no.verdict === 'no' && out.no.reason !== 'bad_input' ? { ...out.no, says: n.says } : out.no;
     if (out.ok === 'unknown' && !unknown) unknown = out.unknown;
   }
+  if (noneSelected !== null && !unknown) return { verdict: 'no', reason: 'none_selected', need: -1, detail: { node: act.this, arg: noneSelected }, fix: null, read };
   return unknown ?? { verdict: 'yes', read };
 }
 
@@ -764,7 +772,7 @@ function selectsBodySlot(form: Form, key: string): boolean {
  * input places both the actor and this thing (`at_mm`, one frame, the thing unturned), else the first free one in the
  * entry's order. `none` names an argument with no slot free.
  */
-export function chosenSlots(kinds: Record<string, Entry>, act: Input['act'], state: Input['state']): { args: Record<string, unknown> } | { none: string } {
+export function chosenSlots(kinds: Record<string, Entry>, act: Input['act'], state: Input['state'], sees: Input['asker']['sees'] = 'all'): { args: Record<string, unknown> } | { none: string; thing?: true } | { unknown: string } {
   const args = { ...(act.args ?? {}) }, nodes = state?.nodes ?? {};
   const self = has(nodes, act.this) ? nodes[act.this] : undefined;
   const entry = self?.kind && has(kinds, self.kind) ? kinds[self.kind] : undefined;
@@ -788,7 +796,65 @@ export function chosenSlots(kinds: Record<string, Entry>, act: Input['act'], sta
     for (const name of free) { const a = far(name), b = far(best); if (a !== null && b !== null && a < b) best = name; }
     args[key] = best;
   }
+  // A thing the caller left out that the form describes by a selector is chosen as the engine chooses it (worldd
+  // `select_thing`, #3914); none qualifying is refused `none_selected` (worldd `thing.none-selected`).
+  for (const key of sorted(form.takes)) {
+    const t = form.takes[key];
+    if (has(args, key) || t?.type !== 'thing' || !t.select) continue;
+    // What a closed container the asker may not see into holds is not in its copy: the choice is the world's.
+    const closed = t.select.in === 'this' ? entry.closed : undefined;
+    if (closed && !seesAudience(sees, closed.audience)) return { unknown: act.this };
+    const picked = selectThing(t.select, act.this, state);
+    if (picked === undefined) continue;
+    if (picked === null) return { none: key, thing: true };
+    args[key] = picked;
+  }
   return { args };
+}
+
+/** How far from the anchor a thing `here` may be, mm (worldd `HERE_REACH_MM`; today's tea's `TAP_REACH`). */
+export const HERE_REACH_MM = 20_000n;
+
+/** The nodes a node holds as this input states them: its children, what rests loose in it and its slots' occupants. */
+const held = (n: Node | undefined): string[] => n ? [...(n.children ?? []), ...(n.loose ?? []), ...Object.values(n.slots ?? {}).flatMap((l) => (Array.isArray(l) ? l : []) as string[])] : [];
+
+/**
+ * A thing selector bound as worldd binds it (`select_thing`, #3914): `in` `this` the act's node's things, `here` those
+ * of the node holding the actor, `parent` those of the node holding the act's node; never the act's node, the actor or
+ * a body (a node with hands); `kind` only that kind. Ordered by squared distance between `at_mm` (x, y, z) from the
+ * anchor (`me` the actor, `this` the act's node), `nearest` or `furthest` first, ties by id, one without a place after
+ * every placed one; then the rank (1, 2, ... or `last`). The id, null when none qualifies, undefined for a selector
+ * this does not read or a set the input does not state.
+ */
+export function selectThing(select: Select, self: string, state: Input['state']): string | null | undefined {
+  const nodes = state?.nodes ?? {};
+  if (select.of !== 'things') return undefined;
+  const holder = (id: string) => Object.keys(nodes).sort().find((k) => held(nodes[k]).includes(id));
+  const set = select.in === 'this' ? self : select.in === 'here' ? holder(state.actor) ?? holder(self) : select.in === 'parent' ? holder(self) : undefined;
+  const here = select.in === 'here';
+  if (select.in !== 'this' && select.in !== 'here' && select.in !== 'parent') return undefined;
+  if (select.anchor !== 'me' && select.anchor !== 'this') return undefined;
+  if (select.order !== 'nearest' && select.order !== 'furthest') return undefined;
+  if (!(select.rank === 'last' || (Number.isSafeInteger(select.rank) && (select.rank as number) >= 1))) return undefined;
+  if (set === undefined || !has(nodes, set)) return undefined;
+  const from = nodes[select.anchor === 'me' ? state.actor : self]?.at_mm;
+  const sq = (a: number[], b: number[]) => [0, 1, 2].reduce((n, k) => { const d = BigInt(a[k] ?? 0) - BigInt(b[k] ?? 0); return n + d * d; }, 0n);
+  // `here` is also what the actor holds, and only within today's reach of a thing used nearby (20 m).
+  const inHand = here ? Object.values(nodes[state.actor]?.hands ?? {}).filter((h): h is string => typeof h === 'string') : [];
+  const body = (id: string) => !!nodes[id].hands || has(nodes[id].links, 'souls:body-of');
+  const ranked = [...new Set([...held(nodes[set]), ...inHand])]
+    .filter((id) => id !== self && id !== state.actor && has(nodes, id) && !body(id))
+    .filter((id) => select.kind === undefined || nodes[id].kind === select.kind)
+    .map((id) => ({ id, d: Array.isArray(from) && Array.isArray(nodes[id].at_mm) ? sq(from, nodes[id].at_mm!) : null }))
+    .filter((r) => !here || r.d === null || r.d <= HERE_REACH_MM * HERE_REACH_MM)
+    .sort((a, b) => {
+      if (a.d !== null && b.d !== null && a.d !== b.d) return (select.order === 'furthest' ? b.d > a.d : a.d > b.d) ? 1 : -1;
+      if (a.d === null && b.d !== null) return 1;
+      if (a.d !== null && b.d === null) return -1;
+      return a.id < b.id ? -1 : a.id > b.id ? 1 : 0;
+    });
+  const pick = select.rank === 'last' ? ranked.at(-1) : ranked[(select.rank as number) - 1];
+  return pick ? pick.id : null;
 }
 
 export function whoMay(input: Input): WhoVerdict {

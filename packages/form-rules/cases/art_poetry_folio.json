@@ -1,0 +1,82 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:poetry_folio (from core-poetry-folio@1, #3716). One poem is written in the blank folio and kept: no second poem over it, no erasing.",
+  "cases": [
+    {
+      "name": "poetry_write_blank",
+      "act": {
+        "this": "t1",
+        "form": "write",
+        "args": {
+          "poem": "w_poem"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:poetry_folio"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "poetry_write_finished",
+      "act": {
+        "this": "t1",
+        "form": "write",
+        "args": {
+          "poem": "w_poem"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:poetry_folio",
+            "fields": {
+              "written": true
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "detail": {
+          "field": "written",
+          "found": true,
+          "wanted": {
+            "is": false
+          }
+        }
+      }
+    }
+  ]
+}

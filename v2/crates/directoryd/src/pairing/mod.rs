@@ -112,7 +112,13 @@ pub struct Pairing {
     guesses: Mutex<BTreeMap<String, Vec<u64>>>,
     /// Per secret hash, the last poll and the interval.
     polls: Mutex<BTreeMap<[u8; 32], (u64, u64)>>,
+    /// The most unretired Souls one account may hold (#3720): today's `MAX_SOULS_PER_USER`, 20 unless
+    /// `DIRECTORYD_SOULS_PER_ACCOUNT` says otherwise. A new Soul past it is refused `too-many`, as today.
+    pub(crate) soul_cap: usize,
 }
+
+/// Today's default per-account Soul cap (`MAX_SOULS_PER_USER`).
+pub const SOUL_CAP: usize = 20;
 
 /// A grant's text is a Soul's: `soul-<32 hex>-<counter>`.
 pub fn is_soul_grant(text: &str) -> bool {
@@ -210,6 +216,10 @@ impl Pairing {
             owner_reader: std::sync::OnceLock::new(),
             guesses: Mutex::default(),
             polls: Mutex::default(),
+            soul_cap: std::env::var("DIRECTORYD_SOULS_PER_ACCOUNT")
+                .ok()
+                .and_then(|v| v.parse().ok())
+                .unwrap_or(SOUL_CAP),
         })
     }
 
@@ -487,6 +497,9 @@ impl Pairing {
                 Some(_) => g,
             },
             None => {
+                if self.at_soul_cap(account).map_err(|e| (e, None))? {
+                    return refuse("too-many", None);
+                }
                 let id = replica::ids::Id::new(replica::ids::Scope(random()), 0)
                     .expect("counter 0 is an id");
                 let g = format!("soul-{}-{}", to_hex(&id.scope().0), id.counter());
