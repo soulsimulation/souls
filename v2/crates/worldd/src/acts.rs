@@ -717,7 +717,7 @@ impl Sight<'_> {
         let n = self.tree.node(self.tree.handle(thing)?)?;
         let r = self
             .kinds
-            .get(plain(n.kind()))?
+            .get(entry_of(&n))?
             .get("areas")?
             .get(point.as_str())?
             .get("radius_mm")?;
@@ -736,7 +736,19 @@ impl Sight<'_> {
         if n.parent() != Some(node) {
             return None;
         }
-        on_drawn_shape(&n, self.kinds.get(plain(n.kind()))?, point.as_str())
+        let entry = self.kinds.get(entry_of(&n));
+        if let Some(at) = entry.and_then(|e| on_drawn_shape(&n, e, point.as_str())) {
+            return Some(at);
+        }
+        // A thing argument names no point of the thing (#4072): the walk goes to the nearest place on its own shape,
+        // from where the body stands, carried into the thing's parent's frame.
+        let me = self.bodies.get(&body)?;
+        let (frame, parent, p) = (
+            self.place(me.pose.frame.node)?,
+            self.place(node)?,
+            me.pose.position,
+        );
+        nearest_on_drawn_shape(&n, [frame.x + p.x - parent.x, frame.z + p.z - parent.z])
     }
 }
 
@@ -753,26 +765,83 @@ pub fn on_drawn_shape(n: &replica::tree::NodeRef<'_>, entry: &Json, point: &str)
         .iter()
         .find_map(|k| um(entry.get(k)?.get(point)?.get("at_mm")))?;
     let bounds = um(entry.get("geometry")?.get("bounds_mm"))?;
-    let xz = |v: &replica::encode::Value| -> Option<Vec<[i64; 2]>> {
-        let replica::encode::Value::Array(rows) = v else {
-            return None;
-        };
-        rows.iter()
-            .map(|r| match r {
-                replica::encode::Value::Array(c) => {
-                    Some([int_of(c.first()?)? * 1000, int_of(c.get(1)?)? * 1000])
-                }
-                _ => None,
-            })
-            .collect()
-    };
-    if let Some(line) = n.fields().get(&F_LINE).and_then(xz) {
+    if let Some(line) = n.fields().get(&F_LINE).and_then(drawn) {
         if bounds.x >= 2 * bounds.z {
             return on_line(p, bounds, &line);
         }
         return on_outline(p, bounds, &line);
     }
-    on_outline(p, bounds, &n.fields().get(&F_OUTLINE).and_then(xz)?)
+    on_outline(p, bounds, &n.fields().get(&F_OUTLINE).and_then(drawn)?)
+}
+
+/// A line's or an outline's points (`[[x, z], ...]` mm) as `[x, z]` µm.
+fn drawn(v: &replica::encode::Value) -> Option<Vec<[i64; 2]>> {
+    let replica::encode::Value::Array(rows) = v else {
+        return None;
+    };
+    rows.iter()
+        .map(|r| match r {
+            replica::encode::Value::Array(c) => {
+                Some([int_of(c.first()?)? * 1000, int_of(c.get(1)?)? * 1000])
+            }
+            _ => None,
+        })
+        .collect()
+}
+
+/// The place on thing `n`'s own shape nearest `q` (`[x, z]` µm in its parent's frame), when `n` is drawn in its
+/// parent's frame (placed at its origin, with a line or an outline field), as Eden's land features are: the nearest
+/// point of its line, or of its outline's edge, or `q` itself when it is inside the outline (#4072). `None` for any
+/// other thing.
+pub fn nearest_on_drawn_shape(n: &replica::tree::NodeRef<'_>, q: [i64; 2]) -> Option<Vec3> {
+    use import_eden::{F_LINE, F_OUTLINE};
+    if n.place().is_some_and(|p| p.position != Vec3::ZERO) {
+        return None;
+    }
+    let (points, closed) = match n.fields().get(&F_LINE).and_then(drawn) {
+        Some(line) => (line, false),
+        None => (n.fields().get(&F_OUTLINE).and_then(drawn)?, true),
+    };
+    let k = points.len();
+    if k == 0 {
+        return None;
+    }
+    if closed && inside(q, &points) {
+        return Some(Vec3::new(q[0], 0, q[1]));
+    }
+    let edges = if closed { k } else { (k - 1).max(1) };
+    let near = (0..edges)
+        .map(|i| on_segment(q, points[i], points[(i + 1) % k]))
+        .min_by_key(|p| flat(q, *p))?;
+    Some(Vec3::new(near[0], 0, near[1]))
+}
+
+/// The point of segment `a`..`b` nearest `q`, across x and z (µm).
+fn on_segment(q: [i64; 2], a: [i64; 2], b: [i64; 2]) -> [i64; 2] {
+    let d = [i128::from(b[0] - a[0]), i128::from(b[1] - a[1])];
+    let w = [i128::from(q[0] - a[0]), i128::from(q[1] - a[1])];
+    let len = d[0] * d[0] + d[1] * d[1];
+    if len == 0 {
+        return a;
+    }
+    let t = (d[0] * w[0] + d[1] * w[1]).clamp(0, len);
+    [0, 1].map(|k| a[k] + i64::try_from(d[k] * t / len).unwrap_or(0))
+}
+
+/// Whether `q` is inside the closed outline `ring` (its corners in order), by the even-odd rule.
+fn inside(q: [i64; 2], ring: &[[i64; 2]]) -> bool {
+    let mut odd = false;
+    for i in 0..ring.len() {
+        let (a, b) = (ring[i], ring[(i + 1) % ring.len()]);
+        if (a[1] > q[1]) != (b[1] > q[1]) {
+            let x = i128::from(a[0])
+                + i128::from(b[0] - a[0]) * i128::from(q[1] - a[1]) / i128::from(b[1] - a[1]);
+            if i128::from(q[0]) < x {
+                odd = !odd;
+            }
+        }
+    }
+    odd
 }
 
 /// `v` stretched from `from` to `to` (µm).
