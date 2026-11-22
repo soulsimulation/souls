@@ -1,0 +1,148 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:pressed_wet_sheet",
+  "owner": "thing",
+  "state": {
+    "fibre": {
+      "n": 28,
+      "type": "int",
+      "unit": "g",
+      "default": 10,
+      "min": 0,
+      "max": 10,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "water": {
+      "n": 29,
+      "type": "int",
+      "unit": "g",
+      "default": 20,
+      "min": 0,
+      "max": 20,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "grip": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        8,
+        180
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      290,
+      16,
+      420
+    ]
+  },
+  "forms": {
+    "take": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "take"
+        }
+      ],
+      "effects": [
+        {
+          "change": "reparent",
+          "what": "this",
+          "into": "actor_hand",
+          "event": "wet_sheet_taken"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "one_hand"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:pressed_wet_sheet",
+    "table": [],
+    "shape": {
+      "round": 1,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            6,
+            0
+          ],
+          "size": [
+            290,
+            12,
+            420
+          ],
+          "tint": "wet"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -141,
+            7,
+            0
+          ],
+          "size": [
+            8,
+            14,
+            410
+          ],
+          "tint": "edge"
+        }
+      ],
+      "palette": {
+        "wet": "#dfd0aa",
+        "edge": "#bca785"
+      },
+      "tags": [
+        "paper",
+        "wet",
+        "sheet",
+        "craft",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "card": "A pressed wet sheet retaining 10 g fibre and 20 g water; carry it by hand.",
+    "paper": "paper",
+    "wet_sheet": "wet sheet",
+    "howto": "Take the wet sheet from its shelf with a free hand, then set it down. It remains wet: this kind has no drying or writing form."
+  },
+  "card": {
+    "text": "card",
+    "category": "paper",
+    "synonyms": [
+      "wet_sheet"
+    ]
+  },
+  "howtos": {
+    "carry_wet_sheet": {
+      "text": "howto",
+      "steps": [
+        {
+          "form": "take"
+        }
+      ]
+    }
+  }
+}

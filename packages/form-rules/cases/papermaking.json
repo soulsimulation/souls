@@ -1,0 +1,2040 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "Papermaking fixed portions: every form and every independent need, exact WIP, wrong stage, insufficient stock, drain capacity, hands, reach and occupied output.",
+  "cases": [
+    {
+      "name": "form_sheet_ready",
+      "act": {
+        "this": "p1",
+        "form": "form_sheet"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 30,
+              "water": 1200,
+              "mat_fibre": 0,
+              "mat_water": 0,
+              "drain_water": 0,
+              "stage": 0
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -500,
+              900,
+              285
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "form_sheet_needs_0_state_stage",
+      "act": {
+        "this": "p1",
+        "form": "form_sheet"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 30,
+              "water": 1200,
+              "mat_fibre": 0,
+              "mat_water": 0,
+              "drain_water": 0,
+              "stage": 1
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -500,
+              900,
+              285
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "says": "resume_stage"
+      }
+    },
+    {
+      "name": "form_sheet_needs_1_state_mat_fibre",
+      "act": {
+        "this": "p1",
+        "form": "form_sheet"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 30,
+              "water": 1200,
+              "mat_fibre": 1,
+              "mat_water": 0,
+              "drain_water": 0,
+              "stage": 0
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -500,
+              900,
+              285
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "says": "mat_mismatch"
+      }
+    },
+    {
+      "name": "form_sheet_needs_2_state_mat_water",
+      "act": {
+        "this": "p1",
+        "form": "form_sheet"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 30,
+              "water": 1200,
+              "mat_fibre": 0,
+              "mat_water": 1,
+              "drain_water": 0,
+              "stage": 0
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -500,
+              900,
+              285
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2,
+        "says": "mat_mismatch"
+      }
+    },
+    {
+      "name": "form_sheet_needs_3_state_fibre",
+      "act": {
+        "this": "p1",
+        "form": "form_sheet"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 9,
+              "water": 1200,
+              "mat_fibre": 0,
+              "mat_water": 0,
+              "drain_water": 0,
+              "stage": 0
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -500,
+              900,
+              285
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 3,
+        "says": "no_fibre"
+      }
+    },
+    {
+      "name": "form_sheet_needs_4_state_water",
+      "act": {
+        "this": "p1",
+        "form": "form_sheet"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 30,
+              "water": 399,
+              "mat_fibre": 0,
+              "mat_water": 0,
+              "drain_water": 0,
+              "stage": 0
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -500,
+              900,
+              285
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 4,
+        "says": "no_water"
+      }
+    },
+    {
+      "name": "form_sheet_needs_5_hand_",
+      "act": {
+        "this": "p1",
+        "form": "form_sheet"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 30,
+              "water": 1200,
+              "mat_fibre": 0,
+              "mat_water": 0,
+              "drain_water": 0,
+              "stage": 0
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              -500,
+              900,
+              285
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 5,
+        "says": "empty_hands"
+      }
+    },
+    {
+      "name": "form_sheet_needs_6_within_reach_",
+      "act": {
+        "this": "p1",
+        "form": "form_sheet"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 30,
+              "water": 1200,
+              "mat_fibre": 0,
+              "mat_water": 0,
+              "drain_water": 0,
+              "stage": 0
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              900,
+              270
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 6
+      }
+    },
+    {
+      "name": "drain_mesh_ready",
+      "act": {
+        "this": "p1",
+        "form": "drain_mesh"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 20,
+              "water": 800,
+              "mat_fibre": 10,
+              "mat_water": 400,
+              "drain_water": 0,
+              "stage": 1
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -500,
+              900,
+              285
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "drain_mesh_needs_0_state_stage",
+      "act": {
+        "this": "p1",
+        "form": "drain_mesh"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 20,
+              "water": 800,
+              "mat_fibre": 10,
+              "mat_water": 400,
+              "drain_water": 0,
+              "stage": 0
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -500,
+              900,
+              285
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "says": "resume_stage"
+      }
+    },
+    {
+      "name": "drain_mesh_needs_1_state_mat_fibre",
+      "act": {
+        "this": "p1",
+        "form": "drain_mesh"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 20,
+              "water": 800,
+              "mat_fibre": 0,
+              "mat_water": 400,
+              "drain_water": 0,
+              "stage": 1
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -500,
+              900,
+              285
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "says": "mat_mismatch"
+      }
+    },
+    {
+      "name": "drain_mesh_needs_2_state_mat_water",
+      "act": {
+        "this": "p1",
+        "form": "drain_mesh"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 20,
+              "water": 800,
+              "mat_fibre": 10,
+              "mat_water": 0,
+              "drain_water": 0,
+              "stage": 1
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -500,
+              900,
+              285
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2,
+        "says": "mat_mismatch"
+      }
+    },
+    {
+      "name": "drain_mesh_needs_3_room_",
+      "act": {
+        "this": "p1",
+        "form": "drain_mesh"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 20,
+              "water": 800,
+              "mat_fibre": 10,
+              "mat_water": 400,
+              "drain_water": 1200,
+              "stage": 1
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -500,
+              900,
+              285
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_room",
+        "need": 3
+      }
+    },
+    {
+      "name": "drain_mesh_needs_4_hand_",
+      "act": {
+        "this": "p1",
+        "form": "drain_mesh"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 20,
+              "water": 800,
+              "mat_fibre": 10,
+              "mat_water": 400,
+              "drain_water": 0,
+              "stage": 1
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              -500,
+              900,
+              285
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 4,
+        "says": "empty_hands"
+      }
+    },
+    {
+      "name": "drain_mesh_needs_5_within_reach_",
+      "act": {
+        "this": "p1",
+        "form": "drain_mesh"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 20,
+              "water": 800,
+              "mat_fibre": 10,
+              "mat_water": 400,
+              "drain_water": 0,
+              "stage": 1
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              900,
+              270
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 5
+      }
+    },
+    {
+      "name": "couch_sheet_ready",
+      "act": {
+        "this": "p1",
+        "form": "couch_sheet"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 20,
+              "water": 800,
+              "mat_fibre": 10,
+              "mat_water": 100,
+              "drain_water": 300,
+              "stage": 2
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              270
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "couch_sheet_needs_0_state_stage",
+      "act": {
+        "this": "p1",
+        "form": "couch_sheet"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 20,
+              "water": 800,
+              "mat_fibre": 10,
+              "mat_water": 100,
+              "drain_water": 300,
+              "stage": 0
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              270
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "says": "resume_stage"
+      }
+    },
+    {
+      "name": "couch_sheet_needs_1_state_mat_fibre",
+      "act": {
+        "this": "p1",
+        "form": "couch_sheet"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 20,
+              "water": 800,
+              "mat_fibre": 0,
+              "mat_water": 100,
+              "drain_water": 300,
+              "stage": 2
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              270
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "says": "mat_mismatch"
+      }
+    },
+    {
+      "name": "couch_sheet_needs_2_state_mat_water",
+      "act": {
+        "this": "p1",
+        "form": "couch_sheet"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 20,
+              "water": 800,
+              "mat_fibre": 10,
+              "mat_water": 0,
+              "drain_water": 300,
+              "stage": 2
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              270
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2,
+        "says": "mat_mismatch"
+      }
+    },
+    {
+      "name": "couch_sheet_needs_3_hand_",
+      "act": {
+        "this": "p1",
+        "form": "couch_sheet"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 20,
+              "water": 800,
+              "mat_fibre": 10,
+              "mat_water": 100,
+              "drain_water": 300,
+              "stage": 2
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              270
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 3,
+        "says": "empty_hands"
+      }
+    },
+    {
+      "name": "couch_sheet_needs_4_within_reach_",
+      "act": {
+        "this": "p1",
+        "form": "couch_sheet"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 20,
+              "water": 800,
+              "mat_fibre": 10,
+              "mat_water": 100,
+              "drain_water": 300,
+              "stage": 2
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              900,
+              270
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 4
+      }
+    },
+    {
+      "name": "press_sheet_ready",
+      "act": {
+        "this": "p1",
+        "form": "press_sheet"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 20,
+              "water": 800,
+              "mat_fibre": 10,
+              "mat_water": 100,
+              "drain_water": 300,
+              "stage": 3
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              270
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "press_sheet_needs_0_state_stage",
+      "act": {
+        "this": "p1",
+        "form": "press_sheet"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 20,
+              "water": 800,
+              "mat_fibre": 10,
+              "mat_water": 100,
+              "drain_water": 300,
+              "stage": 0
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              270
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "says": "resume_stage"
+      }
+    },
+    {
+      "name": "press_sheet_needs_1_state_mat_fibre",
+      "act": {
+        "this": "p1",
+        "form": "press_sheet"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 20,
+              "water": 800,
+              "mat_fibre": 0,
+              "mat_water": 100,
+              "drain_water": 300,
+              "stage": 3
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              270
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "says": "mat_mismatch"
+      }
+    },
+    {
+      "name": "press_sheet_needs_2_state_mat_water",
+      "act": {
+        "this": "p1",
+        "form": "press_sheet"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 20,
+              "water": 800,
+              "mat_fibre": 10,
+              "mat_water": 0,
+              "drain_water": 300,
+              "stage": 3
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              270
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2,
+        "says": "mat_mismatch"
+      }
+    },
+    {
+      "name": "press_sheet_needs_3_room_",
+      "act": {
+        "this": "p1",
+        "form": "press_sheet"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 20,
+              "water": 800,
+              "mat_fibre": 10,
+              "mat_water": 100,
+              "drain_water": 1200,
+              "stage": 3
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              270
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_room",
+        "need": 3
+      }
+    },
+    {
+      "name": "press_sheet_needs_4_hand_",
+      "act": {
+        "this": "p1",
+        "form": "press_sheet"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 20,
+              "water": 800,
+              "mat_fibre": 10,
+              "mat_water": 100,
+              "drain_water": 300,
+              "stage": 3
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              900,
+              270
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 4,
+        "says": "empty_hands"
+      }
+    },
+    {
+      "name": "press_sheet_needs_5_within_reach_",
+      "act": {
+        "this": "p1",
+        "form": "press_sheet"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 20,
+              "water": 800,
+              "mat_fibre": 10,
+              "mat_water": 100,
+              "drain_water": 300,
+              "stage": 3
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              900,
+              270
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 5
+      }
+    },
+    {
+      "name": "lift_sheet_ready",
+      "act": {
+        "this": "p1",
+        "form": "lift_sheet"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 20,
+              "water": 800,
+              "mat_fibre": 10,
+              "mat_water": 20,
+              "drain_water": 380,
+              "stage": 4
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              610,
+              880,
+              270
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "lift_sheet_needs_0_state_stage",
+      "act": {
+        "this": "p1",
+        "form": "lift_sheet"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 20,
+              "water": 800,
+              "mat_fibre": 10,
+              "mat_water": 20,
+              "drain_water": 380,
+              "stage": 0
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              610,
+              880,
+              270
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0,
+        "says": "resume_stage"
+      }
+    },
+    {
+      "name": "lift_sheet_needs_1_state_mat_fibre",
+      "act": {
+        "this": "p1",
+        "form": "lift_sheet"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 20,
+              "water": 800,
+              "mat_fibre": 0,
+              "mat_water": 20,
+              "drain_water": 380,
+              "stage": 4
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              610,
+              880,
+              270
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "says": "mat_mismatch"
+      }
+    },
+    {
+      "name": "lift_sheet_needs_2_state_mat_water",
+      "act": {
+        "this": "p1",
+        "form": "lift_sheet"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 20,
+              "water": 800,
+              "mat_fibre": 10,
+              "mat_water": 0,
+              "drain_water": 380,
+              "stage": 4
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              610,
+              880,
+              270
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2,
+        "says": "mat_mismatch"
+      }
+    },
+    {
+      "name": "lift_sheet_needs_3_slot_free_",
+      "act": {
+        "this": "p1",
+        "form": "lift_sheet"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 20,
+              "water": 800,
+              "mat_fibre": 10,
+              "mat_water": 20,
+              "drain_water": 380,
+              "stage": 4
+            },
+            "slots": {
+              "out": [
+                "old_sheet"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              610,
+              880,
+              270
+            ]
+          },
+          "old_sheet": {
+            "kind": "eden:pressed_wet_sheet"
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_full",
+        "need": 3,
+        "says": "clear_output"
+      }
+    },
+    {
+      "name": "lift_sheet_needs_4_hand_",
+      "act": {
+        "this": "p1",
+        "form": "lift_sheet"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 20,
+              "water": 800,
+              "mat_fibre": 10,
+              "mat_water": 20,
+              "drain_water": 380,
+              "stage": 4
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              610,
+              880,
+              270
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 4,
+        "says": "empty_hands"
+      }
+    },
+    {
+      "name": "lift_sheet_needs_5_within_reach_",
+      "act": {
+        "this": "p1",
+        "form": "lift_sheet"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:papermaking_station",
+            "fields": {
+              "fibre": 20,
+              "water": 800,
+              "mat_fibre": 10,
+              "mat_water": 20,
+              "drain_water": 380,
+              "stage": 4
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              900,
+              270
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 5
+      }
+    },
+    {
+      "name": "wet_sheet_take_free_hand",
+      "act": {
+        "this": "s1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {
+            "kind": "eden:pressed_wet_sheet"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": "x2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "wet_sheet_take_both_hands_full",
+      "act": {
+        "this": "s1",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "s1": {
+            "kind": "eden:pressed_wet_sheet"
+          },
+          "b1": {
+            "hands": {
+              "left": "x1",
+              "right": "x2"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0
+      }
+    }
+  ]
+}

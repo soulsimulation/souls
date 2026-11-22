@@ -1,0 +1,1143 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:papermaking_station",
+  "owner": "thing",
+  "state": {
+    "fibre": {
+      "n": 28,
+      "type": "int",
+      "unit": "g",
+      "default": 30,
+      "min": 0,
+      "max": 30,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "water": {
+      "n": 29,
+      "type": "int",
+      "unit": "g",
+      "default": 1200,
+      "min": 0,
+      "max": 1200,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "mat_fibre": {
+      "n": 30,
+      "type": "int",
+      "unit": "g",
+      "default": 0,
+      "min": 0,
+      "max": 10,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "mat_water": {
+      "n": 31,
+      "type": "int",
+      "unit": "g",
+      "default": 0,
+      "min": 0,
+      "max": 400,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "drain_water": {
+      "n": 32,
+      "type": "int",
+      "unit": "g",
+      "default": 0,
+      "min": 0,
+      "max": 1200,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "stage": {
+      "n": 33,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 4,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "mesh_stand": {
+      "role": "stand",
+      "at_mm": [
+        -500,
+        0,
+        750
+      ],
+      "yaw_mdeg": 180000
+    },
+    "press_stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        750
+      ],
+      "yaw_mdeg": 180000
+    },
+    "out_stand": {
+      "role": "stand",
+      "at_mm": [
+        610,
+        0,
+        750
+      ],
+      "yaw_mdeg": 180000
+    },
+    "mesh": {
+      "role": "contact",
+      "at_mm": [
+        -500,
+        900,
+        285
+      ]
+    },
+    "press": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        900,
+        270
+      ]
+    },
+    "lift": {
+      "role": "contact",
+      "at_mm": [
+        610,
+        880,
+        270
+      ]
+    }
+  },
+  "slots": {
+    "out": {
+      "admits": "thing",
+      "kinds": [
+        "eden:pressed_wet_sheet"
+      ],
+      "most": 1,
+      "at_mm": [
+        610,
+        874,
+        30
+      ],
+      "fits_mm": [
+        300,
+        20,
+        430
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      2000,
+      1180,
+      900
+    ]
+  },
+  "forms": {
+    "form_sheet": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "stage",
+          "is": 0,
+          "says": "resume_stage"
+        },
+        {
+          "need": "state",
+          "field": "mat_fibre",
+          "is": 0,
+          "says": "mat_mismatch"
+        },
+        {
+          "need": "state",
+          "field": "mat_water",
+          "is": 0,
+          "says": "mat_mismatch"
+        },
+        {
+          "need": "state",
+          "field": "fibre",
+          "at_least": 10,
+          "says": "no_fibre"
+        },
+        {
+          "need": "state",
+          "field": "water",
+          "at_least": 400,
+          "says": "no_water"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "mesh"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "mesh_stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "mesh"
+        },
+        {
+          "step": "wait",
+          "us": 4000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "fibre",
+          "from": "this",
+          "into": "this",
+          "into_field": "mat_fibre",
+          "amount": 10,
+          "event": "fibre_formed"
+        },
+        {
+          "change": "transfer",
+          "field": "water",
+          "from": "this",
+          "into": "this",
+          "into_field": "mat_water",
+          "amount": 400,
+          "event": "water_formed"
+        },
+        {
+          "change": "set",
+          "field": "stage",
+          "to": 1,
+          "event": "stage_completed"
+        }
+      ]
+    },
+    "drain_mesh": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "stage",
+          "is": 1,
+          "says": "resume_stage"
+        },
+        {
+          "need": "state",
+          "field": "mat_fibre",
+          "is": 10,
+          "says": "mat_mismatch"
+        },
+        {
+          "need": "state",
+          "field": "mat_water",
+          "is": 400,
+          "says": "mat_mismatch"
+        },
+        {
+          "need": "room"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "mesh"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "mesh_stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "mesh"
+        },
+        {
+          "step": "wait",
+          "us": 3000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "mat_water",
+          "from": "this",
+          "into": "this",
+          "into_field": "drain_water",
+          "amount": 300,
+          "event": "mesh_drained"
+        },
+        {
+          "change": "set",
+          "field": "stage",
+          "to": 2,
+          "event": "stage_completed"
+        }
+      ]
+    },
+    "couch_sheet": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "stage",
+          "is": 2,
+          "says": "resume_stage"
+        },
+        {
+          "need": "state",
+          "field": "mat_fibre",
+          "is": 10,
+          "says": "mat_mismatch"
+        },
+        {
+          "need": "state",
+          "field": "mat_water",
+          "is": 100,
+          "says": "mat_mismatch"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "press"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "press_stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "press"
+        },
+        {
+          "step": "wait",
+          "us": 3000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "stage",
+          "to": 3,
+          "event": "stage_completed"
+        }
+      ]
+    },
+    "press_sheet": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "stage",
+          "is": 3,
+          "says": "resume_stage"
+        },
+        {
+          "need": "state",
+          "field": "mat_fibre",
+          "is": 10,
+          "says": "mat_mismatch"
+        },
+        {
+          "need": "state",
+          "field": "mat_water",
+          "is": 100,
+          "says": "mat_mismatch"
+        },
+        {
+          "need": "room"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "press"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "press_stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "press"
+        },
+        {
+          "step": "wait",
+          "us": 4000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "transfer",
+          "field": "mat_water",
+          "from": "this",
+          "into": "this",
+          "into_field": "drain_water",
+          "amount": 80,
+          "event": "sheet_pressed"
+        },
+        {
+          "change": "set",
+          "field": "stage",
+          "to": 4,
+          "event": "stage_completed"
+        }
+      ]
+    },
+    "lift_sheet": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "stage",
+          "is": 4,
+          "says": "resume_stage"
+        },
+        {
+          "need": "state",
+          "field": "mat_fibre",
+          "is": 10,
+          "says": "mat_mismatch"
+        },
+        {
+          "need": "state",
+          "field": "mat_water",
+          "is": 20,
+          "says": "mat_mismatch"
+        },
+        {
+          "need": "slot_free",
+          "slot": "out",
+          "says": "clear_output"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "lift"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "out_stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "lift"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "mat_fibre",
+          "by": -10,
+          "event": "mat_fibre_lifted"
+        },
+        {
+          "change": "set",
+          "field": "mat_water",
+          "by": -20,
+          "event": "mat_water_lifted"
+        },
+        {
+          "change": "create",
+          "kind": "eden:pressed_wet_sheet",
+          "into": "out",
+          "set": [
+            {
+              "field": "fibre",
+              "to": 10
+            },
+            {
+              "field": "water",
+              "to": 20
+            }
+          ],
+          "event": "wet_sheet_lifted"
+        },
+        {
+          "change": "set",
+          "field": "stage",
+          "to": 0,
+          "event": "stage_completed"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:papermaking_station",
+    "table": [
+      {
+        "part": "water_stock",
+        "field": "water",
+        "do": "scale",
+        "axis": "y",
+        "range": [
+          0,
+          1200
+        ],
+        "to": [
+          0,
+          1000
+        ]
+      },
+      {
+        "part": "fibre_stock",
+        "field": "fibre",
+        "do": "scale",
+        "axis": "x",
+        "range": [
+          0,
+          30
+        ],
+        "to": [
+          0,
+          1000
+        ]
+      },
+      {
+        "part": "drain",
+        "field": "drain_water",
+        "do": "scale",
+        "axis": "y",
+        "range": [
+          0,
+          1200
+        ],
+        "to": [
+          0,
+          1000
+        ]
+      },
+      {
+        "part": "mesh_mat",
+        "field": "stage",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 1,
+          "2": 1,
+          "3": 0,
+          "4": 0
+        }
+      },
+      {
+        "part": "press_mat",
+        "field": "stage",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 1,
+          "4": 1
+        }
+      },
+      {
+        "part": "mesh_mat",
+        "field": "mat_water",
+        "do": "scale",
+        "axis": "y",
+        "range": [
+          0,
+          400
+        ],
+        "to": [
+          150,
+          1000
+        ]
+      },
+      {
+        "part": "press_mat",
+        "field": "mat_water",
+        "do": "scale",
+        "axis": "y",
+        "range": [
+          0,
+          400
+        ],
+        "to": [
+          150,
+          1000
+        ]
+      },
+      {
+        "part": "platen",
+        "field": "stage",
+        "do": "slide",
+        "axis": "y",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": -170
+        }
+      },
+      {
+        "part": "screw",
+        "field": "stage",
+        "do": "slide",
+        "axis": "y",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": -170
+        }
+      }
+    ],
+    "shape": {
+      "round": 2,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            830,
+            0
+          ],
+          "size": [
+            1900,
+            60,
+            850
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -880,
+            400,
+            -350
+          ],
+          "size": [
+            60,
+            800,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -880,
+            400,
+            350
+          ],
+          "size": [
+            60,
+            800,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            880,
+            400,
+            -350
+          ],
+          "size": [
+            60,
+            800,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            880,
+            400,
+            350
+          ],
+          "size": [
+            60,
+            800,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -500,
+            866,
+            30
+          ],
+          "size": [
+            560,
+            12,
+            480
+          ],
+          "tint": "mesh"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -790,
+            885,
+            30
+          ],
+          "size": [
+            25,
+            45,
+            530
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -210,
+            885,
+            30
+          ],
+          "size": [
+            25,
+            45,
+            530
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -500,
+            885,
+            -225
+          ],
+          "size": [
+            600,
+            45,
+            25
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -500,
+            885,
+            285
+          ],
+          "size": [
+            600,
+            45,
+            25
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            874,
+            30
+          ],
+          "size": [
+            340,
+            28,
+            480
+          ],
+          "tint": "cloth"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -200,
+            990,
+            -210
+          ],
+          "size": [
+            30,
+            260,
+            35
+          ],
+          "tint": "metal"
+        },
+        {
+          "kind": "box",
+          "at": [
+            200,
+            990,
+            -210
+          ],
+          "size": [
+            30,
+            260,
+            35
+          ],
+          "tint": "metal"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1120,
+            -210
+          ],
+          "size": [
+            430,
+            30,
+            45
+          ],
+          "tint": "metal"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1082,
+            30
+          ],
+          "size": [
+            330,
+            35,
+            460
+          ],
+          "tint": "wood",
+          "role": "platen"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1050,
+            -210
+          ],
+          "size": [
+            25,
+            130,
+            25
+          ],
+          "tint": "metal",
+          "role": "screw"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1144,
+            -210
+          ],
+          "size": [
+            180,
+            20,
+            25
+          ],
+          "tint": "metal"
+        },
+        {
+          "kind": "box",
+          "at": [
+            610,
+            867,
+            30
+          ],
+          "size": [
+            500,
+            14,
+            480
+          ],
+          "tint": "shelf"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -500,
+            877,
+            30
+          ],
+          "size": [
+            500,
+            20,
+            420
+          ],
+          "tint": "wet",
+          "role": "mesh_mat",
+          "pivot": [
+            -500,
+            867,
+            30
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            900,
+            30
+          ],
+          "size": [
+            290,
+            20,
+            420
+          ],
+          "tint": "wet",
+          "role": "press_mat",
+          "pivot": [
+            0,
+            890,
+            30
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -610,
+            940,
+            -330
+          ],
+          "size": [
+            430,
+            140,
+            120
+          ],
+          "tint": "water",
+          "role": "water_stock",
+          "pivot": [
+            -610,
+            870,
+            -330
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            520,
+            930,
+            -330
+          ],
+          "size": [
+            400,
+            120,
+            120
+          ],
+          "tint": "fibre",
+          "role": "fibre_stock",
+          "pivot": [
+            320,
+            870,
+            -330
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -500,
+            500,
+            30
+          ],
+          "size": [
+            550,
+            30,
+            470
+          ],
+          "tint": "metal"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -500,
+            580,
+            30
+          ],
+          "size": [
+            500,
+            130,
+            420
+          ],
+          "tint": "water",
+          "role": "drain",
+          "pivot": [
+            -500,
+            515,
+            30
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -780,
+            590,
+            30
+          ],
+          "size": [
+            20,
+            180,
+            480
+          ],
+          "tint": "metal"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -220,
+            590,
+            30
+          ],
+          "size": [
+            20,
+            180,
+            480
+          ],
+          "tint": "metal"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -500,
+            590,
+            -205
+          ],
+          "size": [
+            580,
+            180,
+            20
+          ],
+          "tint": "metal"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -500,
+            590,
+            265
+          ],
+          "size": [
+            580,
+            180,
+            20
+          ],
+          "tint": "metal"
+        }
+      ],
+      "palette": {
+        "wood": "#93704b",
+        "metal": "#626b70",
+        "mesh": "#868b80",
+        "cloth": "#c9b896",
+        "wet": "#dfd0aa",
+        "water": "#3677a5",
+        "fibre": "#c7a76b",
+        "shelf": "#b28b5b"
+      },
+      "tags": [
+        "papermaking",
+        "deckle",
+        "craft",
+        "bench",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "card": "Form, drain, couch and press three wet sheets from supplied fibre and water.",
+    "craft": "craft",
+    "papermaking": "papermaking",
+    "deckle": "deckle",
+    "wet_sheet": "wet sheet",
+    "resume_stage": "Continue the existing mat in order: form, drain, couch, press, then lift.",
+    "mat_mismatch": "The mat must hold exactly the material for this stage.",
+    "no_fibre": "The supplied fibre is used up; this station has no refill form.",
+    "no_water": "There is not enough supplied water for another mat.",
+    "empty_hands": "Put down what you are holding before working the mat.",
+    "clear_output": "Take the previous wet sheet off the output shelf before lifting this mat.",
+    "howto": "With empty hands: form a mat, drain its mesh, couch it onto the press bed, press it, and lift one wet sheet onto the output shelf. Take that sheet before the next lift. Each sheet retains 10 g fibre and 20 g water; the tray keeps the other 380 g water. Stocks supply three sheets. This is pressed wet material, with no drying step."
+  },
+  "card": {
+    "text": "card",
+    "category": "craft",
+    "synonyms": [
+      "papermaking",
+      "deckle",
+      "wet_sheet"
+    ]
+  },
+  "howtos": {
+    "make_wet_sheet": {
+      "text": "howto",
+      "steps": [
+        {
+          "form": "form_sheet"
+        },
+        {
+          "form": "drain_mesh"
+        },
+        {
+          "form": "couch_sheet"
+        },
+        {
+          "form": "press_sheet"
+        },
+        {
+          "form": "lift_sheet"
+        }
+      ]
+    }
+  }
+}
