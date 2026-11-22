@@ -76,7 +76,14 @@ pub struct Targets {
 pub struct Seen {
     pub nodes: Vec<(Id, String)>,
     pub bodies: BTreeMap<Id, Id>,
+    /// #4154: each node's frame and its x and z (mm), for the things near the Souls.
+    pub places: BTreeMap<Id, (Id, i64, i64)>,
 }
+
+/// #4154: how far from where the Souls stand a thing may be to be acted on, as an agent acts on what it sees: the
+/// radius (mm) doubles from this until at least [`NEAR_LEAST`] things are in it.
+pub const NEAR_MM: i64 = 30_000;
+pub const NEAR_LEAST: usize = 40;
 
 fn entry_ns(e: &Json) -> &str {
     e.get("kind")
@@ -112,6 +119,47 @@ fn has_form(e: &Json, form: &str) -> bool {
     })
 }
 
+/// #4154: the things standing on the ground the Souls' bodies stand on (their most common frame), within a radius of
+/// the bodies' middle that doubles from [`NEAR_MM`] until it holds [`NEAR_LEAST`]; all of them when the copy says no
+/// places or too few things are near. Picked at random across a world as large as Eden, each walk and form would take
+/// minutes, and every act sent meanwhile would be refused `form-running`.
+fn near<'a>(seen: &Seen, things: Vec<(Id, &'a Json)>) -> Vec<(Id, &'a Json)> {
+    let at: Vec<(Id, i64, i64)> = seen
+        .bodies
+        .values()
+        .filter_map(|b| seen.places.get(b).copied())
+        .collect();
+    let mut frames: BTreeMap<Id, usize> = BTreeMap::new();
+    for (f, _, _) in &at {
+        *frames.entry(*f).or_default() += 1;
+    }
+    let Some((ground, _)) = frames.into_iter().max_by_key(|(_, n)| *n) else {
+        return things;
+    };
+    let on: Vec<&(Id, i64, i64)> = at.iter().filter(|p| p.0 == ground).collect();
+    let (cx, cz) = (
+        on.iter().map(|p| p.1).sum::<i64>() / on.len() as i64,
+        on.iter().map(|p| p.2).sum::<i64>() / on.len() as i64,
+    );
+    let mut r = NEAR_MM;
+    while r < 4_000_000 {
+        let close: Vec<(Id, &Json)> = things
+            .iter()
+            .filter(|(id, _)| {
+                seen.places.get(id).is_some_and(|(f, x, z)| {
+                    *f == ground && (x - cx).pow(2) + (z - cz).pow(2) <= r * r
+                })
+            })
+            .copied()
+            .collect();
+        if close.len() >= NEAR_LEAST {
+            return close;
+        }
+        r *= 2;
+    }
+    things
+}
+
 impl Targets {
     /// The targets from the copy's nodes (id, plain kind) and the world's entries (a JSON array).
     pub fn of(seen: &Seen, entries: &Json) -> Targets {
@@ -141,6 +189,7 @@ impl Targets {
             .filter(|(id, _)| !is_body(id))
             .filter_map(|(id, k)| Some((*id, *by_kind.get(k.as_str())?)))
             .collect();
+        let things = near(seen, things);
         let ids = |f: &dyn Fn(&Json) -> bool| -> Vec<Id> {
             things
                 .iter()
@@ -382,6 +431,26 @@ fn plain_kind(record: &BTreeMap<u64, Value>) -> Option<String> {
     Some(k.split_once('@').map_or(k, |(p, _)| p).to_owned())
 }
 
+/// A node record's pose (field 7): its frame's node and its position's x and z, in mm.
+fn place_of(record: &BTreeMap<u64, Value>) -> Option<(Id, i64, i64)> {
+    let Some(Value::Map(p)) = record.get(&7) else {
+        return None;
+    };
+    let frame = match p.get(&1)? {
+        Value::Array(f) => replica::effects::read_id(f.first()?).ok()?,
+        v => replica::effects::read_id(v).ok()?,
+    };
+    let Value::Array(xyz) = p.get(&2)? else {
+        return None;
+    };
+    let n = |v: &Value| match v {
+        Value::Uint(u) => Some(*u as i64),
+        Value::Nint(u) => Some(-1 - *u as i64),
+        _ => None,
+    };
+    Some((frame, n(xyz.first()?)?, n(xyz.get(2)?)?))
+}
+
 /// The Soul a body record's `souls:body-of` link names (field 9's links `[[id, {1: type, 2: [body, soul]}], ...]`).
 fn soul_of(record: &BTreeMap<u64, Value>) -> Option<Id> {
     let Some(Value::Array(links)) = record.get(&9) else {
@@ -452,6 +521,9 @@ where
         ) {
             if let Some(soul) = soul_of(&m) {
                 out.bodies.insert(soul, id);
+            }
+            if let Some(p) = place_of(&m) {
+                out.places.insert(id, p);
             }
             out.nodes.push((id, kind));
         }
@@ -532,6 +604,7 @@ mod tests {
                 (id(7), "souls:body".to_owned()),
             ],
             bodies: BTreeMap::from([(id(9), id(6)), (id(10), id(7))]),
+            ..Default::default()
         };
         let t = Targets::of(&seen, &json::parse(ENTRIES).unwrap());
         assert_eq!(t.walk, [id(1), id(2)]);
@@ -549,6 +622,7 @@ mod tests {
         let none = Seen {
             nodes: vec![(id(7), "souls:body".to_owned())],
             bodies: BTreeMap::from([(id(10), id(7))]),
+            ..Default::default()
         };
         let t = Targets::of(&none, &json::parse(ENTRIES).unwrap());
         assert!(
@@ -566,6 +640,7 @@ mod tests {
                 (id(8), "eden:humanoid".to_owned()),
             ],
             bodies: BTreeMap::from([(me, id(8))]),
+            ..Default::default()
         };
         let t = Targets::of(&seen, &json::parse(ENTRIES).unwrap());
         let mut c = Choice::default();
