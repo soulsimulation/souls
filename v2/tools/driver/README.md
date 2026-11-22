@@ -30,10 +30,11 @@ target/release/driver --schedule <run folder>/schedule.txt --dir <run folder> [-
   intended against achieved ("under-driven" below 95 %), the share sent within `--late-ms` of the due time and the
   lateness quantiles, `driverCores` (its own user and system time over the run), the answers, `byVerb`,
   `unmapped`, `byTenth` (the same per tenth of the agents by intended acts, busiest first) and `perMinute`: per
-  minute of the run, receipts (a receipt, or a move's acceptance) and receipts a second, act latency from send to
-  the act's first answer (receipt or refusal) at p50, p95 and p99, refusals by name, and errors by name
-  (`unanswered` 5 s after the last send, `socket-closed`, `send-failed`, a gateway's own word such as
-  `token.refused`).
+  minute of the run, receipts (an act's end, kind 1) and receipts a second, act latency from send to
+  the act's first answer (accepted, receipt or refusal) at p50, p95 and p99, refusals by name, and errors by name
+  (`unanswered` and `unfinished`, below; `socket-closed`, `send-failed`, a gateway's own word such as
+  `token.refused`). An act answered accepted (kind 3: a walk or a form whose run started, W11 #4087) is timed then
+  and kept until its receipt or refusal; a sit's acceptance does not seat the Soul, its receipt does.
 
 ## A served world (X7, #4015)
 
@@ -82,7 +83,8 @@ kind entries (`GET /v2/entries`, which gatewayd serves with `--entries`, as ever
   sends them with the words `(load test)`; CI's local run uses it.
 
 The report adds `refusedBy`, the refusals by `<verb> <name>`. Each agent waits 15 s after its last act for its
-answers (a form's receipt comes when it ends); one still open then is `unanswered`.
+answers (a form's receipt comes when it ends); one still open then is `unanswered`, or `unfinished` when it was
+answered accepted and has not ended.
 
 **Rehearsing locally.** `node tools/driver/slice.mjs --facts <testworld facts> --out <folder>` puts an Eden slice on
 N2's test world (20 benches, 15 chairs, 3 speakers, 2 books, 2 apples, with Eden's own entries; its bodies
