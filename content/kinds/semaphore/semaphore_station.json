@@ -1,0 +1,1621 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:semaphore_station",
+  "owner": "thing",
+  "state": {
+    "signal": {
+      "n": 28,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 26,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        800
+      ],
+      "yaw_mdeg": 180000
+    },
+    "control": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        900,
+        290
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1600,
+      2050,
+      600
+    ]
+  },
+  "forms": {
+    "select_rest": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "control"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "signal",
+          "to": 0,
+          "event": "signal_selected"
+        }
+      ]
+    },
+    "select_a": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "control"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "signal",
+          "to": 1,
+          "event": "signal_selected"
+        }
+      ]
+    },
+    "select_b": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "control"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "signal",
+          "to": 2,
+          "event": "signal_selected"
+        }
+      ]
+    },
+    "select_c": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "control"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "signal",
+          "to": 3,
+          "event": "signal_selected"
+        }
+      ]
+    },
+    "select_d": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "control"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "signal",
+          "to": 4,
+          "event": "signal_selected"
+        }
+      ]
+    },
+    "select_e": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "control"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "signal",
+          "to": 5,
+          "event": "signal_selected"
+        }
+      ]
+    },
+    "select_f": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "control"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "signal",
+          "to": 6,
+          "event": "signal_selected"
+        }
+      ]
+    },
+    "select_g": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "control"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "signal",
+          "to": 7,
+          "event": "signal_selected"
+        }
+      ]
+    },
+    "select_h": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "control"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "signal",
+          "to": 8,
+          "event": "signal_selected"
+        }
+      ]
+    },
+    "select_i": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "control"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "signal",
+          "to": 9,
+          "event": "signal_selected"
+        }
+      ]
+    },
+    "select_j": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "control"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "signal",
+          "to": 10,
+          "event": "signal_selected"
+        }
+      ]
+    },
+    "select_k": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "control"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "signal",
+          "to": 11,
+          "event": "signal_selected"
+        }
+      ]
+    },
+    "select_l": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "control"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "signal",
+          "to": 12,
+          "event": "signal_selected"
+        }
+      ]
+    },
+    "select_m": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "control"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "signal",
+          "to": 13,
+          "event": "signal_selected"
+        }
+      ]
+    },
+    "select_n": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "control"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "signal",
+          "to": 14,
+          "event": "signal_selected"
+        }
+      ]
+    },
+    "select_o": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "control"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "signal",
+          "to": 15,
+          "event": "signal_selected"
+        }
+      ]
+    },
+    "select_p": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "control"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "signal",
+          "to": 16,
+          "event": "signal_selected"
+        }
+      ]
+    },
+    "select_q": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "control"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "signal",
+          "to": 17,
+          "event": "signal_selected"
+        }
+      ]
+    },
+    "select_r": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "control"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "signal",
+          "to": 18,
+          "event": "signal_selected"
+        }
+      ]
+    },
+    "select_s": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "control"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "signal",
+          "to": 19,
+          "event": "signal_selected"
+        }
+      ]
+    },
+    "select_t": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "control"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "signal",
+          "to": 20,
+          "event": "signal_selected"
+        }
+      ]
+    },
+    "select_u": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "control"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "signal",
+          "to": 21,
+          "event": "signal_selected"
+        }
+      ]
+    },
+    "select_v": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "control"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "signal",
+          "to": 22,
+          "event": "signal_selected"
+        }
+      ]
+    },
+    "select_w": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "control"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "signal",
+          "to": 23,
+          "event": "signal_selected"
+        }
+      ]
+    },
+    "select_x": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "control"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "signal",
+          "to": 24,
+          "event": "signal_selected"
+        }
+      ]
+    },
+    "select_y": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "control"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "signal",
+          "to": 25,
+          "event": "signal_selected"
+        }
+      ]
+    },
+    "select_z": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "control"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "signal",
+          "to": 26,
+          "event": "signal_selected"
+        }
+      ]
+    }
+  },
+  "looks": {
+    "table": [
+      {
+        "part": "lh",
+        "field": "signal",
+        "do": "rotate",
+        "axis": "z",
+        "at": {
+          "0": 180000,
+          "1": 180000,
+          "2": 180000,
+          "3": 180000,
+          "4": 180000,
+          "5": 315000,
+          "6": 270000,
+          "7": 225000,
+          "8": 135000,
+          "9": 135000,
+          "10": 270000,
+          "11": 0,
+          "12": 315000,
+          "13": 270000,
+          "14": 225000,
+          "15": 45000,
+          "16": 0,
+          "17": 315000,
+          "18": 270000,
+          "19": 225000,
+          "20": 0,
+          "21": 315000,
+          "22": 225000,
+          "23": 270000,
+          "24": 225000,
+          "25": 270000,
+          "26": 270000
+        }
+      },
+      {
+        "part": "rh",
+        "field": "signal",
+        "do": "rotate",
+        "axis": "z",
+        "at": {
+          "0": 180000,
+          "1": 135000,
+          "2": 90000,
+          "3": 45000,
+          "4": 0,
+          "5": 180000,
+          "6": 180000,
+          "7": 180000,
+          "8": 90000,
+          "9": 45000,
+          "10": 0,
+          "11": 135000,
+          "12": 135000,
+          "13": 135000,
+          "14": 135000,
+          "15": 90000,
+          "16": 90000,
+          "17": 90000,
+          "18": 90000,
+          "19": 90000,
+          "20": 45000,
+          "21": 45000,
+          "22": 0,
+          "23": 315000,
+          "24": 315000,
+          "25": 45000,
+          "26": 225000
+        }
+      }
+    ],
+    "shape": {
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            45,
+            0
+          ],
+          "size": [
+            750,
+            90,
+            500
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            720,
+            -80
+          ],
+          "size": [
+            100,
+            1350,
+            100
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1400,
+            0
+          ],
+          "size": [
+            420,
+            70,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            900,
+            250
+          ],
+          "size": [
+            220,
+            110,
+            80
+          ],
+          "tint": "control"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1120,
+            80
+          ],
+          "size": [
+            360,
+            200,
+            30
+          ],
+          "tint": "paper"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -70,
+            1120,
+            102
+          ],
+          "size": [
+            20,
+            130,
+            10
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -25,
+            1180,
+            102
+          ],
+          "size": [
+            110,
+            20,
+            10
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -30,
+            1125,
+            102
+          ],
+          "size": [
+            100,
+            20,
+            10
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            80,
+            1120,
+            102
+          ],
+          "size": [
+            18,
+            110,
+            10
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            80,
+            1180,
+            102
+          ],
+          "size": [
+            65,
+            18,
+            10
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            160,
+            1330,
+            62
+          ],
+          "size": [
+            90,
+            100,
+            15
+          ],
+          "tint": "paper"
+        },
+        {
+          "kind": "box",
+          "at": [
+            135,
+            1330,
+            75
+          ],
+          "size": [
+            12,
+            65,
+            8
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            160,
+            1303,
+            75
+          ],
+          "size": [
+            60,
+            12,
+            8
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -160,
+            1330,
+            62
+          ],
+          "size": [
+            90,
+            100,
+            15
+          ],
+          "tint": "paper"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -185,
+            1330,
+            75
+          ],
+          "size": [
+            12,
+            65,
+            8
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -160,
+            1357,
+            75
+          ],
+          "size": [
+            60,
+            12,
+            8
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -160,
+            1330,
+            75
+          ],
+          "size": [
+            60,
+            12,
+            8
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -135,
+            1344,
+            75
+          ],
+          "size": [
+            12,
+            28,
+            8
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -153,
+            1315,
+            75
+          ],
+          "size": [
+            12,
+            42,
+            8
+          ],
+          "tint": "ink",
+          "roll": 35000
+        },
+        {
+          "kind": "box",
+          "at": [
+            160,
+            1625,
+            30
+          ],
+          "size": [
+            32,
+            450,
+            30
+          ],
+          "tint": "left_arm",
+          "role": "lh",
+          "pivot": [
+            160,
+            1400,
+            30
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            160,
+            1880,
+            30
+          ],
+          "size": [
+            150,
+            120,
+            22
+          ],
+          "tint": "left_flag",
+          "role": "lh",
+          "pivot": [
+            160,
+            1400,
+            30
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            160,
+            1925,
+            43
+          ],
+          "size": [
+            130,
+            15,
+            8
+          ],
+          "tint": "paper",
+          "role": "lh",
+          "pivot": [
+            160,
+            1400,
+            30
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -160,
+            1625,
+            -30
+          ],
+          "size": [
+            32,
+            450,
+            30
+          ],
+          "tint": "right_arm",
+          "role": "rh",
+          "pivot": [
+            -160,
+            1400,
+            -30
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -160,
+            1880,
+            -30
+          ],
+          "size": [
+            150,
+            120,
+            22
+          ],
+          "tint": "right_flag",
+          "role": "rh",
+          "pivot": [
+            -160,
+            1400,
+            -30
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -160,
+            1925,
+            -17
+          ],
+          "size": [
+            130,
+            15,
+            8
+          ],
+          "tint": "paper",
+          "role": "rh",
+          "pivot": [
+            -160,
+            1400,
+            -30
+          ]
+        }
+      ],
+      "round": 0,
+      "palette": {
+        "wood": "#77543b",
+        "paper": "#f1e5c5",
+        "ink": "#1c2834",
+        "control": "#d6b36d",
+        "left_arm": "#167c88",
+        "right_arm": "#b95324",
+        "left_flag": "#e94142",
+        "right_flag": "#edc72f"
+      },
+      "tags": [
+        "semaphore",
+        "alphabet",
+        "display",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "display": "display",
+    "card": "Choose paired flag positions on a receiver-facing semaphore alphabet display.",
+    "semaphore": "semaphore alphabet station",
+    "flags": "paired flag display",
+    "alphabet": "semaphore learning display",
+    "hands_empty": "Put down what you hold before selecting a signal.",
+    "begin": "Stand on the F-marked front/receiver side. L marks the signaler left shoulder at your right; R marks the signaler right shoulder at your left. Red and yellow flags stay attached to their distinct arm assemblies, which have a small fixed depth separation for crossed positions. Select H, Rest, E, Rest, L, Rest, P, Rest to display HELP. Select Rest between letters, including repeated letters. Each choice is independent and repeating the same choice leaves the same signal.",
+    "limits": "One indexed value selects both rigid arm positions at native hand contact. This is a fixed alphabet learning display: no bodily gesture, handheld flag custody, recipient, delivered message, stored word, numeral mode or attention/error protocol. Read only from the marked front; the rear view mirrors the reference. Positions change discretely without a continuous path, physical arm collision, precise contact or smooth-transition claim."
+  },
+  "card": {
+    "text": "card",
+    "category": "display",
+    "synonyms": [
+      "semaphore",
+      "flags",
+      "alphabet"
+    ]
+  },
+  "howtos": {
+    "help": {
+      "text": "begin",
+      "steps": [
+        {
+          "form": "select_h"
+        },
+        {
+          "form": "select_rest"
+        },
+        {
+          "form": "select_e"
+        },
+        {
+          "form": "select_rest"
+        },
+        {
+          "form": "select_l"
+        },
+        {
+          "form": "select_rest"
+        },
+        {
+          "form": "select_p"
+        },
+        {
+          "form": "select_rest"
+        }
+      ]
+    },
+    "reference": {
+      "text": "limits",
+      "steps": [
+        {
+          "form": "select_i"
+        },
+        {
+          "form": "select_rest"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  }
+}
