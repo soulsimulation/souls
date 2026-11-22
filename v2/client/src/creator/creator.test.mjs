@@ -445,6 +445,25 @@ test('#3701: a creator records a district plan, claims its first chapter, builds
   assert.equal((await god('build', 'release', c)).code, 'claim.unknown');
 });
 
+test('#3728: a place by its shape goes to the claims judge as any edit: refused edit.claimed in a claim it is not under', async () => {
+  await connected();
+  const place = (await god('describe')).nodes.find((n) => n.kind === 'souls:place');
+  const made = await god('place', 'room', '--in', place.id, '--at', '81000,0,81000');
+  assert.equal(made.ok, true, JSON.stringify(made));
+  const room = made.names['1'];
+  const claimed = await god('build', 'claim', 'lawn', '--area', '80000,80000,84000,84000');
+  assert.equal(claimed.ok, true, JSON.stringify(claimed));
+  const c = claimed.claim.id;
+  // The world judges a place at its spot: a shape stands at its parent's origin, here the claimed room's.
+  const dry = await god('check', 'place', 'souls:item', '--rect', '0,0,2,2', '--in', room);
+  assert.deepEqual([dry.ok, dry.code], [false, 'edit.claimed'], JSON.stringify(dry));
+  const into = await god('place', 'souls:item', '--path', '[[0,0],[1,1]]', '--in', room);
+  assert.deepEqual([into.ok, into.code, into.sent], [false, 'edit.claimed', false], JSON.stringify(into));
+  const under = await god('place', 'souls:item', '--rect', '0,0,2,2', '--in', room, '--claim', c);
+  assert.equal(under.ok, true, JSON.stringify(under));
+  assert.equal((await god('build', 'release', c)).ok, true);
+});
+
 test('#3700: own, access and zone words make today\'s marks in the world\'s units', () => {
   const soul = `${'ab'.repeat(16)}-4`;
   assert.deepEqual(layerOf('own', ['aa-1', soul, '--private']), { act: 'own', node: 'aa-1', owner: soul, access: 2 });
