@@ -1,0 +1,3706 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "All thirteen forms: exact/max amounts, every own need, empty pile, other-pile independence. Reach is evaluator-level.",
+  "cases": [
+    {
+      "name": "remove_1_a_ready",
+      "act": {
+        "this": "p1",
+        "form": "remove_1_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_1_a_need_0",
+      "act": {
+        "this": "p1",
+        "form": "remove_1_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 0,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "remove_1_a_need_1",
+      "act": {
+        "this": "p1",
+        "form": "remove_1_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "remove_1_a_need_2",
+      "act": {
+        "this": "p1",
+        "form": "remove_1_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "remove_1_a_exact_amount_other_piles_empty",
+      "act": {
+        "this": "p1",
+        "form": "remove_1_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 1,
+              "remaining_b": 0,
+              "remaining_c": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_1_a_empty_selected_pile",
+      "act": {
+        "this": "p1",
+        "form": "remove_1_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 0,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "remove_2_a_ready",
+      "act": {
+        "this": "p1",
+        "form": "remove_2_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_2_a_need_0",
+      "act": {
+        "this": "p1",
+        "form": "remove_2_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 1,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "remove_2_a_need_1",
+      "act": {
+        "this": "p1",
+        "form": "remove_2_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "remove_2_a_need_2",
+      "act": {
+        "this": "p1",
+        "form": "remove_2_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "remove_2_a_exact_amount_other_piles_empty",
+      "act": {
+        "this": "p1",
+        "form": "remove_2_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 2,
+              "remaining_b": 0,
+              "remaining_c": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_2_a_empty_selected_pile",
+      "act": {
+        "this": "p1",
+        "form": "remove_2_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 0,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "remove_3_a_ready",
+      "act": {
+        "this": "p1",
+        "form": "remove_3_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_3_a_need_0",
+      "act": {
+        "this": "p1",
+        "form": "remove_3_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 2,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "remove_3_a_need_1",
+      "act": {
+        "this": "p1",
+        "form": "remove_3_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "remove_3_a_need_2",
+      "act": {
+        "this": "p1",
+        "form": "remove_3_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "remove_3_a_exact_amount_other_piles_empty",
+      "act": {
+        "this": "p1",
+        "form": "remove_3_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 0,
+              "remaining_c": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_3_a_empty_selected_pile",
+      "act": {
+        "this": "p1",
+        "form": "remove_3_a"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 0,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "remove_1_b_ready",
+      "act": {
+        "this": "p1",
+        "form": "remove_1_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_1_b_need_0",
+      "act": {
+        "this": "p1",
+        "form": "remove_1_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 0,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "remove_1_b_need_1",
+      "act": {
+        "this": "p1",
+        "form": "remove_1_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "remove_1_b_need_2",
+      "act": {
+        "this": "p1",
+        "form": "remove_1_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "remove_1_b_exact_amount_other_piles_empty",
+      "act": {
+        "this": "p1",
+        "form": "remove_1_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 0,
+              "remaining_b": 1,
+              "remaining_c": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_1_b_empty_selected_pile",
+      "act": {
+        "this": "p1",
+        "form": "remove_1_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 0,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "remove_2_b_ready",
+      "act": {
+        "this": "p1",
+        "form": "remove_2_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_2_b_need_0",
+      "act": {
+        "this": "p1",
+        "form": "remove_2_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 1,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "remove_2_b_need_1",
+      "act": {
+        "this": "p1",
+        "form": "remove_2_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "remove_2_b_need_2",
+      "act": {
+        "this": "p1",
+        "form": "remove_2_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "remove_2_b_exact_amount_other_piles_empty",
+      "act": {
+        "this": "p1",
+        "form": "remove_2_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 0,
+              "remaining_b": 2,
+              "remaining_c": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_2_b_empty_selected_pile",
+      "act": {
+        "this": "p1",
+        "form": "remove_2_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 0,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "remove_3_b_ready",
+      "act": {
+        "this": "p1",
+        "form": "remove_3_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_3_b_need_0",
+      "act": {
+        "this": "p1",
+        "form": "remove_3_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 2,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "remove_3_b_need_1",
+      "act": {
+        "this": "p1",
+        "form": "remove_3_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "remove_3_b_need_2",
+      "act": {
+        "this": "p1",
+        "form": "remove_3_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "remove_3_b_exact_amount_other_piles_empty",
+      "act": {
+        "this": "p1",
+        "form": "remove_3_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 0,
+              "remaining_b": 3,
+              "remaining_c": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_3_b_empty_selected_pile",
+      "act": {
+        "this": "p1",
+        "form": "remove_3_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 0,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "remove_4_b_ready",
+      "act": {
+        "this": "p1",
+        "form": "remove_4_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_4_b_need_0",
+      "act": {
+        "this": "p1",
+        "form": "remove_4_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 3,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "remove_4_b_need_1",
+      "act": {
+        "this": "p1",
+        "form": "remove_4_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "remove_4_b_need_2",
+      "act": {
+        "this": "p1",
+        "form": "remove_4_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "remove_4_b_exact_amount_other_piles_empty",
+      "act": {
+        "this": "p1",
+        "form": "remove_4_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 0,
+              "remaining_b": 4,
+              "remaining_c": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_4_b_empty_selected_pile",
+      "act": {
+        "this": "p1",
+        "form": "remove_4_b"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 0,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "remove_1_c_ready",
+      "act": {
+        "this": "p1",
+        "form": "remove_1_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_1_c_need_0",
+      "act": {
+        "this": "p1",
+        "form": "remove_1_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "remove_1_c_need_1",
+      "act": {
+        "this": "p1",
+        "form": "remove_1_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "remove_1_c_need_2",
+      "act": {
+        "this": "p1",
+        "form": "remove_1_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "remove_1_c_exact_amount_other_piles_empty",
+      "act": {
+        "this": "p1",
+        "form": "remove_1_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 0,
+              "remaining_b": 0,
+              "remaining_c": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_1_c_empty_selected_pile",
+      "act": {
+        "this": "p1",
+        "form": "remove_1_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "remove_2_c_ready",
+      "act": {
+        "this": "p1",
+        "form": "remove_2_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_2_c_need_0",
+      "act": {
+        "this": "p1",
+        "form": "remove_2_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "remove_2_c_need_1",
+      "act": {
+        "this": "p1",
+        "form": "remove_2_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "remove_2_c_need_2",
+      "act": {
+        "this": "p1",
+        "form": "remove_2_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "remove_2_c_exact_amount_other_piles_empty",
+      "act": {
+        "this": "p1",
+        "form": "remove_2_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 0,
+              "remaining_b": 0,
+              "remaining_c": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_2_c_empty_selected_pile",
+      "act": {
+        "this": "p1",
+        "form": "remove_2_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "remove_3_c_ready",
+      "act": {
+        "this": "p1",
+        "form": "remove_3_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_3_c_need_0",
+      "act": {
+        "this": "p1",
+        "form": "remove_3_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "remove_3_c_need_1",
+      "act": {
+        "this": "p1",
+        "form": "remove_3_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "remove_3_c_need_2",
+      "act": {
+        "this": "p1",
+        "form": "remove_3_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "remove_3_c_exact_amount_other_piles_empty",
+      "act": {
+        "this": "p1",
+        "form": "remove_3_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 0,
+              "remaining_b": 0,
+              "remaining_c": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_3_c_empty_selected_pile",
+      "act": {
+        "this": "p1",
+        "form": "remove_3_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "remove_4_c_ready",
+      "act": {
+        "this": "p1",
+        "form": "remove_4_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_4_c_need_0",
+      "act": {
+        "this": "p1",
+        "form": "remove_4_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "remove_4_c_need_1",
+      "act": {
+        "this": "p1",
+        "form": "remove_4_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "remove_4_c_need_2",
+      "act": {
+        "this": "p1",
+        "form": "remove_4_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "remove_4_c_exact_amount_other_piles_empty",
+      "act": {
+        "this": "p1",
+        "form": "remove_4_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 0,
+              "remaining_b": 0,
+              "remaining_c": 4
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_4_c_empty_selected_pile",
+      "act": {
+        "this": "p1",
+        "form": "remove_4_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "remove_5_c_ready",
+      "act": {
+        "this": "p1",
+        "form": "remove_5_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_5_c_need_0",
+      "act": {
+        "this": "p1",
+        "form": "remove_5_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 4
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "remove_5_c_need_1",
+      "act": {
+        "this": "p1",
+        "form": "remove_5_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "remove_5_c_need_2",
+      "act": {
+        "this": "p1",
+        "form": "remove_5_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "remove_5_c_exact_amount_other_piles_empty",
+      "act": {
+        "this": "p1",
+        "form": "remove_5_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 0,
+              "remaining_b": 0,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_5_c_empty_selected_pile",
+      "act": {
+        "this": "p1",
+        "form": "remove_5_c"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "return_all_ready",
+      "act": {
+        "this": "p1",
+        "form": "return_all"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "return_all_need_0",
+      "act": {
+        "this": "p1",
+        "form": "return_all"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "return_all_need_1",
+      "act": {
+        "this": "p1",
+        "form": "return_all"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "out_of_reach"
+      }
+    }
+  ]
+}

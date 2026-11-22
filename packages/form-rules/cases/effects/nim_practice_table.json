@@ -1,0 +1,2513 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Fixed negative Add only selected pile, literal three-Set reset, primary worked game and reuse. Generic Done replay is separately enumerated; saved fixtures do not prove restart or cancellation.",
+  "cases": [
+    {
+      "name": "remove_1_a_maximum",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_1_a"
+          },
+          "receipt": "remove_1_amaximum",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_a",
+                "n": 28,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:nim_practice_table",
+          "fields": {
+            "remaining_a": 2,
+            "remaining_b": 4,
+            "remaining_c": 5
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_1_a_exact_other_empty",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 1,
+              "remaining_b": 0,
+              "remaining_c": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_1_a"
+          },
+          "receipt": "remove_1_aexact_other_empty",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_a",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:nim_practice_table",
+          "fields": {
+            "remaining_a": 0,
+            "remaining_b": 0,
+            "remaining_c": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_2_a_maximum",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_2_a"
+          },
+          "receipt": "remove_2_amaximum",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_a",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:nim_practice_table",
+          "fields": {
+            "remaining_a": 1,
+            "remaining_b": 4,
+            "remaining_c": 5
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_2_a_exact_other_empty",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 2,
+              "remaining_b": 0,
+              "remaining_c": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_2_a"
+          },
+          "receipt": "remove_2_aexact_other_empty",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_a",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:nim_practice_table",
+          "fields": {
+            "remaining_a": 0,
+            "remaining_b": 0,
+            "remaining_c": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_3_a_maximum",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_3_a"
+          },
+          "receipt": "remove_3_amaximum",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_a",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:nim_practice_table",
+          "fields": {
+            "remaining_a": 0,
+            "remaining_b": 4,
+            "remaining_c": 5
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_3_a_exact_other_empty",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 0,
+              "remaining_c": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_3_a"
+          },
+          "receipt": "remove_3_aexact_other_empty",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_a",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:nim_practice_table",
+          "fields": {
+            "remaining_a": 0,
+            "remaining_b": 0,
+            "remaining_c": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_1_b_maximum",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_1_b"
+          },
+          "receipt": "remove_1_bmaximum",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_b",
+                "n": 29,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:nim_practice_table",
+          "fields": {
+            "remaining_a": 3,
+            "remaining_b": 3,
+            "remaining_c": 5
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_1_b_exact_other_empty",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 0,
+              "remaining_b": 1,
+              "remaining_c": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_1_b"
+          },
+          "receipt": "remove_1_bexact_other_empty",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_b",
+                "n": 29,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:nim_practice_table",
+          "fields": {
+            "remaining_a": 0,
+            "remaining_b": 0,
+            "remaining_c": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_2_b_maximum",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_2_b"
+          },
+          "receipt": "remove_2_bmaximum",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_b",
+                "n": 29,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:nim_practice_table",
+          "fields": {
+            "remaining_a": 3,
+            "remaining_b": 2,
+            "remaining_c": 5
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_2_b_exact_other_empty",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 0,
+              "remaining_b": 2,
+              "remaining_c": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_2_b"
+          },
+          "receipt": "remove_2_bexact_other_empty",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_b",
+                "n": 29,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:nim_practice_table",
+          "fields": {
+            "remaining_a": 0,
+            "remaining_b": 0,
+            "remaining_c": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_3_b_maximum",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_3_b"
+          },
+          "receipt": "remove_3_bmaximum",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_b",
+                "n": 29,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:nim_practice_table",
+          "fields": {
+            "remaining_a": 3,
+            "remaining_b": 1,
+            "remaining_c": 5
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_3_b_exact_other_empty",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 0,
+              "remaining_b": 3,
+              "remaining_c": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_3_b"
+          },
+          "receipt": "remove_3_bexact_other_empty",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_b",
+                "n": 29,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:nim_practice_table",
+          "fields": {
+            "remaining_a": 0,
+            "remaining_b": 0,
+            "remaining_c": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_4_b_maximum",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_4_b"
+          },
+          "receipt": "remove_4_bmaximum",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_b",
+                "n": 29,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:nim_practice_table",
+          "fields": {
+            "remaining_a": 3,
+            "remaining_b": 0,
+            "remaining_c": 5
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_4_b_exact_other_empty",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 0,
+              "remaining_b": 4,
+              "remaining_c": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_4_b"
+          },
+          "receipt": "remove_4_bexact_other_empty",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_b",
+                "n": 29,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:nim_practice_table",
+          "fields": {
+            "remaining_a": 0,
+            "remaining_b": 0,
+            "remaining_c": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_1_c_maximum",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_1_c"
+          },
+          "receipt": "remove_1_cmaximum",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_c",
+                "n": 30,
+                "to": 4
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:nim_practice_table",
+          "fields": {
+            "remaining_a": 3,
+            "remaining_b": 4,
+            "remaining_c": 4
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_1_c_exact_other_empty",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 0,
+              "remaining_b": 0,
+              "remaining_c": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_1_c"
+          },
+          "receipt": "remove_1_cexact_other_empty",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_c",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:nim_practice_table",
+          "fields": {
+            "remaining_a": 0,
+            "remaining_b": 0,
+            "remaining_c": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_2_c_maximum",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_2_c"
+          },
+          "receipt": "remove_2_cmaximum",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_c",
+                "n": 30,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:nim_practice_table",
+          "fields": {
+            "remaining_a": 3,
+            "remaining_b": 4,
+            "remaining_c": 3
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_2_c_exact_other_empty",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 0,
+              "remaining_b": 0,
+              "remaining_c": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_2_c"
+          },
+          "receipt": "remove_2_cexact_other_empty",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_c",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:nim_practice_table",
+          "fields": {
+            "remaining_a": 0,
+            "remaining_b": 0,
+            "remaining_c": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_3_c_maximum",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_3_c"
+          },
+          "receipt": "remove_3_cmaximum",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_c",
+                "n": 30,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:nim_practice_table",
+          "fields": {
+            "remaining_a": 3,
+            "remaining_b": 4,
+            "remaining_c": 2
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_3_c_exact_other_empty",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 0,
+              "remaining_b": 0,
+              "remaining_c": 3
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_3_c"
+          },
+          "receipt": "remove_3_cexact_other_empty",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_c",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:nim_practice_table",
+          "fields": {
+            "remaining_a": 0,
+            "remaining_b": 0,
+            "remaining_c": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_4_c_maximum",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_4_c"
+          },
+          "receipt": "remove_4_cmaximum",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_c",
+                "n": 30,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:nim_practice_table",
+          "fields": {
+            "remaining_a": 3,
+            "remaining_b": 4,
+            "remaining_c": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_4_c_exact_other_empty",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 0,
+              "remaining_b": 0,
+              "remaining_c": 4
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_4_c"
+          },
+          "receipt": "remove_4_cexact_other_empty",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_c",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:nim_practice_table",
+          "fields": {
+            "remaining_a": 0,
+            "remaining_b": 0,
+            "remaining_c": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_5_c_maximum",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_5_c"
+          },
+          "receipt": "remove_5_cmaximum",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_c",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:nim_practice_table",
+          "fields": {
+            "remaining_a": 3,
+            "remaining_b": 4,
+            "remaining_c": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_5_c_exact_other_empty",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 0,
+              "remaining_b": 0,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_5_c"
+          },
+          "receipt": "remove_5_cexact_other_empty",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_c",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:nim_practice_table",
+          "fields": {
+            "remaining_a": 0,
+            "remaining_b": 0,
+            "remaining_c": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "return_all_all_empty",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 0,
+              "remaining_b": 0,
+              "remaining_c": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "return_all"
+          },
+          "receipt": "return_allall_empty",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_a",
+                "n": 28,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_b",
+                "n": 29,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_c",
+                "n": 30,
+                "to": 5
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_returned",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counters_returned",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counters_returned",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:nim_practice_table",
+          "fields": {
+            "remaining_a": 3,
+            "remaining_b": 4,
+            "remaining_c": 5
+          }
+        }
+      }
+    },
+    {
+      "name": "return_all_already_full",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "return_all"
+          },
+          "receipt": "return_allalready_full",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_a",
+                "n": 28,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_b",
+                "n": 29,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_c",
+                "n": 30,
+                "to": 5
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_returned",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counters_returned",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counters_returned",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:nim_practice_table",
+          "fields": {
+            "remaining_a": 3,
+            "remaining_b": 4,
+            "remaining_c": 5
+          }
+        }
+      }
+    },
+    {
+      "name": "primary_nine_move_game_return_same_pieces_and_reuse",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:nim_practice_table",
+            "fields": {
+              "remaining_a": 3,
+              "remaining_b": 4,
+              "remaining_c": 5
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              650
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_2_a"
+          },
+          "receipt": "game0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_a",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_3_c"
+          },
+          "receipt": "game1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_c",
+                "n": 30,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_1_b"
+          },
+          "receipt": "game2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_b",
+                "n": 29,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_1_b"
+          },
+          "receipt": "game3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_b",
+                "n": 29,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_1_a"
+          },
+          "receipt": "game4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_a",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_1_b"
+          },
+          "receipt": "game5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_b",
+                "n": 29,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_1_c"
+          },
+          "receipt": "game6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_c",
+                "n": 30,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_1_b"
+          },
+          "receipt": "game7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_b",
+                "n": 29,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_1_c"
+          },
+          "receipt": "game8",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_c",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "return_all"
+          },
+          "receipt": "game9",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_a",
+                "n": 28,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_b",
+                "n": 29,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_c",
+                "n": 30,
+                "to": 5
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_returned",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counters_returned",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counters_returned",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_3_a"
+          },
+          "receipt": "game10",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "remaining_a",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counters_indexed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:nim_practice_table",
+          "fields": {
+            "remaining_a": 0,
+            "remaining_b": 4,
+            "remaining_c": 5
+          }
+        }
+      }
+    }
+  ]
+}

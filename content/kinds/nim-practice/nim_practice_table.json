@@ -1,0 +1,2198 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:nim_practice_table",
+  "owner": "thing",
+  "state": {
+    "remaining_a": {
+      "n": 28,
+      "type": "int",
+      "unit": "count",
+      "default": 3,
+      "min": 0,
+      "max": 3,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "remaining_b": {
+      "n": 29,
+      "type": "int",
+      "unit": "count",
+      "default": 4,
+      "min": 0,
+      "max": 4,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "remaining_c": {
+      "n": 30,
+      "type": "int",
+      "unit": "count",
+      "default": 5,
+      "min": 0,
+      "max": 5,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        1200
+      ],
+      "yaw_mdeg": 180000
+    },
+    "board": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        850,
+        650
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1780,
+      900,
+      1500
+    ]
+  },
+  "forms": {
+    "remove_1_a": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "remaining_a",
+          "at_least": 1,
+          "says": "insufficient"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "remaining_a",
+          "by": -1,
+          "event": "counters_indexed"
+        }
+      ]
+    },
+    "remove_2_a": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "remaining_a",
+          "at_least": 2,
+          "says": "insufficient"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "remaining_a",
+          "by": -2,
+          "event": "counters_indexed"
+        }
+      ]
+    },
+    "remove_3_a": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "remaining_a",
+          "at_least": 3,
+          "says": "insufficient"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "remaining_a",
+          "by": -3,
+          "event": "counters_indexed"
+        }
+      ]
+    },
+    "remove_1_b": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "remaining_b",
+          "at_least": 1,
+          "says": "insufficient"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "remaining_b",
+          "by": -1,
+          "event": "counters_indexed"
+        }
+      ]
+    },
+    "remove_2_b": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "remaining_b",
+          "at_least": 2,
+          "says": "insufficient"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "remaining_b",
+          "by": -2,
+          "event": "counters_indexed"
+        }
+      ]
+    },
+    "remove_3_b": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "remaining_b",
+          "at_least": 3,
+          "says": "insufficient"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "remaining_b",
+          "by": -3,
+          "event": "counters_indexed"
+        }
+      ]
+    },
+    "remove_4_b": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "remaining_b",
+          "at_least": 4,
+          "says": "insufficient"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "remaining_b",
+          "by": -4,
+          "event": "counters_indexed"
+        }
+      ]
+    },
+    "remove_1_c": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "remaining_c",
+          "at_least": 1,
+          "says": "insufficient"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "remaining_c",
+          "by": -1,
+          "event": "counters_indexed"
+        }
+      ]
+    },
+    "remove_2_c": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "remaining_c",
+          "at_least": 2,
+          "says": "insufficient"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "remaining_c",
+          "by": -2,
+          "event": "counters_indexed"
+        }
+      ]
+    },
+    "remove_3_c": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "remaining_c",
+          "at_least": 3,
+          "says": "insufficient"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "remaining_c",
+          "by": -3,
+          "event": "counters_indexed"
+        }
+      ]
+    },
+    "remove_4_c": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "remaining_c",
+          "at_least": 4,
+          "says": "insufficient"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "remaining_c",
+          "by": -4,
+          "event": "counters_indexed"
+        }
+      ]
+    },
+    "remove_5_c": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "remaining_c",
+          "at_least": 5,
+          "says": "insufficient"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "remaining_c",
+          "by": -5,
+          "event": "counters_indexed"
+        }
+      ]
+    },
+    "return_all": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "remaining_a",
+          "to": 3,
+          "event": "counters_returned"
+        },
+        {
+          "change": "set",
+          "field": "remaining_b",
+          "to": 4,
+          "event": "counters_returned"
+        },
+        {
+          "change": "set",
+          "field": "remaining_c",
+          "to": 5,
+          "event": "counters_returned"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:nim_practice_table",
+    "table": [
+      {
+        "part": "a1",
+        "field": "remaining_a",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "0": 70,
+          "1": -70,
+          "2": -70,
+          "3": -70
+        }
+      },
+      {
+        "part": "a2",
+        "field": "remaining_a",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "0": 70,
+          "1": 70,
+          "2": -70,
+          "3": -70
+        }
+      },
+      {
+        "part": "a3",
+        "field": "remaining_a",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "0": 70,
+          "1": 70,
+          "2": 70,
+          "3": -70
+        }
+      },
+      {
+        "part": "b1",
+        "field": "remaining_b",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "0": 70,
+          "1": -70,
+          "2": -70,
+          "3": -70,
+          "4": -70
+        }
+      },
+      {
+        "part": "b2",
+        "field": "remaining_b",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "0": 70,
+          "1": 70,
+          "2": -70,
+          "3": -70,
+          "4": -70
+        }
+      },
+      {
+        "part": "b3",
+        "field": "remaining_b",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "0": 70,
+          "1": 70,
+          "2": 70,
+          "3": -70,
+          "4": -70
+        }
+      },
+      {
+        "part": "b4",
+        "field": "remaining_b",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "0": 70,
+          "1": 70,
+          "2": 70,
+          "3": 70,
+          "4": -70
+        }
+      },
+      {
+        "part": "c1",
+        "field": "remaining_c",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "0": 70,
+          "1": -70,
+          "2": -70,
+          "3": -70,
+          "4": -70,
+          "5": -70
+        }
+      },
+      {
+        "part": "c2",
+        "field": "remaining_c",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "0": 70,
+          "1": 70,
+          "2": -70,
+          "3": -70,
+          "4": -70,
+          "5": -70
+        }
+      },
+      {
+        "part": "c3",
+        "field": "remaining_c",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "0": 70,
+          "1": 70,
+          "2": 70,
+          "3": -70,
+          "4": -70,
+          "5": -70
+        }
+      },
+      {
+        "part": "c4",
+        "field": "remaining_c",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "0": 70,
+          "1": 70,
+          "2": 70,
+          "3": 70,
+          "4": -70,
+          "5": -70
+        }
+      },
+      {
+        "part": "c5",
+        "field": "remaining_c",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "0": 70,
+          "1": 70,
+          "2": 70,
+          "3": 70,
+          "4": 70,
+          "5": -70
+        }
+      }
+    ],
+    "shape": {
+      "round": 2,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            790,
+            0
+          ],
+          "size": [
+            1760,
+            40,
+            1480
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -810,
+            385,
+            -670
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -810,
+            385,
+            670
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            810,
+            385,
+            -670
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            810,
+            385,
+            670
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            817,
+            0
+          ],
+          "size": [
+            1710,
+            14,
+            1430
+          ],
+          "tint": "paper"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -792,
+            844,
+            -400
+          ],
+          "size": [
+            8,
+            6,
+            61
+          ],
+          "tint": "ink",
+          "yaw": 156801
+        },
+        {
+          "kind": "box",
+          "at": [
+            -768,
+            844,
+            -400
+          ],
+          "size": [
+            8,
+            6,
+            61
+          ],
+          "tint": "ink",
+          "yaw": 23199
+        },
+        {
+          "kind": "box",
+          "at": [
+            -780,
+            844,
+            -396
+          ],
+          "size": [
+            8,
+            6,
+            24
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            30,
+            833,
+            -470
+          ],
+          "size": [
+            1430,
+            8,
+            12
+          ],
+          "tint": "active"
+        },
+        {
+          "kind": "box",
+          "at": [
+            30,
+            833,
+            -330
+          ],
+          "size": [
+            1430,
+            8,
+            12
+          ],
+          "tint": "spent"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -300,
+            835,
+            -400
+          ],
+          "size": [
+            6,
+            8,
+            180
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -300,
+            844,
+            -225
+          ],
+          "size": [
+            8,
+            6,
+            56
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -300,
+            853,
+            -400
+          ],
+          "r": 40,
+          "h": 18,
+          "segments": 16,
+          "tint": "counter",
+          "role": "a1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            835,
+            -400
+          ],
+          "size": [
+            6,
+            8,
+            180
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            844,
+            -253
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            20,
+            844,
+            -239
+          ],
+          "size": [
+            8,
+            6,
+            28
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            844,
+            -225
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": -90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -20,
+            844,
+            -211
+          ],
+          "size": [
+            8,
+            6,
+            28
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            844,
+            -197
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            853,
+            -400
+          ],
+          "r": 40,
+          "h": 18,
+          "segments": 16,
+          "tint": "counter",
+          "role": "a2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            300,
+            835,
+            -400
+          ],
+          "size": [
+            6,
+            8,
+            180
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            300,
+            844,
+            -253
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            320,
+            844,
+            -225
+          ],
+          "size": [
+            8,
+            6,
+            56
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            300,
+            844,
+            -225
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            300,
+            844,
+            -197
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            300,
+            853,
+            -400
+          ],
+          "r": 40,
+          "h": 18,
+          "segments": 16,
+          "tint": "counter",
+          "role": "a3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -802,
+            844,
+            0
+          ],
+          "size": [
+            8,
+            6,
+            56
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -788,
+            844,
+            -28
+          ],
+          "size": [
+            8,
+            6,
+            28
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -766,
+            844,
+            -21
+          ],
+          "size": [
+            8,
+            6,
+            21
+          ],
+          "tint": "ink",
+          "yaw": 48814
+        },
+        {
+          "kind": "box",
+          "at": [
+            -766,
+            844,
+            -7
+          ],
+          "size": [
+            8,
+            6,
+            21
+          ],
+          "tint": "ink",
+          "yaw": -48814
+        },
+        {
+          "kind": "box",
+          "at": [
+            -788,
+            844,
+            0
+          ],
+          "size": [
+            8,
+            6,
+            28
+          ],
+          "tint": "ink",
+          "yaw": -90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -766,
+            844,
+            7
+          ],
+          "size": [
+            8,
+            6,
+            21
+          ],
+          "tint": "ink",
+          "yaw": 48814
+        },
+        {
+          "kind": "box",
+          "at": [
+            -766,
+            844,
+            21
+          ],
+          "size": [
+            8,
+            6,
+            21
+          ],
+          "tint": "ink",
+          "yaw": -48814
+        },
+        {
+          "kind": "box",
+          "at": [
+            -788,
+            844,
+            28
+          ],
+          "size": [
+            8,
+            6,
+            28
+          ],
+          "tint": "ink",
+          "yaw": -90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            30,
+            833,
+            -70
+          ],
+          "size": [
+            1430,
+            8,
+            12
+          ],
+          "tint": "active"
+        },
+        {
+          "kind": "box",
+          "at": [
+            30,
+            833,
+            70
+          ],
+          "size": [
+            1430,
+            8,
+            12
+          ],
+          "tint": "spent"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -450,
+            835,
+            0
+          ],
+          "size": [
+            6,
+            8,
+            180
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -450,
+            844,
+            175
+          ],
+          "size": [
+            8,
+            6,
+            56
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -450,
+            853,
+            0
+          ],
+          "r": 40,
+          "h": 18,
+          "segments": 16,
+          "tint": "counter",
+          "role": "b1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -150,
+            835,
+            0
+          ],
+          "size": [
+            6,
+            8,
+            180
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -150,
+            844,
+            147
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -130,
+            844,
+            161
+          ],
+          "size": [
+            8,
+            6,
+            28
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -150,
+            844,
+            175
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": -90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -170,
+            844,
+            189
+          ],
+          "size": [
+            8,
+            6,
+            28
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -150,
+            844,
+            203
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -150,
+            853,
+            0
+          ],
+          "r": 40,
+          "h": 18,
+          "segments": 16,
+          "tint": "counter",
+          "role": "b2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            150,
+            835,
+            0
+          ],
+          "size": [
+            6,
+            8,
+            180
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            150,
+            844,
+            147
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            170,
+            844,
+            175
+          ],
+          "size": [
+            8,
+            6,
+            56
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            150,
+            844,
+            175
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            150,
+            844,
+            203
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            150,
+            853,
+            0
+          ],
+          "r": 40,
+          "h": 18,
+          "segments": 16,
+          "tint": "counter",
+          "role": "b3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            450,
+            835,
+            0
+          ],
+          "size": [
+            6,
+            8,
+            180
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            430,
+            844,
+            161
+          ],
+          "size": [
+            8,
+            6,
+            28
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            450,
+            844,
+            175
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            470,
+            844,
+            175
+          ],
+          "size": [
+            8,
+            6,
+            56
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            450,
+            853,
+            0
+          ],
+          "r": 40,
+          "h": 18,
+          "segments": 16,
+          "tint": "counter",
+          "role": "b4"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -780,
+            844,
+            372
+          ],
+          "size": [
+            8,
+            6,
+            44
+          ],
+          "tint": "ink",
+          "yaw": -90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -802,
+            844,
+            400
+          ],
+          "size": [
+            8,
+            6,
+            56
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -780,
+            844,
+            428
+          ],
+          "size": [
+            8,
+            6,
+            44
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            30,
+            833,
+            330
+          ],
+          "size": [
+            1430,
+            8,
+            12
+          ],
+          "tint": "active"
+        },
+        {
+          "kind": "box",
+          "at": [
+            30,
+            833,
+            470
+          ],
+          "size": [
+            1430,
+            8,
+            12
+          ],
+          "tint": "spent"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -600,
+            835,
+            400
+          ],
+          "size": [
+            6,
+            8,
+            180
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -600,
+            844,
+            575
+          ],
+          "size": [
+            8,
+            6,
+            56
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -600,
+            853,
+            400
+          ],
+          "r": 40,
+          "h": 18,
+          "segments": 16,
+          "tint": "counter",
+          "role": "c1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -300,
+            835,
+            400
+          ],
+          "size": [
+            6,
+            8,
+            180
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -300,
+            844,
+            547
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -280,
+            844,
+            561
+          ],
+          "size": [
+            8,
+            6,
+            28
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -300,
+            844,
+            575
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": -90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -320,
+            844,
+            589
+          ],
+          "size": [
+            8,
+            6,
+            28
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -300,
+            844,
+            603
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -300,
+            853,
+            400
+          ],
+          "r": 40,
+          "h": 18,
+          "segments": 16,
+          "tint": "counter",
+          "role": "c2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            835,
+            400
+          ],
+          "size": [
+            6,
+            8,
+            180
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            844,
+            547
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            20,
+            844,
+            575
+          ],
+          "size": [
+            8,
+            6,
+            56
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            844,
+            575
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            844,
+            603
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            853,
+            400
+          ],
+          "r": 40,
+          "h": 18,
+          "segments": 16,
+          "tint": "counter",
+          "role": "c3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            300,
+            835,
+            400
+          ],
+          "size": [
+            6,
+            8,
+            180
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            280,
+            844,
+            561
+          ],
+          "size": [
+            8,
+            6,
+            28
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            300,
+            844,
+            575
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            320,
+            844,
+            575
+          ],
+          "size": [
+            8,
+            6,
+            56
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            300,
+            853,
+            400
+          ],
+          "r": 40,
+          "h": 18,
+          "segments": 16,
+          "tint": "counter",
+          "role": "c4"
+        },
+        {
+          "kind": "box",
+          "at": [
+            600,
+            835,
+            400
+          ],
+          "size": [
+            6,
+            8,
+            180
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            600,
+            844,
+            547
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            580,
+            844,
+            561
+          ],
+          "size": [
+            8,
+            6,
+            28
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            600,
+            844,
+            575
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            620,
+            844,
+            589
+          ],
+          "size": [
+            8,
+            6,
+            28
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            600,
+            844,
+            603
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": -90000
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            600,
+            853,
+            400
+          ],
+          "r": 40,
+          "h": 18,
+          "segments": 16,
+          "tint": "counter",
+          "role": "c5"
+        }
+      ],
+      "palette": {
+        "wood": "#75543b",
+        "paper": "#eee2c3",
+        "ink": "#142833",
+        "reference": "#849299",
+        "active": "#3580a8",
+        "spent": "#87624b",
+        "counter": "#b24428"
+      },
+      "tags": [
+        "puzzle",
+        "nim",
+        "counters",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "puzzle": "puzzle",
+    "card": "Play a take-away game on three numbered piles, then return the same counters.",
+    "nim": "Nim practice table",
+    "piles": "three-pile take-away game",
+    "hands_empty": "Put down what you hold before changing a pile.",
+    "insufficient": "That pile has fewer counters than this removal needs. Choose an available positive amount from one pile.",
+    "rules": "This normal-play Nim practice table starts with piles A, B and C containing 3, 4 and 5 integral depicted counters. Seen from the front contact side, A is the far row, B the middle and C the near row. The blue strip in each row is active; the brown strip is spent. Fixed numbers increase left to right. Each original counter always stays in its own numbered column, either active or spent. If a pile has n remaining, positions 1 through n are active. Removing k changes exactly that pile by k and indexes its highest remaining numbered counters to their spent positions. Other piles do not change.",
+    "game": "For normal play, agree who starts and alternate by agreement. On each move remove any positive available number from exactly one pile. The person taking the final counter wins by the stated game rule. Forms enforce only the chosen pile amount: they do not assign players, enforce turns, declare a winner, provide strategy or act as an opponent. The worked 3/4/5 example is A2, C3, B1, B1, A1, B1, C1, B1, C1; the final piles are empty. Return-all restores the same twelve depicted counters to their active positions and the counts to 3/4/5. This fixed indexed practice drawing has no loose inventory, usable-resource creation, custody, physical counter-transfer path or exact individual-token contact claim. Each removal commits one whole negative count adjustment at native hand contact; there is no solver, timer or score."
+  },
+  "card": {
+    "text": "card",
+    "category": "puzzle",
+    "synonyms": [
+      "nim",
+      "piles"
+    ]
+  },
+  "howtos": {
+    "begin": {
+      "text": "rules",
+      "steps": [
+        {
+          "form": "remove_2_a"
+        },
+        {
+          "form": "remove_3_c"
+        }
+      ]
+    },
+    "worked_game": {
+      "text": "game",
+      "steps": [
+        {
+          "form": "remove_2_a"
+        },
+        {
+          "form": "remove_3_c"
+        },
+        {
+          "form": "remove_1_b"
+        },
+        {
+          "form": "remove_1_b"
+        },
+        {
+          "form": "remove_1_a"
+        },
+        {
+          "form": "remove_1_b"
+        },
+        {
+          "form": "remove_1_c"
+        },
+        {
+          "form": "remove_1_b"
+        },
+        {
+          "form": "remove_1_c"
+        },
+        {
+          "form": "return_all"
+        }
+      ]
+    }
+  }
+}
