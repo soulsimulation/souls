@@ -86,6 +86,11 @@ node about one origin request a second.
 The owner's alternative to a CDN is two or three unmetered machines running nginx with the settings above (Fact 2:
 Hetzner's ports). The stand-in below proves the rules, not nginx: nginx was not run here.
 
+**On soul.game** the stream is `/s/*`, which Caddy hands to this origin, and the CDN keeps it only because `/s/*` is
+in the zone's cache rule (`CDN_CACHE_RULE` in `tools/cdn/origin-cache.mjs`, applied by hand as
+[docs/operations/cdn.md](../../docs/operations/cdn.md#the-cache-rule) says; #4159). Without it the CDN passes every
+viewer's request to the origin.
+
 ## Tools
 
 - **Readers** (`v2/tools/readers/readers.mjs <base URL[,…]> <stream path> <readers> <seconds> [processes]`): each
@@ -101,6 +106,10 @@ Hetzner's ports). The stand-in below proves the rules, not nginx: nginx was not 
   [processes]`): V1's live world (`stream-check world`, even load) writes; the origin serves; stand-in cache nodes
   (`v2/tools/origin/cache.mjs`: keeps a 200 for its max-age, never keeps `no-store` or an error, collapses concurrent
   misses as `proxy_cache_lock` does) sit in front; the check runs, then the readers.
+- **The viewers bench through caching nodes** (`tools/bench/capacity/viewers/v2.mjs --cache-nodes K`): the served
+  Eden world and its join waves, with K stand-in nodes between the viewers and the origin (driver i reads through node
+  i mod K). Each window adds the nodes' hit ratio and the origin's requests and body bytes a second; `--poll-ms` sets
+  the viewers' pointer period. A simulation of a CDN, not one.
 
 ## The pilot, on a local stand-in
 
