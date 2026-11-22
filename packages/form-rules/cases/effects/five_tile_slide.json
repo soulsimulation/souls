@@ -1,0 +1,2549 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Atomic selected-tile swaps, complete solution, claim clearing, reset and duplicate receipt. Saved states are not actual interruption proof.",
+  "cases": [
+    {
+      "name": "slide_0_to_1_atomic_result",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 0,
+              "tile_2": 2,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 1,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "slide_0_to_1",
+            "args": {
+              "tile": "tile_1"
+            }
+          },
+          "receipt": "slide_0_to_1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "tile_1",
+                "n": 28,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "blank",
+                "n": 33,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "solved",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_slid",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:blank_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:claim_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:five_tile_slide",
+          "fields": {
+            "tile_1": 1,
+            "tile_2": 2,
+            "tile_3": 3,
+            "tile_4": 4,
+            "tile_5": 5,
+            "blank": 0,
+            "solved": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "slide_0_to_3_atomic_result",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 0,
+              "tile_2": 1,
+              "tile_3": 2,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 3,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "slide_0_to_3",
+            "args": {
+              "tile": "tile_1"
+            }
+          },
+          "receipt": "slide_0_to_3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "tile_1",
+                "n": 28,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "blank",
+                "n": 33,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "solved",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_slid",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:blank_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:claim_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:five_tile_slide",
+          "fields": {
+            "tile_1": 3,
+            "tile_2": 1,
+            "tile_3": 2,
+            "tile_4": 4,
+            "tile_5": 5,
+            "blank": 0,
+            "solved": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "slide_1_to_0_atomic_result",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 2,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 0,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "slide_1_to_0",
+            "args": {
+              "tile": "tile_1"
+            }
+          },
+          "receipt": "slide_1_to_0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "tile_1",
+                "n": 28,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "blank",
+                "n": 33,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "solved",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_slid",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:blank_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:claim_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:five_tile_slide",
+          "fields": {
+            "tile_1": 0,
+            "tile_2": 2,
+            "tile_3": 3,
+            "tile_4": 4,
+            "tile_5": 5,
+            "blank": 1,
+            "solved": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "slide_1_to_2_atomic_result",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 0,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 2,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "slide_1_to_2",
+            "args": {
+              "tile": "tile_1"
+            }
+          },
+          "receipt": "slide_1_to_2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "tile_1",
+                "n": 28,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "blank",
+                "n": 33,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "solved",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_slid",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:blank_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:claim_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:five_tile_slide",
+          "fields": {
+            "tile_1": 2,
+            "tile_2": 0,
+            "tile_3": 3,
+            "tile_4": 4,
+            "tile_5": 5,
+            "blank": 1,
+            "solved": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "slide_1_to_4_atomic_result",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 0,
+              "tile_3": 2,
+              "tile_4": 3,
+              "tile_5": 5,
+              "blank": 4,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "slide_1_to_4",
+            "args": {
+              "tile": "tile_1"
+            }
+          },
+          "receipt": "slide_1_to_4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "tile_1",
+                "n": 28,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "blank",
+                "n": 33,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "solved",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_slid",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:blank_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:claim_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:five_tile_slide",
+          "fields": {
+            "tile_1": 4,
+            "tile_2": 0,
+            "tile_3": 2,
+            "tile_4": 3,
+            "tile_5": 5,
+            "blank": 1,
+            "solved": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "slide_2_to_1_atomic_result",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 2,
+              "tile_2": 0,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 1,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "slide_2_to_1",
+            "args": {
+              "tile": "tile_1"
+            }
+          },
+          "receipt": "slide_2_to_1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "tile_1",
+                "n": 28,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "blank",
+                "n": 33,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "solved",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_slid",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:blank_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:claim_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:five_tile_slide",
+          "fields": {
+            "tile_1": 1,
+            "tile_2": 0,
+            "tile_3": 3,
+            "tile_4": 4,
+            "tile_5": 5,
+            "blank": 2,
+            "solved": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "slide_2_to_5_atomic_result",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 2,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 3,
+              "tile_5": 4,
+              "blank": 5,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "slide_2_to_5",
+            "args": {
+              "tile": "tile_1"
+            }
+          },
+          "receipt": "slide_2_to_5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "tile_1",
+                "n": 28,
+                "to": 5
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "blank",
+                "n": 33,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "solved",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_slid",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:blank_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:claim_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:five_tile_slide",
+          "fields": {
+            "tile_1": 5,
+            "tile_2": 0,
+            "tile_3": 1,
+            "tile_4": 3,
+            "tile_5": 4,
+            "blank": 2,
+            "solved": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "slide_3_to_0_atomic_result",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 3,
+              "tile_2": 1,
+              "tile_3": 2,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 0,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "slide_3_to_0",
+            "args": {
+              "tile": "tile_1"
+            }
+          },
+          "receipt": "slide_3_to_0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "tile_1",
+                "n": 28,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "blank",
+                "n": 33,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "solved",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_slid",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:blank_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:claim_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:five_tile_slide",
+          "fields": {
+            "tile_1": 0,
+            "tile_2": 1,
+            "tile_3": 2,
+            "tile_4": 4,
+            "tile_5": 5,
+            "blank": 3,
+            "solved": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "slide_3_to_4_atomic_result",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 3,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 5,
+              "blank": 4,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "slide_3_to_4",
+            "args": {
+              "tile": "tile_1"
+            }
+          },
+          "receipt": "slide_3_to_4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "tile_1",
+                "n": 28,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "blank",
+                "n": 33,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "solved",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_slid",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:blank_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:claim_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:five_tile_slide",
+          "fields": {
+            "tile_1": 4,
+            "tile_2": 0,
+            "tile_3": 1,
+            "tile_4": 2,
+            "tile_5": 5,
+            "blank": 3,
+            "solved": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "slide_4_to_1_atomic_result",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 4,
+              "tile_2": 0,
+              "tile_3": 2,
+              "tile_4": 3,
+              "tile_5": 5,
+              "blank": 1,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "slide_4_to_1",
+            "args": {
+              "tile": "tile_1"
+            }
+          },
+          "receipt": "slide_4_to_1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "tile_1",
+                "n": 28,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "blank",
+                "n": 33,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "solved",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_slid",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:blank_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:claim_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:five_tile_slide",
+          "fields": {
+            "tile_1": 1,
+            "tile_2": 0,
+            "tile_3": 2,
+            "tile_4": 3,
+            "tile_5": 5,
+            "blank": 4,
+            "solved": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "slide_4_to_3_atomic_result",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 4,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 5,
+              "blank": 3,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "slide_4_to_3",
+            "args": {
+              "tile": "tile_1"
+            }
+          },
+          "receipt": "slide_4_to_3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "tile_1",
+                "n": 28,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "blank",
+                "n": 33,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "solved",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_slid",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:blank_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:claim_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:five_tile_slide",
+          "fields": {
+            "tile_1": 3,
+            "tile_2": 0,
+            "tile_3": 1,
+            "tile_4": 2,
+            "tile_5": 5,
+            "blank": 4,
+            "solved": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "slide_4_to_5_atomic_result",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 4,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 3,
+              "blank": 5,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "slide_4_to_5",
+            "args": {
+              "tile": "tile_1"
+            }
+          },
+          "receipt": "slide_4_to_5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "tile_1",
+                "n": 28,
+                "to": 5
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "blank",
+                "n": 33,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "solved",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_slid",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:blank_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:claim_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:five_tile_slide",
+          "fields": {
+            "tile_1": 5,
+            "tile_2": 0,
+            "tile_3": 1,
+            "tile_4": 2,
+            "tile_5": 3,
+            "blank": 4,
+            "solved": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "slide_5_to_2_atomic_result",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 5,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 3,
+              "tile_5": 4,
+              "blank": 2,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "slide_5_to_2",
+            "args": {
+              "tile": "tile_1"
+            }
+          },
+          "receipt": "slide_5_to_2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "tile_1",
+                "n": 28,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "blank",
+                "n": 33,
+                "to": 5
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "solved",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_slid",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:blank_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:claim_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:five_tile_slide",
+          "fields": {
+            "tile_1": 2,
+            "tile_2": 0,
+            "tile_3": 1,
+            "tile_4": 3,
+            "tile_5": 4,
+            "blank": 5,
+            "solved": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "slide_5_to_4_atomic_result",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 5,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 3,
+              "blank": 4,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "slide_5_to_4",
+            "args": {
+              "tile": "tile_1"
+            }
+          },
+          "receipt": "slide_5_to_4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "tile_1",
+                "n": 28,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "blank",
+                "n": 33,
+                "to": 5
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "solved",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_slid",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:blank_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:claim_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:five_tile_slide",
+          "fields": {
+            "tile_1": 4,
+            "tile_2": 0,
+            "tile_3": 1,
+            "tile_4": 2,
+            "tile_5": 3,
+            "blank": 5,
+            "solved": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "reset_atomic_result",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 4,
+              "tile_3": 2,
+              "tile_4": 0,
+              "tile_5": 5,
+              "blank": 3,
+              "solved": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "reset"
+          },
+          "receipt": "reset",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "tile_1",
+                "n": 28,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "tile_2",
+                "n": 29,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "tile_3",
+                "n": 30,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "tile_4",
+                "n": 31,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "tile_5",
+                "n": 32,
+                "to": 5
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "blank",
+                "n": 33,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "solved",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:layout_reset",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:layout_reset",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:layout_reset",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:layout_reset",
+                "node": "p1",
+                "changes": [
+                  3
+                ]
+              },
+              {
+                "event": "eden:layout_reset",
+                "node": "p1",
+                "changes": [
+                  4
+                ]
+              },
+              {
+                "event": "eden:layout_reset",
+                "node": "p1",
+                "changes": [
+                  5
+                ]
+              },
+              {
+                "event": "eden:claim_cleared",
+                "node": "p1",
+                "changes": [
+                  6
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:five_tile_slide",
+          "fields": {
+            "tile_1": 1,
+            "tile_2": 4,
+            "tile_3": 2,
+            "tile_4": 0,
+            "tile_5": 5,
+            "blank": 3,
+            "solved": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "claim_solved_atomic_result",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 0,
+              "tile_2": 1,
+              "tile_3": 2,
+              "tile_4": 3,
+              "tile_5": 4,
+              "blank": 5,
+              "solved": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "claim_solved"
+          },
+          "receipt": "claim_solved",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "solved",
+                "n": 34,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:solution_claimed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:five_tile_slide",
+          "fields": {
+            "tile_1": 0,
+            "tile_2": 1,
+            "tile_3": 2,
+            "tile_4": 3,
+            "tile_5": 4,
+            "blank": 5,
+            "solved": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "solve_claim_move_clears_and_reset",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 4,
+              "tile_3": 2,
+              "tile_4": 0,
+              "tile_5": 5,
+              "blank": 3,
+              "solved": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "slide_0_to_3",
+            "args": {
+              "tile": "tile_4"
+            }
+          },
+          "receipt": "solution_0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "tile_4",
+                "n": 31,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "blank",
+                "n": 33,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "solved",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_slid",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:blank_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:claim_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "slide_1_to_0",
+            "args": {
+              "tile": "tile_1"
+            }
+          },
+          "receipt": "solution_1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "tile_1",
+                "n": 28,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "blank",
+                "n": 33,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "solved",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_slid",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:blank_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:claim_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "slide_4_to_1",
+            "args": {
+              "tile": "tile_2"
+            }
+          },
+          "receipt": "solution_2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "tile_2",
+                "n": 29,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "blank",
+                "n": 33,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "solved",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_slid",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:blank_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:claim_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "slide_5_to_4",
+            "args": {
+              "tile": "tile_5"
+            }
+          },
+          "receipt": "solution_3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "tile_5",
+                "n": 32,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "blank",
+                "n": 33,
+                "to": 5
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "solved",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_slid",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:blank_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:claim_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "claim_solved"
+          },
+          "receipt": "solution_4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "solved",
+                "n": 34,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:solution_claimed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "slide_4_to_5",
+            "args": {
+              "tile": "tile_5"
+            }
+          },
+          "receipt": "solution_5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "tile_5",
+                "n": 32,
+                "to": 5
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "blank",
+                "n": 33,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "solved",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_slid",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:blank_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:claim_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "reset"
+          },
+          "receipt": "solution_6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "tile_1",
+                "n": 28,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "tile_2",
+                "n": 29,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "tile_3",
+                "n": 30,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "tile_4",
+                "n": 31,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "tile_5",
+                "n": 32,
+                "to": 5
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "blank",
+                "n": 33,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "solved",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:layout_reset",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:layout_reset",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:layout_reset",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:layout_reset",
+                "node": "p1",
+                "changes": [
+                  3
+                ]
+              },
+              {
+                "event": "eden:layout_reset",
+                "node": "p1",
+                "changes": [
+                  4
+                ]
+              },
+              {
+                "event": "eden:layout_reset",
+                "node": "p1",
+                "changes": [
+                  5
+                ]
+              },
+              {
+                "event": "eden:claim_cleared",
+                "node": "p1",
+                "changes": [
+                  6
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:five_tile_slide",
+          "fields": {
+            "tile_1": 1,
+            "tile_2": 4,
+            "tile_3": 2,
+            "tile_4": 0,
+            "tile_5": 5,
+            "blank": 3,
+            "solved": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "same_receipt_is_not_a_second_swap",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 4,
+              "tile_3": 2,
+              "tile_4": 0,
+              "tile_5": 5,
+              "blank": 3,
+              "solved": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "slide_0_to_3",
+            "args": {
+              "tile": "tile_4"
+            }
+          },
+          "receipt": "one_swap",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "tile_4",
+                "n": 31,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "blank",
+                "n": 33,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "solved",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_slid",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:blank_moved",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:claim_cleared",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "slide_0_to_3",
+            "args": {
+              "tile": "tile_4"
+            }
+          },
+          "receipt": "one_swap",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:five_tile_slide",
+          "fields": {
+            "tile_1": 1,
+            "tile_2": 4,
+            "tile_3": 2,
+            "tile_4": 3,
+            "tile_5": 5,
+            "blank": 0,
+            "solved": 0
+          }
+        }
+      }
+    }
+  ]
+}

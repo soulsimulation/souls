@@ -71,8 +71,11 @@
     },
     "solved": {
       "n": 34,
-      "type": "bool",
-      "default": false,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 1,
       "audience": {
         "rule": "everyone"
       }
@@ -178,7 +181,7 @@
         {
           "change": "set",
           "field": "solved",
-          "to": false,
+          "to": 0,
           "event": "claim_cleared"
         }
       ]
@@ -256,7 +259,7 @@
         {
           "change": "set",
           "field": "solved",
-          "to": false,
+          "to": 0,
           "event": "claim_cleared"
         }
       ]
@@ -334,7 +337,7 @@
         {
           "change": "set",
           "field": "solved",
-          "to": false,
+          "to": 0,
           "event": "claim_cleared"
         }
       ]
@@ -412,7 +415,7 @@
         {
           "change": "set",
           "field": "solved",
-          "to": false,
+          "to": 0,
           "event": "claim_cleared"
         }
       ]
@@ -490,7 +493,7 @@
         {
           "change": "set",
           "field": "solved",
-          "to": false,
+          "to": 0,
           "event": "claim_cleared"
         }
       ]
@@ -568,7 +571,7 @@
         {
           "change": "set",
           "field": "solved",
-          "to": false,
+          "to": 0,
           "event": "claim_cleared"
         }
       ]
@@ -646,7 +649,7 @@
         {
           "change": "set",
           "field": "solved",
-          "to": false,
+          "to": 0,
           "event": "claim_cleared"
         }
       ]
@@ -724,7 +727,7 @@
         {
           "change": "set",
           "field": "solved",
-          "to": false,
+          "to": 0,
           "event": "claim_cleared"
         }
       ]
@@ -802,7 +805,7 @@
         {
           "change": "set",
           "field": "solved",
-          "to": false,
+          "to": 0,
           "event": "claim_cleared"
         }
       ]
@@ -880,7 +883,7 @@
         {
           "change": "set",
           "field": "solved",
-          "to": false,
+          "to": 0,
           "event": "claim_cleared"
         }
       ]
@@ -958,7 +961,7 @@
         {
           "change": "set",
           "field": "solved",
-          "to": false,
+          "to": 0,
           "event": "claim_cleared"
         }
       ]
@@ -1036,7 +1039,7 @@
         {
           "change": "set",
           "field": "solved",
-          "to": false,
+          "to": 0,
           "event": "claim_cleared"
         }
       ]
@@ -1114,7 +1117,7 @@
         {
           "change": "set",
           "field": "solved",
-          "to": false,
+          "to": 0,
           "event": "claim_cleared"
         }
       ]
@@ -1192,7 +1195,7 @@
         {
           "change": "set",
           "field": "solved",
-          "to": false,
+          "to": 0,
           "event": "claim_cleared"
         }
       ]
@@ -1266,7 +1269,7 @@
         {
           "change": "set",
           "field": "solved",
-          "to": false,
+          "to": 0,
           "event": "claim_cleared"
         }
       ]
@@ -1314,7 +1317,7 @@
         {
           "need": "state",
           "field": "solved",
-          "is": false
+          "is": 0
         },
         {
           "need": "hand",
@@ -1345,7 +1348,7 @@
         {
           "change": "set",
           "field": "solved",
-          "to": true,
+          "to": 1,
           "event": "solution_claimed"
         }
       ]
@@ -1505,8 +1508,8 @@
         "field": "solved",
         "do": "show",
         "at": {
-          "true": 1,
-          "false": 0
+          "0": 0,
+          "1": 1
         }
       }
     ],

@@ -1,0 +1,8138 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "All fourteen directed adjacent edges, each independent need, closed selection, reset and exact solved claim.",
+  "cases": [
+    {
+      "name": "slide_0_to_1_ready",
+      "act": {
+        "this": "p1",
+        "form": "slide_0_to_1",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 0,
+              "tile_2": 2,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 1,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "slide_0_to_1_need_0",
+      "act": {
+        "this": "p1",
+        "form": "slide_0_to_1",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 2,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 1,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "slide_0_to_1_need_1",
+      "act": {
+        "this": "p1",
+        "form": "slide_0_to_1",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 0,
+              "tile_2": 2,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 2,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "slide_0_to_1_need_2",
+      "act": {
+        "this": "p1",
+        "form": "slide_0_to_1",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 0,
+              "tile_2": 2,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 1,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "slide_0_to_1_need_3",
+      "act": {
+        "this": "p1",
+        "form": "slide_0_to_1",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 0,
+              "tile_2": 2,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 1,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "slide_0_to_1_invalid_blank",
+      "act": {
+        "this": "p1",
+        "form": "slide_0_to_1",
+        "args": {
+          "tile": "blank"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 0,
+              "tile_2": 2,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 1,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "blank"
+        }
+      }
+    },
+    {
+      "name": "slide_0_to_1_invalid_solved",
+      "act": {
+        "this": "p1",
+        "form": "slide_0_to_1",
+        "args": {
+          "tile": "solved"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 0,
+              "tile_2": 2,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 1,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "solved"
+        }
+      }
+    },
+    {
+      "name": "slide_0_to_1_invalid_tile_6",
+      "act": {
+        "this": "p1",
+        "form": "slide_0_to_1",
+        "args": {
+          "tile": "tile_6"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 0,
+              "tile_2": 2,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 1,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "tile_6"
+        }
+      }
+    },
+    {
+      "name": "slide_0_to_1_invalid_0",
+      "act": {
+        "this": "p1",
+        "form": "slide_0_to_1",
+        "args": {
+          "tile": 0
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 0,
+              "tile_2": 2,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 1,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": 0
+        }
+      }
+    },
+    {
+      "name": "slide_0_to_3_ready",
+      "act": {
+        "this": "p1",
+        "form": "slide_0_to_3",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 0,
+              "tile_2": 1,
+              "tile_3": 2,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 3,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "slide_0_to_3_need_0",
+      "act": {
+        "this": "p1",
+        "form": "slide_0_to_3",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 1,
+              "tile_3": 2,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 3,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "slide_0_to_3_need_1",
+      "act": {
+        "this": "p1",
+        "form": "slide_0_to_3",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 0,
+              "tile_2": 1,
+              "tile_3": 2,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 4,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "slide_0_to_3_need_2",
+      "act": {
+        "this": "p1",
+        "form": "slide_0_to_3",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 0,
+              "tile_2": 1,
+              "tile_3": 2,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 3,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "slide_0_to_3_need_3",
+      "act": {
+        "this": "p1",
+        "form": "slide_0_to_3",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 0,
+              "tile_2": 1,
+              "tile_3": 2,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 3,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "slide_0_to_3_invalid_blank",
+      "act": {
+        "this": "p1",
+        "form": "slide_0_to_3",
+        "args": {
+          "tile": "blank"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 0,
+              "tile_2": 1,
+              "tile_3": 2,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 3,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "blank"
+        }
+      }
+    },
+    {
+      "name": "slide_0_to_3_invalid_solved",
+      "act": {
+        "this": "p1",
+        "form": "slide_0_to_3",
+        "args": {
+          "tile": "solved"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 0,
+              "tile_2": 1,
+              "tile_3": 2,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 3,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "solved"
+        }
+      }
+    },
+    {
+      "name": "slide_0_to_3_invalid_tile_6",
+      "act": {
+        "this": "p1",
+        "form": "slide_0_to_3",
+        "args": {
+          "tile": "tile_6"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 0,
+              "tile_2": 1,
+              "tile_3": 2,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 3,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "tile_6"
+        }
+      }
+    },
+    {
+      "name": "slide_0_to_3_invalid_0",
+      "act": {
+        "this": "p1",
+        "form": "slide_0_to_3",
+        "args": {
+          "tile": 0
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 0,
+              "tile_2": 1,
+              "tile_3": 2,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 3,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": 0
+        }
+      }
+    },
+    {
+      "name": "slide_1_to_0_ready",
+      "act": {
+        "this": "p1",
+        "form": "slide_1_to_0",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 2,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 0,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "slide_1_to_0_need_0",
+      "act": {
+        "this": "p1",
+        "form": "slide_1_to_0",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 2,
+              "tile_2": 2,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 0,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "slide_1_to_0_need_1",
+      "act": {
+        "this": "p1",
+        "form": "slide_1_to_0",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 2,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 1,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "slide_1_to_0_need_2",
+      "act": {
+        "this": "p1",
+        "form": "slide_1_to_0",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 2,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 0,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "slide_1_to_0_need_3",
+      "act": {
+        "this": "p1",
+        "form": "slide_1_to_0",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 2,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 0,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "slide_1_to_0_invalid_blank",
+      "act": {
+        "this": "p1",
+        "form": "slide_1_to_0",
+        "args": {
+          "tile": "blank"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 2,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 0,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "blank"
+        }
+      }
+    },
+    {
+      "name": "slide_1_to_0_invalid_solved",
+      "act": {
+        "this": "p1",
+        "form": "slide_1_to_0",
+        "args": {
+          "tile": "solved"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 2,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 0,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "solved"
+        }
+      }
+    },
+    {
+      "name": "slide_1_to_0_invalid_tile_6",
+      "act": {
+        "this": "p1",
+        "form": "slide_1_to_0",
+        "args": {
+          "tile": "tile_6"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 2,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 0,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "tile_6"
+        }
+      }
+    },
+    {
+      "name": "slide_1_to_0_invalid_0",
+      "act": {
+        "this": "p1",
+        "form": "slide_1_to_0",
+        "args": {
+          "tile": 0
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 2,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 0,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": 0
+        }
+      }
+    },
+    {
+      "name": "slide_1_to_2_ready",
+      "act": {
+        "this": "p1",
+        "form": "slide_1_to_2",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 0,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 2,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "slide_1_to_2_need_0",
+      "act": {
+        "this": "p1",
+        "form": "slide_1_to_2",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 2,
+              "tile_2": 0,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 2,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "slide_1_to_2_need_1",
+      "act": {
+        "this": "p1",
+        "form": "slide_1_to_2",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 0,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 3,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "slide_1_to_2_need_2",
+      "act": {
+        "this": "p1",
+        "form": "slide_1_to_2",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 0,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 2,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "slide_1_to_2_need_3",
+      "act": {
+        "this": "p1",
+        "form": "slide_1_to_2",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 0,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 2,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "slide_1_to_2_invalid_blank",
+      "act": {
+        "this": "p1",
+        "form": "slide_1_to_2",
+        "args": {
+          "tile": "blank"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 0,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 2,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "blank"
+        }
+      }
+    },
+    {
+      "name": "slide_1_to_2_invalid_solved",
+      "act": {
+        "this": "p1",
+        "form": "slide_1_to_2",
+        "args": {
+          "tile": "solved"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 0,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 2,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "solved"
+        }
+      }
+    },
+    {
+      "name": "slide_1_to_2_invalid_tile_6",
+      "act": {
+        "this": "p1",
+        "form": "slide_1_to_2",
+        "args": {
+          "tile": "tile_6"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 0,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 2,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "tile_6"
+        }
+      }
+    },
+    {
+      "name": "slide_1_to_2_invalid_0",
+      "act": {
+        "this": "p1",
+        "form": "slide_1_to_2",
+        "args": {
+          "tile": 0
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 0,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 2,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": 0
+        }
+      }
+    },
+    {
+      "name": "slide_1_to_4_ready",
+      "act": {
+        "this": "p1",
+        "form": "slide_1_to_4",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 0,
+              "tile_3": 2,
+              "tile_4": 3,
+              "tile_5": 5,
+              "blank": 4,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "slide_1_to_4_need_0",
+      "act": {
+        "this": "p1",
+        "form": "slide_1_to_4",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 2,
+              "tile_2": 0,
+              "tile_3": 2,
+              "tile_4": 3,
+              "tile_5": 5,
+              "blank": 4,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "slide_1_to_4_need_1",
+      "act": {
+        "this": "p1",
+        "form": "slide_1_to_4",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 0,
+              "tile_3": 2,
+              "tile_4": 3,
+              "tile_5": 5,
+              "blank": 5,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "slide_1_to_4_need_2",
+      "act": {
+        "this": "p1",
+        "form": "slide_1_to_4",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 0,
+              "tile_3": 2,
+              "tile_4": 3,
+              "tile_5": 5,
+              "blank": 4,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "slide_1_to_4_need_3",
+      "act": {
+        "this": "p1",
+        "form": "slide_1_to_4",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 0,
+              "tile_3": 2,
+              "tile_4": 3,
+              "tile_5": 5,
+              "blank": 4,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "slide_1_to_4_invalid_blank",
+      "act": {
+        "this": "p1",
+        "form": "slide_1_to_4",
+        "args": {
+          "tile": "blank"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 0,
+              "tile_3": 2,
+              "tile_4": 3,
+              "tile_5": 5,
+              "blank": 4,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "blank"
+        }
+      }
+    },
+    {
+      "name": "slide_1_to_4_invalid_solved",
+      "act": {
+        "this": "p1",
+        "form": "slide_1_to_4",
+        "args": {
+          "tile": "solved"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 0,
+              "tile_3": 2,
+              "tile_4": 3,
+              "tile_5": 5,
+              "blank": 4,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "solved"
+        }
+      }
+    },
+    {
+      "name": "slide_1_to_4_invalid_tile_6",
+      "act": {
+        "this": "p1",
+        "form": "slide_1_to_4",
+        "args": {
+          "tile": "tile_6"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 0,
+              "tile_3": 2,
+              "tile_4": 3,
+              "tile_5": 5,
+              "blank": 4,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "tile_6"
+        }
+      }
+    },
+    {
+      "name": "slide_1_to_4_invalid_0",
+      "act": {
+        "this": "p1",
+        "form": "slide_1_to_4",
+        "args": {
+          "tile": 0
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 0,
+              "tile_3": 2,
+              "tile_4": 3,
+              "tile_5": 5,
+              "blank": 4,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": 0
+        }
+      }
+    },
+    {
+      "name": "slide_2_to_1_ready",
+      "act": {
+        "this": "p1",
+        "form": "slide_2_to_1",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 2,
+              "tile_2": 0,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 1,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "slide_2_to_1_need_0",
+      "act": {
+        "this": "p1",
+        "form": "slide_2_to_1",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 3,
+              "tile_2": 0,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 1,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "slide_2_to_1_need_1",
+      "act": {
+        "this": "p1",
+        "form": "slide_2_to_1",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 2,
+              "tile_2": 0,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 2,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "slide_2_to_1_need_2",
+      "act": {
+        "this": "p1",
+        "form": "slide_2_to_1",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 2,
+              "tile_2": 0,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 1,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "slide_2_to_1_need_3",
+      "act": {
+        "this": "p1",
+        "form": "slide_2_to_1",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 2,
+              "tile_2": 0,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 1,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "slide_2_to_1_invalid_blank",
+      "act": {
+        "this": "p1",
+        "form": "slide_2_to_1",
+        "args": {
+          "tile": "blank"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 2,
+              "tile_2": 0,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 1,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "blank"
+        }
+      }
+    },
+    {
+      "name": "slide_2_to_1_invalid_solved",
+      "act": {
+        "this": "p1",
+        "form": "slide_2_to_1",
+        "args": {
+          "tile": "solved"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 2,
+              "tile_2": 0,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 1,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "solved"
+        }
+      }
+    },
+    {
+      "name": "slide_2_to_1_invalid_tile_6",
+      "act": {
+        "this": "p1",
+        "form": "slide_2_to_1",
+        "args": {
+          "tile": "tile_6"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 2,
+              "tile_2": 0,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 1,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "tile_6"
+        }
+      }
+    },
+    {
+      "name": "slide_2_to_1_invalid_0",
+      "act": {
+        "this": "p1",
+        "form": "slide_2_to_1",
+        "args": {
+          "tile": 0
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 2,
+              "tile_2": 0,
+              "tile_3": 3,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 1,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": 0
+        }
+      }
+    },
+    {
+      "name": "slide_2_to_5_ready",
+      "act": {
+        "this": "p1",
+        "form": "slide_2_to_5",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 2,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 3,
+              "tile_5": 4,
+              "blank": 5,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "slide_2_to_5_need_0",
+      "act": {
+        "this": "p1",
+        "form": "slide_2_to_5",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 3,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 3,
+              "tile_5": 4,
+              "blank": 5,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "slide_2_to_5_need_1",
+      "act": {
+        "this": "p1",
+        "form": "slide_2_to_5",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 2,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 3,
+              "tile_5": 4,
+              "blank": 0,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "slide_2_to_5_need_2",
+      "act": {
+        "this": "p1",
+        "form": "slide_2_to_5",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 2,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 3,
+              "tile_5": 4,
+              "blank": 5,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "slide_2_to_5_need_3",
+      "act": {
+        "this": "p1",
+        "form": "slide_2_to_5",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 2,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 3,
+              "tile_5": 4,
+              "blank": 5,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "slide_2_to_5_invalid_blank",
+      "act": {
+        "this": "p1",
+        "form": "slide_2_to_5",
+        "args": {
+          "tile": "blank"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 2,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 3,
+              "tile_5": 4,
+              "blank": 5,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "blank"
+        }
+      }
+    },
+    {
+      "name": "slide_2_to_5_invalid_solved",
+      "act": {
+        "this": "p1",
+        "form": "slide_2_to_5",
+        "args": {
+          "tile": "solved"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 2,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 3,
+              "tile_5": 4,
+              "blank": 5,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "solved"
+        }
+      }
+    },
+    {
+      "name": "slide_2_to_5_invalid_tile_6",
+      "act": {
+        "this": "p1",
+        "form": "slide_2_to_5",
+        "args": {
+          "tile": "tile_6"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 2,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 3,
+              "tile_5": 4,
+              "blank": 5,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "tile_6"
+        }
+      }
+    },
+    {
+      "name": "slide_2_to_5_invalid_0",
+      "act": {
+        "this": "p1",
+        "form": "slide_2_to_5",
+        "args": {
+          "tile": 0
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 2,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 3,
+              "tile_5": 4,
+              "blank": 5,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": 0
+        }
+      }
+    },
+    {
+      "name": "slide_3_to_0_ready",
+      "act": {
+        "this": "p1",
+        "form": "slide_3_to_0",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 3,
+              "tile_2": 1,
+              "tile_3": 2,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 0,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "slide_3_to_0_need_0",
+      "act": {
+        "this": "p1",
+        "form": "slide_3_to_0",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 4,
+              "tile_2": 1,
+              "tile_3": 2,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 0,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "slide_3_to_0_need_1",
+      "act": {
+        "this": "p1",
+        "form": "slide_3_to_0",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 3,
+              "tile_2": 1,
+              "tile_3": 2,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 1,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "slide_3_to_0_need_2",
+      "act": {
+        "this": "p1",
+        "form": "slide_3_to_0",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 3,
+              "tile_2": 1,
+              "tile_3": 2,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 0,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "slide_3_to_0_need_3",
+      "act": {
+        "this": "p1",
+        "form": "slide_3_to_0",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 3,
+              "tile_2": 1,
+              "tile_3": 2,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 0,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "slide_3_to_0_invalid_blank",
+      "act": {
+        "this": "p1",
+        "form": "slide_3_to_0",
+        "args": {
+          "tile": "blank"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 3,
+              "tile_2": 1,
+              "tile_3": 2,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 0,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "blank"
+        }
+      }
+    },
+    {
+      "name": "slide_3_to_0_invalid_solved",
+      "act": {
+        "this": "p1",
+        "form": "slide_3_to_0",
+        "args": {
+          "tile": "solved"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 3,
+              "tile_2": 1,
+              "tile_3": 2,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 0,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "solved"
+        }
+      }
+    },
+    {
+      "name": "slide_3_to_0_invalid_tile_6",
+      "act": {
+        "this": "p1",
+        "form": "slide_3_to_0",
+        "args": {
+          "tile": "tile_6"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 3,
+              "tile_2": 1,
+              "tile_3": 2,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 0,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "tile_6"
+        }
+      }
+    },
+    {
+      "name": "slide_3_to_0_invalid_0",
+      "act": {
+        "this": "p1",
+        "form": "slide_3_to_0",
+        "args": {
+          "tile": 0
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 3,
+              "tile_2": 1,
+              "tile_3": 2,
+              "tile_4": 4,
+              "tile_5": 5,
+              "blank": 0,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": 0
+        }
+      }
+    },
+    {
+      "name": "slide_3_to_4_ready",
+      "act": {
+        "this": "p1",
+        "form": "slide_3_to_4",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 3,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 5,
+              "blank": 4,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "slide_3_to_4_need_0",
+      "act": {
+        "this": "p1",
+        "form": "slide_3_to_4",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 4,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 5,
+              "blank": 4,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "slide_3_to_4_need_1",
+      "act": {
+        "this": "p1",
+        "form": "slide_3_to_4",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 3,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 5,
+              "blank": 5,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "slide_3_to_4_need_2",
+      "act": {
+        "this": "p1",
+        "form": "slide_3_to_4",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 3,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 5,
+              "blank": 4,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "slide_3_to_4_need_3",
+      "act": {
+        "this": "p1",
+        "form": "slide_3_to_4",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 3,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 5,
+              "blank": 4,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "slide_3_to_4_invalid_blank",
+      "act": {
+        "this": "p1",
+        "form": "slide_3_to_4",
+        "args": {
+          "tile": "blank"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 3,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 5,
+              "blank": 4,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "blank"
+        }
+      }
+    },
+    {
+      "name": "slide_3_to_4_invalid_solved",
+      "act": {
+        "this": "p1",
+        "form": "slide_3_to_4",
+        "args": {
+          "tile": "solved"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 3,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 5,
+              "blank": 4,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "solved"
+        }
+      }
+    },
+    {
+      "name": "slide_3_to_4_invalid_tile_6",
+      "act": {
+        "this": "p1",
+        "form": "slide_3_to_4",
+        "args": {
+          "tile": "tile_6"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 3,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 5,
+              "blank": 4,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "tile_6"
+        }
+      }
+    },
+    {
+      "name": "slide_3_to_4_invalid_0",
+      "act": {
+        "this": "p1",
+        "form": "slide_3_to_4",
+        "args": {
+          "tile": 0
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 3,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 5,
+              "blank": 4,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": 0
+        }
+      }
+    },
+    {
+      "name": "slide_4_to_1_ready",
+      "act": {
+        "this": "p1",
+        "form": "slide_4_to_1",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 4,
+              "tile_2": 0,
+              "tile_3": 2,
+              "tile_4": 3,
+              "tile_5": 5,
+              "blank": 1,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "slide_4_to_1_need_0",
+      "act": {
+        "this": "p1",
+        "form": "slide_4_to_1",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 5,
+              "tile_2": 0,
+              "tile_3": 2,
+              "tile_4": 3,
+              "tile_5": 5,
+              "blank": 1,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "slide_4_to_1_need_1",
+      "act": {
+        "this": "p1",
+        "form": "slide_4_to_1",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 4,
+              "tile_2": 0,
+              "tile_3": 2,
+              "tile_4": 3,
+              "tile_5": 5,
+              "blank": 2,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "slide_4_to_1_need_2",
+      "act": {
+        "this": "p1",
+        "form": "slide_4_to_1",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 4,
+              "tile_2": 0,
+              "tile_3": 2,
+              "tile_4": 3,
+              "tile_5": 5,
+              "blank": 1,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "slide_4_to_1_need_3",
+      "act": {
+        "this": "p1",
+        "form": "slide_4_to_1",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 4,
+              "tile_2": 0,
+              "tile_3": 2,
+              "tile_4": 3,
+              "tile_5": 5,
+              "blank": 1,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "slide_4_to_1_invalid_blank",
+      "act": {
+        "this": "p1",
+        "form": "slide_4_to_1",
+        "args": {
+          "tile": "blank"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 4,
+              "tile_2": 0,
+              "tile_3": 2,
+              "tile_4": 3,
+              "tile_5": 5,
+              "blank": 1,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "blank"
+        }
+      }
+    },
+    {
+      "name": "slide_4_to_1_invalid_solved",
+      "act": {
+        "this": "p1",
+        "form": "slide_4_to_1",
+        "args": {
+          "tile": "solved"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 4,
+              "tile_2": 0,
+              "tile_3": 2,
+              "tile_4": 3,
+              "tile_5": 5,
+              "blank": 1,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "solved"
+        }
+      }
+    },
+    {
+      "name": "slide_4_to_1_invalid_tile_6",
+      "act": {
+        "this": "p1",
+        "form": "slide_4_to_1",
+        "args": {
+          "tile": "tile_6"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 4,
+              "tile_2": 0,
+              "tile_3": 2,
+              "tile_4": 3,
+              "tile_5": 5,
+              "blank": 1,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "tile_6"
+        }
+      }
+    },
+    {
+      "name": "slide_4_to_1_invalid_0",
+      "act": {
+        "this": "p1",
+        "form": "slide_4_to_1",
+        "args": {
+          "tile": 0
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 4,
+              "tile_2": 0,
+              "tile_3": 2,
+              "tile_4": 3,
+              "tile_5": 5,
+              "blank": 1,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": 0
+        }
+      }
+    },
+    {
+      "name": "slide_4_to_3_ready",
+      "act": {
+        "this": "p1",
+        "form": "slide_4_to_3",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 4,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 5,
+              "blank": 3,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "slide_4_to_3_need_0",
+      "act": {
+        "this": "p1",
+        "form": "slide_4_to_3",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 5,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 5,
+              "blank": 3,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "slide_4_to_3_need_1",
+      "act": {
+        "this": "p1",
+        "form": "slide_4_to_3",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 4,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 5,
+              "blank": 4,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "slide_4_to_3_need_2",
+      "act": {
+        "this": "p1",
+        "form": "slide_4_to_3",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 4,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 5,
+              "blank": 3,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "slide_4_to_3_need_3",
+      "act": {
+        "this": "p1",
+        "form": "slide_4_to_3",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 4,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 5,
+              "blank": 3,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "slide_4_to_3_invalid_blank",
+      "act": {
+        "this": "p1",
+        "form": "slide_4_to_3",
+        "args": {
+          "tile": "blank"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 4,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 5,
+              "blank": 3,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "blank"
+        }
+      }
+    },
+    {
+      "name": "slide_4_to_3_invalid_solved",
+      "act": {
+        "this": "p1",
+        "form": "slide_4_to_3",
+        "args": {
+          "tile": "solved"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 4,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 5,
+              "blank": 3,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "solved"
+        }
+      }
+    },
+    {
+      "name": "slide_4_to_3_invalid_tile_6",
+      "act": {
+        "this": "p1",
+        "form": "slide_4_to_3",
+        "args": {
+          "tile": "tile_6"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 4,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 5,
+              "blank": 3,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "tile_6"
+        }
+      }
+    },
+    {
+      "name": "slide_4_to_3_invalid_0",
+      "act": {
+        "this": "p1",
+        "form": "slide_4_to_3",
+        "args": {
+          "tile": 0
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 4,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 5,
+              "blank": 3,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": 0
+        }
+      }
+    },
+    {
+      "name": "slide_4_to_5_ready",
+      "act": {
+        "this": "p1",
+        "form": "slide_4_to_5",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 4,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 3,
+              "blank": 5,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "slide_4_to_5_need_0",
+      "act": {
+        "this": "p1",
+        "form": "slide_4_to_5",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 5,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 3,
+              "blank": 5,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "slide_4_to_5_need_1",
+      "act": {
+        "this": "p1",
+        "form": "slide_4_to_5",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 4,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 3,
+              "blank": 0,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "slide_4_to_5_need_2",
+      "act": {
+        "this": "p1",
+        "form": "slide_4_to_5",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 4,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 3,
+              "blank": 5,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "slide_4_to_5_need_3",
+      "act": {
+        "this": "p1",
+        "form": "slide_4_to_5",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 4,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 3,
+              "blank": 5,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "slide_4_to_5_invalid_blank",
+      "act": {
+        "this": "p1",
+        "form": "slide_4_to_5",
+        "args": {
+          "tile": "blank"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 4,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 3,
+              "blank": 5,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "blank"
+        }
+      }
+    },
+    {
+      "name": "slide_4_to_5_invalid_solved",
+      "act": {
+        "this": "p1",
+        "form": "slide_4_to_5",
+        "args": {
+          "tile": "solved"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 4,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 3,
+              "blank": 5,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "solved"
+        }
+      }
+    },
+    {
+      "name": "slide_4_to_5_invalid_tile_6",
+      "act": {
+        "this": "p1",
+        "form": "slide_4_to_5",
+        "args": {
+          "tile": "tile_6"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 4,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 3,
+              "blank": 5,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "tile_6"
+        }
+      }
+    },
+    {
+      "name": "slide_4_to_5_invalid_0",
+      "act": {
+        "this": "p1",
+        "form": "slide_4_to_5",
+        "args": {
+          "tile": 0
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 4,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 3,
+              "blank": 5,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": 0
+        }
+      }
+    },
+    {
+      "name": "slide_5_to_2_ready",
+      "act": {
+        "this": "p1",
+        "form": "slide_5_to_2",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 5,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 3,
+              "tile_5": 4,
+              "blank": 2,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "slide_5_to_2_need_0",
+      "act": {
+        "this": "p1",
+        "form": "slide_5_to_2",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 0,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 3,
+              "tile_5": 4,
+              "blank": 2,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "slide_5_to_2_need_1",
+      "act": {
+        "this": "p1",
+        "form": "slide_5_to_2",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 5,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 3,
+              "tile_5": 4,
+              "blank": 3,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "slide_5_to_2_need_2",
+      "act": {
+        "this": "p1",
+        "form": "slide_5_to_2",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 5,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 3,
+              "tile_5": 4,
+              "blank": 2,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "slide_5_to_2_need_3",
+      "act": {
+        "this": "p1",
+        "form": "slide_5_to_2",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 5,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 3,
+              "tile_5": 4,
+              "blank": 2,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "slide_5_to_2_invalid_blank",
+      "act": {
+        "this": "p1",
+        "form": "slide_5_to_2",
+        "args": {
+          "tile": "blank"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 5,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 3,
+              "tile_5": 4,
+              "blank": 2,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "blank"
+        }
+      }
+    },
+    {
+      "name": "slide_5_to_2_invalid_solved",
+      "act": {
+        "this": "p1",
+        "form": "slide_5_to_2",
+        "args": {
+          "tile": "solved"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 5,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 3,
+              "tile_5": 4,
+              "blank": 2,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "solved"
+        }
+      }
+    },
+    {
+      "name": "slide_5_to_2_invalid_tile_6",
+      "act": {
+        "this": "p1",
+        "form": "slide_5_to_2",
+        "args": {
+          "tile": "tile_6"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 5,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 3,
+              "tile_5": 4,
+              "blank": 2,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "tile_6"
+        }
+      }
+    },
+    {
+      "name": "slide_5_to_2_invalid_0",
+      "act": {
+        "this": "p1",
+        "form": "slide_5_to_2",
+        "args": {
+          "tile": 0
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 5,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 3,
+              "tile_5": 4,
+              "blank": 2,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": 0
+        }
+      }
+    },
+    {
+      "name": "slide_5_to_4_ready",
+      "act": {
+        "this": "p1",
+        "form": "slide_5_to_4",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 5,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 3,
+              "blank": 4,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "slide_5_to_4_need_0",
+      "act": {
+        "this": "p1",
+        "form": "slide_5_to_4",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 0,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 3,
+              "blank": 4,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "slide_5_to_4_need_1",
+      "act": {
+        "this": "p1",
+        "form": "slide_5_to_4",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 5,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 3,
+              "blank": 5,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "slide_5_to_4_need_2",
+      "act": {
+        "this": "p1",
+        "form": "slide_5_to_4",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 5,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 3,
+              "blank": 4,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "slide_5_to_4_need_3",
+      "act": {
+        "this": "p1",
+        "form": "slide_5_to_4",
+        "args": {
+          "tile": "tile_1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 5,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 3,
+              "blank": 4,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "slide_5_to_4_invalid_blank",
+      "act": {
+        "this": "p1",
+        "form": "slide_5_to_4",
+        "args": {
+          "tile": "blank"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 5,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 3,
+              "blank": 4,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "blank"
+        }
+      }
+    },
+    {
+      "name": "slide_5_to_4_invalid_solved",
+      "act": {
+        "this": "p1",
+        "form": "slide_5_to_4",
+        "args": {
+          "tile": "solved"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 5,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 3,
+              "blank": 4,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "solved"
+        }
+      }
+    },
+    {
+      "name": "slide_5_to_4_invalid_tile_6",
+      "act": {
+        "this": "p1",
+        "form": "slide_5_to_4",
+        "args": {
+          "tile": "tile_6"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 5,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 3,
+              "blank": 4,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": "tile_6"
+        }
+      }
+    },
+    {
+      "name": "slide_5_to_4_invalid_0",
+      "act": {
+        "this": "p1",
+        "form": "slide_5_to_4",
+        "args": {
+          "tile": 0
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 5,
+              "tile_2": 0,
+              "tile_3": 1,
+              "tile_4": 2,
+              "tile_5": 3,
+              "blank": 4,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": -1,
+        "reason": "bad_input",
+        "detail": {
+          "what": "not_a_choice",
+          "arg": "tile",
+          "value": 0
+        }
+      }
+    },
+    {
+      "name": "reset_ready",
+      "act": {
+        "this": "p1",
+        "form": "reset"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 4,
+              "tile_3": 2,
+              "tile_4": 0,
+              "tile_5": 5,
+              "blank": 3,
+              "solved": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "reset_need_0",
+      "act": {
+        "this": "p1",
+        "form": "reset"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 4,
+              "tile_3": 2,
+              "tile_4": 0,
+              "tile_5": 5,
+              "blank": 3,
+              "solved": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "reset_need_1",
+      "act": {
+        "this": "p1",
+        "form": "reset"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 4,
+              "tile_3": 2,
+              "tile_4": 0,
+              "tile_5": 5,
+              "blank": 3,
+              "solved": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "out_of_reach"
+      }
+    },
+    {
+      "name": "claim_solved_ready",
+      "act": {
+        "this": "p1",
+        "form": "claim_solved"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 0,
+              "tile_2": 1,
+              "tile_3": 2,
+              "tile_4": 3,
+              "tile_5": 4,
+              "blank": 5,
+              "solved": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "claim_solved_need_0",
+      "act": {
+        "this": "p1",
+        "form": "claim_solved"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 1,
+              "tile_2": 1,
+              "tile_3": 2,
+              "tile_4": 3,
+              "tile_5": 4,
+              "blank": 5,
+              "solved": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "claim_solved_need_1",
+      "act": {
+        "this": "p1",
+        "form": "claim_solved"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 0,
+              "tile_2": 2,
+              "tile_3": 2,
+              "tile_4": 3,
+              "tile_5": 4,
+              "blank": 5,
+              "solved": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "claim_solved_need_2",
+      "act": {
+        "this": "p1",
+        "form": "claim_solved"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 0,
+              "tile_2": 1,
+              "tile_3": 3,
+              "tile_4": 3,
+              "tile_5": 4,
+              "blank": 5,
+              "solved": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "claim_solved_need_3",
+      "act": {
+        "this": "p1",
+        "form": "claim_solved"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 0,
+              "tile_2": 1,
+              "tile_3": 2,
+              "tile_4": 4,
+              "tile_5": 4,
+              "blank": 5,
+              "solved": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 3,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "claim_solved_need_4",
+      "act": {
+        "this": "p1",
+        "form": "claim_solved"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 0,
+              "tile_2": 1,
+              "tile_3": 2,
+              "tile_4": 3,
+              "tile_5": 5,
+              "blank": 5,
+              "solved": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 4,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "claim_solved_need_5",
+      "act": {
+        "this": "p1",
+        "form": "claim_solved"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 0,
+              "tile_2": 1,
+              "tile_3": 2,
+              "tile_4": 3,
+              "tile_5": 4,
+              "blank": 0,
+              "solved": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 5,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "claim_solved_need_6",
+      "act": {
+        "this": "p1",
+        "form": "claim_solved"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 0,
+              "tile_2": 1,
+              "tile_3": 2,
+              "tile_4": 3,
+              "tile_5": 4,
+              "blank": 5,
+              "solved": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 6,
+        "reason": "field_differs"
+      }
+    },
+    {
+      "name": "claim_solved_need_7",
+      "act": {
+        "this": "p1",
+        "form": "claim_solved"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 0,
+              "tile_2": 1,
+              "tile_3": 2,
+              "tile_4": 3,
+              "tile_5": 4,
+              "blank": 5,
+              "solved": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 7,
+        "reason": "hand_not_empty"
+      }
+    },
+    {
+      "name": "claim_solved_need_8",
+      "act": {
+        "this": "p1",
+        "form": "claim_solved"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:five_tile_slide",
+            "fields": {
+              "tile_1": 0,
+              "tile_2": 1,
+              "tile_3": 2,
+              "tile_4": 3,
+              "tile_5": 4,
+              "blank": 5,
+              "solved": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 8,
+        "reason": "out_of_reach"
+      }
+    }
+  ]
+}
