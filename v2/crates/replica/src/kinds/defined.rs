@@ -259,7 +259,8 @@ pub fn effects_checked(
     let forms = entry.get("forms").and_then(Json::obj).unwrap_or(&[]);
     let slots = entry.get("slots").and_then(Json::obj).unwrap_or(&[]);
     // The quick timers: form to the forms it starts sooner than the least, and how soon.
-    let mut quick: BTreeMap<&str, Vec<(&str, i128)>> = BTreeMap::new();
+    // Parallel timers between two forms count once, at the soonest (a negative one, refused when it runs, as 0).
+    let mut quick: BTreeMap<&str, BTreeMap<&str, i128>> = BTreeMap::new();
     for (form, f) in forms {
         for e in f.get("effects").and_then(Json::arr).unwrap_or(&[]) {
             match e.get("change").and_then(Json::str) {
@@ -291,19 +292,25 @@ pub fn effects_checked(
                         (e.get("form").and_then(Json::str), e.get("after_us"))
                         && *us < i128::from(TIMER_LEAST_US)
                     {
-                        quick.entry(form.as_str()).or_default().push((to, *us));
+                        let soonest = quick.entry(form.as_str()).or_default().entry(to).or_insert(*us);
+                        *soonest = (*soonest).min(*us);
                     }
                 }
                 _ => {}
             }
         }
     }
-    // A ring of quick timers: from each form, every path of quick timers that comes back to it.
+    // A ring of quick timers: the shortest way back to each form (Dijkstra over the forms), so the search is
+    // polynomial in the record however many timers it has.
     for start in quick.keys() {
-        let mut stack = vec![(*start, 0i128, 0usize)];
-        while let Some((at, spent, depth)) = stack.pop() {
-            for (to, us) in quick.get(at).map_or(&[][..], Vec::as_slice) {
-                let spent = spent + us;
+        let mut best: BTreeMap<&str, i128> = BTreeMap::from([(*start, 0)]);
+        let mut due = std::collections::BinaryHeap::from([std::cmp::Reverse((0i128, *start))]);
+        while let Some(std::cmp::Reverse((spent, at))) = due.pop() {
+            if best.get(at).is_some_and(|b| *b < spent) {
+                continue;
+            }
+            for (to, us) in quick.get(at).into_iter().flatten() {
+                let spent = spent + (*us).max(0);
                 if spent >= i128::from(TIMER_LEAST_US) {
                     continue;
                 }
@@ -312,8 +319,9 @@ pub fn effects_checked(
                         "{start}: starts itself again by timer within {spent} µs, under {TIMER_LEAST_US}"
                     ));
                 }
-                if depth < forms.len() {
-                    stack.push((to, spent, depth + 1));
+                if best.get(to).is_none_or(|b| spent < *b) {
+                    best.insert(to, spent);
+                    due.push(std::cmp::Reverse((spent, to)));
                 }
             }
         }
