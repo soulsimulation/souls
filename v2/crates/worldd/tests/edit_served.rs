@@ -1585,13 +1585,13 @@ async fn g4_undo_and_redo_on_the_wire_and_buildsafe_refuses_an_undo_onto_a_soul(
     souls
         .set_read_timeout(Some(Duration::from_secs(60)))
         .unwrap();
-    assert_eq!(socket_answer(&mut souls).kind, 1, "the walk ends");
+    assert_eq!(socket_end(&mut souls).kind, 1, "the walk ends");
     let got = go(&mut ws, Asked::Undo).await;
     println!("A3: undo onto the Soul: {got:?}");
     assert_eq!((got.kind, got.reason.as_str()), (2, "edit.would-bury"));
     // Refused, nothing changed: the Soul walks off and the same undo commits.
     walk(&mut souls, &w, w.souls[0], 2, -36 * M, 30 * M);
-    assert_eq!(socket_answer(&mut souls).kind, 1, "the walk ends");
+    assert_eq!(socket_end(&mut souls).kind, 1, "the walk ends");
     let got = go(&mut ws, Asked::Undo).await;
     assert_eq!(
         got.kind, 1,

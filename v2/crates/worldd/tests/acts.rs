@@ -401,12 +401,18 @@ impl Client {
         self.0.write_all(&bytes).unwrap();
     }
 
-    /// The next answer: a receipt's entries, or a refusal's reason.
+    /// The next answer: a receipt's entries, or a refusal's reason. A progress answer (C20, sent as a run starts) is
+    /// read past.
     fn answer(&mut self) -> Result<Vec<u64>, String> {
-        let mut len = [0u8; 4];
-        self.0.read_exact(&mut len).expect("an answer");
-        let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
-        self.0.read_exact(&mut frame).unwrap();
+        let frame = loop {
+            let mut len = [0u8; 4];
+            self.0.read_exact(&mut len).expect("an answer");
+            let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
+            self.0.read_exact(&mut frame).unwrap();
+            if !answers::is_progress(&frame) {
+                break frame;
+            }
+        };
         let Value::Map(m) = decode(&frame).unwrap().value else {
             panic!("a frame")
         };

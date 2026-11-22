@@ -263,10 +263,16 @@ fn send(
 
 /// The next answer's kind: 1 a receipt, 2 a refusal (with its reason).
 fn answer(s: &mut UnixStream) -> (u64, String) {
-    let mut len = [0u8; 4];
-    s.read_exact(&mut len).expect("an answer");
-    let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
-    s.read_exact(&mut frame).expect("an answer");
+    // A progress answer (C20, sent as a walk's route is planned) is read past.
+    let frame = loop {
+        let mut len = [0u8; 4];
+        s.read_exact(&mut len).expect("an answer");
+        let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
+        s.read_exact(&mut frame).expect("an answer");
+        if !answers::is_progress(&frame) {
+            break frame;
+        }
+    };
     let Value::Map(m) = decode(&frame).expect("a frame").value else {
         panic!("a frame")
     };

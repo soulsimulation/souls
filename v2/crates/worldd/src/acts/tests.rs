@@ -514,7 +514,7 @@ fn a_gateway_walk_is_watched_against_its_legs_end_not_its_granted_place() {
         .granted
         .insert(id, Vec3::new(-40_000_000, 0, 50_000_000));
     let leg_end = Vec3::new(20_000_000, 0, 50_000_000);
-    let mut walk = Walk::new(id, Id::new(Scope([0xc9; 16]), 2).unwrap(), 0);
+    let mut walk = Walk::new(id, Id::new(Scope([0xc9; 16]), 2).unwrap());
     let mut corners = BTreeSet::new();
     for t in 0..2_000i64 {
         let me = *b.runner.controller.body(id).unwrap();

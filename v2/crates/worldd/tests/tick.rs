@@ -230,8 +230,13 @@ fn run_to(w: &World, tick: i64) -> Ran {
 
 /// An answer: `Ok(entries)` for a receipt, `Err(reason)` for a refusal.
 fn answer(rx: &Receiver<Vec<u8>>) -> Result<Vec<u64>, String> {
-    let frame = rx.recv_timeout(Duration::from_secs(20)).expect("an answer");
-    answer_frame(&frame)
+    // A progress answer (C20, sent as a run starts) is read past.
+    loop {
+        let frame = rx.recv_timeout(Duration::from_secs(20)).expect("an answer");
+        if !answers::is_progress(&frame) {
+            return answer_frame(&frame);
+        }
+    }
 }
 
 fn answer_frame(frame: &[u8]) -> Result<Vec<u64>, String> {
@@ -795,7 +800,8 @@ fn k18b_a_free_running_world_with_its_planner_replays_in_lockstep() {
         #[allow(clippy::disallowed_methods)]
         // a test's real clock, released after the processed-event barrier
         zero.set(std::time::Instant::now()).unwrap();
-        let observed_answer = |rx: &Receiver<Vec<u8>>, label: &str| {
+        // A progress answer (C20, sent as a walk's route is planned) is read past.
+        let observed_answer = |rx: &Receiver<Vec<u8>>, label: &str| loop {
             let frame = rx.recv_timeout(Duration::from_secs(20)).unwrap_or_else(|e| {
                 let records = recover(&bytes(&store)).unwrap().records;
                 let inputs = recorder::inputs(&records).unwrap();
@@ -823,7 +829,9 @@ fn k18b_a_free_running_world_with_its_planner_replays_in_lockstep() {
                     records.len()
                 );
             });
-            answer_frame(&frame)
+            if !answers::is_progress(&frame) {
+                break answer_frame(&frame);
+            }
         };
         while w.beat.read().0 < 5 {
             std::thread::sleep(Duration::from_millis(5));

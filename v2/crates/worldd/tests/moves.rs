@@ -185,10 +185,16 @@ impl Client {
 
     /// The next answer: a receipt's intent id and entries, or a refusal's reason.
     fn answer(&mut self) -> Result<(Id, Vec<u64>), String> {
-        let mut len = [0u8; 4];
-        self.0.read_exact(&mut len).expect("an answer");
-        let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
-        self.0.read_exact(&mut frame).unwrap();
+        // A progress answer (C20, sent as a run starts) is read past.
+        let frame = loop {
+            let mut len = [0u8; 4];
+            self.0.read_exact(&mut len).expect("an answer");
+            let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
+            self.0.read_exact(&mut frame).unwrap();
+            if !answers::is_progress(&frame) {
+                break frame;
+            }
+        };
         read_answer(&frame)
     }
 }
@@ -919,6 +925,9 @@ fn a_walk_whose_act_times_out_mid_move_stops_and_ends_by_name() {
         .send(answers::Event::RunTo { tick: 100, done })
         .unwrap();
     ran.recv().unwrap();
+    // Accepted as its route is planned (C20, W11 #4087), with what is left of its 1 s; then its end.
+    let frame = rx.recv_timeout(Duration::from_secs(20)).expect("an answer");
+    assert!(answers::is_progress(&frame), "accepted first");
     let frame = rx.recv_timeout(Duration::from_secs(20)).expect("an answer");
     assert_eq!(read_answer(&frame), Err("act.timed-out".into()));
     world.stop();
@@ -1136,8 +1145,11 @@ fn c19_a_partly_occupied_primary_precedes_its_ranked_fallback() {
 }
 
 /// C29: the unchanged 20 m B7b leader distance must outlive the default 10 s and arrive, with exactly one C20
-/// progress frame and a route deadline entry named in its receipt.
+/// progress frame and a route deadline entry named in its receipt. W11 (#4087): the progress frame, the act's
+/// "accepted", comes within 2 s of the send (as its route is planned), not at the 10 s arrival deadline.
 #[test]
+// Times the first answer from the send by the wall clock, as the gateway sees it.
+#[allow(clippy::disallowed_methods)]
 fn a_twenty_metre_gateway_walk_gets_one_progress_answer_and_arrives() {
     let (world, mut c, store, path) = served(10_000_000, "longwalk");
     let ground = bodies().unwrap().town.ground;
@@ -1177,6 +1189,7 @@ fn a_twenty_metre_gateway_walk_gets_one_progress_answer_and_arrives() {
         reflex: false,
     };
     let bytes = encode(&i.to_value()).unwrap();
+    let sent = std::time::Instant::now();
     c.0.write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
         .unwrap();
     c.0.write_all(&bytes).unwrap();
@@ -1184,16 +1197,17 @@ fn a_twenty_metre_gateway_walk_gets_one_progress_answer_and_arrives() {
     c.0.read_exact(&mut len).unwrap();
     let mut frame = vec![0; u32::from_be_bytes(len) as usize];
     c.0.read_exact(&mut frame).unwrap();
+    let accepted = sent.elapsed();
     let Value::Map(m) = decode(&frame).unwrap().value else {
         panic!("frame")
     };
     let Some(Value::Map(a)) = m.get(&2) else {
         panic!("answer")
     };
-    assert_eq!(
-        a.get(&3),
-        Some(&Value::Uint(3)),
-        "one in-progress answer at 10 s"
+    assert_eq!(a.get(&3), Some(&Value::Uint(3)), "one in-progress answer");
+    assert!(
+        accepted < Duration::from_secs(2),
+        "accepted within 2 s of its send, not at the arrival deadline: {accepted:?}"
     );
     assert!(matches!(a.get(&answers::LEFT), Some(Value::Uint(n)) if *n > 0));
     let (id, receipt) = c.answer().expect("the next answer is the final receipt");
@@ -1226,8 +1240,7 @@ fn a_twenty_metre_gateway_walk_gets_one_progress_answer_and_arrives() {
     assert_eq!(end.2.as_deref(), Some("done"));
     assert!(near(end.4, destination, 100_000), "arrived: {:?}", end.4);
     println!(
-        "20 m: one progress answer then done; receipt {:?}; planned time {:?}",
-        receipt, due
+        "20 m: one progress answer after {accepted:?}, then done; receipt {receipt:?}; planned time {due:?}"
     );
 }
 
