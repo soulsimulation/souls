@@ -3453,9 +3453,9 @@ fn i3948_create(h: &Header, seq: u64, node: Id, parent: Id, kind: usize) -> Effe
     }
     e
 }
-/// A thing moved to `to` by a Soul, as the gateway moves one: a leave and an arrive in one part.
-fn i3948_move(h: &Header, seq: u64, node: Id, to: Id, transfer: Id) -> Vec<Effect> {
-    let pose = Pose {
+/// A place on `to`.
+fn i3948_pose(to: Id) -> Pose {
+    Pose {
         frame: Frame {
             node: to,
             slot: None,
@@ -3466,7 +3466,11 @@ fn i3948_move(h: &Header, seq: u64, node: Id, to: Id, transfer: Id) -> Vec<Effec
             surface: to,
             height: 0,
         },
-    };
+    }
+}
+/// A thing moved to `to` by a Soul, as the gateway moves one: a leave and an arrive in one part.
+fn i3948_move(h: &Header, seq: u64, node: Id, to: Id, transfer: Id) -> Vec<Effect> {
+    let pose = i3948_pose(to);
     let soul = Id::new(Scope([0x5a; 16]), 1).unwrap();
     let mut leave = w3e_effect(
         seq,
@@ -3557,7 +3561,7 @@ fn i3948_a_closed_containers_contents_stay_out_of_the_public_stream_until_taken_
             i3948_closed(&h),
         )
         .unwrap();
-        w.generation_parts = 4;
+        w.generation_parts = 5;
         w
     };
     let initial = actual.frozen();
@@ -3626,11 +3630,40 @@ fn i3948_a_closed_containers_contents_stay_out_of_the_public_stream_until_taken_
     // Touched again while hidden: nothing public happened, so no part is written.
     assert_eq!(part(&mut out, 3, 3, vec![i3948_set(9, hidden, 9)]), None);
     assert_eq!(out.player.next(), 3);
-    // The other thing touched: the generation then closes (4 parts). A viewer joining now starts from a baseline
-    // without the hidden thing, and a live viewer crosses over.
     let p3 = part(&mut out, 4, 3, vec![i3948_set(10, beside, 9)]).unwrap();
     viewer.play(&p3).unwrap();
-    assert!(!i3948_names(&p3, hidden));
+    assert!(!i3948_names(&p3, hidden) && i3948_names(&p3, beside));
+    // The other thing set into the crate by a reparent, not a transfer: out of the state, its entry not published.
+    // The generation then closes (5 parts): a viewer joining now starts from a baseline without either, and a live
+    // viewer crosses over.
+    let into = w3e_effect(
+        11,
+        beside,
+        Audience::Everyone,
+        Body::Changes(vec![ChangeRec {
+            change: Change::Reparent {
+                node: beside,
+                from: Frame {
+                    node: h.zone,
+                    slot: None,
+                },
+                pose: i3948_pose(crate_),
+            },
+            rest: Rest::new(),
+        }]),
+    );
+    let p4 = part(&mut out, 5, 4, vec![into]).unwrap();
+    viewer.play(&p4).unwrap();
+    assert!(
+        !i3948_holds(&viewer, beside),
+        "set into the crate: out of the public state"
+    );
+    let entries = StreamPart::read(&p4).unwrap().part;
+    assert_eq!(
+        Part::read(&entries).unwrap().effects.len(),
+        0,
+        "the reparent's entry is not published"
+    );
     assert_ne!(
         out.generation_dir(),
         gen0,
@@ -3642,7 +3675,8 @@ fn i3948_a_closed_containers_contents_stay_out_of_the_public_stream_until_taken_
         "a late viewer's baseline does not hold the hidden thing"
     );
     let joiner = PublicPlayer::start(&header_bytes, &late).unwrap();
-    assert!(!i3948_holds(&joiner, hidden) && i3948_holds(&joiner, beside));
+    assert!(!i3948_holds(&joiner, hidden) && !i3948_holds(&joiner, beside));
+    assert!(!i3948_names(&late, beside) && i3948_names(&late, crate_));
     assert_eq!(joiner.hash().unwrap(), viewer.hash().unwrap());
     let pointer = object_map(&fs::read(out.dir.join(POINTER)).unwrap()).unwrap();
     assert!(

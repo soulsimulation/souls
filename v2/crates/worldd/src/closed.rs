@@ -529,7 +529,17 @@ impl Inside {
                             hit |= self.inside.remove(node);
                             self.containers.remove(node);
                         }
-                        Change::Reparent { node, .. } | Change::Set { node, .. } => {
+                        // Set into a closed container is put in it, as a transfer into one is (#3948); set
+                        // anywhere else, taken out.
+                        Change::Reparent { node, pose, .. } => {
+                            if self.holds(pose.frame.node) {
+                                self.inside.insert(*node);
+                                hit = true;
+                            } else {
+                                self.inside.remove(node);
+                            }
+                        }
+                        Change::Set { node, .. } => {
                             hit |= self.inside.contains(node);
                         }
                         Change::Motion(m) => hit |= self.inside.contains(&m.node),
