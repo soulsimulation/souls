@@ -75,7 +75,10 @@ fn a_doorways_end_lies_on_a_floor_that_stops_short_of_its_wall() {
 
 #[test]
 fn a_walker_on_the_short_floor_aims_at_its_doorway_and_is_routed_out() {
-    let (mut t, nodes) = town_of(import_eden::load(&hall(2900)).expect("loads"), b"short-floor");
+    let (mut t, nodes) = town_of(
+        import_eden::load(&hall(2900)).expect("loads"),
+        b"short-floor",
+    );
     let (hall, floor) = (nodes["e_hall"], nodes["e_hall/floor-0"]);
     let door = t
         .buildings
@@ -96,5 +99,9 @@ fn a_walker_on_the_short_floor_aims_at_its_doorway_and_is_routed_out() {
     // The walk to the doorway's near end has a corner to aim at (before: `off-ground`, and the walk ended
     // `souls:no-way`).
     let corner = t.view().corner(&body, end);
-    assert!(corner.is_ok(), "{:?}", corner.err().map(|e| (e.name, e.detail)));
+    assert!(
+        corner.is_ok(),
+        "{:?}",
+        corner.err().map(|e| (e.name, e.detail))
+    );
 }
