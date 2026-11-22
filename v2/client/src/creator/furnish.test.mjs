@@ -2,7 +2,7 @@
 // proof (a full-Eden townhouse emptied and furnished again through `node eden.mjs god furnish`) is in the pull request.
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { furnishOps, kindFor, roomKindOf, styleOf } from './furnish.mjs';
+import { checkedFurnish, furnishOps, kindFor, roomKindOf, styleOf } from './furnish.mjs';
 
 const S = '0'.repeat(32);
 const hex = (t) => ({ hex: Buffer.from(t).toString('hex') });
@@ -64,4 +64,22 @@ test('with no kinds text here (a served creator\'s home), the kinds the world al
   const out = furnishOps(house(true), `${S}-2`, { entries });
   assert.deepEqual(out.placed.map((p) => p.name), ['e_1/kitchen-chair-2', 'e_1/kitchen-stool']);
   assert.ok(out.dropped.some((d) => d.name === 'e_1/kitchen-table' && /no kind/.test(d.why)));
+});
+
+test('the edit is checked under its claim: a piece the check refuses is dropped, a claims refusal is the furnish\'s', () => {
+  // The table refused (its slot, say): it goes, with the bowl on it; the rest is checked again and sent.
+  let asked = 0;
+  const out = checkedFurnish(furnishOps(house(false), `${S}-2`, { kinds, entries }), (ops) => {
+    asked++;
+    const k = ops.findIndex((o) => o.kind === 'eden:table@1');
+    return k >= 0 ? { ok: false, code: 'edit.slot', op: k } : { ok: true };
+  });
+  assert.equal(asked, 2);
+  assert.ok(!out.ops.some((o) => o.kind === 'eden:table@1' || o.kind === 'eden:bowl@1'), JSON.stringify(out.ops));
+  assert.match(out.says, /4 pieces in 1 rooms, 2 dropped; dropped: e_1\/kitchen-table \(edit.slot\), e_1\/kitchen-bowl \(edit.slot\)/);
+  // Inside another's live claim (or outside a helper's own): the whole furnish is refused by name, nothing dropped.
+  for (const code of ['edit.claimed', 'edit.outside-claim', 'edit.claim-unknown']) {
+    const refused = checkedFurnish(furnishOps(house(false), `${S}-2`, { kinds, entries }), () => ({ ok: false, code, op: 0, detail: 'x' }));
+    assert.deepEqual([refused.ok, refused.code, refused.op, refused.ops], [false, code, 0, undefined]);
+  }
 });
