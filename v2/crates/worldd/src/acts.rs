@@ -10,7 +10,9 @@
 //! - **The world the runner reaches** is the bodies' own: their controller (B1), their town for a walk's corners (N7),
 //!   and a due list, moves (B2) and a minter of the forms' own. A move's reach is measured across x and z from the
 //!   body's edge to the nearer of the thing's point the move names and its nearest surface (its entry's bounds), on
-//!   the floor the body stands on (C22, #3485); from the feet to the node's place when its entry gives neither.
+//!   the floor the body stands on or another floor of its building (C22, #3485); from the feet to the node's place
+//!   when its entry gives neither. Height counts too: what lies above the body's standing reach or more than
+//!   [`BELOW_FEET`] under its feet is that much further (a thing on the floor above or below is out of reach).
 //! - **Moves and their targets** (C23, #3494). A step's move is one of [`library`]'s: every move `content/moves`
 //!   declares and the body's own ([`crate::moves`]). A move with no `at` is made where the body stands ([`AT_SELF`]);
 //!   one whose `at`, or with no `at` whose `toward`, is a thing argument reaches that thing ([`AT_ARG`]); a missing
@@ -73,6 +75,7 @@ use replica::time::Micros;
 use replica::tree::Tree;
 use sim::controller::Controller;
 use sim::forms::{Asked, Forms, Intent, Places, RunId, World};
+use sim::ground::scene::xform_to;
 use sim::host::{Geometry, Staged};
 use sim::mover::Body as Moved;
 use sim::moves::{Moves, Reach};
@@ -397,17 +400,50 @@ impl Sight<'_> {
     }
 
     /// Point `at` of node `node`'s frame carried onto the floor of `node` nearest its height (#3688), when `node` has
-    /// floors: `None` when it has none.
+    /// floors: `None` when it has none. A floor's heights are its surfaces' (N1's `F_SURFACES`, mm in the thing's
+    /// frame) and its rooms': every floor node stands at the thing's origin, so its place says nothing of its height
+    /// (#1960: an upper landing's door was carried onto the ground floor, where no place is within an arm of it).
     fn floor_of(&self, node: Id, at: Vec3) -> Option<(Id, Vec3)> {
-        use import_eden::FLOOR;
+        use import_eden::{FLOOR, ROOM};
+        use replica::encode::Value;
+        let mm = |v: &Value| match v {
+            Value::Uint(n) => i64::try_from(*n).ok(),
+            Value::Nint(n) => i64::try_from(*n).ok().map(|n| -1 - n),
+            _ => None,
+        };
         let floor = self
             .tree
             .children(self.tree.handle(node)?)?
             .iter()
             .filter_map(|&c| self.tree.node(c))
             .filter(|f| plain(f.kind()) == FLOOR)
-            .filter_map(|f| Some((f.id(), f.place()?)))
-            .min_by_key(|(_, p)| (p.position.y - at.y).abs())?;
+            .filter_map(|f| {
+                let place = f.place()?;
+                let surfaces = match f.fields().get(&sim::ground::scene::F_SURFACES) {
+                    Some(Value::Array(rows)) => rows.as_slice(),
+                    _ => &[],
+                };
+                let rooms = self
+                    .tree
+                    .children(self.tree.handle(f.id())?)?
+                    .iter()
+                    .filter_map(|&c| self.tree.node(c))
+                    .filter(|r| plain(r.kind()) == ROOM)
+                    .filter_map(|r| Some(r.place()?.position.y));
+                let off = surfaces
+                    .iter()
+                    .filter_map(|r| match r {
+                        Value::Array(r) => r.first().and_then(mm).map(|y| y * 1000),
+                        _ => None,
+                    })
+                    .chain(rooms)
+                    .map(|y| (y - at.y).abs())
+                    .min()
+                    .unwrap_or((place.position.y - at.y).abs());
+                Some((off, f.id(), place))
+            })
+            .min_by_key(|(off, _, _)| *off)
+            .map(|(_, id, place)| (id, place))?;
         let [w, x, y, z] = floor.1.orientation.parts();
         let back = replica::pose::Quat::new(w, -x, -y, -z).ok()?;
         let local = back.rotate(at.minus(floor.1.position).ok()?).ok()?;
@@ -418,9 +454,18 @@ impl Sight<'_> {
     /// walks, at step `step`, to point `at` of node `node`'s frame, a point its entry names as an `areas` entry of a
     /// thing on `node` that has floors: the area is the thing's room of that name, on that room's floor (a lantern room
     /// four floors up, whatever height the kind's area gives), else the thing's only floor; the point is carried into
-    /// the floor's frame (the thing's), at the room's height. `Some(None)` when the thing has floors and none is the
-    /// area's; `None` for any other walk, planned as before. No floor is chosen by nearness.
-    fn area_floor(&self, body: Id, step: usize, node: Id, at: Vec3) -> Option<Option<(Id, Vec3)>> {
+    /// the floor's frame (the thing's), at the room's height. An area that is no room is on the thing's floor where a
+    /// body may stand within `reach` of it, the nearest such in height; with none, it is off the thing's floors (a
+    /// house's back garden, a bridge's ends) and planned as any other point, on the open ground under it, as today's
+    /// game walks to an area by its centre. `None` for any other walk, planned as before.
+    fn area_floor(
+        &self,
+        body: Id,
+        step: usize,
+        node: Id,
+        at: Vec3,
+        reach: i64,
+    ) -> Option<(Id, Vec3)> {
         use import_eden::{F_ORIGIN, FLOOR, ROOM};
         let &(at_step, thing, ref point) = self.walks.get(&body)?;
         if at_step != step {
@@ -462,19 +507,200 @@ impl Sight<'_> {
                 })
                 .map(|r| (f.id(), r.place().map(|p| p.position.y)))
         });
-        let (floor, y) = match room {
-            Some((floor, y)) => (floor, y),
-            None if floors.len() == 1 => (floors[0].id(), None),
-            None => return Some(None),
-        };
         let [w, x, yq, z] = place.orientation.parts();
         let back = replica::pose::Quat::new(w, -x, -yq, -z).ok()?;
         let local = back.rotate(at.minus(place.position).ok()?).ok()?;
-        Some(Some((
-            floor,
-            Vec3::new(local.x, y.unwrap_or(local.y), local.z),
-        )))
+        if let Some((floor, y)) = room {
+            return Some((floor, Vec3::new(local.x, y.unwrap_or(local.y), local.z)));
+        }
+        let own: Vec<Id> = floors.iter().map(|f| f.id()).collect();
+        if let Some(on) = self.stand_on(body, th, &own, local, reach, false) {
+            return Some(on);
+        }
+        // Deck-stand (#1960): a thing with no rooms is sized by its own floors and stairs, not by its kind's frame (a
+        // bridge laid along a path in the world's frame, its pose the world's origin; a flight three times the kind's
+        // height). Its kind's areas are fitted to them, axis by axis (the areas' span onto the floors' and stairs'),
+        // and the area is on a floor that stands a body near the fitted point, else on the ground under it.
+        let roomless = floors.iter().all(|f| {
+            self.tree
+                .handle(f.id())
+                .and_then(|h| self.tree.children(h))
+                .is_some_and(|cs| {
+                    cs.iter()
+                        .filter_map(|&c| self.tree.node(c))
+                        .all(|r| plain(r.kind()) != ROOM)
+                })
+        });
+        if !roomless {
+            return None;
+        }
+        let entry = self.kinds.get(entry_of(&n))?;
+        let fitted = fit(&areas_span(entry)?, &extent(self.tree, &own)?, local);
+        // A body is in an area within its radius: its floor is sought within that and `reach`.
+        let reach = match entry.get("areas")?.get(point.as_str())?.get("radius_mm") {
+            Some(Json::Int(r)) => {
+                reach.saturating_add(i64::try_from(*r).unwrap_or(0).saturating_mul(1000))
+            }
+            _ => reach,
+        };
+        if let Some(on) = self.stand_on(body, th, &own, fitted, reach, true) {
+            return Some(on);
+        }
+        let on_node = place
+            .position
+            .plus(place.orientation.rotate(fitted).ok()?)
+            .ok()?;
+        Some((node, on_node))
     }
+
+    /// Where a body may stand within `reach` of point `p` of thing `th`'s frame on one of the floors `own` of the thing,
+    /// else, when `beyond`, on a floor its links land on (the roof its flight leads up to, #1960): that floor and the
+    /// place, in that floor's frame, the one nearest `p` in height.
+    fn stand_on(
+        &self,
+        body: Id,
+        th: replica::tree::Handle,
+        own: &[Id],
+        p: Vec3,
+        reach: i64,
+        beyond: bool,
+    ) -> Option<(Id, Vec3)> {
+        let thing = self.tree.node(th)?.id();
+        self.with_view(body, |v| {
+            let others: Vec<Id> = if beyond {
+                v.floors_reached(thing)
+                    .into_iter()
+                    .filter(|f| !own.contains(f))
+                    .collect()
+            } else {
+                Vec::new()
+            };
+            [own, &others[..]]
+                .iter()
+                .find_map(|floors| self.nearest_on(v, th, floors, p, reach))
+        })
+        .flatten()
+    }
+
+    /// [`Sight::stand_on`] on the floors `floors` alone.
+    fn nearest_on(
+        &self,
+        v: &View<'_>,
+        th: replica::tree::Handle,
+        floors: &[Id],
+        p: Vec3,
+        reach: i64,
+    ) -> Option<(Id, Vec3)> {
+        floors
+            .iter()
+            .filter_map(|&f| {
+                let owner = self.tree.node(self.tree.handle(f)?)?.parent()?;
+                let oh = self.tree.handle(owner)?;
+                // Carried through the frame both stand in (the open ground, for two things on it).
+                let at = if oh == th {
+                    p
+                } else {
+                    let up = self.tree.handle(self.tree.node(th)?.parent()?)?;
+                    let w = xform_to(self.tree, th, up).ok()?.point(p).ok()?;
+                    sim::links::back(&xform_to(self.tree, oh, up).ok()?, w).ok()?
+                };
+                let s = v.stand_near(f, at, reach, None)?;
+                Some(((s.y - at.y).abs(), f, s))
+            })
+            .min_by_key(|c| c.0)
+            .map(|(_, f, s)| (f, s))
+    }
+}
+
+/// The span `[least, most]` of an entry's areas on each axis, µm in its kind's frame.
+fn areas_span(entry: &Json) -> Option<[[i64; 2]; 3]> {
+    let mut span: Option<[[i64; 2]; 3]> = None;
+    for (_, a) in entry.get("areas")?.obj()? {
+        let at = a.get("at_mm")?.arr()?;
+        let mut p = [0i64; 3];
+        for (k, v) in at.iter().take(3).enumerate() {
+            match v {
+                Json::Int(n) => p[k] = i64::try_from(*n).ok()?.checked_mul(1000)?,
+                _ => return None,
+            }
+        }
+        let s = span.get_or_insert([[p[0]; 2], [p[1]; 2], [p[2]; 2]]);
+        for k in 0..3 {
+            s[k] = [s[k][0].min(p[k]), s[k][1].max(p[k])];
+        }
+    }
+    span
+}
+
+/// The span on each axis of a thing's floors' surfaces and stairs (the floors `floors`, `F_SURFACES` and `F_STAIRS`),
+/// µm in the thing's frame (its floors stand at its origin).
+fn extent(tree: &replica::tree::Tree, floors: &[Id]) -> Option<[[i64; 2]; 3]> {
+    use replica::encode::Value as V;
+    let int = |v: &V| match v {
+        V::Uint(n) => i64::try_from(*n).ok(),
+        V::Nint(n) => i64::try_from(*n).ok().map(|n| -1 - n),
+        _ => None,
+    };
+    let arr = |v: &V| match v {
+        V::Array(a) => a.clone(),
+        _ => Vec::new(),
+    };
+    let mut span: Option<[[i64; 2]; 3]> = None;
+    let mut add = |x: i64, y: i64, z: i64| {
+        let p = [x * 1000, y * 1000, z * 1000];
+        let s = span.get_or_insert([[p[0]; 2], [p[1]; 2], [p[2]; 2]]);
+        for k in 0..3 {
+            s[k] = [s[k][0].min(p[k]), s[k][1].max(p[k])];
+        }
+    };
+    let points = |v: &V| -> Vec<(i64, i64)> {
+        arr(v)
+            .iter()
+            .filter_map(|p| match arr(p).as_slice() {
+                [x, z, ..] => Some((int(x)?, int(z)?)),
+                _ => None,
+            })
+            .collect()
+    };
+    for &f in floors {
+        let n = tree.node(tree.handle(f)?)?;
+        if let Some(v) = n.fields().get(&import_eden::F_SURFACES) {
+            for s in arr(v) {
+                if let [y, ring] = arr(&s).as_slice() {
+                    let y = int(y)?;
+                    points(ring).into_iter().for_each(|(x, z)| add(x, y, z));
+                }
+            }
+        }
+        if let Some(v) = n.fields().get(&import_eden::F_STAIRS) {
+            for r in arr(v) {
+                let r = arr(&r);
+                let (Some(y0), Some(y1)) = (r.get(4).and_then(int), r.get(5).and_then(int)) else {
+                    continue;
+                };
+                for (x, z) in r.get(6).map(points).unwrap_or_default() {
+                    add(x, y0, z);
+                    add(x, y1, z);
+                }
+            }
+        }
+    }
+    span
+}
+
+/// Point `p` of a kind's frame fitted to a thing, axis by axis: the areas' span `areas` onto the thing's span `thing`;
+/// on an axis where the areas do not spread, the middle of the thing's span.
+fn fit(areas: &[[i64; 2]; 3], thing: &[[i64; 2]; 3], p: Vec3) -> Vec3 {
+    let axis = |k: usize, v: i64| {
+        let ([a0, a1], [t0, t1]) = (areas[k], thing[k]);
+        if a1 > a0 {
+            let f = i128::from(v - a0) * i128::from(t1 - t0) / i128::from(a1 - a0);
+            t0 + i64::try_from(f).unwrap_or(0)
+        } else {
+            t0 + (t1 - t0) / 2
+        }
+    };
+    Vec3::new(axis(0, p.x), axis(1, p.y), axis(2, p.z))
 }
 
 impl Sight<'_> {
@@ -676,26 +902,33 @@ impl Geometry for Sight<'_> {
             Some(&(at_step, floor, stand)) if at_step == step => (floor, stand),
             _ => (node, at),
         };
-        let (node, at) = match self.area_floor(body, step, node, at) {
-            Some(Some(on)) => on,
-            // A building's area with no room or floor of its own to stand on: no way there, the body where it is.
-            Some(None) => return WalkPlan::Legs(Vec::new()),
-            None => (node, at),
-        };
+        let (node, at) = self
+            .area_floor(body, step, node, at, reach)
+            .unwrap_or((node, at));
         // An approach to a move's point (#3688): a point of a thing on a building with floors (an inner door) is on
         // the building's floor nearest its height, so the walk goes in to it, and once in through a link the runner
         // approaches again from that floor; on the floor the body stands on, it is aimed short of the point, on the
-        // body's side.
+        // body's side. When the body is not before the point (behind the building whose door it is), the point moved
+        // toward it may have no place within an arm (#1960): then the walk aims at the point itself, and the search
+        // for a place to stand, from the body, finds the body's side.
+        // An approach's move acts on the run's own thing: when that is a doorway's door, the walk may end in its
+        // doorway (#3688).
+        let door = self
+            .approaches
+            .contains(&body)
+            .then(|| self.walks.get(&body).map(|w| w.1))
+            .flatten();
         let (node, at) = if self.approaches.contains(&body) {
             let (node, at) = self.floor_of(node, at).unwrap_or((node, at));
             self.with_view(body, |v| {
                 let (floor, p, _) = v.on_floor(node, at)?;
                 (floor == sim::walk::node_of(me)).then(|| {
                     let short = skills::form_runner::APPROACH_SHORT;
-                    (
-                        floor,
-                        skills::form_runner::short_of(p, me.pose.position, short),
-                    )
+                    let aim = skills::form_runner::short_of(p, me.pose.position, short);
+                    match v.stand_near_door(floor, aim, reach, Some(me), door) {
+                        Some(_) => (floor, aim),
+                        None => (floor, p),
+                    }
                 })
             })
             .flatten()
@@ -704,13 +937,6 @@ impl Geometry for Sight<'_> {
             (node, at)
         };
         let mut planning = self.planning.borrow_mut();
-        // An approach's move acts on the run's own thing: when that is a doorway's door, the walk may end in its
-        // doorway (#3688).
-        let door = self
-            .approaches
-            .contains(&body)
-            .then(|| self.walks.get(&body).map(|w| w.1))
-            .flatten();
         let query = FormQuery::Walk {
             node,
             at,
@@ -789,13 +1015,49 @@ fn um(v: Option<&Json>) -> Option<Vec3> {
     }
 }
 
+/// How far below its feet a body reaches, µm: today's contact check (`contact-actuator.ts`, a hand reaches a thing
+/// within 1.2 m of the feet's height).
+pub const BELOW_FEET: i64 = 1_200_000;
+
+/// How far a span of heights `[lo, hi]` (µm) lies outside what a body with feet at `feet` and standing reach `reach`
+/// gets a hand to: from [`BELOW_FEET`] under its feet to its standing reach above them (`sim::slots::standing_reach`,
+/// today's overhead reach); 0 within.
+fn off_height(feet: i64, reach: i64, lo: i64, hi: i64) -> i64 {
+    (feet - BELOW_FEET - hi).max(lo - feet - reach).max(0)
+}
+
+/// `[x, z]` gap `h` and height gap `v` (µm) as one distance.
+fn with_height(h: i64, v: i64) -> i64 {
+    let (h, v) = (i128::from(h), i128::from(v));
+    i64::try_from((h * h + v * v).isqrt()).unwrap_or(i64::MAX)
+}
+
 impl Sight<'_> {
-    /// How far a body standing at `from` on floor `floor` is from thing `target` across x and z (C22, #3485): from
+    /// Whether floors `a` and `b` share one frame: the same node, or two floors of one building, each placed at the
+    /// building's origin (a storey's height is in its rooms' and things' places).
+    fn same_frame(&self, a: Id, b: Id) -> bool {
+        let at_origin = |id: Id| {
+            let n = self.tree.handle(id).and_then(|h| self.tree.node(h))?;
+            n.place()
+                .is_none_or(|p| p.position == Vec3::ZERO)
+                .then(|| n.parent())
+                .flatten()
+        };
+        a == b || at_origin(a).is_some_and(|pa| at_origin(b) == Some(pa))
+    }
+
+    /// How far a body standing at `from` on floor `floor` is from thing `target` (C22, #3485): across x and z from
     /// the body's edge (a standard body's radius from its feet, [`sim::ground::HUMAN_RADIUS`]: a hand reaches from the
     /// shoulder, not the feet) to the nearer of the thing's point `point` its entry names and its nearest surface, the
     /// box its entry's `geometry.bounds_mm` gives (centred on its place), each turned with the thing and carried onto
-    /// that floor ([`View::on_floor`]). `None` when its entry gives neither, or the thing is not over that floor.
+    /// that floor ([`View::on_floor`]) or another floor of its building; and in height, how far the point or the box
+    /// lies outside the body's reach above and below its feet ([`off_height`]), so a thing on the floor above or
+    /// below is out of reach however near across x and z. `None` when its entry gives neither, or the thing is not
+    /// over that floor or its building.
     fn to_thing(&self, body: Id, floor: Id, from: Vec3, target: Id, point: &Name) -> Option<i64> {
+        let build = *self.builds.get(&body)?;
+        let reach = sim::slots::standing_reach(build);
+        let radius = build.size.radius_mm() * 1000;
         self.with_view(body, |view| {
             let n = self.tree.node(self.tree.handle(target)?)?;
             let entry = self.kinds.get(entry_of(&n))?;
@@ -810,10 +1072,13 @@ impl Sight<'_> {
                 });
             let on = |p: Vec3| {
                 if own_floor {
-                    return Some([p.x, p.z]);
+                    return Some(p);
                 }
-                if let Some(on) = view.on_floor(target, p).filter(|(f, ..)| *f == floor) {
-                    return Some([on.1.x, on.1.z]);
+                if let Some(on) = view
+                    .on_floor(target, p)
+                    .filter(|(f, ..)| self.same_frame(*f, floor))
+                {
+                    return Some(on.1);
                 }
                 // A thing of a building with floors (an inner door, #3688), from a body on that building's floor.
                 let place = n.place()?;
@@ -822,38 +1087,44 @@ impl Sight<'_> {
                     .plus(place.orientation.rotate(p).ok()?)
                     .ok()?;
                 self.floor_of(n.parent()?, up)
-                    .filter(|(f, _)| *f == floor)
-                    .map(|(_, p)| [p.x, p.z])
+                    .filter(|(f, _)| self.same_frame(*f, floor))
+                    .map(|(_, p)| p)
             };
             let q = [from.x, from.z];
+            let gap = |h: i64, lo: i64, hi: i64| {
+                with_height(
+                    h.saturating_sub(radius).max(0),
+                    off_height(from.y, reach, lo, hi),
+                )
+            };
             let named = um(entry
                 .get("points")
                 .and_then(|ps| ps.get(point.as_str()))
                 .and_then(|p| p.get("at_mm")))
             .and_then(on)
-            .map(|p| flat(q, p));
+            .map(|p| gap(flat(q, [p.x, p.z]), p.y, p.y));
             let surface =
                 um(entry.get("geometry").and_then(|g| g.get("bounds_mm"))).and_then(|b| {
                     let (x, z) = (b.x / 2, b.z / 2);
                     let c = |u: i64, v: i64| on(Vec3::new(u, 0, v));
-                    let ring = [c(-x, -z)?, c(x, -z)?, c(x, z)?, c(-x, z)?];
-                    Some(to_ring(q, &ring))
+                    let corners = [c(-x, -z)?, c(x, -z)?, c(x, z)?, c(-x, z)?];
+                    let ring = corners.map(|p| [p.x, p.z]);
+                    let lo = corners.iter().map(|p| p.y).min()?;
+                    let hi = corners.iter().map(|p| p.y).max()? + b.y.max(0);
+                    Some(gap(to_ring(q, &ring), lo, hi))
                 });
-            let d = match (named, surface) {
-                (Some(a), Some(b)) => a.min(b),
-                (a, b) => a.or(b)?,
-            };
-            Some(
-                d.saturating_sub(self.builds.get(&body)?.size.radius_mm() * 1000)
-                    .max(0),
-            )
+            match (named, surface) {
+                (Some(a), Some(b)) => Some(a.min(b)),
+                (a, b) => a.or(b),
+            }
         })?
     }
 }
 
 impl Reach for Sight<'_> {
     /// To another body, from feet to feet; to a thing, from the body's edge to its point or its nearest surface
-    /// ([`Sight::to_thing`]), else to its place in the tree; across x and z.
+    /// ([`Sight::to_thing`]), else to its place in the tree; across x and z, and in height beyond the body's reach
+    /// above and below its feet ([`off_height`]).
     fn distance(
         &self,
         body: Id,
@@ -878,14 +1149,28 @@ impl Reach for Sight<'_> {
         if parent == Some(body) {
             return Some(0);
         }
-        if let Some(d) = self.to_thing(body, sim::walk::node_of(me), a, target, point) {
+        let floor = sim::walk::node_of(me);
+        if let Some(d) = self.to_thing(body, floor, a, target, point) {
             return Some(d);
         }
-        let b = match self.bodies.get(&target) {
-            Some(t) => t.pose.position,
-            None => self.place(target)?,
+        // Heights in the tree's frame: a body's feet on its floor's place, as a thing's place is found.
+        let height = |node: Id, y: i64| self.place(node).map(|p| p.y + y);
+        let (b, top) = match self.bodies.get(&target) {
+            Some(t) => (
+                t.pose.position,
+                height(sim::walk::node_of(t), t.pose.position.y),
+            ),
+            None => {
+                let b = self.place(target)?;
+                (b, Some(b.y))
+            }
         };
-        Some(flat([a.x, a.z], [b.x, b.z]))
+        let reach = sim::slots::standing_reach(*self.builds.get(&body)?);
+        let v = match (height(floor, a.y), top) {
+            (Some(feet), Some(y)) => off_height(feet, reach, y, y),
+            _ => 0,
+        };
+        Some(with_height(flat([a.x, a.z], [b.x, b.z]), v))
     }
 }
 

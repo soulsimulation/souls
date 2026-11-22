@@ -27,6 +27,7 @@ pub mod archive;
 pub mod handoff;
 pub mod http;
 mod placement;
+pub mod register;
 
 use std::collections::BTreeMap;
 use std::path::{Path, PathBuf};
@@ -44,6 +45,9 @@ use crate::worlds::create::{Create, NameRecord, Source, create};
 
 /// The list's one object.
 pub const KEY: &str = "world-list";
+/// The folder the list is kept in when no bucket is set ([`from_env`]), and its default.
+pub const WORLD_STORE_ENV: &str = "DIRECTORYD_WORLD_STORE";
+pub const WORLD_STORE_DEFAULT: &str = "directory";
 /// The most bytes a world's list picture may have, after its metadata is stripped (rule 7).
 pub const PICTURE_BYTES: u64 = 131_072;
 /// The longest side of a world's list picture, px (rule 7).
@@ -703,7 +707,7 @@ pub fn from_env(machine: &str) -> Option<R<Worlds<&'static (dyn Store + Send + S
         let store: Box<dyn Store + Send + Sync> = match crate::directory::s3::S3::from_env() {
             Some(s) => Box::new(s?),
             None => Box::new(crate::directory::folder::Folder::new(PathBuf::from(
-                std::env::var_os("DIRECTORYD_WORLD_STORE").unwrap_or_else(|| "directory".into()),
+                std::env::var_os(WORLD_STORE_ENV).unwrap_or_else(|| WORLD_STORE_DEFAULT.into()),
             ))),
         };
         let store: &'static (dyn Store + Send + Sync) = Box::leak(store);

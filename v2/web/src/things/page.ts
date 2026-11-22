@@ -12,6 +12,7 @@ import { fetchIndex, type ModelIndex } from './models.ts';
 import { ThingLayer } from './things.ts';
 import type { CardPictures } from './standins.ts';
 import { BoardPieces } from './board.ts';
+import { Displays } from './displays.ts';
 import { setWindowLife } from './windows.ts';
 import { civil, localAt, type SkyRecord } from '../sky/record.ts';
 
@@ -44,7 +45,9 @@ export function solidBoxes(n: NodeRec, ground: ((x: number, z: number) => number
 }
 
 export type PageThings = {
-  layer: ThingLayer | null; apply(nodes: NodeRec[], removed: string[]): void; update(eye: THREE.Vector3): void;
+  layer: ThingLayer | null; apply(nodes: NodeRec[], removed: string[]): void;
+  /** `camera`: the page's camera, for the displays' video (#3725). */
+  update(eye: THREE.Vector3, camera?: THREE.Camera): void;
   /** #3603: moves what rides a course to where the world view has it at the drawn time; call after `world.draw`. */
   follow(): void;
   /** C10: the world time drawn and the sky's record then, for the lit windows' share by local hour (today's
@@ -70,14 +73,18 @@ export function modelsRoot(params: URLSearchParams, page: string): URL {
  *  box. Until the models' index arrives nothing is drawn for things; when it cannot be had (no bake for this world, a
  *  404), the world view's boxes are drawn, and kinds' entries where they have them. `things=0` draws none. */
 export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSearchParams, index: (root: string) => Promise<ModelIndex> = fetchIndex, pictures?: CardPictures): PageThings {
-  // N-V12 (#3726): game boards show their pieces, with or without models.
+  // N-V10, N-V11 (#3725): the library's hung pictures and the classroom screen's slide; N-V12 (#3726): game boards'
+  // pieces; each with or without models.
+  const displays = new Displays();
+  scene.add(displays.group);
   const boards = new BoardPieces();
   scene.add(boards.group);
-  const pieces = (nodes: NodeRec[], removed: string[]) => boards.apply(nodes, removed, (id) => world.frame(id));
+  const shown = (nodes: NodeRec[], removed: string[]) => (displays.apply(nodes, removed, (id) => world.frame(id)), boards.apply(nodes, removed, (id) => world.frame(id)));
+  const look = (_eye: THREE.Vector3, camera?: THREE.Camera) => void (camera && displays.update(camera));
   const ride = () => {
     for (const id of world.moving()) if (boards.has(id)) boards.move(id, world.frame(id));
   };
-  const none: PageThings = { layer: null, apply: pieces, update() {}, follow: ride, night: windowLife, kinds: null, drawKinds() {} };
+  const none: PageThings = { layer: null, apply: shown, update: look, follow: ride, night: windowLife, kinds: null, drawKinds() {} };
   world.drawThings = false;
   if (params.get('things') === '0') return none;
   const base = modelsRoot(params, location.href);
@@ -100,7 +107,7 @@ export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSear
     layer: null,
     kinds,
     apply(nodes, removed) {
-      pieces(nodes, removed);
+      shown(nodes, removed);
       drawByKind(nodes, removed);
       if (failed) return;
       if (!layer) return void early.push([nodes, removed]);
@@ -113,7 +120,8 @@ export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSear
         layer.set(n.id, n.origin ?? null, frameOf(n), box);
       }
     },
-    update(eye) {
+    update(eye, camera) {
+      look(eye, camera);
       layer?.update(eye);
     },
     follow() {
