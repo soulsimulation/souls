@@ -370,6 +370,7 @@ pub async fn read_copy(url: &str, token: &str) -> Result<Seen, String> {
             if let Some(soul) = soul_of(&m) {
                 out.bodies.insert(soul, id);
             }
+            if std::env::var("DRIVER_DEBUG").is_ok() { eprintln!("node {kind} {:?}", m.get(&9)); }
             out.nodes.push((id, kind));
         }
     }
