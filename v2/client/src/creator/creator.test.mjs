@@ -48,11 +48,18 @@ const printed = []; // every line a command printed
 let relay;
 
 function makeRelay(port) {
-  const r = { up: 0, port: 0 };
+  // `target` is the gateway it forwards to; `posts` are the plain HTTP connections (uploads), which a test that moves
+  // `target` closes, so the daemon's next upload opens a new one to the new gateway.
+  const r = { up: 0, port: 0, target: port, posts: new Set() };
   const server = createServer((down) => {
-    const upstream = createConnection(port, '127.0.0.1');
+    const upstream = createConnection(r.target, '127.0.0.1');
     let entries = null; // the daemon's entries fetch at sign-in (#3760) is not a request to the world
-    down.on('data', (d) => { entries ??= d.subarray(0, 15).toString('latin1') === 'GET /v2/entries'; if (!entries) r.up += d.length; upstream.write(d); });
+    down.on('data', (d) => {
+      entries ??= d.subarray(0, 15).toString('latin1') === 'GET /v2/entries';
+      if (d.subarray(0, 5).toString('latin1') === 'POST ') r.posts.add(down);
+      if (!entries) r.up += d.length;
+      upstream.write(d);
+    });
     upstream.on('data', (d) => down.write(d));
     for (const s of [down, upstream]) { s.on('error', () => {}); s.on('close', () => { down.destroy(); upstream.destroy(); }); }
   });
@@ -768,4 +775,27 @@ test('#3697: a creator uploads a picture through the check and hold point; an al
   assert.equal(bad.ok, false);
   assert.match(bad.code, /^upload\./, JSON.stringify(bad));
   assert.equal((await god('upload', join(dir, 'notes.txt'))).code, 'usage');
+});
+
+test('#4022: in a world that holds uploads for review, souls-god reports a held upload as held, and it is not served', async () => {
+  await connected();
+  // A second gateway that holds every upload (`--uploads-hold`), its own uploads folder; the upload asks no world.
+  const [, addr] = await run(GATEWAYD, ['--listen', '127.0.0.1:0', '--world', join(dir, 'no-world.sock'), '--tokens', join(dir, 'tokens.txt'),
+    '--build', `1220${'ab'.repeat(32)}`, '--uploads', join(dir, 'uploads-held'), '--assets-check', ASSETS_CHECK, '--uploads-hold'], /listening (\S+)\n/);
+  const port = Number(addr.split(':').pop()), was = relay.target;
+  for (const c of relay.posts) c.destroy();
+  relay.posts.clear();
+  relay.target = port;
+  const file = join(dir, 'poster.png');
+  writeFileSync(file, png('a poster for review'));
+  let up;
+  try { up = await god('upload', file); } finally { relay.target = was; for (const c of relay.posts) c.destroy(); }
+  console.log(`held upload: ${JSON.stringify(up)}`);
+  assert.equal(up.ok, true, JSON.stringify(up));
+  assert.equal(up.state, 'held', 'reported as held');
+  assert.ok(typeof up.reason === 'string' && up.reason.length > 0, 'with its reason');
+  assert.match(up.hash, /^1220[0-9a-f]{64}$/);
+  assert.equal(up.url, undefined, 'a held upload has no url to show');
+  assert.equal((await fetch(`http://127.0.0.1:${port}/v2/uploads/${up.hash}`)).status, 404, 'a held upload is not served');
+  assert.ok(statSync(join(dir, 'uploads-held', 'held', up.hash)).isFile(), 'kept apart for the owner\'s review');
 });
