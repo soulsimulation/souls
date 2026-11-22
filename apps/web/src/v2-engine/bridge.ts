@@ -2,7 +2,6 @@
 // (v2/web/src/source/worker.ts: the stream's pointer and parts, played on the replica's WASM in a worker), keeps the
 // public nodes and body samples it hands on, and keeps the page's `takes` and Souls list as the old socket would: the
 // last chunks of every Soul's body (takes.ts) and one PublicSoul a body. Nothing here draws or decides; LiveWorld does.
-import { BEHIND_US } from '../../../../v2/web/src/clock/clock.ts';
 import { chunkEnd, chunkOf, TICKS, TICK_US, type Body, type Frame, type RecordedChunk, type WorldSample } from './takes.ts';
 
 /** What the reader's worker posts (v2/web/src/source/source.ts: NodeRec, PartRec, Pointer; only the fields read here). */
@@ -28,6 +27,8 @@ export type V2View = {
 };
 
 const Q = 2 ** 30;
+/** The v2 page's own lag behind the world (v2/web/src/clock/clock.ts BEHIND_US: four 0.5 s parts). */
+const BEHIND_US = 2_000_000;
 type Mat = { p: [number, number, number]; q: [number, number, number, number] };
 const rotate = (q: Mat['q'], v: [number, number, number]): [number, number, number] => {
   const [w, x, y, z] = q, [vx, vy, vz] = v;
