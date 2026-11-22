@@ -1,13 +1,14 @@
 // The thing layer on the page (V8, #2718): follows the parts the page plays and places each imported thing from its
-// node, in the frame the world view computes. The page's `models` parameter is the root V17's bake wrote
-// (`models.json`, `worlds/models/<hash>.glb`), served beside the stream or from the CDN; `things=0` draws none (the
-// measure's other arm) and `copies=2` draws each thing twice, the copy one world's width further east.
+// node, in the frame the world view computes. The models root is the folder V17's bake wrote (`models.json`,
+// `worlds/models/<hash>.glb`): the page's `models` parameter, else `models/` beside the world page (`/w/<slug>/models/`,
+// the front door's per-world folder). A world with no models there keeps the world view's boxes. `things=0` draws none
+// (the measure's other arm) and `copies=2` draws each thing twice, the copy one world's width further east.
 import * as THREE from 'three';
 import type { NodeRec } from '../source/source.ts';
 import { STRUCTURE, isBody, type WorldView } from '../draw/world.ts';
 import { Catalogue } from '../kinds/catalogue.ts';
 import { KindLayer } from '../kinds/layer.ts';
-import { fetchIndex } from './models.ts';
+import { fetchIndex, type ModelIndex } from './models.ts';
 import { ThingLayer } from './things.ts';
 import { BoardPieces } from './board.ts';
 import { Displays } from './displays.ts';
@@ -61,11 +62,16 @@ export function windowLife(t: number | null, record: SkyRecord | null): void {
   setWindowLife(t !== null && record ? civil(localAt(record, t)).hour : null, Math.max(0, t ?? 0) / 1e6);
 }
 
-/** The page's things, from its parameters. A thing with a baked model is drawn from it (V8's thing layer, when a
- *  `models` root is given); a thing with none, from its kind's entry (#3871) once its kind's file arrives; anything
- *  else stays a box (the thing layer's, or the world view's with no `models`). `things=0` draws none. */
-export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSearchParams): PageThings {
-  const root = params.get('models');
+/** The models root, resolved against the page: the `models` parameter, else `models/` beside the world page. */
+export function modelsRoot(params: URLSearchParams, page: string): URL {
+  return new URL(params.get('models') || './models/', page);
+}
+
+/** The page's things, from its parameters. A thing with a baked model is drawn from it (V8's thing layer, from the
+ *  models root); a thing with none, from its kind's entry (#3871) once its kind's file arrives; anything else stays a
+ *  box. Until the models' index arrives nothing is drawn for things; when it cannot be had (no bake for this world, a
+ *  404), the world view's boxes are drawn, and kinds' entries where they have them. `things=0` draws none. */
+export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSearchParams, index: (root: string) => Promise<ModelIndex> = fetchIndex): PageThings {
   // N-V10, N-V11 (#3725): the library's hung pictures and the classroom screen's slide; N-V12 (#3726): game boards'
   // pieces; each with or without models.
   const displays = new Displays();
@@ -78,27 +84,31 @@ export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSear
     for (const id of world.moving()) if (boards.has(id)) boards.move(id, world.frame(id));
   };
   const none: PageThings = { layer: null, apply: shown, update: look, follow: ride, night: windowLife, kinds: null, drawKinds() {} };
-  if (root) world.drawThings = false;
+  world.drawThings = false;
   if (params.get('things') === '0') return none;
-  const base = root ? new URL(root, location.href) : null;
-  let layer: ThingLayer | null = null;
+  const base = modelsRoot(params, location.href);
+  let layer: ThingLayer | null = null, failed = false;
   const kinds = new KindLayer(new Catalogue(document.baseURI), (id) => (world.drawnElsewhere(id), layer?.remove(id)));
   scene.add(kinds.group);
   const early: [NodeRec[], string[]][] = [];
   const frameOf = (n: NodeRec) => world.frame(n.id).clone().scale(new THREE.Vector3().setScalar((n.scale ?? 1_000_000) / 1_000_000));
+  /** A thing with no baked model is drawn from its kind's entry, once the models' index (or its failure) says so. */
+  const drawByKind = (nodes: NodeRec[], removed: string[]) => {
+    for (const id of removed) kinds.remove(id);
+    for (const n of nodes) {
+      if (isBody(n) || STRUCTURE.has(n.kind.split('@')[0]) || world.isDrape(n)) continue;
+      if (n.origin && layer?.opts.index.things[n.origin]) continue; // its baked model draws it
+      if (!layer && !failed) continue; // until the models index arrives, a thing may yet have a model
+      kinds.set(n, frameOf(n));
+    }
+  };
   const out: PageThings = {
     layer: null,
     kinds,
     apply(nodes, removed) {
       shown(nodes, removed);
-      for (const id of removed) kinds.remove(id);
-      for (const n of nodes) {
-        if (isBody(n) || STRUCTURE.has(n.kind.split('@')[0]) || world.isDrape(n)) continue;
-        if (n.origin && layer?.opts.index.things[n.origin]) continue; // its baked model draws it
-        if (base && !layer) continue; // until the models index arrives, a thing may yet have a model
-        kinds.set(n, frameOf(n));
-      }
-      if (!base) return;
+      drawByKind(nodes, removed);
+      if (failed) return;
       if (!layer) return void early.push([nodes, removed]);
       if (world.extent) layer.spacing = world.extent[2] - world.extent[0];
       for (const id of removed) layer.remove(id);
@@ -127,8 +137,7 @@ export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSear
       kinds.draw(t);
     },
   };
-  if (!base) return out;
-  fetchIndex(base.href).then((index) => {
+  index(base.href).then((index) => {
     const copies = Number(params.get('copies') ?? 1);
     layer = new ThingLayer({
       index, copies,
@@ -138,6 +147,11 @@ export function pageThings(scene: THREE.Scene, world: WorldView, params: URLSear
     out.layer = layer;
     scene.add(layer.group);
     for (const [n, r] of early.splice(0)) out.apply(n, r);
+  }, (err: unknown) => {
+    failed = true;
+    world.drawThings = true;
+    for (const [n, r] of early.splice(0)) drawByKind(n, r);
+    console.warn(`models: ${err instanceof Error ? err.message : String(err)}; things drawn as boxes`);
   });
   return out;
 }
