@@ -971,7 +971,13 @@ fn motion_history_is_bit_identical_to_its_pinned_hash() {
         send(1 + i as i64 / 8, who, JOIN, None, None);
         send(10 + 7 * i as i64, who, "eden:walk", Some(g), Some(point(i)));
         if i % 3 == 0 {
-            send(400 + 11 * i as i64, who, "eden:walk", Some(g), Some(point(i + 100)));
+            send(
+                400 + 11 * i as i64,
+                who,
+                "eden:walk",
+                Some(g),
+                Some(point(i + 100)),
+            );
         }
     }
     // A walk replaced by another a tick later; two sits on the one chair (the second waits or is refused by name).
@@ -1018,7 +1024,8 @@ fn motion_history_is_bit_identical_to_its_pinned_hash() {
 }
 
 /// [`motion_history_is_bit_identical_to_its_pinned_hash`]'s effect hash, as `origin/main` (c919d8126) writes it.
-const PINNED_MOTION_HISTORY: &str = "b18f5b817f8e19faaf0174ffbc43f546e27dc4732af99949575138ad374be048";
+const PINNED_MOTION_HISTORY: &str =
+    "b18f5b817f8e19faaf0174ffbc43f546e27dc4732af99949575138ad374be048";
 
 /// R21: private membership is checked against the joined actor's authoritative body, not its principal id.
 #[test]
