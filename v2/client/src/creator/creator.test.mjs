@@ -146,6 +146,8 @@ test('the verbs make G1 batches, and a refusal names its usage', () => {
   assert.deepEqual(requestOf(['expand', '1200']).req, { op: 'edit', world: { verb: 'expand', extent: '1200' } });
   assert.deepEqual(requestOf(['land', 'extend', '--toward', 'n', '--metres', '100']).req, { op: 'edit', world: { verb: 'land', land: 'extend', toward: 'n', metres: '100' } });
   assert.throws(() => requestOf(['expand']), /expand <metres>/);
+  // Its edit goes to the world's claims judge as any edit does: under a claim when one is named (#3701).
+  assert.equal(requestOf(['expand', '1200', '--claim', 'k1a2b3c4d']).req.claim, 'c:k1a2b3c4d');
 });
 
 test('#3695: a creator sets the weather and the sky palette and strikes lightning; each has a dry run and a refusal', async () => {
