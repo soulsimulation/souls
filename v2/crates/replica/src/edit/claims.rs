@@ -11,6 +11,8 @@
 //!   `d:market`, `title:market-quarter`, `p:a`, `use:bakery`, `road:main`); the creator's command adds the prefixes. At most [`DISTRICTS_MOST`] plans, [`PLOTS_MOST`] plots and
 //!   [`ROADS_MOST`] roads a plan, [`ROAD_POINTS_MOST`] points a road (today's limits). A malformed plan is refused
 //!   `edit.district-malformed`.
+//! - **Zones** ([`F_ZONES`], #3700): today's land-use areas, `[[zone:<name>, use:<use>, [x, z, ...]], ...]`, else
+//!   `edit.zone-malformed`.
 //! - **Claims** ([`F_CLAIMS`]): `[[id, part, x0, z0, x1, z1], ...]` (`c:house`, `part:roof`), at most [`CLAIMS_MOST`], none overlapping,
 //!   else `edit.claim-malformed`. Releasing a claim is setting the field without it.
 //!
@@ -39,12 +41,14 @@ pub const ROAD_POINTS_MOST: usize = 32;
 /// The farthest a coordinate may be from the root's origin, mm (1000 km).
 const FAR: i64 = 1_000_000_000;
 
-/// A live claim: its id, the part of the work it is for, and its area `[x0, z0, x1, z1]` in mm, x0 < x1, z0 < z1.
+/// A live claim: its id, the part of the work it is for, its area `[x0, z0, x1, z1]` in mm, x0 < x1, z0 < z1, and the
+/// helper that builds under it (#3727): a creator-scope actor of its own, which may edit only under this claim.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Claim {
     pub id: Name,
     pub part: Name,
     pub area: [i64; 4],
+    pub helper: Option<Id>,
 }
 
 impl Claim {
@@ -102,6 +106,27 @@ fn names_only(v: &Value) -> Result<(), String> {
     })
 }
 
+/// A claim's helper as its row holds it: the name `helper:h<32 hex scope>-<counter>` (a name's part starts with a
+/// letter), the creator-scope actor the gateway minted for it (#3727). An id's own form is read too.
+fn helper_of(v: &Value) -> Result<Id, String> {
+    let bad = || "a claim's helper is helper:h<32 hex>-<counter>".to_owned();
+    match v {
+        Value::Text(t) => {
+            let (scope, n) = t
+                .as_str()
+                .strip_prefix("helper:h")
+                .and_then(|r| r.split_once('-'))
+                .ok_or_else(bad)?;
+            let scope: [u8; 16] = crate::encode::from_hex(scope)
+                .ok()
+                .and_then(|b| b.try_into().ok())
+                .ok_or_else(bad)?;
+            Id::new(crate::ids::Scope(scope), n.parse().map_err(|_| bad())?).ok_or_else(bad)
+        }
+        _ => crate::effects::read_id(v).map_err(|_| bad()),
+    }
+}
+
 /// The claims a field value holds, checked: names, areas, the limit, no id twice, no overlap.
 pub fn read_claims(v: &Value) -> Result<Vec<Claim>, String> {
     names_only(v)?;
@@ -110,13 +135,17 @@ pub fn read_claims(v: &Value) -> Result<Vec<Claim>, String> {
         let Value::Array(r) = row else {
             return Err("a claim is [id, part, x0, z0, x1, z1]".into());
         };
-        let [id, part, x0, z0, x1, z1] = r.as_slice() else {
-            return Err("a claim is [id, part, x0, z0, x1, z1]".into());
+        let ([id, part, x0, z0, x1, z1], helper) = (r.get(..6).unwrap_or(&[]), r.get(6)) else {
+            return Err("a claim is [id, part, x0, z0, x1, z1, helper?]".into());
         };
+        if r.len() > 7 {
+            return Err("a claim is [id, part, x0, z0, x1, z1, helper?]".into());
+        }
         let c = Claim {
             id: name(id, "a claim's id")?,
             part: name(part, "a claim's part")?,
             area: [near(x0)?, near(z0)?, near(x1)?, near(z1)?],
+            helper: helper.map(helper_of).transpose()?,
         };
         let [x0, z0, x1, z1] = c.area;
         if x0 >= x1 || z0 >= z1 {
@@ -124,6 +153,12 @@ pub fn read_claims(v: &Value) -> Result<Vec<Claim>, String> {
         }
         if let Some(o) = out.iter().find(|o| o.id == c.id) {
             return Err(format!("claim id {} is used twice", o.id.as_str()));
+        }
+        if let Some(o) = out
+            .iter()
+            .find(|o| c.helper.is_some() && o.helper == c.helper)
+        {
+            return Err(format!("{} has the helper of {}", c.show(), o.show()));
         }
         if let Some(o) = out.iter().find(|o| {
             let [a0, b0, a1, b1] = o.area;
@@ -228,13 +263,165 @@ pub fn read_districts(v: &Value) -> Result<(), String> {
     Ok(())
 }
 
-/// The value a field of this module reads as unset (an empty list), so an undo can take back a batch that added the
-/// field: T6 has no unset, and a set to this value reads the same as none (#3879 review).
+/// The root's field holding the land-use zones (#3700): `[[name, use, [x, z, x, z, ...]], ...]`, a name `zone:<x>`,
+/// a use one of [`USES`] as `use:<use>`, an outline of 3 to [`ZONE_POINTS_MOST`] points in mm, at most [`ZONES_MOST`].
+pub const F_ZONES: u64 = 142;
+pub const ZONES_MOST: usize = 64;
+pub const ZONE_POINTS_MOST: usize = 64;
+/// Today's land uses.
+pub const USES: [&str; 7] = [
+    "residential",
+    "commercial",
+    "park",
+    "farm",
+    "civic",
+    "industrial",
+    "wild",
+];
+
+/// Checks a field value as zones.
+pub fn read_zones(v: &Value) -> Result<(), String> {
+    names_only(v)?;
+    let mut seen = BTreeSet::new();
+    for z in list(v, "zones", ZONES_MOST)? {
+        let Value::Array(z) = z else {
+            return Err("a zone is [name, use, [x, z, ...]]".into());
+        };
+        let [n, u, outline] = z.as_slice() else {
+            return Err("a zone is [name, use, [x, z, ...]]".into());
+        };
+        let n = name(n, "a zone's name")?;
+        if !n.as_str().starts_with("zone:") || !seen.insert(n.clone()) {
+            return Err(format!(
+                "{} is not zone:<name>, or is named twice",
+                n.as_str()
+            ));
+        }
+        let u = name(u, "a zone's use")?;
+        if !u
+            .as_str()
+            .strip_prefix("use:")
+            .is_some_and(|x| USES.contains(&x))
+        {
+            return Err(format!(
+                "{} is not one of use:{}",
+                u.as_str(),
+                USES.join("|use:")
+            ));
+        }
+        let pts = list(outline, "outline coordinates", ZONE_POINTS_MOST * 2)?;
+        if pts.len() < 6 || pts.len() % 2 != 0 {
+            return Err(format!(
+                "zone {}: an outline is at least three x, z points",
+                n.as_str()
+            ));
+        }
+        for p in pts {
+            near(p)?;
+        }
+    }
+    Ok(())
+}
+
+/// The value a field of this module reads as unset (an empty list; 0 for an owner or access mark), so an undo can
+/// take back a batch that added the field: T6 has no unset, and a set to this value reads the same as none.
 pub fn neutral(field: u64) -> Option<Value> {
     match field {
-        F_DISTRICTS | F_CLAIMS => Some(Value::Array(Vec::new())),
+        F_DISTRICTS | F_CLAIMS | F_ZONES => Some(Value::Array(Vec::new())),
+        crate::who_may::F_OWNER | crate::who_may::F_ACCESS => Some(Value::Uint(0)),
         _ => None,
     }
+}
+
+/// Whether `actor` may edit at all: the world's creator, or a live claim's helper sending under that very claim
+/// (#3727). The claim check ([`judge`]) then keeps the helper inside it.
+pub fn admits(edit: &Edit, copy: &Replica, creator: Id) -> bool {
+    match edit.actor {
+        crate::effects::Actor::Creator(a) if a == creator => true,
+        crate::effects::Actor::Creator(a) => edit
+            .claim
+            .as_ref()
+            .is_some_and(|c| live(copy).iter().any(|x| &x.id == c && x.helper == Some(a))),
+        _ => false,
+    }
+}
+
+/// The claim check for an undo or a redo (#3727): the lead's, under no claim, so no change it would write may touch
+/// a live claim's area, before or after. Run on the checker's copy and again on the live copy at the tick.
+pub fn judge_effects(copy: &Replica, effects: &[crate::effects::Effect]) -> Result<(), Refused> {
+    use crate::effects::{Body, Change};
+    let claims = live(copy);
+    if claims.is_empty() {
+        return Ok(());
+    }
+    let tree = copy.tree();
+    let root = tree.node(tree.root()).map(|n| n.id());
+    let at = |id: Id| crate::select::to_root_point(tree, id, Vec3::ZERO);
+    let below = |id: Id| {
+        let mut out = Vec::new();
+        let mut stack = vec![id];
+        while let Some(x) = stack.pop() {
+            out.push(x);
+            if let Some(cs) = tree.handle(x).and_then(|h| tree.children(h)) {
+                stack.extend(cs.iter().filter_map(|c| tree.node(*c)).map(|n| n.id()));
+            }
+        }
+        out
+    };
+    let mut points: Vec<Option<Vec3>> = Vec::new();
+    for e in effects {
+        let Body::Changes(cs) = &e.body else { continue };
+        for c in cs {
+            match &c.change {
+                Change::Create { pose, .. } => points.push(crate::select::to_root_point(
+                    tree,
+                    pose.frame.node,
+                    pose.position,
+                )),
+                Change::Reparent { node, pose, .. } => {
+                    let same = tree
+                        .handle(*node)
+                        .and_then(|h| tree.node(h))
+                        .and_then(|n| n.parent())
+                        == Some(pose.frame.node);
+                    for d in below(*node) {
+                        points.push(at(d));
+                        points.push(if same {
+                            crate::select::to_root_point_moved(
+                                tree,
+                                d,
+                                Vec3::ZERO,
+                                (*node, pose.frame.slot, pose.position, pose.orientation),
+                            )
+                        } else if d == *node {
+                            crate::select::to_root_point(tree, pose.frame.node, pose.position)
+                        } else {
+                            None
+                        });
+                    }
+                }
+                Change::Set { node, .. } if Some(*node) != root => points.push(at(*node)),
+                Change::Remove { node } => points.extend(below(*node).into_iter().map(at)),
+                _ => {}
+            }
+        }
+    }
+    // A point that cannot be read (a node created by the same undo) is judged by where its creation puts it.
+    for p in points.into_iter().flatten() {
+        if let Some(c) = claims.iter().find(|c| c.holds(p)) {
+            return refuse(
+                None,
+                "edit.claimed",
+                format!(
+                    "x {} z {} mm is inside {}: release it first",
+                    p.x / 1000,
+                    p.z / 1000,
+                    c.show()
+                ),
+            );
+        }
+    }
+    Ok(())
 }
 
 /// The live claims on a copy: those its root holds.
@@ -270,6 +457,7 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
             let (bad, why) = match *field {
                 F_CLAIMS => ("edit.claim-malformed", read_claims(to).err()),
                 F_DISTRICTS => ("edit.district-malformed", read_districts(to).err()),
+                F_ZONES => ("edit.zone-malformed", read_zones(to).err()),
                 _ => continue,
             };
             if let Some(why) = why {

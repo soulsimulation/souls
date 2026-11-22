@@ -2,7 +2,7 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
 import * as THREE from 'three';
-import { containingPlace, hoverPlaces, pickAt, pickPlace, rayBody, thingName, tooltipText, type HoverOptions, type HoverPlace } from './hover.ts';
+import { LONG_PRESS_MS, LongPress, containingPlace, hoverPlaces, pickAt, pickPlace, rayBody, thingName, tooltipText, type HoverOptions, type HoverPlace } from './hover.ts';
 import { ThingLayer, rayUnitBox } from '../things/things.ts';
 import type { NodeRec } from '../source/source.ts';
 
@@ -118,4 +118,31 @@ test('#3779 a sunken place (a pond, its middle below its frame) is ground level,
   assert.equal([...hoverPlaces(world)][0].level, null);
   const eye = new THREE.Vector3(-10, 20, 10);
   assert.equal(pickPlace(eye, new THREE.Vector3(0, -3.5, 0).sub(eye).normalize(), world)?.id, 'pond', 'its sunken middle is in it');
+});
+
+test('#3778 a touch held still for 450 ms fires once; moving, a second finger or lifting first cancels', () => {
+  let queued: { f: () => void; ms: number } | null = null, fired: [number, number][] = [];
+  const press = new LongPress((x, y) => fired.push([x, y]), (f, ms) => (queued = { f, ms }), () => (queued = null));
+  const run = () => { const q = queued; queued = null; q?.f(); };
+  press.down(1, 100, 200);
+  assert.equal(queued!.ms, LONG_PRESS_MS);
+  press.move(104, 205); // within the slop: still a press
+  run();
+  assert.deepEqual(fired, [[100, 200]], 'held still: it fires at the touch point');
+  press.up(1);
+  fired = [];
+  press.down(1, 100, 200);
+  press.move(100, 215); // a drag
+  assert.equal(queued, null, 'moving the finger cancels');
+  press.up(1);
+  press.down(1, 100, 200);
+  press.down(2, 300, 200); // a pinch
+  assert.equal(queued, null, 'a second finger cancels');
+  press.up(2);
+  assert.equal(queued, null, 'and lifting it does not start one');
+  press.up(1);
+  press.down(1, 50, 50);
+  press.up(1); // a short tap
+  assert.equal(queued, null, 'a tap lifts before it runs out');
+  assert.deepEqual(fired, []);
 });

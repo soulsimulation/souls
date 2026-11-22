@@ -319,6 +319,156 @@ pub fn who_may_decide(input: &str) -> String {
     }
 }
 
+// --- Ownership marks (0.131 parity, #3700) ---------------------------------------------------------------------
+//
+// Today's `own` and `access`: a thing or a place may carry an owner (a Soul, a group, the world's god) and an access
+// mark, set by the creator's edits as two generic fields. A thing without either takes its nearest marked ancestor's,
+// so a private house makes everything in it private. A private thing refuses every Soul but its owner (`object.private`,
+// [`private_to`]), before its form's own `who`; groups have no members in this world (relationships are off, as they
+// are today without LAYERS), so a group's private thing refuses everyone. No marks anywhere: nothing changes.
+
+/// A node's owner: an id (a Soul's), `group:<name>`, `owner:god`, or 0 for none.
+pub const F_OWNER: u64 = 143;
+/// A node's access: 0 unmarked (the nearest marked ancestor's marks hold), 1 public, 2 private.
+pub const F_ACCESS: u64 = 144;
+
+/// Who owns a marked thing.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Owner {
+    Soul(crate::ids::Id),
+    Group(String),
+    God,
+}
+
+impl Owner {
+    fn read(v: &crate::encode::Value) -> Result<Option<Owner>, String> {
+        use crate::encode::Value as V;
+        match v {
+            V::Uint(0) => Ok(None),
+            V::Text(t) if t.as_str() == "owner:god" => Ok(Some(Owner::God)),
+            V::Text(t) if t.as_str().starts_with("group:") && t.as_str().len() > 6 => {
+                Ok(Some(Owner::Group(t.as_str()[6..].to_owned())))
+            }
+            V::Array(_) => crate::effects::read_id(v)
+                .map(|id| Some(Owner::Soul(id)))
+                .map_err(|_| "an owner id is [scope, counter]".to_owned()),
+            _ => Err("an owner is a Soul's id, group:<name>, owner:god or 0 for none".to_owned()),
+        }
+    }
+
+    /// The owner in a refusal's words.
+    pub fn words(&self) -> String {
+        match self {
+            Owner::Soul(id) => format!("Soul {}'s", crate::world_model::show(*id)),
+            Owner::Group(g) => format!("the {g} group's"),
+            Owner::God => "the world's".to_owned(),
+        }
+    }
+}
+
+/// Checks a value written to [`F_OWNER`] or [`F_ACCESS`]; other fields pass. The edit check refuses a bad one
+/// `edit.owner-malformed`.
+pub fn check_mark(field: u64, v: &crate::encode::Value) -> Result<(), String> {
+    match field {
+        F_OWNER => Owner::read(v).map(|_| ()),
+        F_ACCESS => match v {
+            crate::encode::Value::Uint(0..=2) => Ok(()),
+            _ => Err("access is 0 (none), 1 (public) or 2 (private)".to_owned()),
+        },
+        _ => Ok(()),
+    }
+}
+
+/// A node's ownership as it holds: its own marks, else its nearest marked ancestor's: the owner, whether it is
+/// private, and the node that carries the mark. `None` when nothing above it is marked. `fields` and `parent` read a
+/// node, so the world's tree and a checker's copy share this one walk.
+pub fn ownership_by(
+    node: crate::ids::Id,
+    fields: impl Fn(crate::ids::Id) -> Option<std::collections::BTreeMap<u64, crate::encode::Value>>,
+    parent: impl Fn(crate::ids::Id) -> Option<crate::ids::Id>,
+) -> Option<(Option<Owner>, bool, crate::ids::Id)> {
+    let mut at = Some(node);
+    let mut steps = 0;
+    while let Some(id) = at {
+        let f = fields(id)?;
+        let owner = f.get(&F_OWNER).and_then(|v| Owner::read(v).ok()).flatten();
+        let access = match f.get(&F_ACCESS) {
+            Some(crate::encode::Value::Uint(a)) => *a,
+            _ => 0,
+        };
+        if owner.is_some() || access != 0 {
+            return Some((owner, access == 2, id));
+        }
+        steps += 1;
+        if steps > crate::world_model::DEPTH_LIMIT as usize {
+            return None;
+        }
+        at = parent(id);
+    }
+    None
+}
+
+/// [`ownership_by`] on the world's tree.
+pub fn ownership(
+    tree: &crate::tree::Tree,
+    node: crate::ids::Id,
+) -> Option<(Option<Owner>, bool, crate::ids::Id)> {
+    let n = |id| tree.handle(id).and_then(|h| tree.node(h));
+    ownership_by(
+        node,
+        |id| n(id).map(|x| x.fields().clone()),
+        |id| n(id).and_then(|x| x.parent()),
+    )
+}
+
+/// [`ownership_by`] on a copy read through [`crate::read::Read`] (a checker's): a node's record keeps its fields at
+/// 6 and its parent at 3.
+pub fn ownership_read(
+    copy: &impl crate::read::Read,
+    node: crate::ids::Id,
+) -> Option<(Option<Owner>, bool, crate::ids::Id)> {
+    use crate::encode::Value as V;
+    let rec = |id| match copy.node(id) {
+        Some(V::Map(m)) => Some(m),
+        _ => None,
+    };
+    ownership_by(
+        node,
+        |id| {
+            rec(id).map(|m| match m.get(&6) {
+                Some(V::Map(f)) => f.clone(),
+                _ => std::collections::BTreeMap::new(),
+            })
+        },
+        |id| rec(id).and_then(|m| m.get(&3).and_then(|p| crate::effects::read_id(p).ok())),
+    )
+}
+
+/// The refusal's words when a marked thing is private to someone other than `soul`, else `None`.
+pub fn refusal_of(
+    found: Option<(Option<Owner>, bool, crate::ids::Id)>,
+    soul: crate::ids::Id,
+) -> Option<String> {
+    let (owner, private, _) = found?;
+    if !private || owner == Some(Owner::Soul(soul)) {
+        return None;
+    }
+    Some(match owner {
+        Some(o) => format!("it is {} and private", o.words()),
+        None => "it is private".to_owned(),
+    })
+}
+
+/// Whether `node` is private to someone other than `soul` (the asker's Soul, or its body with none): the refusal's
+/// words when it is (`object.private`), `None` when the asker may use it.
+pub fn private_to(
+    tree: &crate::tree::Tree,
+    node: crate::ids::Id,
+    soul: crate::ids::Id,
+) -> Option<String> {
+    refusal_of(ownership(tree, node), soul)
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

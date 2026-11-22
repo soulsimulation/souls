@@ -1,0 +1,148 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:hollow_stump, a hiding place. A search names no thing: its selector (things in this stump, nearest me, first) chooses it as worldd does (#3914). An asker who sees into the stump (its closed audience, the creator) is answered from what it holds; an empty stump is refused none_selected once every need holds. One who does not see into it cannot know: unknown, and the world chooses.",
+  "cases": [
+    {
+      "name": "search_without_a_thing_finds_what_is_hidden",
+      "act": {
+        "this": "st",
+        "form": "search"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "st": {
+            "kind": "eden:hollow_stump",
+            "slots": {
+              "inside": [
+                "ap"
+              ]
+            }
+          },
+          "ap": {
+            "kind": "eden:apple"
+          },
+          "b1": {
+            "hands": {
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "creator"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "search_an_empty_stump_is_refused_none_selected",
+      "act": {
+        "this": "st",
+        "form": "search"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "st": {
+            "kind": "eden:hollow_stump",
+            "slots": {
+              "inside": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "creator"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "none_selected",
+        "need": -1,
+        "detail": {
+          "node": "st",
+          "arg": "thing"
+        },
+        "fix": null
+      }
+    },
+    {
+      "name": "search_by_one_who_cannot_see_inside_is_unknown",
+      "act": {
+        "this": "st",
+        "form": "search"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "st": {
+            "kind": "eden:hollow_stump",
+            "slots": {
+              "inside": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "unknown",
+        "need": -1,
+        "node": "st"
+      }
+    },
+    {
+      "name": "search_an_empty_stump_with_full_hands_names_the_hands_first",
+      "act": {
+        "this": "st",
+        "form": "search"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "st": {
+            "kind": "eden:hollow_stump",
+            "slots": {
+              "inside": []
+            }
+          },
+          "x": {
+            "kind": "eden:apple"
+          },
+          "b1": {
+            "hands": {
+              "right": "x"
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "creator"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand"
+      }
+    }
+  ]
+}

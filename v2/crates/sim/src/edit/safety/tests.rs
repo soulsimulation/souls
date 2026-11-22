@@ -783,3 +783,28 @@ fn class_guard_and_atomic_install_preserve_each_actual_footprint() {
         "the class bank changes with the committed tree"
     );
 }
+
+/// #3958: a box moved 100 km east of the open ground lies off it, by name, and the same box moved 10 m stays on it;
+/// so the edit is refused before the walkers' maps cut squares all the way out to it.
+#[test]
+fn a_box_moved_far_off_the_open_ground_is_off_it() {
+    let mut w = world();
+    let (b, place) = w.new_box(
+        on(w.ground, Vec3::new(20 * M, 0, 20 * M), surface(w.ground)),
+        &[solid(0, 0, 500, 500, 1_000)],
+    );
+    w.setup(vec![place]);
+    let off = |w: &W, x: i64| {
+        let p = w.part(
+            creator(),
+            vec![w.moved(b, on(w.ground, Vec3::new(x, 0, 20 * M), Support::None))],
+        );
+        let mut after = w.tree.frozen();
+        after.apply(&w.header, &p).expect("the move applies");
+        let changed = crate::ground::changed(&w.tree, &p);
+        crate::ground::open::off_ground(&w.tree, &after, w.ground, &changed).expect("read")
+    };
+    let why = off(&w, 100_000 * M).expect("100 km east is off the ground");
+    println!("{why}");
+    assert_eq!(off(&w, 30 * M), None, "10 m east stays on it");
+}

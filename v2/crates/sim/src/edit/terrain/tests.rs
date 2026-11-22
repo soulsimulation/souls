@@ -328,7 +328,7 @@ fn square() -> Vec<[i64; 2]> {
 fn landform_parameters_and_owned_doorway_metadata_have_distinct_fields() {
     use replica::edit::DOOR_GEOMETRY;
 
-    assert_eq!(DOOR_GEOMETRY, 29);
+    assert_eq!(DOOR_GEOMETRY, 100);
     let im = field();
     let mut edits = Edits::of(&im);
     let parameters = Value::Bytes(br#"{"kind":"bump","h":0}"#.to_vec());

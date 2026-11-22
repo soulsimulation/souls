@@ -168,6 +168,12 @@ impl Tokens {
         true
     }
 
+    /// A helper's token (#3727): kept, as a browser token is, while the tokens file names the same authority.
+    pub fn add_helper(&mut self, grant: Grant, hash: [u8; 32]) {
+        self.add(grant, hash);
+        self.browser.insert(hash, grant);
+    }
+
     /// Names the account that owns `grant`.
     pub fn set_account(&mut self, grant: Grant, account: &str) {
         self.accounts.insert(grant.to_text(), account.to_owned());

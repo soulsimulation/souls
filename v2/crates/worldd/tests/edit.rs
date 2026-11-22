@@ -199,17 +199,17 @@ impl W {
         self.client
             .apply_bytes(&bytes)
             .expect("the client applies it");
-        self.views(checked.edit.intent, n, &c.part);
+        self.views(checked.edit.intent, checked.edit.actor, n, &c.part);
         Ok(c)
     }
 
-    /// The batch as generic effects under one cause, the creator acting; the client's replica equal to the live one;
-    /// the stream's frame for this record holding exactly the batch's effects.
-    fn views(&mut self, intent: Id, record: u64, part: &Part) {
+    /// The batch as generic effects under one cause, its editor acting (the creator, or a claim's helper); the
+    /// client's replica equal to the live one; the stream's frame for this record holding exactly the batch's effects.
+    fn views(&mut self, intent: Id, actor: Actor, record: u64, part: &Part) {
         assert!(!part.effects.is_empty());
         for e in &part.effects {
             assert_eq!(e.envelope.cause, Cause::Intent(intent));
-            assert_eq!(e.envelope.actor, self.creator());
+            assert_eq!(e.envelope.actor, actor);
             assert!(matches!(e.body, Body::Changes(_)), "generic changes");
         }
         assert_eq!(
@@ -896,6 +896,107 @@ fn a2_a_move_carries_every_node_below_it_and_a_late_claim_still_binds() {
 }
 
 #[test]
+fn a3727_a_helper_builds_only_under_its_own_claim_and_an_undo_stays_out_of_claims() {
+    use replica::edit::claims::{F_CLAIMS, judge_effects};
+    let mut w = W::new();
+    let room = kind(&w.header, "souls:room");
+    let helper = Id::new(Scope([0xc0; 16]), (1 << 44) + 7).expect("an id");
+    let stranger = Id::new(Scope([0xc0; 16]), (1 << 44) + 8).expect("an id");
+    let name = |h: Id| {
+        text(&format!(
+            "helper:h{}-{}",
+            replica::encode::to_hex(&h.scope().0),
+            h.counter()
+        ))
+    };
+    // A room the lead places at x 5 mm, before any claim: its creation is what a redo would write again.
+    let v = w.live.version();
+    let lead = w
+        .edit(
+            w.creator(),
+            v,
+            vec![place(1, &room, Ref::Node(w.root), spot(5_000, None))],
+        )
+        .expect("the lead's room");
+    let mut row = match claim_row("c:house", "part:house", [0, -10, 10, 10]) {
+        Value::Array(r) => r,
+        _ => unreachable!(),
+    };
+    row.push(name(helper));
+    let v = w.live.version();
+    w.edit(
+        w.creator(),
+        v,
+        vec![set_root(
+            w.root,
+            F_CLAIMS,
+            Value::Array(vec![Value::Array(row)]),
+        )],
+    )
+    .expect("claimed with a helper");
+    let v = w.live.version();
+    let as_ = |h: Id| Actor::Creator(h);
+    // The helper, under its claim, inside: built.
+    w.edit_under(
+        as_(helper),
+        v,
+        vec![place(1, &room, Ref::Node(w.root), spot(6_000, None))],
+        Some("c:house"),
+    )
+    .expect("the helper builds inside its claim");
+    let v = w.live.version();
+    // Outside its area: refused by the claim check; with no claim, or as a stranger: not an editor at all.
+    let r = w
+        .edit_under(
+            as_(helper),
+            v,
+            vec![place(1, &room, Ref::Node(w.root), spot(20_000, None))],
+            Some("c:house"),
+        )
+        .expect_err("outside");
+    assert_eq!(r.name, "edit.outside-claim", "{r:?}");
+    let r = w
+        .edit(
+            as_(helper),
+            v,
+            vec![place(1, &room, Ref::Node(w.root), spot(30_000, None))],
+        )
+        .expect_err("no claim");
+    assert_eq!(r.name, "edit.not-the-creator", "{r:?}");
+    let r = w
+        .edit_under(
+            as_(stranger),
+            v,
+            vec![place(1, &room, Ref::Node(w.root), spot(6_000, None))],
+            Some("c:house"),
+        )
+        .expect_err("another helper");
+    assert_eq!(r.name, "edit.not-the-creator", "{r:?}");
+    // The lead's undo or redo may not write inside a live claim: the room's creation again, at x 5 mm, is refused.
+    let r = judge_effects(&w.live, &lead.part.effects).expect_err("inside a claim");
+    assert_eq!(r.name, "edit.claimed", "{r:?}");
+    // Malformed helpers are refused with the claim list.
+    let mut bad = match claim_row("c:yard", "part:yard", [20, -10, 30, 10]) {
+        Value::Array(r) => r,
+        _ => unreachable!(),
+    };
+    bad.push(text("helper:hnot-hex"));
+    let r = w
+        .edit(
+            w.creator(),
+            v,
+            vec![set_root(
+                w.root,
+                F_CLAIMS,
+                Value::Array(vec![Value::Array(bad)]),
+            )],
+        )
+        .expect_err("a bad helper");
+    assert_eq!(r.name, "edit.claim-malformed");
+    w.close();
+}
+
+#[test]
 fn a1_a2_plans_and_claims_are_checked_before_they_are_recorded() {
     use replica::edit::claims::{F_CLAIMS, F_DISTRICTS};
     let mut w = W::new();
@@ -969,5 +1070,178 @@ fn a1_a2_plans_and_claims_are_checked_before_they_are_recorded() {
         .edit(w.creator(), v, vec![set_root(w.root, F_CLAIMS, nine)])
         .expect_err("nine");
     assert_eq!(r.name, "edit.claim-malformed");
+    w.close();
+}
+
+// --- #3700: owner and access marks, and land-use zones ---------------------------------------------------------------
+
+#[test]
+fn a1_a_private_mark_is_its_owners_alone_and_passes_down_to_what_is_inside() {
+    use replica::who_may::{F_ACCESS, F_OWNER};
+    let mut w = W::new();
+    let (room, cr, _) = w.furnish();
+    let owner = Id::new(Scope([0x50; 16]), 7).expect("an id");
+    let other = Id::new(Scope([0x50; 16]), 8).expect("an id");
+    let entry =
+        replica::rules::json::parse(r#"{"forms": {"open": {"who": "anyone"}}}"#).expect("JSON");
+    let may = |w: &W, body: Id, node: Id| {
+        sim::forms::may(
+            w.live.tree(),
+            &BTreeMap::new(),
+            &|_| None,
+            body,
+            node,
+            &entry,
+            "open",
+        )
+    };
+    // Unmarked: anyone may, as before.
+    assert!(may(&w, other, cr).is_ok());
+    // The room is the owner's and private: the crate in it is too.
+    let v = w.live.version();
+    w.edit(
+        w.creator(),
+        v,
+        vec![
+            Op::Set {
+                node: Ref::Node(room),
+                field: F_OWNER,
+                to: owner.to_value(),
+            },
+            Op::Set {
+                node: Ref::Node(room),
+                field: F_ACCESS,
+                to: Value::Uint(2),
+            },
+        ],
+    )
+    .expect("marked");
+    assert!(may(&w, owner, cr).is_ok(), "the owner may");
+    let r = may(&w, other, cr).expect_err("private");
+    assert_eq!(r.name, "object.private");
+    assert!(r.detail.contains("private"), "{}", r.detail);
+    // Its own public mark wins over the room's.
+    let v = w.live.version();
+    w.edit(
+        w.creator(),
+        v,
+        vec![Op::Set {
+            node: Ref::Node(cr),
+            field: F_ACCESS,
+            to: Value::Uint(1),
+        }],
+    )
+    .expect("public");
+    assert!(may(&w, other, cr).is_ok());
+    // The god's private thing refuses every Soul; a group has no members.
+    let v = w.live.version();
+    w.edit(
+        w.creator(),
+        v,
+        vec![
+            Op::Set {
+                node: Ref::Node(cr),
+                field: F_ACCESS,
+                to: Value::Uint(2),
+            },
+            Op::Set {
+                node: Ref::Node(cr),
+                field: F_OWNER,
+                to: text("owner:god"),
+            },
+        ],
+    )
+    .expect("the god's");
+    assert_eq!(
+        may(&w, owner, cr).expect_err("private").name,
+        "object.private"
+    );
+    // Marks that do not read are refused, and nothing is written.
+    let v = w.live.version();
+    let log = w.log_hash();
+    for (field, to) in [
+        (F_ACCESS, Value::Uint(3)),
+        (F_OWNER, text("souls:bob")),
+        (F_OWNER, Value::Uint(4)),
+    ] {
+        let r = w
+            .edit(
+                w.creator(),
+                v,
+                vec![Op::Set {
+                    node: Ref::Node(cr),
+                    field,
+                    to,
+                }],
+            )
+            .expect_err("malformed");
+        assert_eq!((r.op, r.name), (Some(0), "edit.owner-malformed"), "{r:?}");
+    }
+    assert_eq!(w.log_hash(), log);
+    // None again: anyone may.
+    w.edit(
+        w.creator(),
+        v,
+        vec![
+            Op::Set {
+                node: Ref::Node(cr),
+                field: F_ACCESS,
+                to: Value::Uint(0),
+            },
+            Op::Set {
+                node: Ref::Node(cr),
+                field: F_OWNER,
+                to: Value::Uint(0),
+            },
+            Op::Set {
+                node: Ref::Node(room),
+                field: F_ACCESS,
+                to: Value::Uint(0),
+            },
+        ],
+    )
+    .expect("cleared");
+    assert!(may(&w, other, cr).is_ok());
+    w.close();
+}
+
+#[test]
+fn a2_zones_are_named_land_uses_with_an_outline() {
+    use replica::edit::claims::F_ZONES;
+    let mut w = W::new();
+    let zone = |n: &str, u: &str, pts: &[i64]| {
+        Value::Array(vec![
+            text(n),
+            text(u),
+            Value::Array(pts.iter().map(|p| mm(*p)).collect()),
+        ])
+    };
+    let square = [0, 0, 10_000, 0, 10_000, 10_000];
+    let v = w.live.version();
+    w.edit(
+        w.creator(),
+        v,
+        vec![set_root(
+            w.root,
+            F_ZONES,
+            Value::Array(vec![zone("zone:market", "use:commercial", &square)]),
+        )],
+    )
+    .expect("zoned");
+    let v = w.live.version();
+    for bad in [
+        zone("zone:market", "use:casino", &square),
+        zone("market", "use:park", &square),
+        zone("zone:park", "use:park", &[0, 0, 5, 5]),
+    ] {
+        let r = w
+            .edit(
+                w.creator(),
+                v,
+                vec![set_root(w.root, F_ZONES, Value::Array(vec![bad]))],
+            )
+            .expect_err("malformed");
+        assert_eq!(r.name, "edit.zone-malformed", "{r:?}");
+    }
     w.close();
 }

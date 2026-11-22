@@ -3,7 +3,7 @@ import assert from 'node:assert/strict';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
-import { FULL_EVENTS, GOD_SKILL_TESTS, JOBS, V2_LEGS, WINDOW_LABELS, changedFiles, ciRunsAt, deferredOnly, deferredReceipt, greenAtHead, greenCommand, lightOnly, jobsFor, runnerFor, smokeFor, windowFor, windowed } from './ci-scope.mjs';
+import { FULL_EVENTS, GOD_SKILL_TESTS, JOBS, V2_LEGS, V2_PATHS, WINDOW_LABELS, changedFiles, ciRunsAt, deferredOnly, deferredReceipt, greenAtHead, greenCommand, lightOnly, jobsFor, runnerFor, smokeFor, windowFor, windowed } from './ci-scope.mjs';
 import { SCOPE_RULES, scopeFor } from '../../tools/test-harness/release-gate.mjs';
 
 const names = files => jobsFor(files).include.map(j => j.name);
@@ -124,6 +124,58 @@ test('a v2/-only change runs the v2 legs alone, scope none; v2 runs on nothing e
   for (const f of ['apps/server/src/world.ts', 'apps/web/src/App.tsx', 'docs/testing.md', 'tools/v2/x.mjs']) assert.ok(!names([f]).some(n => n.startsWith('v2')), f);
   for (const n of V2_NAMES) assert.ok(names(['pnpm-lock.yaml']).includes(n), `full scope includes ${n}`);
   assert.ok(!('paths' in jobsFor(['v2/x.rs']).include[0]));
+});
+
+// The affected-paths split (21 Nov): each v2 leg runs on its own inputs (V2_PATHS), in pull_request and merge_group runs
+// alike; a changelog fragment beside code no longer reads as an unmapped path that runs every job.
+const plan = (files, event = 'merge_group') => run('--files', files.join(','), '--event', event);
+test('affected paths: a client-only change runs the client and rust legs, not sim, worldd or WASM', () => {
+  for (const event of ['merge_group', 'pull_request']) {
+    const p = run('--files', 'v2/client/src/cli/souls.mjs,changes/x.md', '--event', event, '--labels', '["merge:ready"]');
+    assert.deepEqual([p.scope, p.matrix, p.smoke], ['none', ['v2-rust', 'v2-client'], 'false'], event);
+  }
+  assert.deepEqual(names(['v2/client/src/hatch/hatch.test.mjs']), ['v2-rust', 'v2-sim', 'v2-client']);
+  assert.deepEqual(names(['v2/client/src/history/history.mjs']), ['v2-rust', 'v2-wasm', 'v2-client']);
+});
+test('affected paths: a page-only change runs the client and rust legs; the page\'s hatch adds sim', () => {
+  assert.deepEqual(plan(['v2/web/src/draw/main.ts', 'changes/x.md']).matrix, ['v2-rust', 'v2-client']);
+  assert.deepEqual(names(['v2/web/src/hatch/hatch.browser.mjs']), ['v2-rust', 'v2-sim', 'v2-client']);
+  assert.deepEqual(names(['v2/web/package-lock.json']), ['v2-rust', 'v2-client']);
+});
+test('affected paths: a Rust, workspace or v2 tools change runs every v2 leg and nothing else', () => {
+  for (const f of ['v2/crates/sim/src/lib.rs', 'v2/Cargo.lock', 'v2/Cargo.toml', 'v2/clippy.toml', 'v2/rust-toolchain.toml', 'v2/tools/ci.sh', 'v2/tools/ops/stores.json', 'v2/newdir/x.rs'])
+    assert.deepEqual(plan([f, 'changes/x.md']).matrix, V2_NAMES, f);
+});
+test('affected paths: content the v2 world loads runs every v2 leg; other content does not', () => {
+  for (const f of ['content/kinds/seating/bench.json', 'content/moves/sit.json', 'content/worlds/eden/map.json']) assert.deepEqual(names([f]).filter(n => n.startsWith('v2')), V2_NAMES, f);
+  assert.deepEqual(names(['content/asks/a.json']), ['soul-tools']);
+  // content the v2 legs never read selects none of them (an unmapped folder still runs every job, through full scope)
+  for (const f of ['content/asks/a.json', 'content/tunes/a.json', 'content/library/a.json']) assert.ok(V2_LEGS.every(leg => !V2_PATHS[leg].test(f)), f);
+  // content/worlds stays unmapped for today's gate (today's server loads it), so every job runs
+  assert.deepEqual(names(['content/worlds/eden/map.json']), JOBS.map(j => j.name));
+});
+test('affected paths: v2 docs run no leg except the MCP page the client reads', () => {
+  assert.deepEqual(names(['v2/docs/TRUNK.md']), []);
+  assert.deepEqual(names(['v2/docs/site/mcp.md']), ['v2-client']);
+  assert.match(readFileSync(fileURLToPath(new URL('../../v2/client/src/mcp/tools.mjs', import.meta.url)), 'utf8'), /docs\/site\/mcp\.md/);
+});
+test('affected paths: a changelog fragment beside code selects nothing itself; beside .github or the lockfile, everything runs', () => {
+  assert.deepEqual(names(['apps/web/src/App.tsx', 'changes/x.md']), names(['apps/web/src/App.tsx']));
+  assert.notEqual(jobsFor(['apps/web/src/App.tsx', 'changes/x.md']).scope, 'full');
+  for (const f of ['.github/workflows/ci.yml', 'pnpm-lock.yaml', 'package.json'])
+    assert.deepEqual(names([f, 'changes/x.md']), JOBS.map(j => j.name), f);
+  assert.deepEqual(names(['changes/x.md']), []);
+});
+test('affected paths: the leg map matches what v2/tools/ci.sh runs in each leg', () => {
+  const ci = readFileSync(fileURLToPath(new URL('../../v2/tools/ci.sh', import.meta.url)), 'utf8');
+  // rust leg: the origin tests import the client and the page; sim leg: the hatch step; wasm leg: tools/facts
+  assert.match(ci, /if on sim; then tests_sim; wasm_pkg; hatch; fi/);
+  assert.match(ci, /client\/src\/hatch\/\*\.test\.mjs && node web\/src\/hatch\/hatch\.browser\.mjs/);
+  const origin = readFileSync(fileURLToPath(new URL('../../v2/tools/origin/origin.test.mjs', import.meta.url)), 'utf8');
+  assert.match(origin, /\.\.\/\.\.\/client\/src\//); assert.match(origin, /\.\.\/\.\.\/web\/src\//);
+  const facts = readFileSync(fileURLToPath(new URL('../../v2/tools/facts/history.mjs', import.meta.url)), 'utf8');
+  assert.match(facts, /client\/src\/history\//);
+  assert.equal(V2_PATHS.worldd.test('v2/client/src/x.mjs') || V2_PATHS.wasm.test('v2/web/src/x.ts'), false);
 });
 
 test('ci.yml: the v2 job skips the pnpm install and runs v2/tools/ci.sh on the pinned toolchain', () => {
@@ -372,10 +424,11 @@ test('ci.yml: the window reaches the scope step, and a deferred run fails ci-ok'
 const SKIPPED = JOBS.filter(j => j.kind === 'server' || ['latency', 'packages', 'types-web', 'launcher', 'native', 'client-cli', 'soul-actions'].includes(j.kind)).map(j => j.name);
 const LOW = ['tools/entry/check.mjs', 'content/kinds/seating/bench.json', 'content/asks/a.json', 'content/moves/a.json', 'packages/form-rules/cases/kettle.json', 'docs/testing.md', 'changes/a-fragment.md', 'README.md'];
 
-test('low-risk: a diff confined to the allowlist runs soul-tools only: no server, smoke, walk or bundle job', () => {
+test('low-risk: a diff confined to the allowlist runs soul-tools (and the v2 legs, which read content/kinds and moves) only: no server, smoke, walk or bundle job', () => {
   const plan = jobsFor(LOW);
   assert.equal(plan.scope, 'low-risk');
-  assert.deepEqual(plan.include.map(j => j.name), ['soul-tools']);
+  assert.deepEqual(plan.include.map(j => j.name), ['soul-tools', ...V2_NAMES]);
+  assert.deepEqual(names(LOW.filter(f => !/^content\/(kinds|moves)\//.test(f))), ['soul-tools']);
   for (const n of SKIPPED) assert.ok(!names(LOW).includes(n), n);
   assert.equal(smokeFor(LOW), false);
   for (const f of LOW) assert.deepEqual(names([f]).filter(n => SKIPPED.includes(n)), [], f);
@@ -420,7 +473,7 @@ test('low-risk: an empty, missing or unreadable diff runs the full battery', () 
 test('low-risk: a merge group of two allowlist PRs is scoped; one with a server PR in it runs every light leg', () => {
   const a = ['tools/entry/format.mjs', 'changes/sa-f6c.md'], b = ['content/kinds/kitchen/kettle.json', 'packages/form-rules/cases/kettle.json', 'changes/sa-d3.md'];
   const group = run('--files', [...a, ...b].join(','), '--event', 'merge_group');
-  assert.deepEqual([group.scope, group.matrix, group.smoke, group.deferred, group.any], ['low-risk', ['soul-tools'], 'false', 'false', 'true']);
+  assert.deepEqual([group.scope, group.matrix, group.smoke, group.deferred, group.any], ['low-risk', ['soul-tools', ...V2_NAMES], 'false', 'false', 'true']);
   const mixed = run('--files', [...a, ...b, 'apps/server/src/world.ts', 'changes/server.md'].join(','), '--event', 'merge_group');
   assert.deepEqual([mixed.scope, mixed.matrix, mixed.smoke], ['full', JOBS.filter(j => !j.heavy).map(j => j.name), 'true']);
 });

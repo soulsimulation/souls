@@ -18,7 +18,7 @@ import { createServer as createHttp } from 'node:http';
 import { DEFAULT_PKG } from '../daemon/client.mjs';
 import { readSeat } from '../home/home.mjs';
 import { pair } from '../pair/pair.mjs';
-import { areaOf, buildOf, opsOf, planRow, requestOf } from './souls-god.mjs';
+import { areaOf, buildOf, eventOps, layerOf, opsOf, outlineOf, planRow, requestOf, resolve as resolveRelation } from './souls-god.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const v2 = resolve(here, '../../..');
@@ -120,6 +120,23 @@ test('the verbs make G1 batches, and a refusal names its usage', () => {
   assert.deepEqual(opsOf('set', ['aa-3', '1', 'true']), [{ op: 'set', node: 'aa-3', field: 1, value: true }]);
   assert.deepEqual(requestOf(['check', 'remove', 'aa-3']).req, { op: 'check', ops: [{ op: 'remove', node: 'aa-3' }] });
   assert.throws(() => opsOf('move', ['aa-3']), /move <id> --at/);
+  assert.deepEqual(opsOf('hours', ['aa-3', '--open', '09:00-13:00@sat,sun']), [{ op: 'set', node: 'aa-3', field: 81, value: [[2, 96, 9 * 3_600_000_000, 13 * 3_600_000_000]] }]);
+  assert.deepEqual(opsOf('hours', ['aa-3', '--closed']), [{ op: 'set', node: 'aa-3', field: 81, value: [] }]);
+  assert.throws(() => opsOf('hours', ['aa-3']), /hours <id> --open/);
+  // A creator's look is G10's shot of a place, thing or Soul by name or id; its usage is checked before anything runs.
+  assert.deepEqual(requestOf(['look', 'market', '--out', 'm.jpg', '--size', '640x360']), { look: ['market', '--out', 'm.jpg', '--size', '640x360'], creator: undefined });
+  assert.throws(() => requestOf(['look']), (e) => e.code === 'usage');
+  assert.throws(() => requestOf(['look', 'market', '--out', 'm.gif']), /png or .jpg/);
+  assert.throws(() => requestOf(['look', 'picture', 'f.png']), /look <place/);
+  assert.deepEqual(requestOf(['free', '10x8', '--near', 'plaza']), { space: 'free', args: ['10x8', '--near', 'plaza'], creator: undefined });
+  assert.throws(() => requestOf(['clear', 'plaza']), (e) => e.code === 'usage');
+  // #3699: an event is one calendar entry, its start next HH:MM on the world's calendar or given in world µs.
+  assert.deepEqual(requestOf(['event', 'aa-3', 'market', '--when', '09:00', '--for', '240']).event, { into: 'aa-3', words: 'market', when: '09:00', minutes: 240 });
+  assert.deepEqual(eventOps({ into: 'aa-3', words: 'market', start: 5, minutes: 2, at: [1, 0, 2] }),
+    [{ op: 'place', name: 1, kind: 'eden:calendar_entry', in: 'aa-3', at: [1, 0, 2], fields: { 28: 5, 29: 120_000_005, 30: { words: 'market' } } }]);
+  for (const bad of [['aa-3', 'm'], ['aa-3', '', '--when', '09:00'], ['aa-3', 'm', '--when', '9am'], ['aa-3', 'm', '--when', '09:00', '--for', '0']]) {
+    assert.throws(() => requestOf(['event', ...bad]), (e) => e.code === 'usage', bad.join(' '));
+  }
   // #3695: the world's verbs go to the daemon as words; it makes their sets on the world node from its copy.
   assert.deepEqual(requestOf(['weather', '--kind', 'storm', '--minutes', '30']).req, { op: 'edit', world: { verb: 'weather', kind: 'storm', minutes: '30' } });
   assert.deepEqual(requestOf(['check', 'strike', '12,-4']).req, { op: 'check', world: { verb: 'strike', at: '12,-4' } });
@@ -196,6 +213,17 @@ test('a creator describes, checks on its copy alone, and builds a room with a th
   const d2 = await god('describe');
   assert.equal(d2.nodes.find((n) => n.id === lampId)?.parent, roomId, 'the copy holds the new thing in the new room');
   assert.equal((await god('move', lampId, '--at', '2000,0,1000')).ok, true);
+  // #3699: the room's opening hours, published as E7's field and read back from the copy as written.
+  const hours = await god('hours', roomId, '--open', '09:00-17:00@mon-fri', '--open', '10:00-14:00@sat,sun');
+  assert.equal(hours.ok, true, JSON.stringify(hours));
+  const d3 = await god('describe');
+  assert.deepEqual(d3.nodes.find((n) => n.id === roomId)?.hours, ['09:00-17:00@mon,tue,wed,thu,fri', '10:00-14:00@sat,sun']);
+  assert.equal((await god('hours', roomId, '--open', '9-5')).code, 'hours.malformed');
+  // #3699: words in a creator's edit are kept by the world and the edit is taken (a world with no body for the creator).
+  const said = await god('batch', JSON.stringify([{ op: 'set', node: lampId, field: 30, value: { words: 'market on the green at nine' } }]));
+  assert.equal(said.ok, true, JSON.stringify(said));
+  assert.equal((await god('event', roomId, 'market', '--when', '09:00')).code, 'when.no-calendar', 'this world publishes no calendar');
+  assert.equal((await god('event', roomId, 'market', '--when', '5us')).code, 'edit.kind-unknown', 'and has no calendar entry kind');
   assert.equal((await god('remove', lampId)).ok, true);
   // What is gone is refused on the copy, before anything is sent.
   const gone = await god('set', lampId, '1', '1');
@@ -219,6 +247,59 @@ test('a creator describes, checks on its copy alone, and builds a room with a th
   const all = await god('status');
   assert.deepEqual(all.unanswered, []);
   console.log(`edits: ${all.sent} sent, ${all.answered} answered`);
+});
+
+test('a relation resolves on describe: beside, on a free slot, facing (#3694)', () => {
+  const world = {
+    nodes: [
+      { id: 'a-1', kind: 'souls:room', parent: 'a-0', at: [0, 0, 0] },
+      { id: 'a-2', kind: 'souls:item', parent: 'a-1', at: [1000, 0, 2000] },
+      { id: 'a-3', kind: 'r2:shelf', parent: 'a-1', at: [0, 0, 0] },
+      { id: 'a-4', kind: 'souls:item', parent: 'a-3', slot: 0 },
+    ],
+    kinds: { 'r2:shelf@00': { admits: ['thing'], slots: { 0: { admits: 'thing' }, 1: { admits: 'thing' } } } },
+  };
+  const of = (...a) => { const r = requestOf(a); return resolveRelation(r.req, r.relation, world).ops[0]; };
+  assert.deepEqual(of('place', 'lamp', '--beside', 'a-2', '--dir', 'n', '--dist', '500'), { op: 'place', name: 1, kind: 'lamp', in: 'a-1', at: [1000, 0, 1500] });
+  assert.deepEqual(of('place', 'lamp', '--on', 'a-3'), { op: 'place', name: 1, kind: 'lamp', in: 'a-3', slot: 1, at: [0, 0, 0] });
+  assert.deepEqual(of('move', 'a-2', '--facing', 'e'), { op: 'move', node: 'a-2', yaw: 90000, at: [1000, 0, 2000] });
+  assert.equal(of('place', 'lamp', '--in', 'a-1', '--at', '1000,0,0', '--facing', 'a-2').yaw, 0, 'facing +z toward the other');
+  assert.throws(() => of('place', 'lamp', '--beside', 'a-9'), /no a-9/);
+  assert.deepEqual(requestOf(['place', 'room', '--in', 'a-0', '--build', 'hut', '--step', 'shell']).req, { op: 'edit', ops: [{ op: 'place', name: 1, kind: 'room', in: 'a-0' }], build: 'hut', step: 'shell' });
+  assert.throws(() => requestOf(['remove', 'a-2', '--build', 'hut']), /both/);
+});
+
+test('undo and redo step the world\'s history, a build is undone whole, and a relation places beside (#3694)', async () => {
+  await connected();
+  const place = (await god('describe')).nodes.find((n) => n.kind === 'souls:place');
+  assert.equal((await god('undo', '--build', 'hut')).code, 'undo.not-the-build');
+  // A build of two steps, then a thing beside the lamp that is no step.
+  const room = await god('place', 'room', '--in', place.id, '--build', 'hut', '--step', 'shell');
+  assert.equal(room.ok, true, JSON.stringify(room));
+  assert.deepEqual([room.build, room.step], ['hut', 'shell']);
+  const roomId = room.names['1'];
+  const lamp = await god('place', 'lamp', '--in', roomId, '--at', '1000,0,1000', '--build', 'hut', '--step', 'lamp');
+  assert.equal(lamp.ok, true, JSON.stringify(lamp));
+  const beside = await god('place', 'item', '--beside', lamp.names['1'], '--dir', 's', '--dist', '500');
+  assert.equal(beside.ok, true, JSON.stringify(beside));
+  const at = (d, id) => d.nodes.find((n) => n.id === id);
+  assert.deepEqual(at(await god('describe'), beside.names['1'])?.at, [1000, 0, 1500], 'beside the lamp, 500 mm south');
+  // Undo takes the newest away and says what changed; redo gives it back with the same id.
+  const undone = await god('undo');
+  assert.equal(undone.ok, true, JSON.stringify(undone));
+  assert.equal(undone.undone, true);
+  assert.ok(undone.changed, 'the answer says what changed');
+  assert.equal(at(await god('describe'), beside.names['1']), undefined);
+  assert.equal((await god('redo')).ok, true);
+  assert.ok(at(await god('describe'), beside.names['1']), 'redone with its id');
+  assert.equal((await god('undo')).ok, true);
+  // The build, both steps, at once.
+  const build = await god('undo', '--build', 'hut');
+  assert.equal(build.ok, true, JSON.stringify(build));
+  assert.equal(build.steps, 2);
+  const d = await god('describe');
+  assert.equal(at(d, roomId), undefined, 'the build is gone whole');
+  console.log(`undo: a build of 2 steps undone in one command; redo gave back ${beside.names['1']}`);
 });
 
 test('#3701: build words, today\'s plan file in the world\'s units, and a claim over a plan\'s plots', () => {
@@ -275,6 +356,50 @@ test('#3701: a creator records a district plan, claims its first chapter, builds
   assert.deepEqual((await god('build', 'claims')).claims, []);
   assert.equal((await god('remove', inside.names['1'])).ok, true);
   assert.equal((await god('build', 'release', c)).code, 'claim.unknown');
+});
+
+test('#3700: own, access and zone words make today\'s marks in the world\'s units', () => {
+  const soul = `${'ab'.repeat(16)}-4`;
+  assert.deepEqual(layerOf('own', ['aa-1', soul, '--private']), { act: 'own', node: 'aa-1', owner: soul, access: 2 });
+  assert.deepEqual(layerOf('own', ['aa-1', 'god']), { act: 'own', node: 'aa-1', owner: 'owner:god' });
+  assert.deepEqual(layerOf('own', ['aa-1', 'none', '--public']), { act: 'own', node: 'aa-1', owner: 0, access: 1 });
+  assert.deepEqual(layerOf('access', ['aa-1', 'none']), { act: 'access', node: 'aa-1', access: 0 });
+  assert.throws(() => layerOf('own', ['aa-1', 'Ana']), /soul id/);
+  assert.throws(() => layerOf('access', ['aa-1', 'secret']), /private\|public\|none/);
+  assert.deepEqual(outlineOf({ rect: '0,0,20,10' }), [-10, -5, 10, -5, 10, 5, -10, 5]);
+  assert.equal(outlineOf({ circle: '0,0,1000' }).length, 24);
+  assert.throws(() => layerOf('zone', ['market', 'casino', '--rect', '0,0,1,1']), /residential\|commercial/);
+  assert.deepEqual(requestOf(['secret']).layer, { act: 'secret' });
+});
+
+test('#3700: a creator marks a room private to a Soul, zones the land, and secret places stay off', async () => {
+  await connected();
+  const place = (await god('describe')).nodes.find((n) => n.kind === 'souls:place');
+  const room = await god('place', 'room', '--in', place.id, '--at', '40000,0,40000');
+  assert.equal(room.ok, true, JSON.stringify(room));
+  const id = room.names['1'], soul = `${'ab'.repeat(16)}-4`;
+  const owned = await god('own', id, soul, '--private');
+  assert.equal(owned.ok, true, JSON.stringify(owned));
+  const marks = (await god('describe')).nodes.find((n) => n.id === id).marks;
+  assert.deepEqual(marks, { owner: soul, access: 2 });
+  assert.deepEqual((await god('layers')).marked.find((m) => m.id === id), { id, kind: 'souls:room', owner: soul, access: 'private' });
+  assert.equal((await god('access', id, 'public')).ok, true);
+  assert.equal((await god('describe')).nodes.find((n) => n.id === id).marks.access, 1);
+  // A mark that does not read is the world's refusal, with a fix.
+  const bad = await god('set', id, '144', '7');
+  assert.deepEqual([bad.ok, bad.code], [false, 'edit.owner-malformed'], JSON.stringify(bad));
+  assert.match(bad.fix, /access <id>/);
+
+  const zoned = await god('zone', 'Market Square', 'commercial', '--rect', '0,0,20000,10000');
+  assert.equal(zoned.ok, true, JSON.stringify(zoned));
+  assert.ok(zoned.suits.includes('building.commercial'));
+  assert.equal((await god('zone', 'park', 'park', '--circle', '50000,0,8000')).ok, true);
+  const L = await god('layers');
+  assert.deepEqual(L.zones.map((z) => [z.name, z.use, z.outline.length]), [['market-square', 'commercial', 4], ['park', 'park', 12]]);
+  assert.deepEqual((await god('zone-suggest', 'wild')).categories.slice(0, 2), ['vegetation.tree', 'terrain.landform']);
+  const secret = await god('secret');
+  assert.deepEqual([secret.ok, secret.code], [false, 'secret.off']);
+  assert.match(secret.fix, /every place is on every Soul/);
 });
 
 test('boot-body admission is shared by describe and local checks without revising kind pins', async () => {
@@ -418,6 +543,55 @@ test('pairing asks for the creator scope and keeps the creator\'s token', async 
   assert.equal(asked[0].new, undefined);
   const seat = readSeat(at, `c_${'ab'.repeat(16)}-4`);
   assert.deepEqual(seat.grant, { actor: 'creator', scope: 'ab'.repeat(16), counter: 4n });
+});
+
+test('#3727: helper and rewind words', () => {
+  assert.deepEqual(buildOf(['claim', 'house', '--area', '0,0,10,10', '--helper', '--ttl', '30']), { act: 'claim', part: 'house', area: [0, 0, 10, 10], helper: true, ttl: 30 });
+  assert.throws(() => buildOf(['claim', 'house', '--area', '0,0,10,10', '--ttl', '30']), /needs --helper/);
+  assert.deepEqual(buildOf(['rewind', 'hut', '--to', 'shell', '--dry']), { act: 'rewind', build: 'hut', to: 'shell', dry: true });
+  assert.throws(() => buildOf(['rewind', 'hut']), /--to <step>/);
+});
+
+test('#3727: a helper builds only inside its claim, never undoes, and a build rewinds to a step', async () => {
+  await connected();
+  const place = (await god('describe')).nodes.find((n) => n.kind === 'souls:place');
+  const claimed = await god('build', 'claim', 'yard', '--area', '40000,0,50000,10000', '--helper', '--ttl', '5');
+  assert.equal(claimed.ok, true, JSON.stringify(claimed));
+  assert.match(claimed.claim.helper, /^[0-9a-f]{32}-\d+$/);
+  const helperHome = claimed.helper.home;
+  const helperToken = JSON.parse(readFileSync(join(helperHome, 'credentials.json'), 'utf8')).souls[`c_${claimed.claim.helper}`].local.token;
+  assert.ok(!JSON.stringify(claimed).includes(helperToken.split('.')[1]), 'the helper token is not printed');
+  // The helper's own home: every edit goes under its claim, so inside builds and outside is refused by the world.
+  const helper = (...args) => new Promise((ok) => {
+    execFile(process.execPath, [GOD, ...args], { env: { PATH: process.env.PATH, SOULS_HOME: helperHome, SOULS_REPLICA_PKG: PKG } }, (_, stdout) => {
+      printed.push(stdout);
+      ok(JSON.parse(stdout.trim().split('\n').at(-1)));
+    });
+  });
+  for (const until = Date.now() + 15_000; !(await helper('status')).connected && Date.now() < until;) await new Promise((r) => setTimeout(r, 100));
+  const inside = await helper('place', 'room', '--in', place.id, '--at', '45000,0,5000');
+  assert.equal(inside.ok, true, JSON.stringify(inside));
+  const outside = await helper('place', 'room', '--in', place.id, '--at', '60000,0,5000');
+  assert.deepEqual([outside.ok, outside.code], [false, 'edit.outside-claim'], JSON.stringify(outside));
+  assert.equal((await helper('undo')).code, 'edit.not-the-creator', 'an undo is the lead\'s');
+  // The lead may not undo into the helper's claim: the helper's room is in it.
+  await helper('stop');
+  assert.equal((await god('build', 'release', claimed.claim.id)).ok, true);
+  // A build of three steps, rewound to its first: the two later steps go, newest first.
+  const shell = await god('place', 'room', '--in', place.id, '--at', '70000,0,0', '--build', 'barn', '--step', 'shell');
+  assert.equal(shell.ok, true, JSON.stringify(shell));
+  const roof = await god('place', 'lamp', '--in', shell.names['1'], '--at', '0,0,0', '--build', 'barn', '--step', 'roof');
+  const door = await god('place', 'lamp', '--in', shell.names['1'], '--at', '500,0,0', '--build', 'barn', '--step', 'door');
+  assert.equal(roof.ok && door.ok, true);
+  assert.deepEqual((await god('build', 'rewind', 'barn', '--to', 'shell', '--dry')).would, ['roof', 'door']);
+  const rewound = await god('build', 'rewind', 'barn', '--to', 'shell');
+  assert.equal(rewound.ok, true, JSON.stringify(rewound));
+  assert.equal(rewound.steps, 2);
+  const d = await god('describe');
+  assert.ok(d.nodes.some((n) => n.id === shell.names['1']), 'the shell stays');
+  assert.ok(!d.nodes.some((n) => n.id === roof.names['1'] || n.id === door.names['1']), 'its later steps are gone');
+  assert.equal((await god('build', 'rewind', 'barn', '--to', 'porch')).code, 'rewind.no-step');
+  console.log(`helper ${claimed.claim.helper}: built inside its claim, refused outside, no undo; barn rewound 2 steps to shell`);
 });
 
 test('no output, log or trace holds the token', () => {
