@@ -62,8 +62,9 @@ done
 TLS, so it runs where it reaches gatewayd's own port, not through the public proxy. Each Soul's sequences start at the
 run's start in Unix milliseconds, past any an earlier run sent; every intent goes against the zero basis.
 
-**Targets** (`src/targets.rs`). Once every agent is signed in, and before the clock starts, the driver reads the
-world's ids the way a client does: the first agent syncs its copy over its own socket (R5b's compare and descend:
+**Targets** (`src/targets.rs`). Once every agent is signed in, and before the clock starts, each agent sends one
+`<ns>:rise` (its Soul's first intent, which has the world bear its body, C3; answered, mostly `not-seated`, outside
+the report), and the driver reads the world's ids the way a client does: the first agent syncs its copy over its own socket (R5b's compare and descend:
 its scope's hashes, then every record they reach, each checked against its hash), and the driver fetches the world's
 kind entries (`GET /v2/entries`, which gatewayd serves with `--entries`, as every placed world's unit does). The line
 `targets:` and the report's `targets` say what it found. Then each act of the schedule goes as:
@@ -74,7 +75,7 @@ kind entries (`GET /v2/entries`, which gatewayd serves with `--entries`, as ever
   (a walk while seated is refused, `resource-held`), and a sit refused leaves it standing;
 - **gesture, sit-ground, read, eat, play-music**: the first form of `FORMS` an entry offers (`wave`; `sit_down`;
   `read`; `eat`, `bite` or `drink`; `play_music` or `play`), on the things of that kind, or on the Soul's own body
-  (its `souls:body-of` link in the copy) for its body family's form. A form that needs the thing held first (a
+  (its `souls:body-of` link in the copy) when the body's kind has an entry with the form. A form that needs the thing held first (a
   book's `read`, an apple's `bite`) is left out. A kind with no such form, or a Soul whose body is not in the first
   agent's copy, sends a walk instead, counted under `standIns`;
 - **say**: withheld, counted under `withheld`, so a run on a world people visit says nothing out loud. `--speech`
@@ -84,8 +85,8 @@ The report adds `refusedBy`, the refusals by `<verb> <name>`. Each agent waits 1
 answers (a form's receipt comes when it ends); one still open then is `unanswered`.
 
 **Rehearsing locally.** `node tools/driver/slice.mjs --facts <testworld facts> --out <folder>` puts an Eden slice on
-N2's test world (20 benches, 15 chairs, 3 speakers, 2 books, 2 apples, with Eden's own entries and the body's
-family). Seed it and serve it behind a gatewayd with its entries, then run the driver as above:
+N2's test world (20 benches, 15 chairs, 3 speakers, 2 books, 2 apples, with Eden's own entries; its bodies
+have no entry, so gestures and sit-ground stand in as walks). Seed it and serve it behind a gatewayd with its entries, then run the driver as above:
 
 ```sh
 cd v2

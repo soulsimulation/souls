@@ -9,8 +9,8 @@
 //!   the client's `inspect` reads them ([`read_entries`]). A gateway without entries (404) gives none.
 //! - **The choice** ([`Targets::of`]): walks go to things with a seat (their stand point), else to any thing with an
 //!   entry; sits to things with a seat of posture `sit`; each other shape kind to the first of its [`FORMS`] an entry
-//!   offers, on the things of that kind, or on the Soul's own body for a body family's form (`owner: "family"`). A
-//!   shape kind no entry offers goes as a walk and is counted (`standIns`).
+//!   offers, on the things of that kind, or on the Soul's own body (its `souls:body-of` link) when its body's kind
+//!   has an entry with the form. A shape kind no entry offers goes as a walk and is counted (`standIns`).
 //!
 //! [`Choice`] then turns each act into an intent the way an agent would: a Soul seated by its last sit rises first
 //! (a walk or a sit while seated is refused, `resource-held`), and says are withheld unless `--speech` opts in, so a
@@ -98,14 +98,17 @@ impl Targets {
             .iter()
             .filter_map(|e| Some((e.get("kind")?.str()?, e)))
             .collect();
-        let families: Vec<&Json> = all
+        // The bodies' own entries (the kind the world looks a body's forms up by), and the things that are not bodies.
+        let is_body = |id: &Id| seen.bodies.values().any(|b| b == id);
+        let families: Vec<&Json> = nodes
             .iter()
-            .filter(|e| e.get("owner").and_then(Json::str) == Some("family"))
+            .filter(|(id, _)| is_body(id))
+            .filter_map(|(_, k)| by_kind.get(k.as_str()).copied())
             .collect();
         let things: Vec<(Id, &Json)> = nodes
             .iter()
+            .filter(|(id, _)| !is_body(id))
             .filter_map(|(id, k)| Some((*id, *by_kind.get(k.as_str())?)))
-            .filter(|(_, e)| e.get("owner").and_then(Json::str) != Some("family"))
             .collect();
         let ids = |f: &dyn Fn(&Json) -> bool| -> Vec<Id> {
             things
@@ -419,7 +422,7 @@ mod tests {
       {"kind": "eden:chair", "slots": {"seat": {"admits": "body", "posture": "sit"}}, "forms": {"sit": {}}},
       {"kind": "eden:speaker", "forms": {"play_music": {}}},
       {"kind": "eden:book", "forms": {"read": {"needs": [{"need": "held_by_actor"}]}}},
-      {"kind": "eden:humanoid", "owner": "family", "forms": {"wave": {}, "sit_down": {}}}
+      {"kind": "eden:humanoid", "forms": {"wave": {}, "sit_down": {}}}
     ]"#;
 
     #[test]
@@ -431,8 +434,10 @@ mod tests {
                 (id(3), "eden:speaker".to_owned()),
                 (id(4), "souls:ground".to_owned()),
                 (id(5), "eden:book".to_owned()),
+                (id(6), "eden:humanoid".to_owned()),
+                (id(7), "souls:body".to_owned()),
             ],
-            bodies: BTreeMap::new(),
+            bodies: BTreeMap::from([(id(9), id(6)), (id(10), id(7))]),
         };
         let t = Targets::of(&seen, &json::parse(ENTRIES).unwrap());
         assert_eq!(t.walk, [id(1), id(2)]);
@@ -447,13 +452,25 @@ mod tests {
             !t.forms.contains_key("read"),
             "a form that needs the thing held"
         );
+        let none = Seen {
+            nodes: vec![(id(7), "souls:body".to_owned())],
+            bodies: BTreeMap::from([(id(10), id(7))]),
+        };
+        let t = Targets::of(&none, &json::parse(ENTRIES).unwrap());
+        assert!(
+            t.forms.is_empty(),
+            "a body whose kind has no entry offers no form"
+        );
     }
 
     #[test]
     fn a_seated_soul_rises_first_says_are_withheld_and_an_unoffered_kind_walks() {
         let me = id(9);
         let seen = Seen {
-            nodes: vec![(id(1), "eden:chair".to_owned())],
+            nodes: vec![
+                (id(1), "eden:chair".to_owned()),
+                (id(8), "eden:humanoid".to_owned()),
+            ],
             bodies: BTreeMap::from([(me, id(8))]),
         };
         let t = Targets::of(&seen, &json::parse(ENTRIES).unwrap());
