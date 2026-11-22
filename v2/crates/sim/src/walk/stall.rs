@@ -9,8 +9,9 @@
 //!   distance left through the corner aimed at (`|here - corner| + |corner - leg's end|`, never more than the way
 //!   left), or, while it aimed at one corner the whole window, the least distance to that corner. A walker going round
 //!   a building gains on its corner; one pushed against a thing or an edge, turning this way and that, gains on
-//!   neither. A new leg's end starts the watch again. A tick aimed at its own place (standing for the planner's
-//!   line, the first tick or two of each leg) is no tick of walking and is not sampled (C22, #3485).
+//!   neither. A new leg's end starts the watch again, and so does a new corner once the walker has reached the one
+//!   before ([`REACHED`]). A tick aimed at its own place (standing for the planner's line, the first tick or two of
+//!   each leg) is no tick of walking and is not sampled (C22, #3485).
 //! - **The blocker** ([`blocker`]): the thing on the walker's ground whose solids are nearest it, within [`NEAR`],
 //!   or else the edge of the walked ground where it stands.
 //!
@@ -26,6 +27,7 @@ use replica::tree::{Handle, Tree};
 use replica::world_model::{plain, show};
 
 use crate::ground::scene::{F_SOLIDS, xform_to};
+use crate::walk::town::OFF_LINE;
 
 /// How long a walk may go without progress, world time µs.
 pub const WINDOW: Micros = 3_000_000;
@@ -33,6 +35,9 @@ pub const WINDOW: Micros = 3_000_000;
 pub const GAIN: i64 = 250_000;
 /// A thing whose solids are this near the walker is named as what blocks it, µm.
 pub const NEAR: i64 = 1_000_000;
+/// A corner the walker has come this near is reached: the line moves on from it, there or past it, no more than
+/// [`OFF_LINE`] off its stretch, µm.
+pub const REACHED: i64 = OFF_LINE;
 
 /// One tick of a walker: when, the least distance left through its corner so far, the corner, and the least
 /// distance to that corner so far.
@@ -96,7 +101,15 @@ impl Watch {
             aimed: now,
             samples: VecDeque::new(),
         });
-        if t.to != to {
+        // A new leg's end, or a new corner once the walker has reached the one it aimed at (the line moves on only past
+        // a corner it reached), starts the watch again: reaching a corner is progress. The way left through a corner
+        // that turns away from the leg's end can be metres longer than the least before it, though the walker goes
+        // on at full speed round a building (#1960).
+        let reached = t
+            .samples
+            .back()
+            .is_some_and(|b| b.aim != aim && b.near <= REACHED);
+        if t.to != to || reached {
             (t.to, t.aimed) = (to, now);
             t.samples.clear();
         }
@@ -344,6 +357,42 @@ mod tests {
             };
             assert!(!w.seen(fixture(9), here, aim, to, t * TICK), "tick {t}");
         }
+    }
+
+    /// Served Eden (#1960): born beside a cottage, the walk goes north round its west wall, away from its leg's end (the
+    /// front door, 11 m south-east), then turns east along the north wall. The way left through its first corner was
+    /// the least; through the second, 2 m longer, and the walker gained on that corner, aimed at the whole window. On
+    /// the tick it reached it and turned for the third, it was found stalled: the way left through the third was
+    /// longer still, it had aimed at it for no window, and it was no nearer it than 3 s before.
+    #[test]
+    fn a_corner_reached_round_a_building_is_progress() {
+        let to = [-91_391_500, -96_577_000];
+        let corners = [
+            [-97_970_226, -90_694_387],
+            [-96_044_870, -85_211_099],
+            [-85_649_000, -96_000_000],
+        ];
+        let (mut w, mut here, mut next) = (Watch::new(), [-98_134_000, -92_500_000], 0);
+        for t in 0..300i64 {
+            if len(here, corners[next]) <= 100_000 && next + 1 < corners.len() {
+                next += 1;
+            }
+            let aim = corners[next];
+            assert!(!w.seen(fixture(9), here, aim, to, t * TICK), "tick {t}");
+            let d = len(here, aim).max(1);
+            let step = 70_000.min(d);
+            here = [
+                here[0] + (aim[0] - here[0]) * step / d,
+                here[1] + (aim[1] - here[1]) * step / d,
+            ];
+        }
+        // Pinned, aimed at corners in turn that it never comes near (new lines): none is reached, and it is found.
+        let mut w = Watch::new();
+        let stalled = (0..200i64).find(|t| {
+            let aim = corners[(*t as usize / 10) % 3];
+            w.seen(fixture(9), [-98_134_000, -92_500_000], aim, to, t * TICK)
+        });
+        assert_eq!(stalled, Some(60));
     }
 
     #[test]

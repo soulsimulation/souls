@@ -596,6 +596,22 @@ impl Forms {
             .collect()
     }
 
+    /// The bodies whose step in progress is a walk that is to be there, not to act from there: no `move`, `sit` or
+    /// `lie` comes next. The world may end such a walk to an area anywhere within reach of the area's circle.
+    pub fn goal_walks(&self) -> BTreeSet<Id> {
+        self.runs
+            .values()
+            .filter(|fr| {
+                matches!(fr.runner.step(), Some(Step::WalkTo { .. }))
+                    && !matches!(
+                        fr.runner.next_step(),
+                        Some(Step::Move { .. } | Step::Sit { .. })
+                    )
+            })
+            .map(|fr| fr.body)
+            .collect()
+    }
+
     /// The bodies whose run's step in progress is an approach walk, the walk the binding adds before a form's first
     /// move at a point (#3688), so the world can aim it at clear ground on the body's side of that point.
     pub fn approaches(&self) -> std::collections::BTreeSet<Id> {

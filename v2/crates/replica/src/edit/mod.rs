@@ -170,7 +170,7 @@ pub struct DoorGeometry {
 }
 
 /// A doorway leaf's owned wall patch: [wall id, closed rows, open rows].
-pub const DOOR_GEOMETRY: u64 = 29;
+pub const DOOR_GEOMETRY: u64 = 100;
 const SOLIDS: u64 = 12;
 const GEOMETRY_MOST: usize = 64;
 type OwnedDoor = (Ref, Vec<Value>, Vec<Value>, [Ref; 2]);
