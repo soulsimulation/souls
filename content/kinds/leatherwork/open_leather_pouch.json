@@ -52,11 +52,17 @@
         {
           "need": "hand",
           "free": true
+        },
+        {
+          "need": "within_reach",
+          "point": "grip"
         }
       ],
       "steps": [
         {
-          "step": "take"
+          "step": "take",
+          "move": "touch",
+          "at": "grip"
         }
       ],
       "effects": [
