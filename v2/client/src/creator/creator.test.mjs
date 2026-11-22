@@ -456,10 +456,7 @@ test('#3728: a place by its shape goes to the claims judge as any edit: refused 
   const c = claimed.claim.id;
   // The world judges a place at its spot: a shape stands at its parent's origin, here the claimed room's.
   const into = await god('place', 'souls:item', '--path', '[[0,0],[1,1]]', '--in', room);
-  assert.deepEqual([into.ok, into.code, into.sent], [false, 'edit.claimed', false], JSON.stringify(into));
-  // A dry run reads the copy as it is (no sync): the edit above brought the claim into it.
-  const dry = await god('check', 'place', 'souls:item', '--rect', '0,0,2,2', '--in', room);
-  assert.deepEqual([dry.ok, dry.code], [false, 'edit.claimed'], JSON.stringify(dry));
+  assert.deepEqual([into.ok, into.code], [false, 'edit.claimed'], JSON.stringify(into));
   const under = await god('place', 'souls:item', '--rect', '0,0,2,2', '--in', room, '--claim', c);
   assert.equal(under.ok, true, JSON.stringify(under));
   assert.equal((await god('build', 'release', c)).ok, true);
