@@ -3577,7 +3577,13 @@ fn i3948_a_closed_containers_contents_stay_out_of_the_public_stream_until_taken_
         actual.apply_bytes(&p).unwrap();
         out.push(record, &p).unwrap();
         out.flush().unwrap();
-        fs::read(gen0.join(record.to_string())).unwrap()
+        fs::read(gen0.join(record.to_string())).unwrap_or_else(|e| {
+            panic!(
+                "part {record}: {e}; next {}, files {:?}",
+                out.player.next(),
+                files(&gen0).iter().map(|f| f.0.clone()).collect::<Vec<_>>()
+            )
+        })
     };
     // Touched while hidden: its entry is not published and its row never appears; the other cup's are.
     let p0 = part(
