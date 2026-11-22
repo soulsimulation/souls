@@ -1295,7 +1295,7 @@
   },
   "text": {
     "work": "work",
-    "card": "An indexed ratchet model: forward with either pawl position; raise the pawl before reversing.",
+    "card": "An indexed ratchet: turn forward, or raise the pawl before reversing.",
     "ratchet": "ratchet",
     "pawl": "pawl interlock",
     "index": "indexed wheel",
