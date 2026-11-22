@@ -1666,8 +1666,10 @@ fn far_chair() -> Result<Bodies, replica::effects::Refusal> {
     bodies_with(CHAIR, far_seat())
 }
 
-/// #4086 A2: a walk to a thing 100 m away is answered only when the walk ends: the answers and when each came, how the
-/// walk's entries ended, and where its body rows put the body, all read from the world's records.
+/// #4086 A2: a walk to a thing about 100 m away (99.6 m to the chair) is a real move, answered only as it goes and when
+/// it ends: one progress answer at 10 s, the receipt when the walk ends `done` (about 71 s at walking speed), and the
+/// body's rows carry it from its start to the chair's stand point. The answers and when each came, how the walk's
+/// entries ended, and where its rows put the body are read from the world's records.
 #[test]
 fn w10_a2_a_walk_to_a_thing_100_m_away_ends_there() {
     let (world, mut c, store, path) = served_with(10_000_000, "w10far", far_chair);
@@ -1721,4 +1723,19 @@ fn w10_a2_a_walk_to_a_thing_100_m_away_ends_there() {
         rows.last(),
         rows.len()
     );
+    let (id, receipt) = end.expect("a receipt");
+    assert_eq!(answered.len(), 2, "one progress answer, then the receipt");
+    assert_eq!(answered[0].0, Some(Value::Uint(3)));
+    // 99.6 m at 1.4 m/s is 71 s: nothing answers the walk done before it could have been walked.
+    assert!(answered[1].1 > Duration::from_secs(60), "{answered:?}");
+    let ended = events
+        .iter()
+        .find(|e| e.1 == id && e.2 == MOVE_ENDED)
+        .expect("the walk's end");
+    assert_eq!(ended.3.as_deref(), Some("done"));
+    assert!(receipt.contains(&ended.0), "the receipt is this walk's");
+    let (first, last) = (rows.first().unwrap(), rows.last().unwrap());
+    assert!(near([first.x, first.y, first.z], start(), 1));
+    let stand = Vec3::new(far_seat().x, 0, far_seat().z + 300_000);
+    assert!(near([last.x, last.y, last.z], stand, 500_000), "{last:?}");
 }
