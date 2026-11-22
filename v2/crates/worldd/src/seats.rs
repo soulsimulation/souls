@@ -194,6 +194,16 @@ fn board_from(
                 continue;
             };
             let gap = sim::spots::flat(p, stand);
+            if std::env::var("SEAT_DIAG").is_ok() {
+                eprintln!(
+                    "BOARD ring {ring} p ({}, {}) slot-gap {} passage {} crossed {}",
+                    p.x,
+                    p.z,
+                    sim::spots::flat(p, slot),
+                    passage(p),
+                    crossed(p)
+                );
+            }
             if sim::spots::flat(p, slot) <= board
                 && best.is_none_or(|b| gap < b.0)
                 && !passage(p)
