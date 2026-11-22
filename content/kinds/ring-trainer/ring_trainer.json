@@ -1520,7 +1520,7 @@
     "lower_ring_on": "Disengage every ring below the immediate predecessor before changing this ring. Higher rings do not affect the rule.",
     "hands_empty": "Put down what you hold before changing a ring index.",
     "start": "This five-ring Chinese-rings rules trainer starts with every hoop engaged. Fixed numbers 1 to 5 run left to right from the front contact side. Each hoop stays in its numbered column: rear blue E means engaged; front brown D means disengaged. Ring 1 may change at any time. To change ring i above 1, ring i\u22121 must be engaged and all rings numbered 1 through i\u22122 must be disengaged. Higher rings are irrelevant. Each action changes exactly one ring. Start by disengaging ring 1, disengaging ring 3, engaging ring 1, disengaging ring 2, then disengaging ring 1: the first three are off while rings 4 and 5 remain on.",
-    "finish": "The goal is all five hoops on the front D row. Continue applying the exact lower-ring rule; higher rings may be in either state. Restore the initial all-engaged arrangement using legal reverse moves; there is no reset or success counter. This is an indexed rules-training depiction, not a loose-ring or wire model. Hoops change between two fixed poses when the native hand-contact effect commits. No threading, tension, mechanical force, continuous collision-free path, ring custody, exact individual-ring contact, automatic solver or variable puzzle is claimed."
+    "finish": "The goal is all five hoops on the front D row. Continue applying the exact lower-ring rule; higher rings may be in either state. From all-disengaged, engaging ring 1 begins the legal reverse sequence; it does not restore all five at once. Continue legal reverse moves to restore the initial all-engaged arrangement. There is no reset or success counter. This is an indexed rules-training depiction, not a loose-ring or wire model. Hoops change between two fixed poses when the native hand-contact effect commits. No threading, tension, mechanical force, continuous collision-free path, ring custody, exact individual-ring contact, automatic solver or variable puzzle is claimed."
   },
   "card": {
     "text": "card",
@@ -1551,7 +1551,7 @@
         }
       ]
     },
-    "restore": {
+    "begin_restore": {
       "text": "finish",
       "steps": [
         {
