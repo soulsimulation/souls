@@ -378,6 +378,8 @@ struct NodeSecond {
 /// The subscriptions of one zone, run by the view tier on the log's parts.
 #[derive(Default)]
 pub struct Hub {
+    /// Closed containers and what is in them (#3915): such an entry is sent to its actor alone.
+    inside: crate::closed::Inside,
     places: Places,
     subs: Vec<Option<Sub>>,
     second: Option<i64>,
@@ -406,8 +408,15 @@ impl Hub {
         }
     }
 
+    /// The world's closed kinds (#3915): an entry that puts a thing into one, or touches one in it, is sent to its
+    /// actor alone. Called before [`Hub::seed`].
+    pub fn closed(&mut self, closed: &crate::closed::Closed) {
+        self.inside = crate::closed::Inside::new(closed);
+    }
+
     /// Enters the bodies of the world as built, which no record creates (C6), and its activities' members (E26a).
     pub fn seed(&mut self, tree: &Tree) {
+        self.inside.seed(tree);
         self.places.seed(tree);
         let mut todo = vec![tree.root()];
         while let Some(h) = todo.pop() {
@@ -649,7 +658,21 @@ impl Hub {
         for e in &part.effects {
             self.places.apply(e);
             self.members_apply(e);
-            let readers = self.readers(e.envelope.audience);
+            let mut readers = self.readers(e.envelope.audience);
+            if self.inside.apply(e) {
+                // A thing hidden in a closed container (#3915): its entry goes to its actor alone.
+                let actor: BTreeSet<Id> = match e.envelope.actor {
+                    replica::effects::Actor::Soul(id) | replica::effects::Actor::Creator(id) => {
+                        BTreeSet::from([id])
+                    }
+                    replica::effects::Actor::World => BTreeSet::new(),
+                };
+                let kept = match &readers {
+                    None => actor,
+                    Some(r) => actor.intersection(r).copied().collect(),
+                };
+                readers = Some(Arc::new(kept));
+            }
             if let Some((body, keep)) = self.body_of(e) {
                 let bytes = bytes_of(map(vec![(1, Value::Uint(1)), (2, e.to_value())]))?;
                 by_body

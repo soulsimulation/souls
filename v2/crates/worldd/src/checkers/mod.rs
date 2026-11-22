@@ -179,7 +179,19 @@ fn thing(record: &Cbor, entry: &Value) -> Value {
             Value::Int(n) => u64::try_from(*n).ok(),
             _ => None,
         });
-        if let Some(v) = n.and_then(|n| field(field(record, 6)?, n)).and_then(int) {
+        let Some(v) = n.and_then(|n| field(field(record, 6)?, n)) else {
+            continue;
+        };
+        // A text field reads its words' reference (`{21: id}`, K16) once written and null once cleared (`{}`), so
+        // a need on `is: null` tells them apart (#3911's finding).
+        if def.get("type").and_then(Value::str) == Some("text") {
+            let reference = field(v, replica::audience::REFERENCE)
+                .and_then(|r| replica::effects::read_id(r).ok());
+            fields.push((
+                name.clone(),
+                reference.map_or(Value::Null, |id| Value::s(&replica::world_model::show(id))),
+            ));
+        } else if let Some(v) = int(v) {
             fields.push((name.clone(), Value::Int(v)));
         }
     }
@@ -217,7 +229,7 @@ fn prepare(this: Id, entry: &Value, form: &str) -> Result<Vec<Change>, &'static 
 }
 
 /// Checks one candidate on `copy`.
-fn candidate(copy: &impl Read, rules: &Rules, body: Id, c: &Candidate) -> Checked {
+fn candidate(copy: &impl Read, rules: &Rules, body: Id, soul: Id, c: &Candidate) -> Checked {
     off_clock();
     let r = Recording::new(copy);
     let this = r.node(c.this);
@@ -234,6 +246,14 @@ fn candidate(copy: &impl Read, rules: &Rules, body: Id, c: &Candidate) -> Checke
     let Some(entry) = plain_kind(&this).and_then(|k| rules.kinds.get(k)) else {
         return no("no_such_kind", r);
     };
+    // #3700: a private thing (its own mark or its nearest marked ancestor's) is its owner's alone. The ancestors are
+    // read on the copy, outside the read set, so a busy room does not send every act in it to a re-check; the clock
+    // thread asks again on the live tree before it commits the candidate it takes (`answers`), so a mark set since
+    // still binds.
+    if replica::who_may::refusal_of(replica::who_may::ownership_read(copy, c.this), soul).is_some()
+    {
+        return no("object.private", r);
+    }
     let (this_id, body_id) = (show(c.this), show(body));
     let mut nodes = vec![(this_id.clone(), thing(&this, entry))];
     if let (Some(a), Some(t)) = (position(&actor), position(&this)) {
@@ -285,7 +305,13 @@ pub fn check(copy: &impl Read, rules: &Rules, act: &Act) -> Checks {
         candidates: act
             .candidates
             .iter()
-            .map(|c| candidate(copy, rules, act.body, c))
+            .map(|c| {
+                let soul = match act.actor {
+                    Actor::Soul(s) => s,
+                    _ => act.body,
+                };
+                candidate(copy, rules, act.body, soul, c)
+            })
             .collect(),
     }
 }

@@ -103,15 +103,20 @@ step encoding-vectors bash -c 'npm ci --prefix tools/encoding-vectors --no-audit
 
 }
 web_steps() {
-# The page's pose (V7, #2716): a body's bones as a function of its record and time, the same at 30 and 144 frames a
-# second, in any order and in a fresh process, with the hand on its contact point (web/src/pose/pose.test.ts).
-step web-pose bash -c 'npm ci --prefix web --no-audit --no-fund && node --test web/src/pose/*.test.ts web/src/source/signin.test.ts web/src/crowd/creature/creature.test.ts'
+step web-deps npm ci --prefix web --no-audit --no-fund
+# #3871: every content kind's entry draws (web/kind-entries.test.ts, beside src/, so web-unit does not find it).
+step web-kind-entries node --test web/kind-entries.test.ts
 # B15: acquire only the released inputs and exercise the actual prepared artifact, after the locked page dependencies.
 step body-presets bash -c 'node tools/import-body/prepare.mjs --out .local/ci-body-assets --test'
-# The words path (V1b, #3361): a local world's said sentence, and a body's name and description, through the page's
-# worker within the stream's lag; a whisper in no public file (web/src/source/words.test.ts). A still world is drawn
-# at once and kept live (V5b, web/src/source/still.test.ts). A node on a course moves at world time (#3603).
-step web-words bash -c 'cargo build -p worldd --locked --quiet && node --test web/src/source/words.test.ts web/src/source/still.test.ts web/src/source/continuity.test.ts web/src/worlds/worlds.test.ts web/src/draw/course.test.ts'
+# The page's typecheck, the first half of its `npm run build` (install-v2, release-v2), after the links above (#1960).
+step web-types bash -c 'cd web && npx tsc --noEmit -p .'
+# Every page unit test, found by name (web/src/**/*.test.ts and *.test.mjs), so a new one runs here with no edit. A
+# file that starts target/debug/worldd (the words path V1b #3361, a still world V5b, the sky live) times a served world
+# on the wall clock, so those run one at a time after the rest; the rest run in parallel. Some read the replica WASM
+# package (wasm_pkg, above). Named by file: Node 24 reads a bare folder as one file, not as the tests inside it.
+web_tests() { find web/src \( -name "*.test.ts" -o -name "*.test.mjs" \) -not -path "*/node_modules/*" | sort; }
+step web-unit node --test $(grep -L target/debug/worldd $(web_tests))
+step web-served bash -c "cargo build -p worldd --locked --quiet && node --test --test-concurrency=1 $(grep -l target/debug/worldd $(web_tests) | tr '\n' ' ')"
 
 }
 wasm_goldens() {
@@ -182,7 +187,7 @@ step client-clock bash -c 'cargo build -p gatewayd -p worldd -p testworld --lock
 step client-command bash -c 'cargo build -p directoryd -p gatewayd -p worldd --locked --quiet &&
   node --test client/src/brief/*.test.mjs client/src/find/*.test.mjs client/src/cli/*.test.mjs client/src/shoot/*.test.mjs client/src/view/*.test.mjs client/src/home/*.test.mjs'
 # The creator's command (G7, #2796): a creator's daemon checks batches on its copy with no frame sent, and edits.
-step client-creator bash -c 'cargo build -p gatewayd -p worldd --locked --quiet && node --test client/src/creator/*.test.mjs'
+step client-creator bash -c 'cargo build -p gatewayd -p worldd -p directoryd --locked --quiet && node --test client/src/creator/*.test.mjs'
 # The client's trace and stats (R10, #2702): per achieved intent, local only, with the network refused.
 step client-stats node --test client/src/stats/*.test.mjs
 # The local check (R8, #2703): R2's rules on the copy, at `can` and again at send time (the daemon's side is above).
@@ -199,7 +204,9 @@ step client-upgrade node --test client/test/compat/*.test.mjs client/src/upgrade
 step client-pair bash -c 'cargo build -p directoryd -p gatewayd -p worldd -p testworld --locked --quiet &&
   node --test client/src/pair/*.test.mjs'
 # The served client (R17, #2818): the served files against the release's manifest; the one line, upgrade, rollback.
-step client-served bash -c 'cargo build -p directoryd -p gatewayd -p worldd --locked --quiet && node --test client/served/*.test.mjs'
+# The served client carries packages/ground's zod for the land verbs (#3695), so the build needs it installed.
+step client-served bash -c 'npm install --no-save --no-package-lock --no-audit --no-fund --prefix ../packages/ground zod@4.6.7 &&
+  cargo build -p directoryd -p gatewayd -p worldd --locked --quiet && node --test client/served/*.test.mjs'
 # The served-world gate (#1960): an Eden slice served by worldd, gatewayd and directoryd, two Souls paired and joined,
 # real acts through the thin command; the page's worker on the public stream and the client's copy, across a restart.
 # Assertions that wait on an open fix are marked PENDING #<issue> in the file and printed, never skipped silently.

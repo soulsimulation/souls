@@ -127,7 +127,7 @@ test('A3: markup and an address in an utterance are drawn as plain text, with no
     asked.push(`${url} ${init.body}`);
     return new Response(url === '/v1/account/now' ? JSON.stringify({ now: { [grant]: { text: '<script>alert(2)</script> mending nets', at: Math.floor(Date.now() / 1000) } } }) : '{}');
   };
-  Object.assign(globalThis, { document: doc, innerWidth: 1280, innerHeight: 720, devicePixelRatio: 1, addEventListener() {}, fetch });
+  Object.assign(globalThis, { document: doc, innerWidth: 1280, innerHeight: 720, devicePixelRatio: 1, addEventListener() {}, fetch, window: globalThis });
   made.length = 0;
   const { pageSouls } = await import('./page.ts');
 
