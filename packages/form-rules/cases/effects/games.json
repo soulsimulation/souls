@@ -55,6 +55,7 @@
             "verdict": "yes",
             "changes": [
               {"change": "set", "node": "c1", "field": "phase", "n": 29, "to": "playing"},
+              {"change": "set", "node": "c1", "field": "check", "n": 34, "to": 0},
               {"change": "set", "node": "c1", "field": "turn", "n": 28, "to": "white"},
               {"change": "set", "node": "c1", "field": "winner", "n": 30, "to": "none"},
               {"change": "set", "node": "c1", "field": "castling", "n": 32, "to": 15},
@@ -62,10 +63,11 @@
             ],
             "events": [
               {"event": "eden:game_began", "node": "c1", "changes": [0]},
-              {"event": "eden:white_to_move", "node": "c1", "changes": [1]},
-              {"event": "eden:no_winner_yet", "node": "c1", "changes": [2]},
-              {"event": "eden:castling_restored", "node": "c1", "changes": [3]},
-              {"event": "eden:no_en_passant", "node": "c1", "changes": [4]}
+              {"event": "eden:no_check", "node": "c1", "changes": [1]},
+              {"event": "eden:white_to_move", "node": "c1", "changes": [2]},
+              {"event": "eden:no_winner_yet", "node": "c1", "changes": [3]},
+              {"event": "eden:castling_restored", "node": "c1", "changes": [4]},
+              {"event": "eden:no_en_passant", "node": "c1", "changes": [5]}
             ],
             "timers": []
           }
@@ -115,6 +117,7 @@
             "verdict": "yes",
             "changes": [
               {"change": "set", "node": "c1", "field": "phase", "n": 29, "to": "playing"},
+              {"change": "set", "node": "c1", "field": "check", "n": 34, "to": 0},
               {"change": "set", "node": "c1", "field": "turn", "n": 28, "to": "white"},
               {"change": "set", "node": "c1", "field": "winner", "n": 30, "to": "none"},
               {"change": "set", "node": "c1", "field": "castling", "n": 32, "to": 15},
@@ -122,10 +125,11 @@
             ],
             "events": [
               {"event": "eden:game_began", "node": "c1", "changes": [0]},
-              {"event": "eden:white_to_move", "node": "c1", "changes": [1]},
-              {"event": "eden:no_winner_yet", "node": "c1", "changes": [2]},
-              {"event": "eden:castling_restored", "node": "c1", "changes": [3]},
-              {"event": "eden:no_en_passant", "node": "c1", "changes": [4]}
+              {"event": "eden:no_check", "node": "c1", "changes": [1]},
+              {"event": "eden:white_to_move", "node": "c1", "changes": [2]},
+              {"event": "eden:no_winner_yet", "node": "c1", "changes": [3]},
+              {"event": "eden:castling_restored", "node": "c1", "changes": [4]},
+              {"event": "eden:no_en_passant", "node": "c1", "changes": [5]}
             ],
             "timers": []
           }
@@ -186,7 +190,7 @@
           "kind": "eden:chess_table",
           "links": {"white": [], "black": []},
           "slots": {"white_seat": [], "black_seat": []},
-          "fields": {"phase": "resigned", "turn": "white", "winner": "black", "castling": 15, "en_passant": 64}
+          "fields": {"phase": "resigned", "check": 0, "turn": "white", "winner": "black", "castling": 15, "en_passant": 64}
         }
       }
     },
