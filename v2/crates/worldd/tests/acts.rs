@@ -944,14 +944,21 @@ fn w10_a_take_with_no_walk_needs_the_thing_in_reach() {
     );
     assert_eq!(far, Err("out_of_reach".to_owned()), "refused by name");
     assert_eq!(at(&r, w1()), before, "the body has not moved");
-    assert_eq!(parent(&r, far_can()), (Some(ground()), None), "the can lies where it lay");
+    assert_eq!(
+        parent(&r, far_can()),
+        (Some(ground()), None),
+        "the can lies where it lay"
+    );
     let beyond = a.act("test:take", Some(beyond_can()), none());
     println!("W10 take 2.2 m: {beyond:?}");
     assert_eq!(beyond, Err("out_of_reach".to_owned()));
     assert_eq!(parent(&run.replay(), beyond_can()), (Some(ground()), None));
     let near = a.act("test:take", Some(near_can()), none());
     let r = run.replay();
-    println!("W10 take 1.5 m: {near:?}; parent {:?}", parent(&r, near_can()));
+    println!(
+        "W10 take 1.5 m: {near:?}; parent {:?}",
+        parent(&r, near_can())
+    );
     assert!(!near.expect("within reach: taken").is_empty());
     assert_eq!(parent(&r, near_can()).0, Some(w1()), "in the body's hand");
     assert_eq!(at(&r, w1()), before, "taken where the body stands");

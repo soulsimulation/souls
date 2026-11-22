@@ -32,9 +32,9 @@ use std::collections::BTreeMap;
 use replica::effects::Refusal;
 use replica::encode::Value as Cbor;
 use replica::ids::Id;
+use replica::pose::Vec3;
 use replica::rules::json::Value;
 use replica::rules::{REASONS, decide_parts};
-use replica::pose::Vec3;
 use replica::time::Micros;
 use replica::tree::Tree;
 use skills::form_runner::{Arg, Args, Step};
@@ -512,7 +512,11 @@ pub fn hand_reach(
         detail: format!(
             "the form's hand step is done where the body stands, and {} is beyond its reach: walk to it first {}",
             replica::world_model::show(node),
-            Value::object([("step", Value::s("walk_to")), ("thing", Value::Str(key(node)))]).to_json()
+            Value::object([
+                ("step", Value::s("walk_to")),
+                ("thing", Value::Str(key(node)))
+            ])
+            .to_json()
         ),
     })
 }

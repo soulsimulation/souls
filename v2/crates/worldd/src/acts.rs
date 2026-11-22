@@ -1391,7 +1391,13 @@ fn carried(tree: &Tree, frame: Option<Id>, local: Vec3) -> Option<Vec3> {
 
 /// Whether `body` stands within a form's reach of `node`: within its half size (its entry's bounds) and
 /// [`NEAR_MM`], across x and z, in the zone's frame (`body_at` when the body is not a node of the tree).
-pub(crate) fn within_reach(tree: &Tree, entry: &Json, body: Id, body_at: Option<Vec3>, node: Id) -> bool {
+pub(crate) fn within_reach(
+    tree: &Tree,
+    entry: &Json,
+    body: Id,
+    body_at: Option<Vec3>,
+    node: Id,
+) -> bool {
     let (Some(b), Some(n)) = (world_at(tree, body).or(body_at), world_at(tree, node)) else {
         return false;
     };

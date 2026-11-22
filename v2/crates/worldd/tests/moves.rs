@@ -1710,11 +1710,7 @@ fn w10_a2_a_walk_to_a_thing_100_m_away_ends_there() {
     let ticks = ticks(&log);
     let rows: Vec<Vec3> = ticks
         .iter()
-        .flat_map(|(_, r)| {
-            r.iter()
-                .filter(|(b, _)| *b == body_id())
-                .map(|(_, p)| *p)
-        })
+        .flat_map(|(_, r)| r.iter().filter(|(b, _)| *b == body_id()).map(|(_, p)| *p))
         .collect();
     let events: Vec<_> = ticks.iter().flat_map(|(e, _)| e.clone()).collect();
     println!(
