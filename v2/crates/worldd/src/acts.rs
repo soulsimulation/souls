@@ -1033,6 +1033,28 @@ fn with_height(h: i64, v: i64) -> i64 {
 }
 
 impl Sight<'_> {
+    /// How far a body seated in slot `slot` of thing `target` is from the thing's point `point`, across x and z in
+    /// the thing's frame, from the body's edge: the slot's and the point's places as its entry names them. `None`
+    /// when the entry names neither.
+    fn reach_in_slot(&self, body: Id, target: Id, slot: u64, point: &Name) -> Option<i64> {
+        let n = self.tree.node(self.tree.handle(target)?)?;
+        let entry = self.kinds.get(plain(n.kind()))?;
+        let held = entry
+            .get("slots")
+            .and_then(Json::obj)?
+            .get(usize::try_from(slot).ok()?.checked_sub(1)?)
+            .and_then(|(_, s)| um(s.get("at_mm")))?;
+        let at = um(entry
+            .get("points")
+            .and_then(|ps| ps.get(point.as_str()))
+            .and_then(|p| p.get("at_mm")))?;
+        Some(
+            flat([held.x, held.z], [at.x, at.z])
+                .saturating_sub(self.builds.get(&body)?.size.radius_mm() * 1000)
+                .max(0),
+        )
+    }
+
     /// Whether floors `a` and `b` share one frame: the same node, or two floors of one building, each placed at the
     /// building's origin (a storey's height is in its rooms' and things' places).
     fn same_frame(&self, a: Id, b: Id) -> bool {
@@ -1148,6 +1170,13 @@ impl Reach for Sight<'_> {
             .and_then(|h| self.tree.node(h)?.parent());
         if parent == Some(body) {
             return Some(0);
+        }
+        // A body seated in the thing's own slot reaches from that slot, in the thing's frame (#3713): a player at a
+        // table moves on its board from where it sits, not from where the slot's frame would carry it.
+        if let (true, Some(slot)) = (me.pose.frame.node == target, me.pose.frame.slot)
+            && let Some(d) = self.reach_in_slot(body, target, slot, point)
+        {
+            return Some(d);
         }
         let floor = sim::walk::node_of(me);
         if let Some(d) = self.to_thing(body, floor, a, target, point) {
