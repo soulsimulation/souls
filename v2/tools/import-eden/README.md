@@ -20,7 +20,10 @@ win 1 and the named places of win 3. Two steps, both run by hand:
    today's catalog as a JSON file, the difference list by id with a reason.
 
 3. **Bake** (TypeScript, `bake/bake.ts`, V17 #2717), from the repository root after `pnpm install`:
-   `node v2/tools/import-eden/bake/bake.ts [--write-records]`. It replays the same template, runs today's mesh builders
+   `node v2/tools/import-eden/bake/bake.ts [--write-records]`, or for a live world
+   `node v2/tools/import-eden/bake/bake.ts --backup <sim.db> [--world <id>] [--map <map.json>] --out <dir>` (the same
+   backup and map its facts were exported from, so `things` is keyed by the facts' `origin` ids; a template replay's
+   seed gives other ids and maps none of a live world's things). It replays the same template, runs today's mesh builders
    (`apps/web/src/gen-mesh`, unchanged) in Node once per kind and set of geometry parameters (the builder's instance
    key, with tint, variation and stretch left on the instance), and writes each picture as binary glTF named by its T3
    hash (`souls/model/1`, then the bytes; `1220` and 64 hex digits) under `.local/import-eden/models/worlds/models/`, with

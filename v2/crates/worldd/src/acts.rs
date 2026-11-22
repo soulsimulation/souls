@@ -338,6 +338,8 @@ struct Sight<'a> {
     /// Each run's walk in progress right before a sit into a slot the places hold: its step, the seat's floor and its
     /// stand point on that floor (moved clear at registration when the entry's point is blocked).
     sit_walks: BTreeMap<Id, (usize, Id, Vec3)>,
+    /// The bodies whose walk in progress is to be there, not to act from there ([`Forms::goal_walks`]).
+    goals: BTreeSet<Id>,
     planning: &'a RefCell<Planning>,
     map: Arc<Versions>,
 }
@@ -475,6 +477,127 @@ impl Sight<'_> {
     }
 }
 
+impl Sight<'_> {
+    /// The radius of the area a body walks to, at step `step`, to be there (no move or sit after it): the walk may end
+    /// within reach of the area's circle. `None` for any other walk.
+    fn area_radius(&self, body: Id, step: usize) -> Option<i64> {
+        if !self.goals.contains(&body) {
+            return None;
+        }
+        let &(at_step, thing, ref point) = self.walks.get(&body)?;
+        if at_step != step {
+            return None;
+        }
+        let n = self.tree.node(self.tree.handle(thing)?)?;
+        let r = self
+            .kinds
+            .get(plain(n.kind()))?
+            .get("areas")?
+            .get(point.as_str())?
+            .get("radius_mm")?;
+        match r {
+            Json::Int(mm) => i64::try_from(*mm).ok()?.checked_mul(1000),
+            _ => None,
+        }
+    }
+
+    fn on_shape(&self, body: Id, step: usize, node: Id) -> Option<Vec3> {
+        let &(at_step, thing, ref point) = self.walks.get(&body)?;
+        if at_step != step {
+            return None;
+        }
+        let n = self.tree.node(self.tree.handle(thing)?)?;
+        if n.parent() != Some(node) {
+            return None;
+        }
+        on_drawn_shape(&n, self.kinds.get(plain(n.kind()))?, point.as_str())
+    }
+}
+
+/// Point `point` of entry `entry` laid on thing `n`'s own shape, when `n` is drawn in its parent's frame (placed at its
+/// origin, with a line or an outline field), as Eden's land features are: on its line ([`on_line`]) when the entry
+/// is long along x (a hedge's, a bridge's: x at least twice z), else on the box of its line's or outline's points
+/// ([`on_outline`]: a pond, a garden, a winding channel). `None` for any other thing or point.
+pub fn on_drawn_shape(n: &replica::tree::NodeRef<'_>, entry: &Json, point: &str) -> Option<Vec3> {
+    use import_eden::{F_LINE, F_OUTLINE};
+    if n.place().is_some_and(|p| p.position != Vec3::ZERO) {
+        return None;
+    }
+    let p = ["points", "areas"]
+        .iter()
+        .find_map(|k| um(entry.get(k)?.get(point)?.get("at_mm")))?;
+    let bounds = um(entry.get("geometry")?.get("bounds_mm"))?;
+    let xz = |v: &replica::encode::Value| -> Option<Vec<[i64; 2]>> {
+        let replica::encode::Value::Array(rows) = v else {
+            return None;
+        };
+        rows.iter()
+            .map(|r| match r {
+                replica::encode::Value::Array(c) => {
+                    Some([int_of(c.first()?)? * 1000, int_of(c.get(1)?)? * 1000])
+                }
+                _ => None,
+            })
+            .collect()
+    };
+    if let Some(line) = n.fields().get(&F_LINE).and_then(xz) {
+        if bounds.x >= 2 * bounds.z {
+            return on_line(p, bounds, &line);
+        }
+        return on_outline(p, bounds, &line);
+    }
+    on_outline(p, bounds, &n.fields().get(&F_OUTLINE).and_then(xz)?)
+}
+
+/// `v` stretched from `from` to `to` (µm).
+fn stretch(v: i64, from: i64, to: i64) -> Option<i64> {
+    i64::try_from(i128::from(v) * i128::from(to) / i128::from(from.max(1))).ok()
+}
+
+/// Point `p` of an entry whose bounds are `bounds` laid on `line` (`[x, z]` µm): its x along the line from the first
+/// point to the last, stretched from the bounds' x to the line's length, from the line's middle; its z across it, as
+/// it is; its y as it is.
+fn on_line(p: Vec3, bounds: Vec3, line: &[[i64; 2]]) -> Option<Vec3> {
+    let (a, b) = (line.first()?, line.last()?);
+    let (dx, dz) = (b[0] - a[0], b[1] - a[1]);
+    let len = flat(*a, *b);
+    if len == 0 {
+        return None;
+    }
+    let along = stretch(p.x, bounds.x, len)?;
+    let on = |u: i64, w: i64| i64::try_from(i128::from(u) * i128::from(w) / i128::from(len)).ok();
+    // The line's way is (dx, dz), and across it (-dz, dx), each over its length.
+    Some(Vec3::new(
+        (a[0] + b[0]) / 2 + on(along, dx)? - on(p.z, dz)?,
+        p.y,
+        (a[1] + b[1]) / 2 + on(along, dz)? + on(p.z, dx)?,
+    ))
+}
+
+/// Point `p` of an entry whose bounds are `bounds` laid on `outline` (`[x, z]` µm): from the middle of the outline's
+/// box, each of x and z stretched from the bounds to the box; its y as it is.
+fn on_outline(p: Vec3, bounds: Vec3, outline: &[[i64; 2]]) -> Option<Vec3> {
+    let lo = [0, 1].map(|k| outline.iter().map(|q| q[k]).min());
+    let hi = [0, 1].map(|k| outline.iter().map(|q| q[k]).max());
+    let ([Some(x0), Some(z0)], [Some(x1), Some(z1)]) = (lo, hi) else {
+        return None;
+    };
+    Some(Vec3::new(
+        (x0 + x1) / 2 + stretch(p.x, bounds.x, x1 - x0)?,
+        p.y,
+        (z0 + z1) / 2 + stretch(p.z, bounds.z, z1 - z0)?,
+    ))
+}
+
+/// A whole number of the encoding as an `i64`.
+fn int_of(v: &replica::encode::Value) -> Option<i64> {
+    match v {
+        replica::encode::Value::Uint(u) => i64::try_from(*u).ok(),
+        replica::encode::Value::Nint(n) => i64::try_from(*n).ok().map(|n| -n - 1),
+        _ => None,
+    }
+}
+
 impl Geometry for Sight<'_> {
     fn ask(&self, body: Id, q: &Ask) -> Option<Answer> {
         match q {
@@ -545,6 +668,9 @@ impl Geometry for Sight<'_> {
         let Some(me) = self.bodies.get(&body) else {
             return WalkPlan::Legs(Vec::new());
         };
+        let at = self.on_shape(body, step, node).unwrap_or(at);
+        // A walk to be in an area ends within reach of the area's circle, not of its middle.
+        let reach = reach.saturating_add(self.area_radius(body, step).unwrap_or(0));
         // A walk before a sit goes to the seat's own stand point, the one its sit is measured from.
         let (node, at) = match self.sit_walks.get(&body) {
             Some(&(at_step, floor, stand)) if at_step == step => (floor, stand),
@@ -578,7 +704,20 @@ impl Geometry for Sight<'_> {
             (node, at)
         };
         let mut planning = self.planning.borrow_mut();
-        match planning.ask(key, *me, FormQuery::Walk { node, at, reach }, &self.map) {
+        // An approach's move acts on the run's own thing: when that is a doorway's door, the walk may end in its
+        // doorway (#3688).
+        let door = self
+            .approaches
+            .contains(&body)
+            .then(|| self.walks.get(&body).map(|w| w.1))
+            .flatten();
+        let query = FormQuery::Walk {
+            node,
+            at,
+            reach,
+            door,
+        };
+        match planning.ask(key, *me, query, &self.map) {
             Some(FormResult::Walk(legs)) => {
                 // A later stage may start in this same call before Sight's context is refreshed: it must request its
                 // own answer, even when its step number and target repeat the preceding stage.
@@ -1296,6 +1435,7 @@ impl Acts {
             walks,
             approaches,
             sit_walks,
+            goals: self.forms.goal_walks(),
             planning: &self.planning,
             map,
         };
