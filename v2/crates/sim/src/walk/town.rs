@@ -642,6 +642,7 @@ impl Town {
             buildings,
             ground: *ground,
             boxes: OnceCell::new(),
+            door: None,
         };
         f(tree, &mut g)
     }
@@ -1912,6 +1913,19 @@ pub fn in_passage(
     node: Id,
     p: Vec3,
 ) -> bool {
+    in_passage_but(buildings, boxes, ground, node, p, None)
+}
+
+/// [`in_passage`], with the doorway of thing `door`'s own link not counted (#3688): a body acting on a door may stand
+/// in that door's own doorway, as no place out of it may be within an arm of the door's panel.
+pub fn in_passage_but(
+    buildings: &[Building],
+    boxes: &[Option<[i64; 4]>],
+    ground: Id,
+    node: Id,
+    p: Vec3,
+    door: Option<Id>,
+) -> bool {
     buildings.iter().enumerate().any(|(i, b)| {
         if node == ground
             && let Some(bx) = boxes.get(i)
@@ -1919,27 +1933,30 @@ pub fn in_passage(
         {
             return false;
         }
-        b.links.iter().any(|l| {
-            let ends = l.ends.iter().flatten().filter(|e| e.floor == node);
-            let mut on = false;
-            for e in ends {
-                on = true;
-                if to_segment(p, e.a, e.b) < CLEAR {
-                    return true;
+        b.links
+            .iter()
+            .filter(|l| door.is_none() || l.door != door)
+            .any(|l| {
+                let ends = l.ends.iter().flatten().filter(|e| e.floor == node);
+                let mut on = false;
+                for e in ends {
+                    on = true;
+                    if to_segment(p, e.a, e.b) < CLEAR {
+                        return true;
+                    }
                 }
-            }
-            on && l.line.windows(2).any(|s| {
-                let (a, c) = if node == ground {
-                    (
-                        b.place.point(s[0]).unwrap_or(s[0]),
-                        b.place.point(s[1]).unwrap_or(s[1]),
-                    )
-                } else {
-                    (s[0], s[1])
-                };
-                to_segment(p, a, c) < l.width / 2 + CLEAR / 2
+                on && l.line.windows(2).any(|s| {
+                    let (a, c) = if node == ground {
+                        (
+                            b.place.point(s[0]).unwrap_or(s[0]),
+                            b.place.point(s[1]).unwrap_or(s[1]),
+                        )
+                    } else {
+                        (s[0], s[1])
+                    };
+                    to_segment(p, a, c) < l.width / 2 + CLEAR / 2
+                })
             })
-        })
     })
 }
 
@@ -1953,6 +1970,8 @@ struct Grounds<'a> {
     ground: Id,
     /// [`ground_boxes`], made at the first passage asked about.
     boxes: OnceCell<Vec<Option<[i64; 4]>>>,
+    /// A door whose own doorway is not a passage here ([`in_passage_but`]).
+    door: Option<Id>,
 }
 
 /// N5's map as the spot tables search it: the town's own (its searches keep their caches), or a view's shared map
@@ -2003,7 +2022,7 @@ impl Ground for Grounds<'_> {
         let boxes = self
             .boxes
             .get_or_init(|| ground_boxes(self.buildings, self.ground));
-        in_passage(self.buildings, boxes, self.ground, node, p)
+        in_passage_but(self.buildings, boxes, self.ground, node, p, self.door)
     }
 
     fn walk(&mut self, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64> {
@@ -2077,6 +2096,7 @@ impl World for Town {
                 buildings,
                 ground: *ground,
                 boxes: OnceCell::new(),
+                door: None,
             },
         );
         for (&size, g) in classes {
@@ -2089,6 +2109,7 @@ impl World for Town {
                     buildings: &g.buildings,
                     ground: *ground,
                     boxes: OnceCell::new(),
+                    door: None,
                 },
             );
         }
@@ -2427,6 +2448,19 @@ impl<'a> View<'a> {
     /// Where a body may stand within `reach` of `at` (µm, `node`'s frame) to act there, for `from` (C15, #3447):
     /// [`crate::spots::within`] over this town's ground.
     pub fn stand_near(&self, node: Id, at: Vec3, reach: i64, from: Option<&Body>) -> Option<Vec3> {
+        self.stand_near_door(node, at, reach, from, None)
+    }
+
+    /// [`View::stand_near`] for a move at thing `door`: when it is a doorway's door, a place in that doorway counts
+    /// (#3688), so a knock from a room whose floor stops short of the door reaches its panel.
+    pub fn stand_near_door(
+        &self,
+        node: Id,
+        at: Vec3,
+        reach: i64,
+        from: Option<&Body>,
+        door: Option<Id>,
+    ) -> Option<Vec3> {
         let from = from.map(|b| (node_of(b), b.pose.position));
         let mut scratch = self.scratch.borrow_mut();
         let (tree, surfaces, buildings, ground) =
@@ -2438,6 +2472,7 @@ impl<'a> View<'a> {
             buildings,
             ground,
             boxes: OnceCell::new(),
+            door,
         };
         crate::spots::within(&mut g, Target::new(node, at), reach, from)
     }

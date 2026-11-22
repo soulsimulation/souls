@@ -6,10 +6,17 @@
 import * as THREE from 'three';
 import type { NodeRec } from '../source/source.ts';
 import { buildShape, whenKey } from './shape.ts';
+import { looks } from './looks.ts';
+import { placeParts } from './apply.ts';
 import { kindState } from './state.ts';
 import type { Catalogue, KindEntry } from './catalogue.ts';
 
-type Drawn = { node: NodeRec; entry: KindEntry; key: string; picture: THREE.Group; holder: THREE.Group };
+/** `held` and `prev`: the state the looks last placed and the one before it; `since`: the world time it changed, so a
+ *  row with `over_us` (a wheel's turn, a cabin's slide) eases from the one to the other over that long. */
+type Drawn = { node: NodeRec; entry: KindEntry; key: string; looks: string; picture: THREE.Group; holder: THREE.Group; held?: string; heldState?: Record<string, unknown>; prev?: Record<string, unknown>; since?: number };
+/** Called each time a thing's picture is placed for its state (a new picture, or new looks): a hook for what draws on
+ *  a thing's parts (a picture in a frame, slides on a screen). */
+export type OnLooks = (id: string, picture: THREE.Group, state: Record<string, unknown>) => void;
 
 export class KindLayer {
   readonly group = new THREE.Group();
@@ -19,6 +26,8 @@ export class KindLayer {
   /** Things to draw again at the next `draw`: their node changed; and the things whose kind has a timed field. */
   private dirty = new Set<string>();
   private timed = new Set<string>();
+  /** Things part-way through an eased change (a row's `over_us`). */
+  private easing = new Set<string>();
   /** One picture per kind and `when` key, cloned for each thing (clones share geometry and materials). */
   private pictures = new Map<string, THREE.Group>();
   /** `onDrawn(id)`: the thing is now drawn here, so whatever stood in for it (a box) can go. */
@@ -29,6 +38,9 @@ export class KindLayer {
     this.onDrawn = onDrawn;
     this.group.name = 'kinds';
   }
+
+  /** See `OnLooks`. */
+  readonly onLooks: OnLooks[] = [];
 
   /** Whether the thing is drawn from its kind here. */
   has(id: string): boolean { return this.drawn.has(id); }
@@ -57,7 +69,7 @@ export class KindLayer {
       holder.matrix.copy(w.frame);
       holder.name = `thing:${node.id}`;
       this.group.add(holder);
-      this.drawn.set(node.id, { node: w.node, entry, key: '\0', picture: new THREE.Group(), holder });
+      this.drawn.set(node.id, { node: w.node, entry, key: '\0', looks: '', picture: new THREE.Group(), holder });
       if (Object.values(entry.state ?? {}).some((f) => f.type === 'timed')) this.timed.add(node.id);
       this.onDrawn(node.id);
       this.refresh(node.id, null);
@@ -79,6 +91,7 @@ export class KindLayer {
     this.drawn.delete(id);
     this.dirty.delete(id);
     this.timed.delete(id);
+    this.easing.delete(id);
   }
 
   /** The thing's state as its kind names it, at world time `t` (µs; null before the clock starts). */
@@ -92,22 +105,41 @@ export class KindLayer {
     for (const id of this.dirty) this.refresh(id, t);
     this.dirty.clear();
     for (const id of this.timed) this.refresh(id, t);
+    for (const id of this.easing) if (!this.timed.has(id)) this.refresh(id, t);
   }
 
-  /** The picture a thing has, for the looks (piece 4) and for tests: its root under the thing's frame. */
+  /** The picture a thing has (its root under the thing's frame), for a look hook and for tests. */
   picture(id: string): THREE.Group | null { return this.drawn.get(id)?.picture ?? null; }
 
   private refresh(id: string, t: number | null): void {
-    const d = this.drawn.get(id)!, shape = d.entry.looks!.shape!;
+    const d = this.drawn.get(id)!, shape = d.entry.looks!.shape!, table = d.entry.looks?.table ?? [];
     const state = kindState(d.node.fields, d.entry.state ?? {}, t ?? undefined);
     const key = whenKey(shape, state);
-    if (key === d.key) return;
-    const cacheKey = `${d.entry.kind}|${key}`;
-    let proto = this.pictures.get(cacheKey);
-    if (!proto) this.pictures.set(cacheKey, (proto = buildShape(shape, state)));
-    d.holder.remove(d.picture);
-    d.picture = proto.clone(true);
-    d.holder.add(d.picture);
-    d.key = key;
+    let fresh = false;
+    if (key !== d.key) {
+      const cacheKey = `${d.entry.kind}|${key}`;
+      let proto = this.pictures.get(cacheKey);
+      if (!proto) this.pictures.set(cacheKey, (proto = buildShape(shape, state)));
+      d.holder.remove(d.picture);
+      d.picture = proto.clone(true);
+      d.holder.add(d.picture);
+      d.key = key;
+      fresh = true;
+    }
+    // the looks table: each part placed for this state (a timed field at world time t); only when the answer changed
+    // a changed state (timed values aside) starts an ease from the one before, for the rows that say how long
+    const plain = JSON.stringify(Object.entries(state).filter(([, v]) => typeof v !== 'object'));
+    if (d.held !== undefined && plain !== d.held && t !== null) (d.prev = d.heldState), (d.since = t);
+    d.held = plain;
+    d.heldState = state;
+    const t_us = d.prev && d.since !== undefined && t !== null ? t - d.since : undefined;
+    const longest = Math.max(0, ...table.map((r) => r.over_us ?? 0));
+    if (t_us !== undefined && t_us < longest) this.easing.add(id); else this.easing.delete(id);
+    const placed = table.length ? looks({ table, state: state as never, prev: d.prev as never, t_us, now_us: t ?? undefined, fields: d.entry.state as never }) : {};
+    const lk = JSON.stringify(placed);
+    if (!fresh && lk === d.looks) return;
+    d.looks = lk;
+    placeParts(d.picture, placed, id);
+    for (const f of this.onLooks) f(id, d.picture, state);
   }
 }
