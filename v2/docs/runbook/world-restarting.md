@@ -5,7 +5,12 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
 
 ## How a world runs
 
-- **The unit** is `v2/tools/ops/units/worldd@.service`. `Type=notify`: the world says READY=1 once it ticks, then
+- **The unit** is `v2/tools/ops/units/worldd@.service`. `Type=notify`: while it loads, the world says
+  `EXTEND_TIMEOUT_USEC=30000000` at each load stage and while it applies its log (at most ten a second), so a long
+  load runs as long as it makes progress, and a load with no progress for 30 s (`TimeoutStartSec`) is ended
+  (`Result=timeout`) and restarted. Never raise `TimeoutStartSec` or add an override for a slow world: read its
+  `start-up: <stage> at <ms>` lines in the journal for the stage that went 30 s without progress (#4013;
+  `v2/tools/ops/x5-start-progress.sh` runs both cases under the unit). The world says READY=1 once it ticks, then
   WATCHDOG=1 twice a second while its clock is not wedged. No word for 5 s ends it: a process frozen whole. K7's own
   watchdog inside says a stall (no tick for 0.5 s) in the journal (`watchdog: stalled`) and in `health.json`
   (`stalled`: `now_ms` while it lasts, `ended`, `longest_ms`), and the world runs on: a busy host's pause never
@@ -17,7 +22,15 @@ pinned build, restarted alone and for ever. `<world>` is `<lineage hex>-<zone sc
   copy (`$WORLDS_ROOT/cache/<world>`), so an unreachable store holds no world down. It checks that
   `$WORLDS_ROOT/builds/<hash>/worldd` hashes to the pin (SHA-256 of the file, `1220` in front), and runs it as
   `worldd serve --dir $WORLDS_ROOT/worlds/<world>`, the world folder `worldd seed` made and `place-world.sh` placed (C1).
-- **Limits per world** go in `/etc/systemd/system/worldd@<world>.service.d/limits.conf` (`MemoryMax`, `CPUWeight`).
+- **Limits per world** go in `/etc/systemd/system/worldd@<world>.service.d/limits.conf`. Never write it by hand: to
+  set a world's cap, add its slug to `v2/tools/ops/units/world-limits.json` (`"eden": { "memory_max": "8G",
+  "start_within_s": 600 }`) and install a build (`install.sh apply`), which writes the file for each listed world placed
+  on the machine (`world-limits.mjs`, slug to instance through the world-authority map) and runs `systemctl
+  daemon-reload`; the cap applies at the world's next start. A world not listed keeps the unit's `MemoryMax=2G`, and
+  `souls.slice` (12 GB) leaves room for one 8 GB world. `start_within_s` is how long `deploy` waits for the world to
+  serve (30 s when not listed). Once a build with this and #4069 is installed on production, the hand-added drop-ins
+  `worldd@<Eden>.service.d/40-memory.conf` and `30-start-timeout.conf` can be removed (`systemctl daemon-reload`
+  after): `limits.conf` carries Eden's 8 GB, and worldd's start-up progress replaces the raised start timeout.
   There is never a `CPUQuota`: it throttles the clock and slows world time. `MemoryHigh` stays `infinity`: below the
   limit with no swap it throttles a leaking world to a crawl that never reaches the limit (one leak run with
   `MemoryHigh` at 75 % of the limit: no exit in 10 s, the neighbours' tick 99th percentile up 11 and 18 %), a world held slow instead of restarted.

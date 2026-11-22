@@ -54,7 +54,11 @@ views (R3), live subscriptions (R4), files and the CDN (V1, V2) and packing (V3)
    the one asked for down, whose busiest world second over those views fits its budget, and says so: `{1: level}`, or
    `{1: level, 2: level asked, 3: "souls:over-budget"}` when it was lowered. Counts fits every budget from the least
    up; a smaller one is refused when asked for (`budget-below-minimum`). An accepted subscription is never dropped:
-   `counts-over-bound` would name a counts view that broke its bound, a fault in the view.
+   `counts-over-bound` would name a counts view that broke its bound, a fault in the view. A socket that does not
+   read is another matter: the gateway lets a view socket go once it falls more than 10 s behind its stream
+   (`VIEW_BEHIND_MOST`, told `{4: "view.behind"}` and closed 1013, #4078). It measures this with a WebSocket ping
+   every 2 s that the client answers only once it has read everything sent before it, so a backlog held in kernel
+   buffers counts; a send that waits 10 s counts too. The viewer rejoins as any new one does, from a new grant.
 8. **Words reach a view by reference.** The log holds a reference, never words (T8). Delivery to an audience entitled
    to them may put the words beside the reference, from the text store (K16), for references not on the redaction
    list. That changes no record of the view and is not one of its inputs.

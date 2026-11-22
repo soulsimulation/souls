@@ -14,7 +14,8 @@
 //!   walk keeps a place behind a wall far; the weight fills the rings nearest the target first. When the target is
 //!   itself clear ground, a place must also be joined to it on foot: a walk between them within [`DETOUR`] times
 //!   their straight gap plus a pitch. A target that is not (in a box, a wall, a doorway, on a stair, on water, off the
-//!   ground) is bound to the nearest clear place beside it the same way.
+//!   ground) is bound to the nearest clear place beside it the same way, and so is a clear target the asker's walk
+//!   does not reach (a pocket of ground walled in by a desk's legs and the chairs round it, #4072).
 //! - **Recorded as the engine's.** Each grant is an [`Entry::Grant`] with the actor the world and the cause the
 //!   asker's order; the same marks give the same grants every run (integers, id order, no hashing).
 //! - **Released** when its holder no longer asks for it: it left (its mark asks for another target or none,
@@ -47,6 +48,10 @@ pub const CLEAR: i64 = 700_000;
 pub const WEIGHT: i64 = 3;
 /// A place is joined to a clear target when walked to from it within this many times their straight gap, plus a pitch.
 pub const DETOUR: i64 = 2;
+/// A search for a place to stand gives up after this many route searches that find no way (#4072). A place the ground
+/// already knows no walk reaches ([`Ground::may_reach`], a lookup) is skipped without one and is not counted, so a
+/// target cut off from the asker (a floor with no way up) costs lookups, and at most this many failed searches.
+pub const MISSES_MOST: usize = 64;
 
 /// The ground as the spot tables read it. All µm.
 pub trait Ground {
@@ -57,6 +62,11 @@ pub trait Ground {
     fn passage(&self, node: Id, p: Vec3) -> bool;
     /// The walking distance from `a` on node `an` to `b` on node `bn`, never through a wall; `None` with no way there.
     fn walk(&mut self, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64>;
+    /// Whether a walk from `a` to `b` may find a way: `false` only when none can (no portal or link joins them),
+    /// told without a route search (#4072). A ground that cannot tell says `true`.
+    fn may_reach(&self, _an: Id, _a: Vec3, _bn: Id, _b: Vec3) -> bool {
+        true
+    }
 }
 
 /// The same geometry questions selected for one admitted footprint. Reservations are never stored here.
@@ -64,6 +74,9 @@ pub trait ClassGround {
     fn stand(&self, size: Size, node: Id, p: Vec3) -> Option<(Vec3, Vec3)>;
     fn passage(&self, size: Size, node: Id, p: Vec3) -> bool;
     fn walk(&mut self, size: Size, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64>;
+    fn may_reach(&self, _size: Size, _an: Id, _a: Vec3, _bn: Id, _b: Vec3) -> bool {
+        true
+    }
 }
 struct Selected<'a> {
     ground: &'a mut dyn ClassGround,
@@ -78,6 +91,9 @@ impl Ground for Selected<'_> {
     }
     fn walk(&mut self, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64> {
         self.ground.walk(self.size, an, a, bn, b)
+    }
+    fn may_reach(&self, an: Id, a: Vec3, bn: Id, b: Vec3) -> bool {
+        self.ground.may_reach(self.size, an, a, bn, b)
     }
 }
 struct Standard<'a>(&'a mut dyn Ground);
@@ -94,6 +110,9 @@ impl ClassGround for Standard<'_> {
         (size == Size::Standard)
             .then(|| self.0.walk(an, a, bn, b))
             .flatten()
+    }
+    fn may_reach(&self, _size: Size, an: Id, a: Vec3, bn: Id, b: Vec3) -> bool {
+        self.0.may_reach(an, a, bn, b)
     }
 }
 
@@ -265,6 +284,32 @@ impl Table {
         let Some((_, a)) = g.stand(ask.node, ask.from) else {
             return Err("spot-none-free");
         };
+        let found = self.nearest_by(g, ask, a, blocked, self.clear);
+        // A clear target the asker's walk does not reach (a pocket under a desk, #4072) is bound to the nearest place
+        // beside it, as a target in a box is. A crowd that holds every joined place of a reached target is still
+        // refused.
+        match found {
+            Err(_)
+                if self.clear
+                    && g.walk(ask.node, ask.from, ask.target.node, ask.target.point())
+                        .is_none() =>
+            {
+                self.nearest_by(g, ask, a, blocked, false)
+            }
+            r => r,
+        }
+    }
+
+    /// [`Table::nearest`] from the asker's place in the ground's frame `a`; with `joined`, only places joined on foot
+    /// to the target count.
+    fn nearest_by(
+        &mut self,
+        g: &mut dyn Ground,
+        ask: &Ask,
+        a: Vec3,
+        blocked: &BTreeSet<usize>,
+        joined: bool,
+    ) -> Result<(usize, i64), &'static str> {
         let t = ask.target;
         let gap = |p: &Place| flat(p.at, t.point());
         // Free places by a bound below their cost: the straight way there plus the weighted gap.
@@ -277,14 +322,21 @@ impl Table {
             .collect();
         order.sort_unstable();
         let mut best: Option<(i64, u16, u16, usize)> = None;
+        let mut misses = 0;
         for (bound, ring, k, i) in order {
             if best.is_some_and(|b| bound > b.0) {
                 break;
             }
-            if self.clear && !self.joined(g, t, i) {
+            if !g.may_reach(ask.node, ask.from, t.node, self.places[i].at)
+                || joined && !self.joined(g, t, i)
+            {
                 continue;
             }
             let Some(walk) = g.walk(ask.node, ask.from, t.node, self.places[i].at) else {
+                misses += 1;
+                if misses >= MISSES_MOST {
+                    break;
+                }
                 continue;
             };
             let key = (walk + WEIGHT * gap(&self.places[i]), ring, k, i);
@@ -314,7 +366,8 @@ impl Table {
 /// Between the rings [`within`] tries, and between neighbouring places on a ring, µm.
 pub const REACH_PITCH: i64 = 100_000;
 
-/// Where a body may stand to act at `target` (C15, #3447): the target itself when a body may stand there; else the
+/// Where a body may stand to act at `target` (C15, #3447): the target itself when a body may stand there and the
+/// asker's walk reaches it (#4072); else the
 /// nearest place within `reach` of it, on rings [`REACH_PITCH`] apart (`⌊2πk⌋` places on ring `k`), on walkable
 /// ground and out of doorways and off stairs, as a table's places are. Nearest as a table's nearest: the least walk
 /// from `from` (the asker's node and where it stands) plus [`WEIGHT`] times the place's gap to the target, ties by
@@ -326,10 +379,29 @@ pub fn within(
     from: Option<(Id, Vec3)>,
 ) -> Option<Vec3> {
     let t = target.point();
-    if g.stand(target.node, t).is_some() {
+    let from = from.and_then(|(node, p)| Some((node, p, g.stand(node, p)?.1)));
+    // A point a body may stand on is its own place, unless the asker's walk cannot reach it (a pocket under a desk,
+    // walled in by its legs and the chairs round it, #4072): then the rings are tried, and the point is kept only
+    // when none of them is reached either.
+    let standable = g.stand(target.node, t).is_some();
+    if standable && from.is_none_or(|(node, p, _)| g.walk(node, p, target.node, t).is_some()) {
         return Some(t);
     }
-    let from = from.and_then(|(node, p)| Some((node, p, g.stand(node, p)?.1)));
+    let found = rings(g, target, reach, from);
+    if found.is_none() && standable {
+        return Some(t);
+    }
+    found
+}
+
+/// [`within`]'s rings: the place within `reach` of `target` nearest by the asker's walk, or by the gap alone.
+fn rings(
+    g: &mut dyn Ground,
+    target: Target,
+    reach: i64,
+    from: Option<(Id, Vec3, Vec3)>,
+) -> Option<Vec3> {
+    let t = target.point();
     // Places by a bound below their cost: the straight way there plus the weighted gap.
     let mut order: Vec<(i64, i64, i64, Vec3)> = Vec::new();
     for ring in 1..=reach / REACH_PITCH {
@@ -359,11 +431,19 @@ pub fn within(
         return order.first().map(|o| o.3);
     };
     let mut best: Option<(i64, i64, i64, Vec3)> = None;
+    let mut misses = 0;
     for (bound, ring, k, at) in order {
         if best.is_some_and(|b| bound > b.0) {
             break;
         }
+        if !g.may_reach(node, p, target.node, at) {
+            continue;
+        }
         let Some(walk) = g.walk(node, p, target.node, at) else {
+            misses += 1;
+            if misses >= MISSES_MOST {
+                break;
+            }
             continue;
         };
         let key = (walk + WEIGHT * flat(at, t), ring, k, at);
