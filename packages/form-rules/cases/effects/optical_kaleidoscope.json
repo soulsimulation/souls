@@ -1,0 +1,168 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Exact state changes, named events and timers for every optical control; receipt replay must be idempotent.",
+  "cases": [
+    {
+      "name": "kaleidoscope_turn_chamber_exact_changes",
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "t1": {
+            "kind": "eden:kaleidoscope",
+            "fields": {
+              "pattern": "star",
+              "shutter": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "turn_chamber",
+            "args": {
+              "pattern": "flower"
+            }
+          },
+          "receipt": "r-kaleidoscope-turn_chamber",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "pattern",
+                "n": 28,
+                "to": "flower"
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:chamber_turned",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "kaleidoscope_close_eyepiece_exact_changes",
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "t1": {
+            "kind": "eden:kaleidoscope",
+            "fields": {
+              "pattern": "star",
+              "shutter": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "close_eyepiece"
+          },
+          "receipt": "r-kaleidoscope-close_eyepiece",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "shutter",
+                "n": 29,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:eyepiece_closed",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "kaleidoscope_open_eyepiece_exact_changes",
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "t1": {
+            "kind": "eden:kaleidoscope",
+            "fields": {
+              "pattern": "star",
+              "shutter": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "open_eyepiece"
+          },
+          "receipt": "r-kaleidoscope-open_eyepiece",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "shutter",
+                "n": 29,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:eyepiece_opened",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ]
+    }
+  ]
+}

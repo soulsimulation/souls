@@ -1,0 +1,400 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:zoetrope",
+  "owner": "thing",
+  "state": {
+    "strip": {
+      "n": 28,
+      "type": "enum",
+      "default": "none",
+      "audience": {
+        "rule": "everyone"
+      },
+      "values": [
+        "none",
+        "horse",
+        "bouncing_ball"
+      ]
+    },
+    "spinning": {
+      "n": 29,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        -430
+      ],
+      "yaw_mdeg": 0
+    },
+    "control": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        1050,
+        -90
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      500,
+      1400,
+      400
+    ]
+  },
+  "forms": {
+    "fit_strip": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "spinning",
+          "says": "brake_first",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "strip",
+          "says": "remove_first",
+          "is": "none"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "strip",
+          "to": {
+            "arg": "strip"
+          },
+          "event": "picture_strip_fitted"
+        }
+      ],
+      "takes": {
+        "strip": {
+          "type": "value",
+          "of": [
+            "horse",
+            "bouncing_ball"
+          ]
+        }
+      }
+    },
+    "remove_strip": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "spinning",
+          "says": "brake_first",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "strip",
+          "not": "none",
+          "says": "no_strip"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "strip",
+          "to": "none",
+          "event": "picture_strip_removed"
+        }
+      ]
+    },
+    "spin_drum": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "spinning",
+          "says": "brake_first",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "strip",
+          "not": "none",
+          "says": "no_strip"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "spinning",
+          "to": true,
+          "event": "picture_drum_spun"
+        },
+        {
+          "change": "timer",
+          "form": "coast_to_stop",
+          "after_us": 8000000,
+          "event": "drum_coasting"
+        }
+      ]
+    },
+    "brake_drum": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "spinning",
+          "says": "already_stopped",
+          "is": true
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "spinning",
+          "to": false,
+          "event": "picture_drum_braked"
+        }
+      ]
+    },
+    "coast_to_stop": {
+      "who": "world",
+      "starts": "timer",
+      "needs": [
+        {
+          "need": "state",
+          "field": "spinning",
+          "is": true
+        }
+      ],
+      "steps": [],
+      "effects": [
+        {
+          "change": "set",
+          "field": "spinning",
+          "to": false,
+          "event": "picture_drum_stopped"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:zoetrope",
+    "table": [
+      {
+        "part": "flip",
+        "field": "spinning",
+        "do": "rotate",
+        "axis": "y",
+        "at": {
+          "true": 360000,
+          "false": 0
+        },
+        "over_us": 8000000
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            450,
+            0
+          ],
+          "size": [
+            100,
+            900,
+            100
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            900,
+            0
+          ],
+          "size": [
+            480,
+            40,
+            360
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            1050,
+            0
+          ],
+          "r": 180,
+          "h": 260,
+          "segments": 16,
+          "tint": "dark",
+          "role": "flip"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -50,
+            1080,
+            -181
+          ],
+          "size": [
+            35,
+            70,
+            4
+          ],
+          "tint": "paper",
+          "when": "@strip=horse"
+        },
+        {
+          "kind": "box",
+          "at": [
+            50,
+            1080,
+            -181
+          ],
+          "size": [
+            35,
+            70,
+            4
+          ],
+          "tint": "paper",
+          "when": "@strip=bouncing_ball"
+        }
+      ],
+      "palette": {
+        "wood": "#79563c",
+        "dark": "#292d36",
+        "paper": "#f6e7c4",
+        "red": "#ce6452",
+        "blue": "#5184a6",
+        "gold": "#d6b34c"
+      },
+      "tags": [
+        "optical",
+        "toy",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "card": "A slotted picture drum: fit a strip, spin it, then brake before changing it.",
+    "optical": "optical",
+    "empty_hands": "Empty your hands before operating this mounted optical toy.",
+    "brake_first": "Brake the spinning drum before changing strips or spinning again.",
+    "remove_first": "Remove the fitted strip before choosing another.",
+    "no_strip": "Fit a picture strip in the stopped drum first.",
+    "already_stopped": "The picture drum is already stopped.",
+    "howto_play": "Fit a horse or bouncing-ball strip, spin the drum, brake it, and remove the strip."
+  },
+  "card": {
+    "text": "card",
+    "category": "optical",
+    "synonyms": []
+  },
+  "howtos": {
+    "play": {
+      "text": "howto_play",
+      "steps": [
+        {
+          "form": "fit_strip"
+        },
+        {
+          "form": "spin_drum"
+        },
+        {
+          "form": "brake_drum"
+        },
+        {
+          "form": "remove_strip"
+        }
+      ]
+    }
+  }
+}

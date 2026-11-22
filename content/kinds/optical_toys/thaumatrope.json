@@ -1,0 +1,391 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:thaumatrope",
+  "owner": "thing",
+  "state": {
+    "twists": {
+      "n": 28,
+      "type": "int",
+      "default": 0,
+      "audience": {
+        "rule": "everyone"
+      },
+      "unit": "count",
+      "min": 0,
+      "max": 3
+    },
+    "spinning": {
+      "n": 29,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        -430
+      ],
+      "yaw_mdeg": 0
+    },
+    "control": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        1050,
+        -90
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      500,
+      1400,
+      400
+    ]
+  },
+  "forms": {
+    "wind_strings": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "spinning",
+          "says": "let_settle",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "twists",
+          "at_most": 2,
+          "says": "fully_wound"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "twists",
+          "by": 1,
+          "event": "disc_strings_wound"
+        }
+      ]
+    },
+    "unwind_strings": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "spinning",
+          "says": "let_settle",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "twists",
+          "at_least": 1,
+          "says": "not_wound"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "twists",
+          "by": -1,
+          "event": "disc_strings_unwound"
+        }
+      ]
+    },
+    "release_disc": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "spinning",
+          "says": "let_settle",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "twists",
+          "at_least": 1,
+          "says": "not_wound"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "tug",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "twists",
+          "to": 0,
+          "event": "disc_strings_released"
+        },
+        {
+          "change": "set",
+          "field": "spinning",
+          "to": true,
+          "event": "picture_disc_spun"
+        },
+        {
+          "change": "timer",
+          "form": "settle_disc",
+          "after_us": 6000000,
+          "event": "disc_unwinding"
+        }
+      ]
+    },
+    "settle_disc": {
+      "who": "world",
+      "starts": "timer",
+      "needs": [
+        {
+          "need": "state",
+          "field": "spinning",
+          "is": true
+        }
+      ],
+      "steps": [],
+      "effects": [
+        {
+          "change": "set",
+          "field": "spinning",
+          "to": false,
+          "event": "picture_disc_settled"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:thaumatrope",
+    "table": [
+      {
+        "part": "flip",
+        "field": "spinning",
+        "do": "rotate",
+        "axis": "x",
+        "at": {
+          "true": 720000,
+          "false": 0
+        },
+        "over_us": 6000000
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            450,
+            0
+          ],
+          "size": [
+            100,
+            900,
+            100
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            900,
+            0
+          ],
+          "size": [
+            480,
+            40,
+            360
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -200,
+            1080,
+            0
+          ],
+          "size": [
+            25,
+            300,
+            25
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            200,
+            1080,
+            0
+          ],
+          "size": [
+            25,
+            300,
+            25
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1080,
+            0
+          ],
+          "size": [
+            400,
+            8,
+            8
+          ],
+          "tint": "gold"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            1080,
+            0
+          ],
+          "r": 110,
+          "h": 10,
+          "segments": 16,
+          "tint": "paper",
+          "roll": 90000,
+          "role": "flip"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -25,
+            1080,
+            -12
+          ],
+          "size": [
+            40,
+            50,
+            5
+          ],
+          "tint": "blue"
+        },
+        {
+          "kind": "box",
+          "at": [
+            25,
+            1080,
+            12
+          ],
+          "size": [
+            40,
+            70,
+            5
+          ],
+          "tint": "red"
+        }
+      ],
+      "palette": {
+        "wood": "#79563c",
+        "dark": "#292d36",
+        "paper": "#f6e7c4",
+        "red": "#ce6452",
+        "blue": "#5184a6",
+        "gold": "#d6b34c"
+      },
+      "tags": [
+        "optical",
+        "toy",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "card": "A two-sided picture disc: wind its strings, release it, and let it settle.",
+    "optical": "optical",
+    "empty_hands": "Empty your hands before operating this mounted optical toy.",
+    "let_settle": "Let the released picture disc settle before winding or releasing again.",
+    "fully_wound": "The strings have three twists; release the disc or unwind a twist.",
+    "not_wound": "Wind the strings before releasing or unwinding the disc.",
+    "howto_play": "Wind one to three twists into the strings, release the picture disc, and let it settle before winding again."
+  },
+  "card": {
+    "text": "card",
+    "category": "optical",
+    "synonyms": []
+  },
+  "howtos": {
+    "play": {
+      "text": "howto_play",
+      "steps": [
+        {
+          "form": "wind_strings"
+        },
+        {
+          "form": "release_disc"
+        }
+      ]
+    }
+  }
+}

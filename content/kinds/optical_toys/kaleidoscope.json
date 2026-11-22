@@ -1,0 +1,434 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:kaleidoscope",
+  "owner": "thing",
+  "state": {
+    "pattern": {
+      "n": 28,
+      "type": "enum",
+      "default": "star",
+      "audience": {
+        "rule": "everyone"
+      },
+      "values": [
+        "star",
+        "flower",
+        "snowflake",
+        "fan",
+        "wheel",
+        "hexagon"
+      ]
+    },
+    "shutter": {
+      "n": 29,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        -430
+      ],
+      "yaw_mdeg": 0
+    },
+    "control": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        1050,
+        -90
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      500,
+      1400,
+      400
+    ]
+  },
+  "forms": {
+    "turn_chamber": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "shutter",
+          "says": "open_first",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "pattern",
+          "not": {
+            "arg": "pattern"
+          },
+          "says": "different_pattern"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "pattern",
+          "to": {
+            "arg": "pattern"
+          },
+          "event": "chamber_turned"
+        }
+      ],
+      "takes": {
+        "pattern": {
+          "type": "value",
+          "of": [
+            "star",
+            "flower",
+            "snowflake",
+            "fan",
+            "wheel",
+            "hexagon"
+          ]
+        }
+      }
+    },
+    "close_eyepiece": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "shutter",
+          "says": "already_closed",
+          "is": false
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "shutter",
+          "to": true,
+          "event": "eyepiece_closed"
+        }
+      ]
+    },
+    "open_eyepiece": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "shutter",
+          "says": "already_open",
+          "is": true
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "shutter",
+          "to": false,
+          "event": "eyepiece_opened"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:kaleidoscope",
+    "table": [
+      {
+        "part": "knob",
+        "field": "pattern",
+        "do": "rotate",
+        "axis": "z",
+        "at": {
+          "star": 0,
+          "flower": 60000,
+          "snowflake": 120000,
+          "fan": 180000,
+          "wheel": 240000,
+          "hexagon": 300000
+        },
+        "over_us": 600000
+      },
+      {
+        "part": "lid",
+        "field": "shutter",
+        "do": "show",
+        "at": {
+          "true": 1,
+          "false": 0
+        }
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            450,
+            0
+          ],
+          "size": [
+            100,
+            900,
+            100
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            900,
+            0
+          ],
+          "size": [
+            480,
+            40,
+            360
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            1080,
+            0
+          ],
+          "r": 80,
+          "h": 300,
+          "segments": 16,
+          "tint": "dark",
+          "roll": 90000
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            1080,
+            140
+          ],
+          "r": 88,
+          "h": 30,
+          "segments": 16,
+          "tint": "gold",
+          "roll": 90000,
+          "role": "knob"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1080,
+            -155
+          ],
+          "size": [
+            130,
+            130,
+            12
+          ],
+          "tint": "dark",
+          "role": "lid"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -50,
+            1080,
+            -165
+          ],
+          "size": [
+            16,
+            60,
+            8
+          ],
+          "tint": "blue",
+          "when": "@pattern=star"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -30,
+            1080,
+            -165
+          ],
+          "size": [
+            16,
+            60,
+            8
+          ],
+          "tint": "red",
+          "when": "@pattern=flower"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -10,
+            1080,
+            -165
+          ],
+          "size": [
+            16,
+            60,
+            8
+          ],
+          "tint": "blue",
+          "when": "@pattern=snowflake"
+        },
+        {
+          "kind": "box",
+          "at": [
+            10,
+            1080,
+            -165
+          ],
+          "size": [
+            16,
+            60,
+            8
+          ],
+          "tint": "red",
+          "when": "@pattern=fan"
+        },
+        {
+          "kind": "box",
+          "at": [
+            30,
+            1080,
+            -165
+          ],
+          "size": [
+            16,
+            60,
+            8
+          ],
+          "tint": "blue",
+          "when": "@pattern=wheel"
+        },
+        {
+          "kind": "box",
+          "at": [
+            50,
+            1080,
+            -165
+          ],
+          "size": [
+            16,
+            60,
+            8
+          ],
+          "tint": "red",
+          "when": "@pattern=hexagon"
+        }
+      ],
+      "palette": {
+        "wood": "#79563c",
+        "dark": "#292d36",
+        "paper": "#f6e7c4",
+        "red": "#ce6452",
+        "blue": "#5184a6",
+        "gold": "#d6b34c"
+      },
+      "tags": [
+        "optical",
+        "toy",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "card": "A mounted kaleidoscope: turn its chamber to arrange six coloured patterns.",
+    "optical": "optical",
+    "empty_hands": "Empty your hands before operating this mounted optical toy.",
+    "open_first": "Open the eyepiece before turning the chamber.",
+    "different_pattern": "The chamber already shows that pattern; choose another detent.",
+    "already_closed": "The eyepiece is already closed.",
+    "already_open": "The eyepiece is already open.",
+    "howto_play": "Open the eyepiece, choose a different chamber pattern, then close the eyepiece."
+  },
+  "card": {
+    "text": "card",
+    "category": "optical",
+    "synonyms": []
+  },
+  "howtos": {
+    "play": {
+      "text": "howto_play",
+      "steps": [
+        {
+          "form": "turn_chamber"
+        },
+        {
+          "form": "close_eyepiece"
+        },
+        {
+          "form": "open_eyepiece"
+        }
+      ]
+    }
+  }
+}
