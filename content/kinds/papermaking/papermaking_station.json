@@ -249,14 +249,16 @@
         {
           "need": "state",
           "field": "mat_fibre",
-          "is": 10,
-          "says": "mat_mismatch"
+          "says": "mat_mismatch",
+          "at_least": 10,
+          "at_most": 10
         },
         {
           "need": "state",
           "field": "mat_water",
-          "is": 400,
-          "says": "mat_mismatch"
+          "says": "mat_mismatch",
+          "at_least": 400,
+          "at_most": 400
         },
         {
           "need": "room"
@@ -317,14 +319,16 @@
         {
           "need": "state",
           "field": "mat_fibre",
-          "is": 10,
-          "says": "mat_mismatch"
+          "says": "mat_mismatch",
+          "at_least": 10,
+          "at_most": 10
         },
         {
           "need": "state",
           "field": "mat_water",
-          "is": 100,
-          "says": "mat_mismatch"
+          "says": "mat_mismatch",
+          "at_least": 100,
+          "at_most": 100
         },
         {
           "need": "hand",
@@ -373,14 +377,16 @@
         {
           "need": "state",
           "field": "mat_fibre",
-          "is": 10,
-          "says": "mat_mismatch"
+          "says": "mat_mismatch",
+          "at_least": 10,
+          "at_most": 10
         },
         {
           "need": "state",
           "field": "mat_water",
-          "is": 100,
-          "says": "mat_mismatch"
+          "says": "mat_mismatch",
+          "at_least": 100,
+          "at_most": 100
         },
         {
           "need": "room"
@@ -441,14 +447,16 @@
         {
           "need": "state",
           "field": "mat_fibre",
-          "is": 10,
-          "says": "mat_mismatch"
+          "says": "mat_mismatch",
+          "at_least": 10,
+          "at_most": 10
         },
         {
           "need": "state",
           "field": "mat_water",
-          "is": 20,
-          "says": "mat_mismatch"
+          "says": "mat_mismatch",
+          "at_least": 20,
+          "at_most": 20
         },
         {
           "need": "slot_free",

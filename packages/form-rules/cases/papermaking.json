@@ -585,7 +585,7 @@
             "fields": {
               "fibre": 20,
               "water": 800,
-              "mat_fibre": 0,
+              "mat_fibre": 9,
               "mat_water": 400,
               "drain_water": 0,
               "stage": 1
@@ -643,7 +643,7 @@
               "fibre": 20,
               "water": 800,
               "mat_fibre": 10,
-              "mat_water": 0,
+              "mat_water": 399,
               "drain_water": 0,
               "stage": 1
             },
@@ -979,7 +979,7 @@
             "fields": {
               "fibre": 20,
               "water": 800,
-              "mat_fibre": 0,
+              "mat_fibre": 9,
               "mat_water": 100,
               "drain_water": 300,
               "stage": 2
@@ -1037,7 +1037,7 @@
               "fibre": 20,
               "water": 800,
               "mat_fibre": 10,
-              "mat_water": 0,
+              "mat_water": 99,
               "drain_water": 300,
               "stage": 2
             },
@@ -1317,7 +1317,7 @@
             "fields": {
               "fibre": 20,
               "water": 800,
-              "mat_fibre": 0,
+              "mat_fibre": 9,
               "mat_water": 100,
               "drain_water": 300,
               "stage": 3
@@ -1375,7 +1375,7 @@
               "fibre": 20,
               "water": 800,
               "mat_fibre": 10,
-              "mat_water": 0,
+              "mat_water": 99,
               "drain_water": 300,
               "stage": 3
             },
@@ -1711,7 +1711,7 @@
             "fields": {
               "fibre": 20,
               "water": 800,
-              "mat_fibre": 0,
+              "mat_fibre": 9,
               "mat_water": 20,
               "drain_water": 380,
               "stage": 4
@@ -1769,7 +1769,7 @@
               "fibre": 20,
               "water": 800,
               "mat_fibre": 10,
-              "mat_water": 0,
+              "mat_water": 19,
               "drain_water": 380,
               "stage": 4
             },
