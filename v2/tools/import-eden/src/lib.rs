@@ -1487,6 +1487,9 @@ pub struct BodySlot {
     pub at: Vec3,
     /// The slot's stand point (the point its `stand` names), where a body stands to take it and is set back.
     pub stand: Vec3,
+    /// The slot's boarding reach, µm (its `board_mm`; 0 when it has none): when no body can stand at or near its stand
+    /// point (a boat's side afloat), how far from the slot the clear ground it is got onto from may be.
+    pub board: i64,
 }
 
 /// Every slot that admits a body ([`BodySlot`]) on the things of `tree` whose kind's entry (`entries`, `(kind,
@@ -1522,8 +1525,8 @@ pub fn body_slots_of(
     out
 }
 
-/// Each kind's body slots, in the entry's order: (number, lie, at, stand).
-type ByKind<'a> = BTreeMap<&'a str, Vec<(u64, bool, Vec3, Vec3)>>;
+/// Each kind's body slots, in the entry's order: (number, lie, at, stand, boarding reach).
+type ByKind<'a> = BTreeMap<&'a str, Vec<(u64, bool, Vec3, Vec3, i64)>>;
 
 fn body_slots_by_kind(entries: &[(String, replica::rules::json::Value)]) -> ByKind<'_> {
     use replica::rules::json::Value as J;
@@ -1547,7 +1550,11 @@ fn body_slots_by_kind(entries: &[(String, replica::rules::json::Value)]) -> ByKi
                 let stand = d.get("stand").and_then(J::str)?;
                 let stand = um(e.get("points")?.get(stand)?.get("at_mm"))?;
                 let lie = d.get("posture").and_then(J::str) == Some("lie");
-                Some((n, lie, um(d.get("at_mm"))?, stand))
+                let board = match d.get("board_mm") {
+                    Some(J::Int(mm)) => i64::try_from(*mm).ok()?.saturating_mul(1000),
+                    _ => 0,
+                };
+                Some((n, lie, um(d.get("at_mm"))?, stand, board))
             })
             .collect();
         if !found.is_empty() {
@@ -1573,7 +1580,7 @@ fn slots_on(
     // seat is at the thing's own slot of that number (field 13, its def's geometry), its stand point kept at the
     // entry's offset from the seat, on the floor. An entry seat the thing has no slot for is not offered.
     let borrowed = entry != plain(kind);
-    out.extend(found.iter().filter_map(|&(slot, lie, at, stand)| {
+    out.extend(found.iter().filter_map(|&(slot, lie, at, stand, board)| {
         let (at, stand) = if borrowed {
             let own = slot_point(fields, slot)?;
             (
@@ -1589,6 +1596,7 @@ fn slots_on(
             lie,
             at,
             stand,
+            board,
         })
     }));
     found.len()

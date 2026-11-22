@@ -1406,6 +1406,46 @@ fn c22_a2_the_desks_write_ends_done() {
     act_at("74.0,-1.0", "e_0f7fb44b", "eden:write", "c22a2").expect("written, done");
 }
 
+/// #1960 seat approach: a boat afloat is boarded from the bank. Its seat's stand point is on the water, with no ground
+/// within a form's reach of it; the seat's `board_mm` lets the world move it to the nearest clear ground within that of
+/// the seat, from which the straight step onto the seat crosses no other solid (`worldd::places`). Born on the bank, a
+/// Soul rides the boat (a walk to that point, then the sit), rises, and is set down on that ground, the bank.
+fn boards_from_the_bank_and_rises_onto_it(at: &str, today: &str, tag: &str, bank: f64) {
+    let facts = facts_path();
+    let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
+    let (served, mut soul, dir) = serve(&facts, at, tag, im.nodes["world"].scope());
+    let rode = soul.act("eden:ride", Some(im.nodes[today]), BTreeMap::new());
+    println!("ride {today}: {rode:?}");
+    let seated = track(&dir).last().map(|b| (b.2, b.3));
+    let rose = soul.act("eden:rise", None, BTreeMap::new());
+    println!("rise: {rose:?}");
+    let off = track(&dir).last().map(|b| (b.2, b.3));
+    println!("in the seat at {seated:?} m; off it at {off:?} m");
+    drop(served);
+    let _ = std::fs::remove_dir_all(&dir);
+    rode.expect("boarded from the bank, done");
+    rose.expect("rose");
+    let (x, _) = off.expect("the body's track");
+    assert!(
+        x <= bank,
+        "set down on the bank (x <= {bank} m), at {off:?}"
+    );
+}
+
+/// The canal's canoe (today's e_21e423f2, at (136.5, 42.0) m): its bank is 3.5 m west of its back seat.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn a_soul_boards_the_canoe_from_the_bank_and_gets_off_onto_it() {
+    boards_from_the_bank_and_rises_onto_it("132.5,42.0", "e_21e423f2", "seatcanoe", 133.2);
+}
+
+/// The harbour's first rowing boat (today's e_4b754b5c, at (16.0, 166.0) m): its quay is 3.6 m west of its oars.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn a_soul_boards_the_rowing_boat_from_the_quay_and_gets_off_onto_it() {
+    boards_from_the_bank_and_rises_onto_it("11.5,167.0", "e_4b754b5c", "seatrow", 12.7);
+}
+
 /// C22 sweep follow-up: a walk before a sit goes to the seat's own stand point, as the world's places hold it, not
 /// the entry's. The narrowboat's (today's e_13a2e4cf) `towpath` point is on the water by its hull, so no place within
 /// a sit's reach of it can be stood on; `worldd serve` moves the stern's stand point onto the bank, and `ride` (a walk
@@ -1488,34 +1528,9 @@ fn sweep() -> (BTreeMap<String, Vec<String>>, Vec<String>) {
     )
     .expect("the town");
     let mut bodies = worldd::bodies::Bodies::new(town, 50_000).unwrap();
-    // The seats, as `worldd serve` registers them: a stand point a body cannot stand on moved within reach.
-    let (seats, _) = import_eden::body_slots(&bodies.town.tree, &found);
-    for s in &seats {
-        let view = bodies.town.view();
-        let Some((floor, point, facing)) = view.on_floor(s.thing, s.at) else {
-            continue;
-        };
-        let mut place = sim::slots::PlaceAt {
-            thing: s.thing,
-            place: replica::moves::Place {
-                slot: s.slot,
-                height: s.at.y.max(0),
-                stand: [s.stand.x - s.at.x, s.stand.z - s.at.z],
-            },
-            point,
-            facing,
-            floor,
-        };
-        let stand = place.stand().map(|p| Vec3::new(p.x, point.y - s.at.y, p.z));
-        let [w, x, y, z] = facing.parts();
-        let back = Quat::new(w, -x, -y, -z);
-        if let (Ok(stand), Ok(back)) = (stand, back)
-            && view.stand_near(floor, stand, 1, None).is_none()
-            && let Some(clear) = view.stand_near(floor, stand, skills::form_runner::REACH, None)
-            && let Ok(d) = back.rotate(Vec3::new(clear.x - point.x, 0, clear.z - point.z))
-        {
-            place.place.stand = [d.x, d.z];
-        }
+    // The seats, as `worldd serve` registers them (`worldd::places::register`).
+    let (seats, ..) = worldd::places::register(&mut bodies.town, &found);
+    for place in seats {
         let _ = bodies.add_place(place);
     }
     let family = {
