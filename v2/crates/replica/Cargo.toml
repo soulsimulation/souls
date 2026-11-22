@@ -20,5 +20,11 @@ checker = []
 # limit is twice), 0.31.2 adds 0.85 times it.
 wasmi = { version = "=0.31.2", default-features = false, features = ["std"] }
 
+# SHA-256 with the processor's own instructions where it has them (x86-64 SHA-NI, aarch64 SHA2), found at run time,
+# and portable Rust otherwise (#1960, follow-up of #4080). Native only: the WASM build keeps replica's written-out
+# SHA-256 (`ids.rs`), so the module a page loads does not grow. No `asm` feature: Rust alone, no assembler.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+sha2 = { version = "0.10.9", default-features = false }
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen.workspace = true

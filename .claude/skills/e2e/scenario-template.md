@@ -1,7 +1,7 @@
 ---
 id: <kebab-case-id>            # matches the file name without .md
 tier: smoke                    # smoke | regression
-fixture: hello-hamlet          # genesis template under worlds/templates/ (fake minds, fresh data dir)
+fixture: testworld             # the local world v2/tools/dev/run.sh starts (N2's test world, a fresh folder)
 mocks: []                      # third parties the journey touches; local fake minds need none
 critical_path: true            # stop at the first failed step if true
 ---
@@ -10,7 +10,7 @@ critical_path: true            # stop at the first failed step if true
 <One paragraph: the user-visible outcome this scenario protects. This is the acceptance contract.>
 
 ## Preconditions
-- <State that must exist before step 1, e.g. "a fresh hello-hamlet world on a free local port".>
+- <State that must exist before step 1, e.g. "a fresh local world on a free port, signed in as Ada".>
 - Isolated browser context only; never a signed-in personal profile or a production world.
 
 ## Steps
@@ -23,7 +23,7 @@ critical_path: true            # stop at the first failed step if true
    - expect: <e.g. "an object panel titled 'Bench' opens with a Sit action">
    - screenshot: panel.png
 3. <Action that hits the server.>
-   - expect-api: GET /w/<slug>/healthz status 200
+   - expect-api: GET /w/dev/v1/bootstrap status 200
    - expect-console: no errors since step 1 except matching <regex>
 
 ## Proof required
