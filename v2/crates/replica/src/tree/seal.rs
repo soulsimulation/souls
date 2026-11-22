@@ -25,7 +25,9 @@
 //!   rest) and then its children's hashes. The state hash keeps SHA-256 past the head of a node whose head is
 //!   [`HEAD_KEPT`] bytes or more, and while only nodes below it change takes just its children's hashes again: with
 //!   Souls walking on Eden's ground (megabytes of fields), a tick no longer hashes the ground's fields. A change to
-//!   the node itself lets its head go; attaching or taking out a child keeps it.
+//!   the node itself lets its head go; attaching or taking out a child keeps it. Such a node also keeps its
+//!   children's hashes as last taken and SHA-256's state every [`KIDS_STRIDE`] children ([`Head`]), so a tick takes
+//!   again only the children from the first one whose hash changed: the bodies, born last, at the list's end.
 
 use super::{Away, Life, LinkRec, Moved, NONE, NodeRec, Place, R, Tree, Where, refuse, show};
 use crate::effects::{TimerState, read_id};
@@ -39,6 +41,54 @@ use std::collections::{BTreeMap, BTreeSet};
 /// A node's head (its record up to its children) of this many bytes or more is kept between state hashes
 /// ([`Tree::head`]): below it, encoding the record again costs less than keeping a SHA-256 state per node.
 const HEAD_KEPT: usize = 4096;
+/// A kept head marks SHA-256's state at every this many children ([`Head`]).
+const KIDS_STRIDE: usize = 16;
+
+/// A kept head ([`Tree::head`]) and, after it, its node's children's hashes as last taken, with SHA-256's state at
+/// every [`KIDS_STRIDE`]th: a tick that changes children near the end of the list (Souls born last, walking) takes
+/// only the children from the last mark before the first changed one again. The children are compared by value, so
+/// however they changed (a child moved, attached, taken out), what is taken is the record's bytes.
+pub(super) struct Head {
+    /// SHA-256 past the head.
+    sha: Sha256,
+    /// The children's hashes last taken, in order.
+    kids: Vec<Hash>,
+    /// `marks[k]`: SHA-256 past the head, the children's array's own head and the first `k * KIDS_STRIDE` children.
+    marks: Vec<Sha256>,
+}
+
+impl Head {
+    /// The node's hash with these children's hashes (those its record covers, in order), keeping them and the marks.
+    fn take(&mut self, hashes: Vec<Hash>) -> R<Hash> {
+        let same = hashes.len() == self.kids.len() && !self.marks.is_empty();
+        if !same {
+            // Another count is another array head: every child is taken again.
+            let mut sha = self.sha.clone();
+            sha.update(&crate::encode::head(4, hashes.len() as u64));
+            self.marks = vec![sha];
+        }
+        let first = if same {
+            hashes
+                .iter()
+                .zip(&self.kids)
+                .position(|(a, b)| a != b)
+                .unwrap_or(hashes.len())
+        } else {
+            0
+        };
+        let k = (first / KIDS_STRIDE).min(self.marks.len() - 1);
+        self.marks.truncate(k + 1);
+        let mut sha = self.marks[k].clone();
+        for (j, h) in hashes.iter().enumerate().skip(k * KIDS_STRIDE) {
+            sha.update(&bytes_of(&h.to_value())?);
+            if (j + 1) % KIDS_STRIDE == 0 {
+                self.marks.push(sha.clone());
+            }
+        }
+        self.kids = hashes;
+        Ok(Hash::of_taken(sha))
+    }
+}
 
 /// What a seal gives: the records of nodes hashed again, and each audience's record, with their hashes.
 pub struct Sealed {
@@ -214,18 +264,28 @@ impl Tree {
         }
         let mut hashes = Vec::new();
         for c in self.covered(slot) {
-            hashes.push(self.state_node(c)?.to_value());
+            hashes.push(self.state_node(c)?);
         }
-        let mut sha = match self.heads.get(&slot) {
-            Some(head) => head.clone(),
-            None => self.head(slot)?,
+        if !self.heads.contains_key(&slot) {
+            let mut sha = self.head(slot)?;
+            if !self.heads.contains_key(&slot) {
+                let children = Value::Array(hashes.into_iter().map(Hash::to_value).collect());
+                sha.update(&bytes_of(&children)?);
+                return Ok(self.stated(slot, Hash::of_taken(sha)));
+            }
+        }
+        let h = match self.heads.get_mut(&slot) {
+            Some(head) => head.take(hashes)?,
+            None => unreachable!("a head kept above"),
         };
-        let children = bytes_of(&Value::Array(hashes))?;
-        sha.update(&children);
-        let h = Hash::of_taken(sha);
+        Ok(self.stated(slot, h))
+    }
+
+    /// The node's hash for the state hash, now worked out.
+    fn stated(&mut self, slot: u32, h: Hash) -> Hash {
         self.nodes[slot as usize].state = Some(h);
         self.rehashed += 1;
-        Ok(h)
+        h
     }
 
     /// A node's record up to its children, field 10's key included, taken by SHA-256 after its audience's label:
@@ -244,7 +304,14 @@ impl Tree {
         let mut sha = Hash::taking(purpose(rec.audience));
         sha.update(&bytes);
         if bytes.len() >= HEAD_KEPT {
-            self.heads.insert(slot, sha.clone());
+            self.heads.insert(
+                slot,
+                Head {
+                    sha: sha.clone(),
+                    kids: Vec::new(),
+                    marks: Vec::new(),
+                },
+            );
         }
         Ok(sha)
     }

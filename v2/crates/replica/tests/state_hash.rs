@@ -144,6 +144,10 @@ impl Gen {
         match which {
             0 => {
                 let parent = loop {
+                    // With large fields, half the nodes go under the root, as Eden's things under its ground.
+                    if self.big && self.rng.below(2) == 0 {
+                        break self.nodes[0];
+                    }
                     let p = self.rng.pick(&self.nodes);
                     if p == self.nodes[0] || self.at(p).2 < 20 {
                         break p;
@@ -461,14 +465,22 @@ impl Gen {
 }
 
 /// #1960: with large fields, a node's record up to its children is kept between ticks (`Tree::head`) and only its
-/// children's hashes are taken again while nodes below it change. Over 3,000 ticks of generated parts, refused parts
+/// children's hashes are taken again while nodes below it change, from the mark before the first that changed (the
+/// root, with a large field, has dozens of children). Over 3,000 ticks of generated parts, refused parts
 /// that set and undo a large field among them, the state hash so worked out equals the whole tree's, hashed with no
 /// mark and nothing kept, at every tick, and K5's seal's at every 100th.
 #[test]
 fn a_kept_head_gives_the_whole_trees_state_hash_on_every_tick() {
     let mut g = Gen::new(1960);
     g.big = true;
-    let (mut kept, mut refused) = (0usize, 0u64);
+    // The root's own large field: its head is kept, and its many children are taken from their marks.
+    let root = g.nodes[0];
+    let mut set = g.set(root);
+    while !matches!(&set, Change::Set { to: Value::Bytes(b), .. } if b.len() >= 4_096) {
+        set = g.set(root);
+    }
+    g.apply(root, set);
+    let (mut kept, mut refused, mut children) = (0usize, 0u64, 0usize);
     for tick in 0..3_000u64 {
         for _ in 0..1 + g.rng.below(3) {
             g.part();
@@ -480,6 +492,7 @@ fn a_kept_head_gives_the_whole_trees_state_hash_on_every_tick() {
         let got = tree.state_hashes().unwrap();
         assert_eq!(got, tree.state_hashes_whole().unwrap(), "tick {tick}");
         kept = kept.max(tree.heads_kept());
+        children = children.max(tree.children(tree.root()).map_or(0, <[_]>::len));
         if tick % 100 == 99 {
             assert_eq!(
                 tree.seal()
@@ -492,7 +505,10 @@ fn a_kept_head_gives_the_whole_trees_state_hash_on_every_tick() {
             );
         }
     }
-    println!("up to {kept} heads kept; {refused} refused parts");
+    println!(
+        "up to {kept} heads kept, the root's children up to {children}; {refused} refused parts"
+    );
     assert!(kept >= 5, "heads kept: {kept}");
+    assert!(children >= 48, "the root's children: {children}");
     assert!(refused > 300, "refused parts: {refused}");
 }
