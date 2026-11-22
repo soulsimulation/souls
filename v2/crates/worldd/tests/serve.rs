@@ -22,6 +22,23 @@ use sim::log::{FileStore, Log};
 use sim::text::{Grade, Store};
 use worldd::answers::{self, STATE};
 
+thread_local! {
+    /// The acts that had their one progress answer (C20) on this test's thread.
+    static PROGRESSED: std::cell::RefCell<std::collections::BTreeSet<(Vec<u8>, u64)>> =
+        std::cell::RefCell::default();
+}
+
+/// Whether `frame` is an act's progress answer (C20, W11 #4087), which the answer helpers read past. An act has at
+/// most one: a second fails the test.
+fn progress_once(frame: &[u8]) -> bool {
+    let Some(key) = answers::progress_of(frame) else {
+        return false;
+    };
+    let first = PROGRESSED.with(|p| p.borrow_mut().insert(key));
+    assert!(first, "a second progress answer for one act");
+    true
+}
+
 fn worldd() -> Command {
     Command::new(env!("CARGO_BIN_EXE_worldd"))
 }
@@ -269,7 +286,7 @@ fn answer(s: &mut UnixStream) -> (u64, String) {
         s.read_exact(&mut len).expect("an answer");
         let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
         s.read_exact(&mut frame).expect("an answer");
-        if !answers::is_progress(&frame) {
+        if !progress_once(&frame) {
             break frame;
         }
     };

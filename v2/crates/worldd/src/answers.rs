@@ -875,9 +875,10 @@ struct Clock {
     fresh: Vec<(Hash, Vec<u8>)>,
     checked: Vec<(Act, Checks)>,
     replies: Vec<Out>,
-    /// Progress answers (C20), by act: sent after the tick's sync with its answers, as they are, never kept or logged;
-    /// one whose act ends in the same tick is dropped, as its answer says more.
-    progress: Vec<(Id, Vec<Reply>, Vec<u8>)>,
+    /// Progress answers (C20), by act: to whom, its actor and sequence, and the µs it has left. Framed at the tick's
+    /// end with the tick's last version and sent after the tick's sync and its answers, so no stream sees a version go
+    /// back (W11, #4087); never kept or logged; one whose act ends in the same tick is dropped, as its answer says more.
+    progress: Vec<(Id, Vec<Reply>, Actor, u64, Micros)>,
     rows: Vec<Value>,
     effects: Vec<Effect>,
     parts: Vec<Arc<Part>>,
@@ -1265,10 +1266,23 @@ pub fn progress(version: &Value, actor: Actor, sequence: u64, intent: Id, left: 
 
 /// Whether `frame` is a progress answer ([`progress`]: accepted, with the µs left), which an act's own answer follows.
 pub fn is_progress(frame: &[u8]) -> bool {
-    let Ok(d) = decode(frame) else { return false };
-    let Value::Map(m) = d.value else { return false };
-    matches!(m.get(&2), Some(Value::Map(a))
-        if a.get(&3) == Some(&Value::Uint(3)) && matches!(a.get(&LEFT), Some(Value::Uint(_))))
+    progress_of(frame).is_some()
+}
+
+/// A progress answer's actor (its encoding) and sequence, which name its act; `None` for any other frame.
+pub fn progress_of(frame: &[u8]) -> Option<(Vec<u8>, u64)> {
+    let Value::Map(m) = decode(frame).ok()?.value else {
+        return None;
+    };
+    let Some(Value::Map(a)) = m.get(&2) else {
+        return None;
+    };
+    match (a.get(&1), a.get(&2), a.get(&3), a.get(&LEFT)) {
+        (Some(actor), Some(Value::Uint(s)), Some(Value::Uint(3)), Some(Value::Uint(_))) => {
+            Some((encode(actor).ok()?, *s))
+        }
+        _ => None,
+    }
 }
 
 /// The backstop refusal of an intent holding a text that is not a name (#3765).
@@ -3629,16 +3643,20 @@ impl Clock {
     /// its arrival rather than at its arrival deadline (W11, #4087), and the act is due at its run's own deadline from
     /// here on. One whose act ends in this tick is dropped, as its answer says more.
     fn run_started(&mut self, id: Id, due: Micros, now: Micros) {
-        let version = self.version();
         let Some(o) = self.open.get(&id) else {
             return;
         };
         let due = due.min(o.expiry);
         let body = o.body;
-        let frame = progress(&version, o.actor, o.sequence, id, due.saturating_sub(now));
-        let waiters = o.waiters.clone();
+        let answer = (
+            id,
+            o.waiters.clone(),
+            o.actor,
+            o.sequence,
+            due.saturating_sub(now),
+        );
         self.progress.retain(|p| p.0 != id);
-        self.progress.push((id, waiters, frame));
+        self.progress.push(answer);
         self.deadlines.close(body, id);
         self.deadlines.open(body, id, due);
         self.note_with(id, ACT_DEADLINE, None, Some(due), now);
@@ -3959,9 +3977,13 @@ impl Clock {
         let bytes = inputs.as_ref().map_or(0, Vec::len) + record.as_ref().map_or(0, Vec::len);
         let written = u64::from(inputs.is_some()) + u64::from(record.is_some());
         let handed = mark();
+        // Framed now, with the tick's last version: every answer of the tick carries that version or an older one.
+        let version = self.version();
         let progress: Vec<_> = std::mem::take(&mut self.progress)
             .into_iter()
-            .map(|(_, to, frame)| (to, frame))
+            .map(|(id, to, actor, sequence, left)| {
+                (to, progress(&version, actor, sequence, id, left))
+            })
             .collect();
         if written > 0 || !replies.is_empty() || !progress.is_empty() || !parts.is_empty() {
             let _ = self.answers.send(Tick {
@@ -4841,7 +4863,8 @@ pub fn start<S: Storage + 'static>(
                         if !lockstep {
                             b.wait = Some(planner_wait.unwrap_or(tick / 10));
                         }
-                        b.schedule = planned_at;
+                        // Kept with any the bodies were made with (a test's late planner, W11 #4087); the log's win.
+                        b.schedule.extend(planned_at);
                         // Those the log last had in a seat sit in it again, the seat held (K18c).
                         for (body, why) in b.seat_placed(&placed, at) {
                             eprintln!(
