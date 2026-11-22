@@ -1,13 +1,14 @@
 import test from 'node:test';
 import assert from 'node:assert/strict';
+import { spawn } from 'node:child_process';
 import { createServer } from 'node:http';
 import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { join } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { cdnCacheEligible, cdnRuleExpression, originCacheClass, originCacheProblem } from './origin-cache.mjs';
 import { checkSoulGame } from '../world-launcher/deploy/caddy/check-soul-game.mjs';
 import { EDGE_SNAPSHOT_CACHE } from '../../apps/server/src/edge-snapshot.ts';
-import { createOrigin } from '../../v2/tools/origin/origin.mjs';
 
 const IMM = 'public, max-age=31536000, immutable', DAYSWR = 'public, max-age=86400, stale-while-revalidate=604800';
 const r = (path, cc, cf = 'HIT', status = 200) => ({ path, status, headers: { ...(cc ? { 'cache-control': cc } : {}), ...(cf ? { 'cf-cache-status': cf } : {}) } });
@@ -156,7 +157,11 @@ test('#4159 A2: through a stand-in CDN from the rule and the real viewers\' orig
   const dir = mkdtempSync(join(tmpdir(), 'cdn-4159-')), g = 'ab'.repeat(32), at = (...p) => join(dir, 'eden', ...p);
   mkdirSync(at('g', g), { recursive: true });
   writeFileSync(at('pointer'), 'p1'); writeFileSync(at('g', g, 'baseline'), 'base'); writeFileSync(at('g', g, '0'), 'part0');
-  const origin = await listen(createOrigin(dir).server);
+  // The viewers' origin as production runs it (v2/tools/origin/origin.mjs), started as its own program (K14: nothing
+  // outside v2/ imports from it).
+  const child = spawn(process.execPath, [fileURLToPath(new URL('../../v2/tools/origin/origin.mjs', import.meta.url)), dir, '0', '127.0.0.1'], { env: { ...process.env, ORIGIN_PROCESSES: '1' }, stdio: ['ignore', 'pipe', 'inherit'] });
+  const port = await new Promise((ok, no) => { let out = ''; child.stdout.on('data', (d) => { out += d; const m = /origin (\d+)\n/.exec(out); if (m) ok(m[1]); }); child.on('exit', (c) => no(new Error(`origin ended (${c})`))); });
+  const origin = { url: `http://127.0.0.1:${port}`, close: () => child.kill('SIGKILL') };
   // Caddy's `handle_path /s/*` hands the origin the path without /s.
   const cdn = await standInCdn(origin.url, cdnCacheEligible, (u) => u.replace(/^\/s\//, '/'));
   const get = async (p) => { const r = await fetch(cdn.url + p); return { status: r.status, cf: r.headers.get('cf-cache-status'), cc: r.headers.get('cache-control'), cookie: r.headers.get('set-cookie'), body: await r.text() }; };
