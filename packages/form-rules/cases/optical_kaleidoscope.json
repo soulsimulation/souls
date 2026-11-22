@@ -382,7 +382,7 @@
           "t1": {
             "kind": "eden:kaleidoscope",
             "fields": {
-              "pattern": 0,
+              "pattern": 6,
               "shutter": false
             }
           },

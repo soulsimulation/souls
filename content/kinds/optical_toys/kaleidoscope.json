@@ -147,8 +147,9 @@
         {
           "need": "state",
           "field": "pattern",
-          "is": 5,
-          "says": "turn_to_last"
+          "says": "turn_to_last",
+          "at_least": 5,
+          "at_most": 5
         },
         {
           "need": "hand",
