@@ -296,7 +296,12 @@ fn visible_report(agents: &[Sent], seen: &stream::Seen) -> serde_like::Obj {
         .collect();
     let mut lag: Vec<u64> = seen.lag_ms.iter().map(|&l| l.max(0) as u64).collect();
     lag.sort_unstable();
-    let within = |ms: u64| ratio(all.iter().filter(|&&w| w <= ms).count() as u64, all.len() as u64);
+    let within = |ms: u64| {
+        ratio(
+            all.iter().filter(|&&w| w <= ms).count() as u64,
+            all.len() as u64,
+        )
+    };
     serde_like::Obj::new()
         .n("taken", taken as f64)
         .n("seen", all.len() as f64)
@@ -344,7 +349,10 @@ fn stuck_report(agents: &[Sent]) -> serde_like::Obj {
         .n("refusedOnly", refused.len() as f64)
         .n("stallMaxMs", stalls.last().copied().unwrap_or(0) as f64)
         .n("lastAnswerAgeP50Ms", at_share(&ages, 0.5) as f64)
-        .n("lastAnswerAgeMaxMs", ages.last().copied().unwrap_or(0) as f64)
+        .n(
+            "lastAnswerAgeMaxMs",
+            ages.last().copied().unwrap_or(0) as f64,
+        )
         .raw("stuckAgents", format!("[{}]", stuck.join(", ")))
         .raw("refusedOnlyAgents", format!("[{}]", refused.join(", ")))
 }
@@ -487,8 +495,7 @@ fn heard(bytes: &[u8]) -> Heard {
         (Some(Value::Uint(s)), Some(Value::Uint(k @ (1 | 3)))) => Heard::Receipt(
             *s,
             *k,
-            a.get(&4)
-                .and_then(|v| replica::effects::read_id(v).ok()),
+            a.get(&4).and_then(|v| replica::effects::read_id(v).ok()),
         ),
         (Some(Value::Uint(s)), Some(Value::Uint(2))) => Heard::Refused(*s, name(a.get(&4))),
         (_, Some(Value::Uint(5))) => Heard::Error(name(a.get(&4))),
@@ -658,15 +665,20 @@ async fn agent(
     // #4154: a take's thing, by sequence, held once its receipt comes; the last answer of any kind, the last receipt
     // or acceptance, and the last act sent.
     let mut takes: HashMap<u64, Id> = HashMap::new();
-    let (mut last_answer, mut last_ok, mut last_sent): (Option<Instant>, Option<Instant>, Option<Instant>) =
-        (None, None, None);
+    let (mut last_answer, mut last_ok, mut last_sent): (
+        Option<Instant>,
+        Option<Instant>,
+        Option<Instant>,
+    ) = (None, None, None);
     loop {
         // #4154's stuck measure, at every step: acts outstanding with no answer since the later of the last answer and
         // the oldest outstanding send; acts sent with only refusals since the last receipt.
         let now = Instant::now();
         if let Some(oldest) = pending.values().map(|p| p.0).min() {
             let since = last_answer.map_or(oldest, |l| l.max(oldest));
-            out.stall_ms = out.stall_ms.max(now.duration_since(since).as_millis() as u64);
+            out.stall_ms = out
+                .stall_ms
+                .max(now.duration_since(since).as_millis() as u64);
         }
         if let (Some(sent), Some(first)) = (last_sent, start) {
             let since = last_ok.unwrap_or(first);
@@ -1360,7 +1372,11 @@ async fn main() {
                 if let Some(x) = c.stand_in {
                     *stand_ins.entry(x).or_insert(0u64) += 1;
                 }
-                (Name::new(&c.verb).expect("a verb is a name"), c.target, c.arg)
+                (
+                    Name::new(&c.verb).expect("a verb is a name"),
+                    c.target,
+                    c.arg,
+                )
             }
         };
         let due = start + Duration::from_millis(act.at_ms + think(act.agent));
@@ -1465,7 +1481,9 @@ async fn main() {
         .raw("viewers", serde_like::list(&viewers))
         .raw(
             "visible",
-            visible.as_ref().map_or("null".into(), serde_like::Obj::json),
+            visible
+                .as_ref()
+                .map_or("null".into(), serde_like::Obj::json),
         )
         .raw("stuck", stuck.json());
     if let Some(v) = &visible {

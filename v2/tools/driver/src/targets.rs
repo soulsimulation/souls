@@ -273,7 +273,11 @@ impl Targets {
             self.things.len(),
             self.takeable.len(),
             self.bodies.len(),
-            self.body_forms.keys().cloned().collect::<Vec<_>>().join(" "),
+            self.body_forms
+                .keys()
+                .cloned()
+                .collect::<Vec<_>>()
+                .join(" "),
             self.gestures.len(),
             forms.join(", ")
         )
@@ -330,7 +334,8 @@ impl Choice {
         };
         let body = t.bodies.get(&soul).copied();
         let holding = *self.holding.lock().unwrap_or_else(|e| e.into_inner());
-        let standing_form = |k: &str| k == "take" || (BODY_FORMS.contains(&k) && k != "look_at" && k != "point");
+        let standing_form =
+            |k: &str| k == "take" || (BODY_FORMS.contains(&k) && k != "look_at" && k != "point");
         let out = match kind {
             "say" if !speech => return None,
             "say" => Chosen {

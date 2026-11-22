@@ -39,7 +39,9 @@ pub struct Seen {
 
 /// An HTTP/1.1 GET (one connection a request, as `--remote` is plain): the status and the body.
 async fn get(base: &str, path: &str) -> Result<(u16, Vec<u8>), String> {
-    let rest = base.strip_prefix("http://").ok_or("--stream: give http://")?;
+    let rest = base
+        .strip_prefix("http://")
+        .ok_or("--stream: give http://")?;
     let (host, dir) = rest.split_once('/').unwrap_or((rest, ""));
     let mut s = tokio::net::TcpStream::connect(host)
         .await
