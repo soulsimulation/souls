@@ -321,7 +321,9 @@ impl Store for S3 {
         }
         req = match when {
             When::Absent => req.header("if-none-match", "*"),
-            When::Is(e) => req.header("if-match", format!("\"{e}\"")),
+            // The ETag bare, without quotes: R2 refuses a quoted `If-Match` on PutObject (412 even when it is the
+            // object's ETag) and takes the bare one (#1960).
+            When::Is(e) => req.header("if-match", e),
         };
         let res = req.send(bytes).or_else(|e| unreachable(key, e))?;
         status(res.status().as_u16(), key)?;

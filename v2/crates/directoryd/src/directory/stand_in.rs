@@ -165,7 +165,8 @@ fn answer(
                     if now.is_none() {
                         return (404, None, Vec::new());
                     }
-                    now.as_deref() == Some(e.trim_matches('"'))
+                    // As R2 does (#1960): only the bare ETag matches; a quoted one is refused (412).
+                    now.as_deref() == Some(e.as_str())
                 }
                 (None, None) => true,
             };
