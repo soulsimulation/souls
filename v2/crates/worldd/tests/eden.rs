@@ -1498,6 +1498,16 @@ fn sweep() -> (BTreeMap<String, Vec<String>>, Vec<String>) {
         {
             let stand = place.stand().unwrap();
             let gap = sim::spots::flat(stand, place.point);
+            let st = Vec3::new(stand.x, place.point.y - place.place.height, stand.z);
+            let dry = bodies.town.map.spot(place.floor, st).is_some();
+            let near = bodies.town.view().stand_near(place.floor, st, 1, None);
+            let any = bodies.town.view().on_any_ground(place.floor, st);
+            println!(
+                "SEAT  floor {} at ({}, {}) dry {dry} near1 {near:?} any {any}",
+                show(place.floor),
+                st.x,
+                st.z
+            );
             println!(
                 "SEAT {} slot {} stand {:?} -> {} um from the slot",
                 show(place.thing),
