@@ -37,11 +37,34 @@ pub const FORMS: &[(&str, &[&str])] = &[
     ("play-music", &["play_music", "play"]),
 ];
 
+/// The body forms of the real Soul Actions mix (#4154) that take one thing: each shape kind's form, sent on the Soul's
+/// own body with the thing as its argument (C2's `[[name, id]]`, the name the entry's `takes` gives).
+pub const BODY_FORMS: &[&str] = &["go_to", "look_at", "touch", "lean_on", "wait_by", "point"];
+
+/// The gestures of the mix (#4154): the body forms with no argument, taken in turn.
+pub const GESTURES: &[&str] = &[
+    "wave",
+    "clap",
+    "cheer",
+    "bow",
+    "shrug",
+    "stretch",
+    "jump",
+    "dance",
+    "look_around",
+];
+
 /// What a Soul can be sent on this world.
 #[derive(Debug, Default, PartialEq)]
 pub struct Targets {
     pub walk: Vec<Id>,
     pub sit: Vec<Id>,
+    /// #4154: every thing with an entry (a body form's argument), the things whose own `take` form needs nothing
+    /// held, the body's one-thing forms (form → verb and argument name) and its gestures (verbs).
+    pub things: Vec<Id>,
+    pub takeable: Vec<Id>,
+    pub body_forms: BTreeMap<String, (String, String)>,
+    pub gestures: Vec<String>,
     /// Shape kind → the form's verb (`<entry namespace>:<form>`) and the things that offer it; none: the Soul's body.
     pub forms: BTreeMap<String, (String, Vec<Id>)>,
     /// Each Soul's body in the copy (its `souls:body-of` link), for a body family's form.
@@ -139,9 +162,35 @@ impl Targets {
                 forms.insert((*kind).to_owned(), f);
             }
         }
+        let mut body_forms = BTreeMap::new();
+        for f in BODY_FORMS {
+            let Some(fam) = families.iter().find(|e| has_form(e, f)) else {
+                continue;
+            };
+            let arg = fam
+                .get("forms")
+                .and_then(|x| x.get(f))
+                .and_then(|x| x.get("takes"))
+                .and_then(Json::obj)
+                .and_then(|t| t.first().map(|(k, _)| k.clone()));
+            if let Some(arg) = arg {
+                body_forms.insert((*f).to_owned(), (format!("{}:{f}", entry_ns(fam)), arg));
+            }
+        }
+        let gestures = GESTURES
+            .iter()
+            .filter_map(|g| {
+                let fam = families.iter().find(|e| has_form(e, g))?;
+                Some(format!("{}:{g}", entry_ns(fam)))
+            })
+            .collect();
         Targets {
             walk,
             sit: ids(&|e| has_slot(e, Some("sit"))),
+            things: ids(&|_| true),
+            takeable: ids(&|e| has_form(e, "take")),
+            body_forms,
+            gestures,
             forms,
             bodies: seen.bodies.clone(),
         }
@@ -162,10 +211,15 @@ impl Targets {
             })
             .collect();
         format!(
-            "{{\"walk\": {}, \"sit\": {}, \"bodies\": {}, \"forms\": {{{}}}}}",
+            "{{\"walk\": {}, \"sit\": {}, \"things\": {}, \"takeable\": {}, \"bodies\": {}, \"bodyForms\": {:?}, \
+             \"gestures\": {}, \"forms\": {{{}}}}}",
             self.walk.len(),
             self.sit.len(),
+            self.things.len(),
+            self.takeable.len(),
             self.bodies.len(),
+            self.body_forms.keys().cloned().collect::<Vec<_>>().join(" "),
+            self.gestures.len(),
             forms.join(", ")
         )
     }
@@ -176,6 +230,8 @@ impl Targets {
 pub struct Chosen {
     pub verb: String,
     pub target: Option<Id>,
+    /// A body form's one argument, by the name its entry takes it under (#4154).
+    pub arg: Option<(String, Id)>,
     pub words: bool,
     /// `None`, or the shape kind a walk stands in for.
     pub stand_in: Option<String>,
@@ -186,6 +242,9 @@ pub struct Chosen {
 #[derive(Default, Clone)]
 pub struct Choice {
     pub seated: Arc<AtomicBool>,
+    /// #4154: the thing the Soul's last take put in its hand (set by the agent's socket on the take's receipt); its
+    /// next take puts it down first (`hands:set-down`, `v2/docs/intents.md` rule 16).
+    pub holding: Arc<std::sync::Mutex<Option<Id>>>,
     n: u64,
 }
 
@@ -210,17 +269,45 @@ impl Choice {
         let plain = |verb: String, target| Chosen {
             verb,
             target,
+            arg: None,
             words: false,
             stand_in: None,
         };
+        let body = t.bodies.get(&soul).copied();
+        let holding = *self.holding.lock().unwrap_or_else(|e| e.into_inner());
+        let standing_form = |k: &str| k == "take" || (BODY_FORMS.contains(&k) && k != "look_at" && k != "point");
         let out = match kind {
             "say" if !speech => return None,
             "say" => Chosen {
                 verb: verb.to_owned(),
                 target: None,
+                arg: None,
                 words: true,
                 stand_in: None,
             },
+            // #4154's mix: a body form needs the Soul standing (all but a look or a point), so a seated one rises.
+            k if seated && standing_form(k) => {
+                sit(false);
+                plain(format!("{ns}:rise"), None)
+            }
+            "take" if holding.is_some() => {
+                *self.holding.lock().unwrap_or_else(|e| e.into_inner()) = None;
+                plain("hands:set-down".to_owned(), holding)
+            }
+            "take" if !t.takeable.is_empty() => {
+                plain(format!("{ns}:take"), pick(&t.takeable, a * 13 + n))
+            }
+            k if t.body_forms.contains_key(k) && body.is_some() && !t.things.is_empty() => {
+                let (v, arg) = &t.body_forms[k];
+                Chosen {
+                    arg: pick(&t.things, a * 11 + n).map(|x| (arg.clone(), x)),
+                    ..plain(v.clone(), body)
+                }
+            }
+            "gesture" if body.is_some() && !t.gestures.is_empty() => {
+                let g = &t.gestures[((a + n) % t.gestures.len() as u64) as usize];
+                plain(g.clone(), body)
+            }
             "walk" | "sit" if seated => {
                 sit(false);
                 plain(format!("{ns}:rise"), None)

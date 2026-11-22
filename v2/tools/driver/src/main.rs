@@ -21,6 +21,7 @@
 // The repeat rule's map ban (K12, v2/clippy.toml) is `sim`'s; the driver's maps are lookups.
 #![allow(clippy::disallowed_types)]
 
+mod stream;
 mod targets;
 
 use std::collections::{BTreeMap, HashMap};
@@ -135,6 +136,15 @@ struct Sent {
     /// X10's trace lines (`--trace`): `ack|dup <agent> <sequence> <unix ms>`, `first <agent> <sequence> <sent unix ms>
     /// <answer unix ms> <receipt or refusal name>`, `gone|back <agent> <unix ms>`.
     trace: Vec<String>,
+    /// #4154: each act the world took (a receipt or an acceptance naming its intent's id): the id, its send in Unix ms
+    /// and its verb, joined with the public stream's first sight of it.
+    taken: Vec<(Id, u64, String)>,
+    /// #4154's stuck measure: the longest time this agent had an act sent and unanswered with no answer at all, and
+    /// the longest time it acted with only refusals back (its Soul moves nowhere); ms. Its last answer's age at the
+    /// end of the schedule, ms.
+    stall_ms: u64,
+    refused_only_ms: u64,
+    last_answer_age_ms: u64,
 }
 
 /// One minute of the run's answers: receipts (a receipt, or a move's acceptance), refusals and errors by name, and
@@ -252,6 +262,86 @@ fn by_tenth(agents: &[Sent], late_ms: u64) -> Vec<serde_like::Obj> {
         .collect()
 }
 
+/// #4154: act wait to the public stream. Every act the world took (its receipt or acceptance named the intent's id)
+/// joined with the arrival of the first part showing an effect it caused: how many were seen, the wait's quantiles
+/// (ms, from the send), the same per verb, and the stream's own lag per part.
+fn visible_report(agents: &[Sent], seen: &stream::Seen) -> serde_like::Obj {
+    let q = |v: &[u64], s: f64| at_share(v, s) as f64;
+    let mut all = Vec::new();
+    let mut by_verb: BTreeMap<&str, (u64, Vec<u64>)> = BTreeMap::new();
+    for (id, sent_ms, verb) in agents.iter().flat_map(|a| a.taken.iter()) {
+        let e = by_verb.entry(verb.as_str()).or_default();
+        e.0 += 1;
+        if let Some(at) = seen.first.get(id) {
+            let w = at.saturating_sub(*sent_ms);
+            all.push(w);
+            e.1.push(w);
+        }
+    }
+    all.sort_unstable();
+    let taken: u64 = by_verb.values().map(|v| v.0).sum();
+    let verbs: Vec<String> = by_verb
+        .iter_mut()
+        .map(|(k, (n, w))| {
+            w.sort_unstable();
+            format!(
+                "{k:?}: {{\"taken\": {n}, \"seen\": {}, \"p50Ms\": {}, \"p95Ms\": {}}}",
+                w.len(),
+                q(w, 0.5),
+                q(w, 0.95)
+            )
+        })
+        .collect();
+    let mut lag: Vec<u64> = seen.lag_ms.iter().map(|&l| l.max(0) as u64).collect();
+    lag.sort_unstable();
+    let within = |ms: u64| ratio(all.iter().filter(|&&w| w <= ms).count() as u64, all.len() as u64);
+    serde_like::Obj::new()
+        .n("taken", taken as f64)
+        .n("seen", all.len() as f64)
+        .n("seenShare", ratio(all.len() as u64, taken))
+        .n("p50Ms", q(&all, 0.5))
+        .n("p95Ms", q(&all, 0.95))
+        .n("p99Ms", q(&all, 0.99))
+        .n("maxMs", all.last().copied().unwrap_or(0) as f64)
+        .n("within100Ms", within(100))
+        .n("within300Ms", within(300))
+        .n("streamParts", seen.parts as f64)
+        .n("streamReadsFailed", seen.failed as f64)
+        .n("streamLagP50Ms", q(&lag, 0.5))
+        .n("streamLagP95Ms", q(&lag, 0.95))
+        .n("streamLagMaxMs", lag.last().copied().unwrap_or(0) as f64)
+        .raw("byVerb", format!("{{{}}}", verbs.join(", ")))
+}
+
+/// #4154's stuck measure, per agent from its own answers (not the gateway's receipts file, which logs few Souls):
+/// stuck is an act outstanding with no answer for 60 s or more; refused-only is 60 s or more of acting with nothing
+/// but refusals back. Also the agents' last answer's age at the end of the schedule.
+fn stuck_report(agents: &[Sent]) -> serde_like::Obj {
+    const STUCK_MS: u64 = 60_000;
+    let who = |f: &dyn Fn(&Sent) -> bool| -> Vec<String> {
+        agents
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| f(a))
+            .map(|(k, _)| k.to_string())
+            .collect()
+    };
+    let stuck = who(&|a| a.stall_ms >= STUCK_MS);
+    let refused = who(&|a| a.refused_only_ms >= STUCK_MS);
+    let mut ages: Vec<u64> = agents.iter().map(|a| a.last_answer_age_ms).collect();
+    ages.sort_unstable();
+    let mut stalls: Vec<u64> = agents.iter().map(|a| a.stall_ms).collect();
+    stalls.sort_unstable();
+    serde_like::Obj::new()
+        .n("stuck", stuck.len() as f64)
+        .n("refusedOnly", refused.len() as f64)
+        .n("stallMaxMs", stalls.last().copied().unwrap_or(0) as f64)
+        .n("lastAnswerAgeP50Ms", at_share(&ages, 0.5) as f64)
+        .n("lastAnswerAgeMaxMs", ages.last().copied().unwrap_or(0) as f64)
+        .raw("stuckAgents", format!("[{}]", stuck.join(", ")))
+        .raw("refusedOnlyAgents", format!("[{}]", refused.join(", ")))
+}
+
 /// A tiny JSON writer, so the report needs no dependency.
 mod serde_like {
     pub struct Obj(Vec<(String, String)>);
@@ -322,11 +412,23 @@ fn basis(remote: bool) -> Value {
 /// served world (`targets.rs`), none on the driver's own.
 const WORDS: &str = "(load test)";
 
-fn intent(actor: Actor, verb: &Name, target: Option<Id>, sequence: u64, basis: &Value) -> Vec<u8> {
+fn intent(
+    actor: Actor,
+    verb: &Name,
+    target: Option<Id>,
+    arg: Option<&(String, Id)>,
+    sequence: u64,
+    basis: &Value,
+) -> Vec<u8> {
     let mut parameters = BTreeMap::new();
     if verb.as_str().ends_with(":say") {
         let words = Value::Map([(23, Value::Bytes(WORDS.as_bytes().to_vec()))].into());
         parameters.insert(1, words);
+    }
+    // A body form's thing argument (#4154): parameter 1 as C2's `[[name, id]]`, as the client's `wireIntent` sends it.
+    if let Some((name, id)) = arg {
+        let pair = Value::Array(vec![Value::Bytes(name.as_bytes().to_vec()), id.to_value()]);
+        parameters.insert(1, Value::Array(vec![pair]));
     }
     let i = Intent {
         actor,
@@ -350,7 +452,8 @@ fn intent(actor: Actor, verb: &Name, target: Option<Id>, sequence: u64, basis: &
 #[derive(Debug, PartialEq)]
 enum Heard {
     /// An act's receipt, or a move's acceptance (`replica::intents::Answer` kinds 1 and 3), by its sequence and kind.
-    Receipt(u64, u64),
+    /// With the intent's id the world minted (field 4), which its effects name as their cause (#4154).
+    Receipt(u64, u64, Option<Id>),
     /// An act refused, by its sequence and the refusal's name (kind 2).
     Refused(u64, String),
     /// Bytes the gateway could not read (kind 5), or a gateway's own word (`{4: name}`, a token refused): an error.
@@ -374,7 +477,12 @@ fn heard(bytes: &[u8]) -> Heard {
         return Heard::Other;
     };
     match (a.get(&2), a.get(&3)) {
-        (Some(Value::Uint(s)), Some(Value::Uint(k @ (1 | 3)))) => Heard::Receipt(*s, *k),
+        (Some(Value::Uint(s)), Some(Value::Uint(k @ (1 | 3)))) => Heard::Receipt(
+            *s,
+            *k,
+            a.get(&4)
+                .and_then(|v| replica::effects::read_id(v).ok()),
+        ),
         (Some(Value::Uint(s)), Some(Value::Uint(2))) => Heard::Refused(*s, name(a.get(&4))),
         (_, Some(Value::Uint(5))) => Heard::Error(name(a.get(&4))),
         _ => Heard::Other,
@@ -394,6 +502,7 @@ struct Due {
     sequence: u64,
     start: Instant,
     verb: Name,
+    target: Option<Id>,
 }
 
 /// How long an agent waits for its answers after its last act: a form's receipt comes when it ends, seconds later.
@@ -492,6 +601,7 @@ async fn agent(
     gate: Arc<Semaphore>,
     ready: Arc<AtomicU64>,
     seated: Arc<std::sync::atomic::AtomicBool>,
+    holding: Arc<std::sync::Mutex<Option<Id>>>,
     warm: Option<(Vec<u8>, u64)>,
     faults: Faults,
     mut acts: mpsc::UnboundedReceiver<Job>,
@@ -512,7 +622,7 @@ async fn agent(
         while ok && Instant::now() < until {
             match tokio::time::timeout_at(until.into(), rx.next()).await {
                 Ok(Some(Ok(Message::Binary(b)))) => match heard(&b) {
-                    Heard::Receipt(s, _) | Heard::Refused(s, _) if s == sequence => break,
+                    Heard::Receipt(s, _, _) | Heard::Refused(s, _) if s == sequence => break,
                     _ => {}
                 },
                 Ok(Some(Ok(_))) => {}
@@ -538,7 +648,27 @@ async fn agent(
     let mut start: Option<Instant> = None;
     let mut drain_until: Option<Instant> = None;
     let mut drop_at: Option<Instant> = None;
+    // #4154: a take's thing, by sequence, held once its receipt comes; the last answer of any kind, the last receipt
+    // or acceptance, and the last act sent.
+    let mut takes: HashMap<u64, Id> = HashMap::new();
+    let (mut last_answer, mut last_ok, mut last_sent): (Option<Instant>, Option<Instant>, Option<Instant>) =
+        (None, None, None);
     loop {
+        // #4154's stuck measure, at every step: acts outstanding with no answer since the later of the last answer and
+        // the oldest outstanding send; acts sent with only refusals since the last receipt.
+        let now = Instant::now();
+        if let Some(oldest) = pending.values().map(|p| p.0).min() {
+            let since = last_answer.map_or(oldest, |l| l.max(oldest));
+            out.stall_ms = out.stall_ms.max(now.duration_since(since).as_millis() as u64);
+        }
+        if let (Some(sent), Some(first)) = (last_sent, start) {
+            let since = last_ok.unwrap_or(first);
+            if sent > since {
+                out.refused_only_ms = out
+                    .refused_only_ms
+                    .max(sent.duration_since(since).as_millis() as u64);
+            }
+        }
         if drain_until
             .is_some_and(|u| Instant::now() >= u || (pending.is_empty() && retry.is_empty()))
         {
@@ -563,7 +693,11 @@ async fn agent(
                     }
                     start = Some(d.start);
                     let now = Instant::now();
+                    last_sent = Some(now);
                     pending.insert(d.sequence, (now, unix_ms(), d.bytes.clone()));
+                    if let (true, Some(t)) = (d.verb.as_str().ends_with(":take"), d.target) {
+                        takes.insert(d.sequence, t);
+                    }
                     verb_of.insert(d.sequence, d.verb);
                     out.late_us.push(now.duration_since(d.at).as_micros() as u64);
                     if tx.send(Message::Binary(d.bytes.into())).await.is_err() {
@@ -571,14 +705,34 @@ async fn agent(
                         lost = Some(true);
                     }
                 }
-                None => drain_until = Some(Instant::now() + Duration::from_secs(DRAIN_S)),
+                None => {
+                    let now = Instant::now();
+                    out.last_answer_age_ms = now
+                        .duration_since(last_answer.or(start).unwrap_or(now))
+                        .as_millis() as u64;
+                    drain_until = Some(now + Duration::from_secs(DRAIN_S));
+                }
             },
             m = rx.next() => match m {
                 Some(Ok(Message::Binary(b))) => {
                     let now = Instant::now();
                     let s0 = start.unwrap_or(now);
-                    match heard(&b) {
-                        Heard::Receipt(s, kind) => {
+                    let h = heard(&b);
+                    if matches!(h, Heard::Receipt(..) | Heard::Refused(..)) {
+                        last_answer = Some(now);
+                    }
+                    if matches!(h, Heard::Receipt(..)) {
+                        last_ok = Some(now);
+                    }
+                    match h {
+                        Heard::Receipt(s, kind, iid) => {
+                            if let (1, Some(t)) = (kind, takes.remove(&s)) {
+                                *holding.lock().unwrap_or_else(|e| e.into_inner()) = Some(t);
+                            }
+                            if let (Some(id), Some((_, sent_ms, _))) = (iid, pending.get(&s)) {
+                                let verb = verb_of.get(&s).map_or("?".into(), |v| v.as_str().to_owned());
+                                out.taken.push((id, *sent_ms, verb));
+                            }
                             if kind == 1 && !receipted.insert(s) {
                                 out.duplicates += 1;
                                 out.trace.push(format!("dup {k} {s} {}", unix_ms()));
@@ -779,6 +933,9 @@ struct Args {
     viewers: Option<(u32, f64, PathBuf)>,
     slow_read_ms: u64,
     trace: Option<PathBuf>,
+    /// #4154: the public stream's folder as the viewers' origin serves it (`http://host:port/path/`), read as a page
+    /// reads it, for act wait to the first thing a viewer can see (`stream.rs`).
+    stream: Option<String>,
 }
 
 /// `<share>@<second>+<seconds away>`, as `--drop` takes it.
@@ -831,6 +988,7 @@ fn args() -> Option<Args> {
         },
         slow_read_ms: num("--slow-read-ms", 2000)?,
         trace: get("--trace").map(PathBuf::from),
+        stream: get("--stream").cloned(),
     })
 }
 
@@ -1076,9 +1234,10 @@ async fn main() {
             gate.clone(),
             ready.clone(),
             c.seated.clone(),
+            c.holding.clone(),
             entries
                 .is_some()
-                .then(|| (intent(actors[k], &rise, None, first, &based), first)),
+                .then(|| (intent(actors[k], &rise, None, None, first, &based), first)),
             faults,
             rx,
         )));
@@ -1115,6 +1274,18 @@ async fn main() {
 
     // The run: each act at its due time (plus its agent's thinking delay), whatever came back before it.
     let (cpu0, start) = (cpu_us(), Instant::now());
+    // #4154: the public stream read as a viewer reads it, on a thread of its own so it never delays a send.
+    let stop_reading = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let reader = a.stream.clone().map(|base| {
+        let stop = stop_reading.clone();
+        std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("a runtime")
+                .block_on(stream::read(base, stop))
+        })
+    });
     // X10: the viewers, each following one Soul's body (viewer i the i-th Soul's, round the agents), until the run's
     // answers are in.
     let mut watching = Vec::new();
@@ -1158,8 +1329,8 @@ async fn main() {
         };
         let k = act.agent as usize;
         // On a served world: the act's target from the world's ids, a rise first when seated, a say withheld.
-        let (verb, target) = match &aimed {
-            None => (verbs[v].clone(), None),
+        let (verb, target, arg) = match &aimed {
+            None => (verbs[v].clone(), None, None),
             Some(t) => {
                 let body = match actors[k] {
                     Actor::Soul(b) => b,
@@ -1174,7 +1345,7 @@ async fn main() {
                 if let Some(x) = c.stand_in {
                     *stand_ins.entry(x).or_insert(0u64) += 1;
                 }
-                (Name::new(&c.verb).expect("a verb is a name"), c.target)
+                (Name::new(&c.verb).expect("a verb is a name"), c.target, c.arg)
             }
         };
         let due = start + Duration::from_millis(act.at_ms + think(act.agent));
@@ -1184,10 +1355,11 @@ async fn main() {
         *by_verb.entry(verb.as_str().to_owned()).or_default() += 1;
         let _ = chans[k].send(Job::Act(Due {
             at: due,
-            bytes: intent(actors[k], &verb, target, sequence[k], &based),
+            bytes: intent(actors[k], &verb, target, arg.as_ref(), sequence[k], &based),
             sequence: sequence[k],
             start,
             verb,
+            target,
         }));
     }
     drop(chans);
@@ -1198,6 +1370,10 @@ async fn main() {
         sent.push(x);
     }
     let (wall, cpu) = (start.elapsed(), cpu_us() - cpu0);
+    stop_reading.store(true, Ordering::Relaxed);
+    let seen = reader.map(|r| r.join().unwrap_or_default());
+    let visible = seen.as_ref().map(|v| visible_report(&sent, v));
+    let stuck = stuck_report(&sent);
     for mut c in children {
         let _ = c.kill();
         let _ = c.wait();
@@ -1271,7 +1447,30 @@ async fn main() {
         .n("duplicateReceipts", duplicates as f64)
         .n("resent", resent as f64)
         .n("restartingAnswers", restarting as f64)
-        .raw("viewers", serde_like::list(&viewers));
+        .raw("viewers", serde_like::list(&viewers))
+        .raw(
+            "visible",
+            visible.as_ref().map_or("null".into(), serde_like::Obj::json),
+        )
+        .raw("stuck", stuck.json());
+    if let Some(v) = &visible {
+        println!(
+            "Visible on the public stream: {} of {} acts the world took; act wait p50 {} ms, p95 {} ms, p99 {} ms; \
+             the stream's own lag p50 {} ms, p95 {} ms",
+            v.get("seen").unwrap_or(0.0),
+            v.get("taken").unwrap_or(0.0),
+            v.get("p50Ms").unwrap_or(0.0),
+            v.get("p95Ms").unwrap_or(0.0),
+            v.get("p99Ms").unwrap_or(0.0),
+            v.get("streamLagP50Ms").unwrap_or(0.0),
+            v.get("streamLagP95Ms").unwrap_or(0.0),
+        );
+    }
+    println!(
+        "Stuck: {} agents with an act unanswered 60 s or more; {} acting 60 s or more with only refusals",
+        stuck.get("stuck").unwrap_or(0.0),
+        stuck.get("refusedOnly").unwrap_or(0.0),
+    );
     let on_time = total.get("onTimeShare").unwrap_or(0.0);
     println!(
         "Acts: {} achieved of {} intended ({:.1} %){}; {:.1} % sent within {} ms of due (p50 {} ms, p99 {} ms, max {} ms); \

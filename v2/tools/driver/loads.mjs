@@ -15,7 +15,51 @@ import { SHAPES, describe, schedule, summarize } from '../../../tools/bench/capa
 export const VERBS = Object.freeze({
   walk: 'eden:walk', sit: 'eden:sit', 'sit-ground': 'eden:sit-ground', read: 'eden:read', eat: 'eden:eat',
   'play-music': 'eden:play-music', gesture: 'eden:wave', say: 'eden:say',
+  // #4154's mix: the body's one-thing forms and take (then put, `hands:set-down`); the driver picks the real form.
+  go_to: 'eden:go_to', look_at: 'eden:look_at', touch: 'eden:touch', lean_on: 'eden:lean_on', wait_by: 'eden:wait_by',
+  point: 'eden:point', take: 'eden:take',
 });
+
+/** The real Soul Actions mix (stage 2a, #4154), shares in percent: say most (people talk most), then walks and the
+ *  body's forms on Eden's things, take and put, sits, gestures. Each act's kind is drawn from it by a hash of the
+ *  seed, the agent and the act, so the same name and seed give the same schedule. */
+export const MIX = Object.freeze({
+  say: 22, walk: 14, gesture: 10, take: 10, go_to: 8, sit: 8, look_at: 7, point: 6, touch: 6, lean_on: 5, wait_by: 4,
+});
+
+/** The mix's rate arms: every agent acting every 4 s (125 acts a second at 500), and a burst at 2.7 times that. */
+export const RATES = Object.freeze({ every4: 4, burst: 1.5 });
+
+/** FNV-1a of a text, as a share of 1. */
+const share = (t) => { let h = 2166136261; for (let i = 0; i < t.length; i++) h = Math.imul(h ^ t.charCodeAt(i), 16777619); return (h >>> 0) / 2 ** 32; };
+const MIX_KINDS = Object.entries(MIX), MIX_TOTAL = MIX_KINDS.reduce((s, [, w]) => s + w, 0);
+const mixKind = (u) => { let x = u * MIX_TOTAL; for (const [k, w] of MIX_KINDS) { if ((x -= w) < 0) return k; } return MIX_KINDS.at(-1)[0]; };
+
+/** A schedule with its acts' kinds redrawn from MIX. */
+function mixed(sched, seed) {
+  const agents = sched.agents.map((a) => ({ ...a, acts: a.acts.map((x, j) => ({ ...x, kind: mixKind(share(`${seed}|mix|${a.i}|${j}`)) })) }));
+  return { ...sched, agents, summary: summarize(agents, sched.seconds) };
+}
+
+/** A mix load (#4154): `mix-<n>-<even|uneven>-<every4|burst>`. Even is `uniform` at the arm's pace; uneven is the
+ *  shared `event` shape with every agent present, its time scaled so it intends as many acts a second as the even
+ *  arm (so the two differ in how the load falls, not how much: skewed rates, crowds and bursts kept). */
+function mixLoad(n, arm, rate) {
+  const pace = RATES[rate];
+  return (_, s, seed) => {
+    if (arm === 'even') return mixed(schedule('uniform', n, s, seed, { actSec: pace }), seed);
+    const ev = { ...SHAPES.agents.event, name: 'event-all', presence: { value: 1, source: '#4154: every agent present' } };
+    // The event shape's rate is not linear in its length (its crowds and runs), so the scale is found in a few steps.
+    const squeeze = (k) => {
+      const long = schedule(ev, n, Math.ceil(s * k), seed);
+      const agents = long.agents.map((a) => ({ ...a, stays: [[0, s]], acts: a.acts.filter((x) => x.at / k < s).map((x) => ({ ...x, at: x.at / k })) }));
+      return { ...long, shape: `event-all x${k.toFixed(2)}`, seconds: s, agents, acts: agents.reduce((t, a) => t + a.acts.length, 0) };
+    };
+    let k = n / pace / Math.max(1e-9, schedule(ev, n, s, seed).summary.meanPerS), sq = squeeze(k);
+    for (let i = 0; i < 4 && Math.abs(sq.acts / s - n / pace) > 0.02 * (n / pace); i++) sq = squeeze((k *= (n / pace) / (sq.acts / s)));
+    return mixed(sq, seed);
+  };
+}
 
 /** `target`: a copy of `event` with every agent present, every walk to the gathered place and a median agent acting
  *  every 18 s, about 5,000 acts a minute at 1,000 agents. Its name is part of the seed. */
@@ -57,6 +101,8 @@ export const LOADS = Object.freeze({
     return merge(schedule(TARGET, n - fast, s, seed), schedule('uniform', fast, s, seed, { actSec: 0.5 }), 'stretch');
   },
   ...Object.assign({}, ...LADDER.map(ladder)),
+  ...Object.fromEntries(LADDER.flatMap((n) => ['even', 'uneven'].flatMap((arm) => Object.keys(RATES)
+    .map((rate) => [`mix-${n}-${arm}-${rate}`, mixLoad(n, arm, rate)])))),
 });
 
 /** The driver's file: the describe line, then `<due ms> <agent> <kind> <verb>` a line, by due time then agent. */
