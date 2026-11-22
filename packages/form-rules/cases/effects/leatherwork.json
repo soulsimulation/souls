@@ -1,0 +1,915 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Two blanks and four lace lengths become exactly two actual pouches; refused finishing retains paid WIP, loaded custody is real, retrieval preserves the pouch and duplicate receipts apply once.",
+  "cases": [
+    {
+      "name": "two_paid_pouches_loaded_carry_and_retrieval",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:leatherworking_bench",
+            "fields": {
+              "leather_blanks": 2,
+              "lace_lengths": 4,
+              "cut": false,
+              "punched": false,
+              "laced": 0
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "tomato": {
+            "kind": "eden:tomato"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": "tomato",
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {}
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "actor": "b1",
+          "act": {
+            "this": "bench",
+            "form": "punch_seam"
+          },
+          "receipt": "early-punch",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        },
+        {
+          "actor": "b1",
+          "act": {
+            "this": "bench",
+            "form": "cut_panels"
+          },
+          "receipt": "cut1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "leather_blanks",
+                "n": 28,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "cut",
+                "n": 30,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:blank_cut",
+                "node": "bench",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:panels_cut",
+                "node": "bench",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "actor": "b1",
+          "act": {
+            "this": "bench",
+            "form": "cut_panels"
+          },
+          "receipt": "duplicate-cut1",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        },
+        {
+          "actor": "b1",
+          "act": {
+            "this": "bench",
+            "form": "lace_side"
+          },
+          "receipt": "early-lace1",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 1
+          }
+        },
+        {
+          "actor": "b1",
+          "act": {
+            "this": "bench",
+            "form": "punch_seam"
+          },
+          "receipt": "punch1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "punched",
+                "n": 31,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:seam_punched",
+                "node": "bench",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "actor": "b1",
+          "act": {
+            "this": "bench",
+            "form": "punch_seam"
+          },
+          "receipt": "duplicate-punch1",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 1
+          }
+        },
+        {
+          "actor": "b1",
+          "act": {
+            "this": "bench",
+            "form": "finish_pouch"
+          },
+          "receipt": "early-finish1",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 2
+          }
+        },
+        {
+          "actor": "b1",
+          "act": {
+            "this": "bench",
+            "form": "lace_side"
+          },
+          "receipt": "lace1-1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "lace_lengths",
+                "n": 29,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "laced",
+                "n": 32,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:lace_used",
+                "node": "bench",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:side_laced",
+                "node": "bench",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "actor": "b1",
+          "act": {
+            "this": "bench",
+            "form": "lace_side"
+          },
+          "receipt": "lace1-2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "lace_lengths",
+                "n": 29,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "laced",
+                "n": 32,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:lace_used",
+                "node": "bench",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:side_laced",
+                "node": "bench",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "actor": "b1",
+          "act": {
+            "this": "bench",
+            "form": "lace_side"
+          },
+          "receipt": "extra-lace1",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 2
+          }
+        },
+        {
+          "actor": "b1",
+          "act": {
+            "this": "bench",
+            "form": "finish_pouch"
+          },
+          "receipt": "finish1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "cut",
+                "n": 30,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "punched",
+                "n": 31,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "laced",
+                "n": 32,
+                "to": 0
+              },
+              {
+                "change": "create",
+                "node": "finish1.0",
+                "kind": "eden:open_leather_pouch",
+                "to": {
+                  "node": "bench",
+                  "slot": "out"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:panels_cleared",
+                "node": "bench",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:punching_cleared",
+                "node": "bench",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:lacing_cleared",
+                "node": "bench",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:pouch_finished",
+                "node": "bench",
+                "changes": [
+                  3
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "actor": "b1",
+          "act": {
+            "this": "bench",
+            "form": "cut_panels"
+          },
+          "receipt": "cut2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "leather_blanks",
+                "n": 28,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "cut",
+                "n": 30,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:blank_cut",
+                "node": "bench",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:panels_cut",
+                "node": "bench",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "actor": "b1",
+          "act": {
+            "this": "bench",
+            "form": "cut_panels"
+          },
+          "receipt": "duplicate-cut2",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        },
+        {
+          "actor": "b1",
+          "act": {
+            "this": "bench",
+            "form": "lace_side"
+          },
+          "receipt": "early-lace2",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 1
+          }
+        },
+        {
+          "actor": "b1",
+          "act": {
+            "this": "bench",
+            "form": "punch_seam"
+          },
+          "receipt": "punch2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "punched",
+                "n": 31,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:seam_punched",
+                "node": "bench",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "actor": "b1",
+          "act": {
+            "this": "bench",
+            "form": "punch_seam"
+          },
+          "receipt": "duplicate-punch2",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 1
+          }
+        },
+        {
+          "actor": "b1",
+          "act": {
+            "this": "bench",
+            "form": "finish_pouch"
+          },
+          "receipt": "early-finish2",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 2
+          }
+        },
+        {
+          "actor": "b1",
+          "act": {
+            "this": "bench",
+            "form": "lace_side"
+          },
+          "receipt": "lace2-1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "lace_lengths",
+                "n": 29,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "laced",
+                "n": 32,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:lace_used",
+                "node": "bench",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:side_laced",
+                "node": "bench",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "actor": "b1",
+          "act": {
+            "this": "bench",
+            "form": "lace_side"
+          },
+          "receipt": "lace2-2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "lace_lengths",
+                "n": 29,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "laced",
+                "n": 32,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:lace_used",
+                "node": "bench",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:side_laced",
+                "node": "bench",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "actor": "b1",
+          "act": {
+            "this": "bench",
+            "form": "lace_side"
+          },
+          "receipt": "extra-lace2",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 2
+          }
+        },
+        {
+          "actor": "b1",
+          "act": {
+            "this": "bench",
+            "form": "finish_pouch"
+          },
+          "receipt": "full-output",
+          "expect": {
+            "verdict": "no",
+            "reason": "slot_taken",
+            "need": 3
+          }
+        },
+        {
+          "actor": "b2",
+          "act": {
+            "this": "finish1.0",
+            "form": "stow",
+            "args": {
+              "item": "tomato"
+            }
+          },
+          "receipt": "store-tomato",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "tomato",
+                "to": {
+                  "node": "finish1.0",
+                  "slot": "inside"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:stowed",
+                "node": "finish1.0",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "actor": "b1",
+          "act": {
+            "this": "finish1.0",
+            "form": "take"
+          },
+          "receipt": "take-loaded",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "finish1.0",
+                "to": {
+                  "node": "b1",
+                  "hand": "left"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "finish1.0",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "actor": "b1",
+          "act": {
+            "this": "bench",
+            "form": "finish_pouch"
+          },
+          "receipt": "held-output",
+          "expect": {
+            "verdict": "no",
+            "reason": "hand_not_empty",
+            "need": 4
+          }
+        },
+        {
+          "actor": "b2",
+          "act": {
+            "this": "bench",
+            "form": "finish_pouch"
+          },
+          "receipt": "finish2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "cut",
+                "n": 30,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "punched",
+                "n": 31,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "laced",
+                "n": 32,
+                "to": 0
+              },
+              {
+                "change": "create",
+                "node": "finish2.0",
+                "kind": "eden:open_leather_pouch",
+                "to": {
+                  "node": "bench",
+                  "slot": "out"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:panels_cleared",
+                "node": "bench",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:punching_cleared",
+                "node": "bench",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:lacing_cleared",
+                "node": "bench",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:pouch_finished",
+                "node": "bench",
+                "changes": [
+                  3
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "actor": "b1",
+          "act": {
+            "this": "bench",
+            "form": "finish_pouch"
+          },
+          "receipt": "duplicate-finish",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        },
+        {
+          "actor": "b2",
+          "act": {
+            "this": "finish2.0",
+            "form": "take"
+          },
+          "receipt": "take-second",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "finish2.0",
+                "to": {
+                  "node": "b2",
+                  "hand": "left"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "finish2.0",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "actor": "b2",
+          "act": {
+            "this": "tomato",
+            "form": "take"
+          },
+          "receipt": "retrieve-tomato",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "tomato",
+                "to": {
+                  "node": "b2",
+                  "hand": "right"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "tomato",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "actor": "b1",
+          "act": {
+            "this": "bench",
+            "form": "cut_panels"
+          },
+          "receipt": "exhausted",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 1
+          }
+        }
+      ],
+      "after": {
+        "bench": {
+          "kind": "eden:leatherworking_bench",
+          "fields": {
+            "leather_blanks": 0,
+            "lace_lengths": 0,
+            "cut": 0,
+            "punched": 0,
+            "laced": 0
+          },
+          "slots": {
+            "out": []
+          }
+        },
+        "b1": {
+          "hands": {
+            "left": "finish1.0",
+            "right": null
+          },
+          "effector_mm": [
+            -200,
+            1000,
+            450
+          ]
+        },
+        "b2": {
+          "hands": {
+            "left": "finish2.0",
+            "right": "tomato"
+          },
+          "effector_mm": [
+            -200,
+            1000,
+            450
+          ]
+        },
+        "finish1.0": {
+          "kind": "eden:open_leather_pouch",
+          "fields": {},
+          "slots": {
+            "inside": []
+          }
+        },
+        "finish2.0": {
+          "kind": "eden:open_leather_pouch",
+          "fields": {}
+        },
+        "tomato": {
+          "kind": "eden:tomato"
+        }
+      }
+    }
+  ]
+}
