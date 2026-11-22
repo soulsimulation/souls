@@ -1,0 +1,859 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Two complete volumes consume exactly two paper sets, six thread lengths and two cover pairs; admission refusal spends nothing, output is physical and taken, and each successful receipt is idempotent.",
+  "cases": [
+    {
+      "name": "two_paid_volumes_and_no_third",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 6,
+              "cover_pairs": 2,
+              "gathered": false,
+              "pierced": false,
+              "stitches": 0
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {}
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "bench",
+            "form": "pierce_spine"
+          },
+          "receipt": "premature",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        },
+        {
+          "act": {
+            "this": "bench",
+            "form": "collate_signatures"
+          },
+          "receipt": "collate1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "paper_sets",
+                "n": 28,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "gathered",
+                "n": 31,
+                "to": true
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:paper_collated",
+                "node": "bench",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:signatures_gathered",
+                "node": "bench",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "bench",
+            "form": "collate_signatures"
+          },
+          "receipt": "duplicate1",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        },
+        {
+          "act": {
+            "this": "bench",
+            "form": "sew_pass"
+          },
+          "receipt": "unpierced1",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 1
+          }
+        },
+        {
+          "act": {
+            "this": "bench",
+            "form": "pierce_spine"
+          },
+          "receipt": "pierce1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "pierced",
+                "n": 32,
+                "to": true
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:spine_pierced",
+                "node": "bench",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "bench",
+            "form": "pierce_spine"
+          },
+          "receipt": "repierce1",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 1
+          }
+        },
+        {
+          "act": {
+            "this": "bench",
+            "form": "sew_pass"
+          },
+          "receipt": "sew11",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "thread_lengths",
+                "n": 29,
+                "to": 5
+              },
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "stitches",
+                "n": 33,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:thread_used",
+                "node": "bench",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:sewing_pass_finished",
+                "node": "bench",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "bench",
+            "form": "sew_pass"
+          },
+          "receipt": "sew12",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "thread_lengths",
+                "n": 29,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "stitches",
+                "n": 33,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:thread_used",
+                "node": "bench",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:sewing_pass_finished",
+                "node": "bench",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "bench",
+            "form": "sew_pass"
+          },
+          "receipt": "sew13",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "thread_lengths",
+                "n": 29,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "stitches",
+                "n": 33,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:thread_used",
+                "node": "bench",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:sewing_pass_finished",
+                "node": "bench",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "bench",
+            "form": "sew_pass"
+          },
+          "receipt": "extra1",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 2
+          }
+        },
+        {
+          "act": {
+            "this": "bench",
+            "form": "case_volume"
+          },
+          "receipt": "case1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "cover_pairs",
+                "n": 30,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "gathered",
+                "n": 31,
+                "to": false
+              },
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "pierced",
+                "n": 32,
+                "to": false
+              },
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "stitches",
+                "n": 33,
+                "to": 0
+              },
+              {
+                "change": "create",
+                "node": "case1.0",
+                "kind": "eden:cloth_bound_volume",
+                "to": {
+                  "node": "bench",
+                  "slot": "out"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:covers_used",
+                "node": "bench",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:work_cleared",
+                "node": "bench",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:piercing_cleared",
+                "node": "bench",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:sewing_cleared",
+                "node": "bench",
+                "changes": [
+                  3
+                ]
+              },
+              {
+                "event": "eden:volume_bound",
+                "node": "bench",
+                "changes": [
+                  4
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "bench",
+            "form": "collate_signatures"
+          },
+          "receipt": "collate2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "paper_sets",
+                "n": 28,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "gathered",
+                "n": 31,
+                "to": true
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:paper_collated",
+                "node": "bench",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:signatures_gathered",
+                "node": "bench",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "bench",
+            "form": "collate_signatures"
+          },
+          "receipt": "duplicate2",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 0
+          }
+        },
+        {
+          "act": {
+            "this": "bench",
+            "form": "sew_pass"
+          },
+          "receipt": "unpierced2",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 1
+          }
+        },
+        {
+          "act": {
+            "this": "bench",
+            "form": "pierce_spine"
+          },
+          "receipt": "pierce2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "pierced",
+                "n": 32,
+                "to": true
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:spine_pierced",
+                "node": "bench",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "bench",
+            "form": "pierce_spine"
+          },
+          "receipt": "repierce2",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 1
+          }
+        },
+        {
+          "act": {
+            "this": "bench",
+            "form": "sew_pass"
+          },
+          "receipt": "sew21",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "thread_lengths",
+                "n": 29,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "stitches",
+                "n": 33,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:thread_used",
+                "node": "bench",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:sewing_pass_finished",
+                "node": "bench",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "bench",
+            "form": "sew_pass"
+          },
+          "receipt": "sew22",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "thread_lengths",
+                "n": 29,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "stitches",
+                "n": 33,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:thread_used",
+                "node": "bench",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:sewing_pass_finished",
+                "node": "bench",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "bench",
+            "form": "sew_pass"
+          },
+          "receipt": "sew23",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "thread_lengths",
+                "n": 29,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "stitches",
+                "n": 33,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:thread_used",
+                "node": "bench",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:sewing_pass_finished",
+                "node": "bench",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "bench",
+            "form": "sew_pass"
+          },
+          "receipt": "extra2",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 2
+          }
+        },
+        {
+          "act": {
+            "this": "bench",
+            "form": "case_volume"
+          },
+          "receipt": "occupied",
+          "expect": {
+            "verdict": "no",
+            "reason": "slot_taken",
+            "need": 4
+          }
+        },
+        {
+          "actor": "b2",
+          "act": {
+            "this": "case1.0",
+            "form": "take"
+          },
+          "receipt": "take1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "case1.0",
+                "to": {
+                  "node": "b2",
+                  "hand": "left"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "case1.0",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "bench",
+            "form": "case_volume"
+          },
+          "receipt": "case2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "cover_pairs",
+                "n": 30,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "gathered",
+                "n": 31,
+                "to": false
+              },
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "pierced",
+                "n": 32,
+                "to": false
+              },
+              {
+                "change": "set",
+                "node": "bench",
+                "field": "stitches",
+                "n": 33,
+                "to": 0
+              },
+              {
+                "change": "create",
+                "node": "case2.0",
+                "kind": "eden:cloth_bound_volume",
+                "to": {
+                  "node": "bench",
+                  "slot": "out"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:covers_used",
+                "node": "bench",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:work_cleared",
+                "node": "bench",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:piercing_cleared",
+                "node": "bench",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:sewing_cleared",
+                "node": "bench",
+                "changes": [
+                  3
+                ]
+              },
+              {
+                "event": "eden:volume_bound",
+                "node": "bench",
+                "changes": [
+                  4
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "bench",
+            "form": "collate_signatures"
+          },
+          "receipt": "empty_paper",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs",
+            "need": 1
+          }
+        },
+        {
+          "actor": "b2",
+          "act": {
+            "this": "case2.0",
+            "form": "take"
+          },
+          "receipt": "take2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "reparent",
+                "node": "case2.0",
+                "to": {
+                  "node": "b2",
+                  "hand": "right"
+                }
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:taken",
+                "node": "case2.0",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "bench": {
+          "fields": {
+            "paper_sets": 0,
+            "thread_lengths": 0,
+            "cover_pairs": 0,
+            "gathered": false,
+            "pierced": false,
+            "stitches": 0
+          },
+          "slots": {
+            "out": []
+          }
+        },
+        "b2": {
+          "hands": {
+            "left": "case1.0",
+            "right": "case2.0"
+          }
+        }
+      }
+    }
+  ]
+}

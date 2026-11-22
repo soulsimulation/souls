@@ -1,0 +1,862 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:bookbinding_bench",
+  "owner": "thing",
+  "state": {
+    "paper_sets": {
+      "n": 28,
+      "type": "int",
+      "unit": "count",
+      "default": 2,
+      "min": 0,
+      "max": 2,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "thread_lengths": {
+      "n": 29,
+      "type": "int",
+      "unit": "count",
+      "default": 6,
+      "min": 0,
+      "max": 6,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "cover_pairs": {
+      "n": 30,
+      "type": "int",
+      "unit": "count",
+      "default": 2,
+      "min": 0,
+      "max": 2,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "gathered": {
+      "n": 31,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "pierced": {
+      "n": 32,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "stitches": {
+      "n": 33,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 3,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        750
+      ],
+      "yaw_mdeg": 180000
+    },
+    "collation": {
+      "role": "contact",
+      "at_mm": [
+        -150,
+        940,
+        240
+      ]
+    },
+    "spine": {
+      "role": "contact",
+      "at_mm": [
+        -280,
+        940,
+        200
+      ]
+    },
+    "punch": {
+      "role": "contact",
+      "at_mm": [
+        -315,
+        1028,
+        120
+      ]
+    },
+    "casing": {
+      "role": "contact",
+      "at_mm": [
+        -150,
+        940,
+        240
+      ]
+    }
+  },
+  "slots": {
+    "out": {
+      "admits": "thing",
+      "kinds": [
+        "eden:cloth_bound_volume"
+      ],
+      "most": 1,
+      "at_mm": [
+        360,
+        925,
+        180
+      ],
+      "fits_mm": [
+        280,
+        80,
+        210
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1100,
+      1050,
+      760
+    ]
+  },
+  "forms": {
+    "collate_signatures": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "gathered",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "paper_sets",
+          "at_least": 1,
+          "says": "no_paper"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "collation"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "craft",
+          "at": "collation"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "paper_sets",
+          "by": -1,
+          "event": "paper_collated"
+        },
+        {
+          "change": "set",
+          "field": "gathered",
+          "to": true,
+          "event": "signatures_gathered"
+        }
+      ]
+    },
+    "pierce_spine": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "gathered",
+          "says": "collate_first",
+          "is": true
+        },
+        {
+          "need": "state",
+          "field": "pierced",
+          "says": "already_pierced",
+          "is": false
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "punch"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "punch"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "pierced",
+          "to": true,
+          "event": "spine_pierced"
+        }
+      ]
+    },
+    "sew_pass": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "gathered",
+          "says": "collate_first",
+          "is": true
+        },
+        {
+          "need": "state",
+          "field": "pierced",
+          "says": "pierce_first",
+          "is": true
+        },
+        {
+          "need": "state",
+          "field": "stitches",
+          "at_most": 2,
+          "says": "sewing_complete"
+        },
+        {
+          "need": "state",
+          "field": "thread_lengths",
+          "at_least": 1,
+          "says": "no_thread"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "spine"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "craft",
+          "at": "spine"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "thread_lengths",
+          "by": -1,
+          "event": "thread_used"
+        },
+        {
+          "change": "set",
+          "field": "stitches",
+          "by": 1,
+          "event": "sewing_pass_finished"
+        }
+      ]
+    },
+    "case_volume": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "gathered",
+          "says": "collate_first",
+          "is": true
+        },
+        {
+          "need": "state",
+          "field": "pierced",
+          "says": "pierce_first",
+          "is": true
+        },
+        {
+          "need": "state",
+          "field": "stitches",
+          "at_least": 3,
+          "says": "sew_first"
+        },
+        {
+          "need": "state",
+          "field": "cover_pairs",
+          "at_least": 1,
+          "says": "no_covers"
+        },
+        {
+          "need": "slot_free",
+          "slot": "out",
+          "says": "clear_output"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "casing"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "craft",
+          "at": "casing"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "cover_pairs",
+          "by": -1,
+          "event": "covers_used"
+        },
+        {
+          "change": "set",
+          "field": "gathered",
+          "to": false,
+          "event": "work_cleared"
+        },
+        {
+          "change": "set",
+          "field": "pierced",
+          "to": false,
+          "event": "piercing_cleared"
+        },
+        {
+          "change": "set",
+          "field": "stitches",
+          "to": 0,
+          "event": "sewing_cleared"
+        },
+        {
+          "change": "create",
+          "kind": "eden:cloth_bound_volume",
+          "into": "out",
+          "event": "volume_bound"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:bookbinding_bench",
+    "table": [
+      {
+        "part": "thread_supply",
+        "field": "thread_lengths",
+        "do": "scale",
+        "axis": "y",
+        "range": [
+          0,
+          6
+        ],
+        "to": [
+          0,
+          1000
+        ]
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            900,
+            0
+          ],
+          "size": [
+            1100,
+            40,
+            760
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -480,
+            440,
+            -310
+          ],
+          "size": [
+            70,
+            880,
+            70
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -480,
+            440,
+            310
+          ],
+          "size": [
+            70,
+            880,
+            70
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            480,
+            440,
+            -310
+          ],
+          "size": [
+            70,
+            880,
+            70
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            480,
+            440,
+            310
+          ],
+          "size": [
+            70,
+            880,
+            70
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -150,
+            927,
+            200
+          ],
+          "size": [
+            270,
+            14,
+            200
+          ],
+          "tint": "paper",
+          "when": "@gathered=true"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -150,
+            938,
+            200
+          ],
+          "size": [
+            260,
+            8,
+            190
+          ],
+          "tint": "paper",
+          "when": "@gathered=true"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -150,
+            944,
+            200
+          ],
+          "size": [
+            260,
+            4,
+            190
+          ],
+          "tint": "paper",
+          "when": "@gathered=true"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -280,
+            948,
+            130
+          ],
+          "r": 5,
+          "h": 3,
+          "segments": 8,
+          "tint": "hole",
+          "when": "@pierced=true"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -280,
+            948,
+            200
+          ],
+          "r": 5,
+          "h": 3,
+          "segments": 8,
+          "tint": "hole",
+          "when": "@pierced=true"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -280,
+            948,
+            270
+          ],
+          "r": 5,
+          "h": 3,
+          "segments": 8,
+          "tint": "hole",
+          "when": "@pierced=true"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -280,
+            952,
+            130
+          ],
+          "size": [
+            12,
+            5,
+            45
+          ],
+          "tint": "thread",
+          "when": "@stitches>=1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -277,
+            936,
+            130
+          ],
+          "size": [
+            5,
+            30,
+            5
+          ],
+          "tint": "thread",
+          "when": "@stitches>=1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -280,
+            952,
+            200
+          ],
+          "size": [
+            12,
+            5,
+            45
+          ],
+          "tint": "thread",
+          "when": "@stitches>=2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -277,
+            936,
+            200
+          ],
+          "size": [
+            5,
+            30,
+            5
+          ],
+          "tint": "thread",
+          "when": "@stitches>=2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -280,
+            952,
+            270
+          ],
+          "size": [
+            12,
+            5,
+            45
+          ],
+          "tint": "thread",
+          "when": "@stitches>=3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -277,
+            936,
+            270
+          ],
+          "size": [
+            5,
+            30,
+            5
+          ],
+          "tint": "thread",
+          "when": "@stitches>=3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -130,
+            932,
+            -240
+          ],
+          "size": [
+            260,
+            12,
+            180
+          ],
+          "tint": "paper",
+          "when": "@paper_sets>=1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -130,
+            948,
+            -240
+          ],
+          "size": [
+            260,
+            12,
+            180
+          ],
+          "tint": "paper",
+          "when": "@paper_sets>=2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            320,
+            930,
+            -240
+          ],
+          "size": [
+            270,
+            12,
+            195
+          ],
+          "tint": "cloth",
+          "when": "@cover_pairs>=1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            320,
+            948,
+            -240
+          ],
+          "size": [
+            270,
+            12,
+            195
+          ],
+          "tint": "cloth",
+          "when": "@cover_pairs>=2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            65,
+            949,
+            -230
+          ],
+          "size": [
+            48,
+            58,
+            48
+          ],
+          "tint": "spool"
+        },
+        {
+          "kind": "box",
+          "at": [
+            65,
+            950,
+            -230
+          ],
+          "size": [
+            58,
+            48,
+            58
+          ],
+          "tint": "thread",
+          "role": "thread_supply",
+          "pivot": [
+            65,
+            926,
+            -230
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -365,
+            931,
+            200
+          ],
+          "size": [
+            70,
+            22,
+            220
+          ],
+          "tint": "metal"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -365,
+            983,
+            120
+          ],
+          "size": [
+            25,
+            105,
+            25
+          ],
+          "tint": "metal"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -315,
+            1028,
+            120
+          ],
+          "size": [
+            125,
+            18,
+            22
+          ],
+          "tint": "handle"
+        }
+      ],
+      "palette": {
+        "wood": "#75543d",
+        "paper": "#eddfbd",
+        "cloth": "#365f76",
+        "thread": "#cfaa64",
+        "hole": "#262321",
+        "metal": "#7b858b",
+        "handle": "#a84a35",
+        "spool": "#493c32"
+      },
+      "tags": [
+        "bookbinding",
+        "craft",
+        "workbench",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "card": "A bookbinding bench with two paper sets, six thread lengths and two cover pairs. Collate, pierce, sew three passes, then case a blank volume onto the output tray.",
+    "no_paper": "No supplied paper set remains.",
+    "collate_first": "Collate the paper signatures first.",
+    "already_pierced": "The gathered spine is already pierced.",
+    "pierce_first": "Pierce the gathered spine before sewing or casing.",
+    "sewing_complete": "The three sewing passes are complete; case the volume next.",
+    "no_thread": "No supplied thread length remains.",
+    "sew_first": "Finish all three sewing passes before casing.",
+    "no_covers": "No supplied cover pair remains.",
+    "clear_output": "Take the finished volume from the output tray before casing another.",
+    "empty_hands": "Empty your hands before working at the binding bench.",
+    "bookbinding": "bookbinding",
+    "binding_bench": "binding bench",
+    "sewing": "sewing",
+    "howto_bind": "Collate one paper set, pierce its spine, sew three passes using one thread length each, then case it using one cover pair. Take the finished blank volume. Work in progress stays on the bench; there is no drying timer or text writing."
+  },
+  "card": {
+    "text": "card",
+    "category": "bookbinding",
+    "synonyms": [
+      "binding_bench",
+      "sewing"
+    ]
+  },
+  "howtos": {
+    "bind_volume": {
+      "text": "howto_bind",
+      "steps": [
+        {
+          "form": "collate_signatures"
+        },
+        {
+          "form": "pierce_spine"
+        },
+        {
+          "form": "sew_pass"
+        },
+        {
+          "form": "sew_pass"
+        },
+        {
+          "form": "sew_pass"
+        },
+        {
+          "form": "case_volume"
+        }
+      ]
+    }
+  }
+}

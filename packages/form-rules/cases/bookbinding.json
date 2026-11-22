@@ -1,0 +1,2297 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "Bookbinding stage order, finite material, output admission, hand and reach guards; every refusal is before completion effects.",
+  "cases": [
+    {
+      "name": "collate_signatures_ready",
+      "act": {
+        "this": "bench",
+        "form": "collate_signatures"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 6,
+              "cover_pairs": 2,
+              "gathered": false,
+              "pierced": false,
+              "stitches": 0
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {}
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "pierce_spine_ready",
+      "act": {
+        "this": "bench",
+        "form": "pierce_spine"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 6,
+              "cover_pairs": 2,
+              "gathered": true,
+              "pierced": false,
+              "stitches": 0
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {}
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "sew_pass_ready",
+      "act": {
+        "this": "bench",
+        "form": "sew_pass"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 6,
+              "cover_pairs": 2,
+              "gathered": true,
+              "pierced": true,
+              "stitches": 1
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {}
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "case_volume_ready",
+      "act": {
+        "this": "bench",
+        "form": "case_volume"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 6,
+              "cover_pairs": 2,
+              "gathered": true,
+              "pierced": true,
+              "stitches": 3
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {}
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "last_thread_can_finish_last_pass",
+      "act": {
+        "this": "bench",
+        "form": "sew_pass"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 1,
+              "cover_pairs": 2,
+              "gathered": true,
+              "pierced": true,
+              "stitches": 2
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {}
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "first_pass_keeps_two_more_to_do",
+      "act": {
+        "this": "bench",
+        "form": "sew_pass"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 6,
+              "cover_pairs": 2,
+              "gathered": true,
+              "pierced": true,
+              "stitches": 0
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {}
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "collation_refuses_existing_work",
+      "act": {
+        "this": "bench",
+        "form": "collate_signatures"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 6,
+              "cover_pairs": 2,
+              "gathered": true,
+              "pierced": false,
+              "stitches": 0
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {}
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "collation_refuses_exhausted_paper",
+      "act": {
+        "this": "bench",
+        "form": "collate_signatures"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 0,
+              "thread_lengths": 6,
+              "cover_pairs": 2,
+              "gathered": false,
+              "pierced": false,
+              "stitches": 0
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {}
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "pierce_needs_collation",
+      "act": {
+        "this": "bench",
+        "form": "pierce_spine"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 6,
+              "cover_pairs": 2,
+              "gathered": false,
+              "pierced": false,
+              "stitches": 0
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {}
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "pierce_is_once_per_workpiece",
+      "act": {
+        "this": "bench",
+        "form": "pierce_spine"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 6,
+              "cover_pairs": 2,
+              "gathered": true,
+              "pierced": true,
+              "stitches": 0
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {}
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "sew_pass_needs_collation",
+      "act": {
+        "this": "bench",
+        "form": "sew_pass"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 6,
+              "cover_pairs": 2,
+              "gathered": false,
+              "pierced": true,
+              "stitches": 1
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {}
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "sew_pass_needs_piercing",
+      "act": {
+        "this": "bench",
+        "form": "sew_pass"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 6,
+              "cover_pairs": 2,
+              "gathered": true,
+              "pierced": false,
+              "stitches": 1
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {}
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "case_volume_needs_collation",
+      "act": {
+        "this": "bench",
+        "form": "case_volume"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 6,
+              "cover_pairs": 2,
+              "gathered": false,
+              "pierced": true,
+              "stitches": 3
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {}
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "case_volume_needs_piercing",
+      "act": {
+        "this": "bench",
+        "form": "case_volume"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 6,
+              "cover_pairs": 2,
+              "gathered": true,
+              "pierced": false,
+              "stitches": 3
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {}
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "no_fourth_sewing_pass",
+      "act": {
+        "this": "bench",
+        "form": "sew_pass"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 6,
+              "cover_pairs": 2,
+              "gathered": true,
+              "pierced": true,
+              "stitches": 3
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {}
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2
+      }
+    },
+    {
+      "name": "sewing_needs_a_real_thread_length",
+      "act": {
+        "this": "bench",
+        "form": "sew_pass"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 0,
+              "cover_pairs": 2,
+              "gathered": true,
+              "pierced": true,
+              "stitches": 1
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {}
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 3
+      }
+    },
+    {
+      "name": "case_refuses_0_sewing_passes",
+      "act": {
+        "this": "bench",
+        "form": "case_volume"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 6,
+              "cover_pairs": 2,
+              "gathered": true,
+              "pierced": true,
+              "stitches": 0
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {}
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2
+      }
+    },
+    {
+      "name": "case_refuses_1_sewing_passes",
+      "act": {
+        "this": "bench",
+        "form": "case_volume"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 6,
+              "cover_pairs": 2,
+              "gathered": true,
+              "pierced": true,
+              "stitches": 1
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {}
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2
+      }
+    },
+    {
+      "name": "case_refuses_2_sewing_passes",
+      "act": {
+        "this": "bench",
+        "form": "case_volume"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 6,
+              "cover_pairs": 2,
+              "gathered": true,
+              "pierced": true,
+              "stitches": 2
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {}
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2
+      }
+    },
+    {
+      "name": "case_needs_a_real_cover_pair",
+      "act": {
+        "this": "bench",
+        "form": "case_volume"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 6,
+              "cover_pairs": 0,
+              "gathered": true,
+              "pierced": true,
+              "stitches": 3
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {}
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 3
+      }
+    },
+    {
+      "name": "case_keeps_work_and_covers_when_output_full",
+      "act": {
+        "this": "bench",
+        "form": "case_volume"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 6,
+              "cover_pairs": 2,
+              "gathered": true,
+              "pierced": true,
+              "stitches": 3
+            },
+            "slots": {
+              "out": [
+                "volume"
+              ]
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {},
+          "volume": {
+            "kind": "eden:cloth_bound_volume"
+          }
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "slot_taken",
+        "need": 4
+      }
+    },
+    {
+      "name": "collate_signatures_requires_empty_hands",
+      "act": {
+        "this": "bench",
+        "form": "collate_signatures"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 6,
+              "cover_pairs": 2,
+              "gathered": false,
+              "pierced": false,
+              "stitches": 0
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "other",
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {}
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hands_not_empty",
+        "need": 2
+      }
+    },
+    {
+      "name": "collate_signatures_refuses_unreachable_control",
+      "act": {
+        "this": "bench",
+        "form": "collate_signatures"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 6,
+              "cover_pairs": 2,
+              "gathered": false,
+              "pierced": false,
+              "stitches": 0
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              10000,
+              1000,
+              10000
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {}
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "pierce_spine_requires_empty_hands",
+      "act": {
+        "this": "bench",
+        "form": "pierce_spine"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 6,
+              "cover_pairs": 2,
+              "gathered": true,
+              "pierced": false,
+              "stitches": 0
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "other",
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {}
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hands_not_empty",
+        "need": 2
+      }
+    },
+    {
+      "name": "pierce_spine_refuses_unreachable_control",
+      "act": {
+        "this": "bench",
+        "form": "pierce_spine"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 6,
+              "cover_pairs": 2,
+              "gathered": true,
+              "pierced": false,
+              "stitches": 0
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              10000,
+              1000,
+              10000
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {}
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "sew_pass_requires_empty_hands",
+      "act": {
+        "this": "bench",
+        "form": "sew_pass"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 6,
+              "cover_pairs": 2,
+              "gathered": true,
+              "pierced": true,
+              "stitches": 1
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "other",
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {}
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hands_not_empty",
+        "need": 4
+      }
+    },
+    {
+      "name": "sew_pass_refuses_unreachable_control",
+      "act": {
+        "this": "bench",
+        "form": "sew_pass"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 6,
+              "cover_pairs": 2,
+              "gathered": true,
+              "pierced": true,
+              "stitches": 1
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              10000,
+              1000,
+              10000
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {}
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 5
+      }
+    },
+    {
+      "name": "case_volume_requires_empty_hands",
+      "act": {
+        "this": "bench",
+        "form": "case_volume"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 6,
+              "cover_pairs": 2,
+              "gathered": true,
+              "pierced": true,
+              "stitches": 3
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "other",
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {}
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hands_not_empty",
+        "need": 5
+      }
+    },
+    {
+      "name": "case_volume_refuses_unreachable_control",
+      "act": {
+        "this": "bench",
+        "form": "case_volume"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 6,
+              "cover_pairs": 2,
+              "gathered": true,
+              "pierced": true,
+              "stitches": 3
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              10000,
+              1000,
+              10000
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {}
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 6
+      }
+    },
+    {
+      "name": "take_finished_volume",
+      "act": {
+        "this": "volume",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 6,
+              "cover_pairs": 2,
+              "gathered": false,
+              "pierced": false,
+              "stitches": 0
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {},
+          "volume": {
+            "kind": "eden:cloth_bound_volume"
+          }
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "take_needs_a_free_hand",
+      "act": {
+        "this": "volume",
+        "form": "take"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "b2",
+              "bench"
+            ]
+          },
+          "bench": {
+            "kind": "eden:bookbinding_bench",
+            "fields": {
+              "paper_sets": 2,
+              "thread_lengths": 6,
+              "cover_pairs": 2,
+              "gathered": false,
+              "pierced": false,
+              "stitches": 0
+            },
+            "slots": {
+              "out": []
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "other",
+              "right": "other"
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              -200,
+              1000,
+              450
+            ]
+          },
+          "other": {},
+          "volume": {
+            "kind": "eden:cloth_bound_volume"
+          }
+        },
+        "moves": {
+          "craft": {
+            "reach_mm": 500
+          },
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0
+      }
+    }
+  ]
+}
