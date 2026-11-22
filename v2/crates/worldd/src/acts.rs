@@ -868,6 +868,14 @@ impl Reach for Sight<'_> {
             AT_ARG => *self.toward.get(&body)?,
             _ => target,
         };
+        // A thing in the body's own hand is within its reach (#3715): a held kettle's switch.
+        let parent = self
+            .tree
+            .handle(target)
+            .and_then(|h| self.tree.node(h)?.parent());
+        if parent == Some(body) {
+            return Some(0);
+        }
         if let Some(d) = self.to_thing(body, sim::walk::node_of(me), a, target, point) {
             return Some(d);
         }
@@ -1057,16 +1065,18 @@ fn within_reach(tree: &Tree, entry: &Json, body: Id, body_at: Option<Vec3>, node
 /// `form-rules`' `selectThing` reads it the same way, #3914). `Ok(Some(thing))` binds it, `Ok(None)` finds nothing
 /// that qualifies, and `Err(())` is a selector this does not read (the argument stays missing).
 ///
-/// - **The set** (`in`): `this` the children of the act's node; `here` those of the node the actor's body is in
-///   (the act's node's parent when the body is not in the tree) and what the body holds, within [`HERE_REACH_MM`]
-///   of the anchor; `parent` those of the act's node's parent. Never the act's node, the actor's body, a body (a
-///   node linked `souls:body-of`) or a node of a private audience; with `kind`, only that kind.
+/// - **The set** (`in`): `this` the children of the act's node; `here` every thing within [`HERE_REACH_MM`] of the
+///   anchor across x and z, what the body holds included, in the same building or on the same ground as the act's
+///   node when both say (#3715: the kettle fills at the nearest sink in its own building), and never one inside a
+///   closed container; `parent` those of the act's node's parent. Never the act's node, the actor's body, a body (a
+///   node linked `souls:body-of`) or a node of a private audience; with `kind`, only things of that kind or entry.
 /// - **The order**: by squared distance in the zone's frame (x, y and z) from the `anchor` (`me` the body, `this`
 ///   the act's node), `nearest` first or `furthest` first, ties by id; a thing with no place goes after every placed
 ///   one, by id.
 /// - **The rank**: 1, 2, ... or `last`. Too few is nothing.
 pub(crate) fn select_thing(
     tree: &Tree,
+    kinds: &Json,
     select: &Json,
     node: Id,
     body: Id,
@@ -1079,11 +1089,8 @@ pub(crate) fn select_thing(
     let here = select.get("in").and_then(Json::str) == Some("here");
     let sets: Vec<Id> = match select.get("in").and_then(Json::str) {
         Some("this") => vec![node],
-        Some("here") => parent(body)
-            .or_else(|| parent(node))
-            .into_iter()
-            .chain([body])
-            .collect(),
+        // Every node of the tree, narrowed below by reach, building and closed containers.
+        Some("here") => Vec::new(),
         Some("parent") => parent(node).into_iter().collect(),
         _ => return Err(()),
     };
@@ -1113,20 +1120,68 @@ pub(crate) fn select_thing(
         d(a.x, p.x) + d(a.y, p.y) + d(a.z, p.z)
     };
     let reach = i128::from(HERE_REACH_MM * 1_000) * i128::from(HERE_REACH_MM * 1_000);
-    let mut ranked: Vec<(Option<i128>, Id)> = sets
-        .iter()
-        .filter_map(|s| tree.children(tree.handle(*s)?))
-        .flatten()
-        .filter_map(|&h| tree.node(h))
+    let handles: Vec<replica::tree::Handle> = if here {
+        let mut all = Vec::new();
+        let mut stack = vec![tree.root()];
+        while let Some(h) = stack.pop() {
+            stack.extend(tree.children(h).unwrap_or(&[]));
+            all.push(h);
+        }
+        all
+    } else {
+        sets.iter()
+            .filter_map(|s| tree.children(tree.handle(*s)?))
+            .flatten()
+            .copied()
+            .collect()
+    };
+    // Here: the same building or ground as the act's node, when both say; never inside a closed container.
+    let frame = replica::select::standing(tree, node).ok().map(|f| f.0);
+    let same_place = |id: Id| match (frame, replica::select::standing(tree, id)) {
+        (Some(f), Ok((g, _))) => f == g,
+        _ => true,
+    };
+    let closed_above = |id: Id| {
+        let mut up = parent(id);
+        for _ in 0..64 {
+            let Some(p) = up else { return false };
+            let Some(pn) = tree.node(tree.handle(p).unwrap_or_else(|| tree.root())) else {
+                return false;
+            };
+            if p != node
+                && kinds
+                    .get(plain(pn.kind()))
+                    .and_then(|e| e.get("closed"))
+                    .is_some()
+            {
+                return true;
+            }
+            up = pn.parent();
+        }
+        true
+    };
+    let xz = |a: Vec3, p: Vec3| {
+        let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+        d(a.x, p.x) + d(a.z, p.z)
+    };
+    let of_kind = |n: &replica::tree::NodeRef<'_>| {
+        kind.is_none_or(|k| plain(n.kind()) == k || entry_of(n).split('@').next() == Some(k))
+    };
+    let mut ranked: Vec<(Option<i128>, Id)> = handles
+        .into_iter()
+        .filter_map(|h| tree.node(h))
         .filter(|n| n.id() != node && n.id() != body)
         .filter(|n| n.audience() == replica::world_model::Audience::Everyone)
-        .filter(|n| kind.is_none_or(|k| plain(n.kind()) == k))
+        .filter(|n| of_kind(n))
         .filter(|n| !is_body(n.id()))
-        .map(|n| {
-            let d = anchor.zip(world_at(tree, n.id())).map(|(a, p)| d2(a, p));
-            (d, n.id())
+        .filter(|n| !here || (same_place(n.id()) && !closed_above(n.id())))
+        .filter_map(|n| {
+            let p = world_at(tree, n.id());
+            if here && anchor.zip(p).is_none_or(|(a, p)| xz(a, p) > reach) {
+                return None;
+            }
+            Some((anchor.zip(p).map(|(a, p)| d2(a, p)), n.id()))
         })
-        .filter(|(d, _)| !here || d.is_some_and(|d| d <= reach))
         .collect();
     ranked.sort_by(|(da, a), (db, b)| {
         let by = match (da, db) {
@@ -1225,6 +1280,11 @@ impl Acts {
             let mut e = entry.clone();
             if let Json::Obj(o) = &mut e {
                 o.retain(|(k, _)| k != "forms");
+                // A timed field (a kettle's heat) is not an amount, and the kind format cannot hold its default yet:
+                // left out, so the entry's amounts load (#3715).
+                if let Some((_, Json::Obj(state))) = o.iter_mut().find(|(k, _)| k == "state") {
+                    state.retain(|(_, f)| f.get("type").and_then(Json::str) != Some("timed"));
+                }
             }
             if let Ok(text) = replica::kinds::entry::entry_to_kind(&e.to_json()) {
                 loaded.load(&[("entry", text.as_str())]);
@@ -1588,7 +1648,7 @@ impl Acts {
                     let Some(select) = take.get("select") else {
                         continue;
                     };
-                    match select_thing(tree, select, *node, body, body_at) {
+                    match select_thing(tree, &self.kinds, select, *node, body, body_at) {
                         Ok(Some(t)) => {
                             all.insert(key.clone(), skills::form_runner::Arg::Node(t));
                             picked = true;

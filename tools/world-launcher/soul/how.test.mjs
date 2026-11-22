@@ -38,7 +38,7 @@ test("A1: how for tea returns at most six steps naming real things, cut at the w
   t.after(() => w.server.close());
   const r = (await run(home(w.url), "how", "tea")).out;
   assert.equal(r.how, "tea");
-  assert.match(r.text, /Fill the kettle at a tap, switch it on/);
+  assert.match(r.text, /Take the kettle, fill it at a sink, switch it on/);
   assert.equal(r.with.thing, "kettle");
   assert.deepEqual(r.done, [{ form: "fill", act: "object:kettle:fill", why: "already so on this copy: water is 1000" }], "a kettle already filled passes over fill and says so");
   assert.ok(r.steps.length >= 1 && r.steps.length <= HOW_STEPS_MAX);
