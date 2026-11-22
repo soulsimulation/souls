@@ -27,7 +27,7 @@
 // fails, and the run prints `PENDING #<issue>: <what> (expected failure: <why>)` and goes on: never a silent skip. When
 // it passes, the test FAILS with `PENDING #<issue> now passes: remove its marker`, so the fix's PR removes the marker
 // in the same change and the assertion is required from then on.
-//   #3772 (a Soul's body runs its family's forms, E21 #2791): the wave's `souls:form-move` in (a) and `can wave` in (b).
+//   None open: #3772 was fixed by #4075, and #4143 (a wave on a seated body first walked to its own point) by its PR.
 //
 // Fake minds, isolated folders under the OS temp dir, no fixed sleeps (each wait is on an event, bounded as a failure
 // backstop). Run from v2/ after
@@ -63,9 +63,7 @@ const replicaUrl = pathToFileURL(join(PKG, 'replica.js')).href;
 registerHooks({ resolve: (s, c, next) => (s === 'replica' ? { url: replicaUrl, shortCircuit: true } : next(s, c)) });
 
 // ---- Pending markers ---------------------------------------------------------------------------------------------
-const PENDING = {
-  4143: "a Soul's wave right after its walk is refused resource-held",
-};
+const PENDING = {};
 const pendingReport = [];
 /** Runs `check`; while `issue` is open a failure is expected and printed, a pass fails the run (remove the marker). */
 async function pending(issue, what, check) {
@@ -250,11 +248,12 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
     return { label, home, soul: said.soul, rt, cli: (...a) => souls(home, ...a, '--soul', said.soul) };
   }
   // An act's answer from the world: the daemon's `read` events, by the act's sequence.
-  async function answered(s, sequence, ms = 30_000) {
+  /** The world's first answer to intent `sequence`; with `final`, its last, past an answer in progress (3). */
+  async function answered(s, sequence, ms = 30_000, final = false) {
     s.seen ??= [];
     return waitFor(`${s.label}'s answer to intent ${sequence}`, async () => {
       s.seen.push(...(await request(s.rt.socket, { op: 'read' })).events.filter((e) => e.kind === 'answer'));
-      return s.seen.find((e) => e.sequence === sequence);
+      return s.seen.find((e) => e.sequence === sequence && !(final && e.answer === 3));
     }, ms);
   }
   /** The first event of `s`'s daemon that `pred` holds of; answers read on the way are kept for `answered`. */
@@ -383,6 +382,9 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   assert.ok(accepted(walk.answer), `A's walk to the bench: ${JSON.stringify(walk.answer)}`);
   const sit = await act(A, `sit:${bench.id}`);
   assert.ok(accepted(sit.answer), `A's sit on the bench: ${JSON.stringify(sit.answer)}`);
+  // A body runs one form at a time and the world queues nothing (v2/docs/intents.md rules 7, 8): a sit answered in
+  // progress (3) is followed by its receipt, and only then is the body free for the wave.
+  if (sit.answer.answer === 3) assert.equal((await answered(A, sit.sent.sequence, 30_000, true)).answer, 1, "A's sit ends with its receipt");
   const wave = await act(A, `wave:${meA}`);
   const words = 'the bread is still warm on the square';
   const secret = 'the key is under the third stone';
@@ -428,12 +430,9 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
     assert.ok(!bytes.includes(Buffer.from('second bell')), `#3775: the private words are in no public file: ${f.slice(world.length)}`);
   }
 
-  // (a) The wave's move record, from the body's family.
-  // #3772 is fixed by #4075 (the body runs its family's forms); the wave is now refused resource-held (#4143).
-  await pending(4143, "(a) the wave is accepted and its souls:form-move reaches the public stream", async () => {
-    assert.ok(accepted(wave.answer), `the wave: ${JSON.stringify(wave.answer)}`);
-    await waitFor('souls:form-move', () => v1.parts.some((p) => (p.happened ?? []).some((h) => h.name === 'souls:form-move' && h.node === pageKey(meA))), 10_000);
-  });
+  // (a) The wave's move record, from the body's family (#4075), made seated where the body is (#4143).
+  assert.ok(accepted(wave.answer), `(a) the wave on the seated body: ${JSON.stringify(wave.answer)}`);
+  await waitFor('souls:form-move', () => v1.parts.some((p) => (p.happened ?? []).some((h) => h.name === 'souls:form-move' && h.node === pageKey(meA))), 10_000);
 
   // (a) Body motion: positions change on the walk, and the sit hands the body off to the bench's slot.
   const a = pageKey(meA), benchKey = pageKey(bench.id);

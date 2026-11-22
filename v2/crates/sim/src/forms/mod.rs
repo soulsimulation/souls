@@ -918,6 +918,11 @@ impl Forms {
         {
             form_runner::turn(&mut steps, p.orientation)?;
         }
+        // A move on the body itself (a wave, a stretch) is made where it stands: no approach walk to its own point,
+        // which a seated body's legs would refuse (`resource-held`, #4143).
+        if node == body {
+            steps.retain(|s| !matches!(s, Step::WalkTo { on: None, approach: true, .. }));
+        }
         let reserves = node != body && !self.shared.contains(&node);
         if reserves && let Some(holder) = self.holder(node) {
             return Err(Refusal {
