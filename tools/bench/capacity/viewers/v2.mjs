@@ -16,11 +16,13 @@
 //   node tools/bench/capacity/viewers/v2.mjs --facts <eden facts.json> [--bin <dir with worldd, gatewayd>]
 //        [--pkg <replica wasm-bindgen pkg>] [--steps 100,250,500,1000,2000,5000] [--souls 20] [--window-sec 60]
 //        [--wave-sec 5] [--settle-sec 10] [--slow-share 0.02] [--drivers 8] [--repeats 1] [--origin-memory-mb 256]
-//        [--cache-nodes 0] [--poll-ms 250] [--out <dir>]
+//        [--cache-nodes 0] [--poll-ms 250] [--origin-port 0] [--viewer-base <https URL>] [--out <dir>]
 // --cache-nodes K (#4159) puts K caching nodes (v2/tools/origin/cache.mjs: keeps what the origin's headers allow,
 // collapses concurrent misses) between the viewers and the origin, driver i reading through node i mod K, as edge
 // locations split a CDN's viewers: a SIMULATION of a CDN, not one. Each window then reports the nodes' hit ratio and
 // the origin's requests and body bytes a second. --poll-ms sets the viewers' pointer period (the page's is 250 ms).
+// --viewer-base reads through a real CDN instead: viewers ask that URL (e.g. a test hostname whose origin is this
+// bench's origin on --origin-port, through a tunnel), with the stream at the same path; nothing else changes.
 // The origin runs as its unit does: killed past --origin-memory-mb resident (its MemoryMax; 0 for no cap) and
 // restarted a second after it ends. A window with no viewers follows the ladder too: the tick bar
 // (B6) is judged against the mean of the two.
@@ -47,6 +49,8 @@ const log = (...a) => { const s = `[${new Date().toISOString().slice(11, 19)}] $
 const wire = await import(pathToFileURL(join(PKG, 'replica.js')).href);
 wire.initSync({ module: readFileSync(join(PKG, 'replica_bg.wasm')) });
 const ORIGIN_MB = Number(opt('origin-memory-mb', 256)), CACHE_NODES = Number(opt('cache-nodes', 0)), POLL_MS = Number(opt('poll-ms', 250));
+const ORIGIN_PORT = Number(opt('origin-port', 0)), VIEWER_BASE = opt('viewer-base');
+if (VIEWER_BASE && CACHE_NODES) throw new Error('--viewer-base and --cache-nodes are two ways to put a cache in front: pick one');
 const FD_LIMIT = Number(execFileSync('sh', ['-c', 'ulimit -n'], { encoding: 'utf8' }).trim());
 const PEAK = Math.max(...STEPS) * (1 + SLOW_SHARE) + 5;
 if (Number.isFinite(FD_LIMIT) && FD_LIMIT < 2 * PEAK + 1024) throw new Error(`open-file limit ${FD_LIMIT} is below ${Math.ceil(2 * PEAK + 1024)}: the origin holds up to two sockets a viewer; raise it (ulimit -n)`);
@@ -83,7 +87,7 @@ async function serve(dir) {
     o.p.on('exit', () => { clearInterval(cap); if (!stopping) { s.originRestarts++; log(`origin ended (restart ${s.originRestarts})`); setTimeout(() => port(o.m[1]).catch((e) => log(String(e))), 1000); } });
     return o.m[1];
   };
-  s.base = `http://127.0.0.1:${await port(0)}/`;
+  s.base = `http://127.0.0.1:${await port(ORIGIN_PORT)}/`;
   s.caches = await Promise.all(Array.from({ length: CACHE_NODES }, (_, i) => new Promise((ok, fail) => {
     const p = fork(join(V2, 'tools/origin/cache.mjs'), [s.base, '0', '127.0.0.1'], { stdio: ['ignore', 'pipe', 'pipe', 'ipc'] });
     procs.push(p);
@@ -145,7 +149,7 @@ async function drivers(s) {
   const kids = await Promise.all(Array.from({ length: DRIVERS }, () => new Promise((ok) => {
     const k = fork(new URL('./v2-readers.mjs', import.meta.url).pathname, [], { stdio: ['ignore', 'inherit', 'inherit', 'ipc'] });
     k.once('message', () => ok(k));
-    k.send({ init: { base: s.caches.length ? s.caches[kids0++ % s.caches.length].base : s.base, stream: s.stream, pkg: PKG, pollMs: POLL_MS } });
+    k.send({ init: { base: VIEWER_BASE ?? (s.caches.length ? s.caches[kids0++ % s.caches.length].base : s.base), stream: s.stream, pkg: PKG, pollMs: POLL_MS } });
   })));
   // A driver that ended answers nothing: its take is left out (and logged), so the ladder never waits on it.
   kids.forEach((k, i) => k.on('exit', (c) => { k.dead = true; log(`driver ${i} ended (${c})`); }));

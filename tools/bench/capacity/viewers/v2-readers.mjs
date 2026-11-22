@@ -7,8 +7,10 @@
 // of two sockets per viewer. Slow readers ask for the baseline and never read.
 // Messages from v2.mjs: {init: {base, stream, pkg, pollMs}} (pollMs: the pointer's period, default the page's 250), {add: n, overMs}, {slow: n}, {unslow: true}, {take: true}
 // (answers with the counters since the last take, and resets them), {stop: true}.
-import { Agent, request } from 'node:http';
+import { Agent as HttpAgent, request as httpRequest } from 'node:http';
+import { Agent as HttpsAgent, request as httpsRequest } from 'node:https';
 import { connect } from 'node:net';
+import { connect as tlsConnect } from 'node:tls';
 import { readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -18,6 +20,10 @@ import { fileType, record } from './v2-stats.mjs';
 const AHEAD = 16, TIMEOUT_MS = 10_000;
 let POLL_MS = 250; // the page's (v2/web/src/source/worker.ts); --poll-ms measures another
 const PERIOD_US = 500_000, BEHIND_US = 4 * PERIOD_US, CUT_US = 20_000_000; // v2/web/src/clock/clock.ts
+// An https base (a CDN hostname, #4159) is read over TLS; the local origin and caching nodes over plain HTTP.
+const tls = () => new URL(cfg.base).protocol === 'https:';
+const request = (url, o, cb) => (url.protocol === 'https:' ? httpsRequest : httpRequest)(url, o, cb);
+function Agent(o) { return tls() ? new HttpsAgent(o) : new HttpAgent(o); }
 const sleep = (ms) => new Promise((r) => setTimeout(r, Math.max(0, ms)));
 let cfg, readPointer;
 const viewers = new Set(), slow = new Set();
@@ -134,7 +140,7 @@ async function viewer(v) {
 /** A slow reader: one socket asking for the baseline (and the pointer after it) that never reads its answers. */
 function slowReader(p) {
   const url = at(p, 'baseline'), base = new URL(cfg.base);
-  const s = connect(Number(base.port), base.hostname, () => {
+  const s = (tls() ? (port, host, cb) => tlsConnect({ port: Number(port || 443), host, servername: host }, cb) : connect)(Number(base.port), base.hostname, () => {
     s.pause();
     const ask = (path) => `GET ${path} HTTP/1.1\r\nHost: ${base.host}\r\nConnection: keep-alive\r\n\r\n`;
     s.write(ask(url.pathname) + ask(new URL('pointer', streamUrl()).pathname));
