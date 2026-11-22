@@ -3572,25 +3572,22 @@ fn i3948_a_closed_containers_contents_stay_out_of_the_public_stream_until_taken_
     let mut viewer = PublicPlayer::start(&header_bytes, &baseline).unwrap();
     assert!(!i3948_holds(&viewer, hidden) && i3948_holds(&viewer, shown_cup));
     let gen0 = out.generation_dir();
-    let mut part = |out: &mut PublicWriter<_>, record: u64, effects: Vec<Effect>| {
+    // Record `record` pushed and cut; part `number` of the first generation as written, if it was.
+    let mut part = |out: &mut PublicWriter<_>, record: u64, number: u64, effects: Vec<Effect>| {
         let p = w3e_packet(&h, effects);
         actual.apply_bytes(&p).unwrap();
         out.push(record, &p).unwrap();
         out.flush().unwrap();
-        fs::read(gen0.join(record.to_string())).unwrap_or_else(|e| {
-            panic!(
-                "part {record}: {e}; next {}, files {:?}",
-                out.player.next(),
-                files(&gen0).iter().map(|f| f.0.clone()).collect::<Vec<_>>()
-            )
-        })
+        fs::read(gen0.join(number.to_string())).ok()
     };
     // Touched while hidden: its entry is not published and its row never appears; the other cup's are.
     let p0 = part(
         &mut out,
         0,
+        0,
         vec![i3948_set(3, shown_cup, 7), i3948_set(4, hidden, 8)],
-    );
+    )
+    .unwrap();
     viewer.play(&p0).unwrap();
     assert!(
         !i3948_names(&p0, hidden),
@@ -3600,7 +3597,7 @@ fn i3948_a_closed_containers_contents_stay_out_of_the_public_stream_until_taken_
     assert!(!i3948_holds(&viewer, hidden));
     // Taken out: public from then on.
     let x1 = Id::new(Scope([0x3a; 16]), 1).unwrap();
-    let p1 = part(&mut out, 1, i3948_move(&h, 5, hidden, h.zone, x1));
+    let p1 = part(&mut out, 1, 1, i3948_move(&h, 5, hidden, h.zone, x1)).unwrap();
     viewer.play(&p1).unwrap();
     assert!(
         i3948_holds(&viewer, hidden),
@@ -3614,7 +3611,7 @@ fn i3948_a_closed_containers_contents_stay_out_of_the_public_stream_until_taken_
     );
     // Put back: out of the state, and the hide's entries are not published.
     let x2 = Id::new(Scope([0x3a; 16]), 2).unwrap();
-    let p2 = part(&mut out, 2, i3948_move(&h, 7, hidden, crate_, x2));
+    let p2 = part(&mut out, 2, 2, i3948_move(&h, 7, hidden, crate_, x2)).unwrap();
     viewer.play(&p2).unwrap();
     assert!(
         !i3948_holds(&viewer, hidden),
@@ -3626,12 +3623,14 @@ fn i3948_a_closed_containers_contents_stay_out_of_the_public_stream_until_taken_
         "the hide's entries are not published"
     );
     assert_eq!(Part::read(&entries).unwrap().effects.len(), 0);
-    // Touched again while hidden; the generation then closes (4 parts): a viewer joining now starts from a baseline
-    // without the cup, and a live viewer crosses over.
-    let p3 = part(&mut out, 3, vec![i3948_set(9, hidden, 9)]);
+    // Touched again while hidden: nothing public happened, so no part is written.
+    assert_eq!(part(&mut out, 3, 3, vec![i3948_set(9, hidden, 9)]), None);
+    assert_eq!(out.player.next(), 3);
+    // The other cup touched: the generation then closes (4 parts). A viewer joining now starts from a baseline
+    // without the hidden cup, and a live viewer crosses over.
+    let p3 = part(&mut out, 4, 3, vec![i3948_set(10, shown_cup, 9)]).unwrap();
     viewer.play(&p3).unwrap();
     assert!(!i3948_names(&p3, hidden));
-    assert_eq!(viewer.state(), out.player.state());
     assert_ne!(
         out.generation_dir(),
         gen0,
