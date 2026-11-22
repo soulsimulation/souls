@@ -64,7 +64,7 @@ registerHooks({ resolve: (s, c, next) => (s === 'replica' ? { url: replicaUrl, s
 
 // ---- Pending markers ---------------------------------------------------------------------------------------------
 const PENDING = {
-  3772: "a Soul's body has no forms: its family's wave is refused and writes no souls:form-move",
+  4143: "a Soul's wave right after its walk is refused resource-held",
 };
 const pendingReport = [];
 /** Runs `check`; while `issue` is open a failure is expected and printed, a pass fails the run (remove the marker). */
@@ -308,7 +308,7 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
 
   // (b) can wave on my own body, from the copy alone.
   const can = await A.cli('can', `wave:${meA}`);
-  await pending(3772, '(b) `can wave:<me>` answers yes from the copy', () => assert.equal(can.can ?? can.answer ?? can.verdict, 'yes', JSON.stringify(can)));
+  assert.equal(can.can ?? can.answer ?? can.verdict, 'yes', `(b) \`can wave:<me>\` answers yes from the copy (#3772, fixed by #4075): ${JSON.stringify(can)}`);
 
   // #3775: a private conversation. A offers B one where they stand (a seat admits no conversation), B accepts and
   // takes a private turn.
@@ -429,7 +429,8 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   }
 
   // (a) The wave's move record, from the body's family.
-  await pending(3772, "(a) the wave is accepted and its souls:form-move reaches the public stream", async () => {
+  // #3772 is fixed by #4075 (the body runs its family's forms); the wave is now refused resource-held (#4143).
+  await pending(4143, "(a) the wave is accepted and its souls:form-move reaches the public stream", async () => {
     assert.ok(accepted(wave.answer), `the wave: ${JSON.stringify(wave.answer)}`);
     await waitFor('souls:form-move', () => v1.parts.some((p) => (p.happened ?? []).some((h) => h.name === 'souls:form-move' && h.node === pageKey(meA))), 10_000);
   });

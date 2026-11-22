@@ -64,6 +64,34 @@ pub fn entry_to_kind(json: &str) -> Result<String, String> {
         .collect::<Vec<_>>()))
 }
 
+/// A body's forms come from its family (E21, #2791). A body kind with no entry of its own (a served Soul's
+/// generated `souls:body`) gets, under its name, the world's family entry (owner `family`, such as
+/// `content/kinds/body/humanoid.json`), so a wave or a bow on a Soul's own body runs the family's form. A world whose
+/// entries hold more than one family entry gives the body none: the body kind must then name its family. The thin
+/// client applies the same rule to the entries it holds (`v2/client/src/check/state.mjs` `kindsIn`). Returns whether
+/// the body got the family's entry.
+pub fn family_forms(entries: &mut Vec<(String, Value)>, body: &str) -> bool {
+    if entries.iter().any(|(k, _)| k == body) {
+        return false;
+    }
+    let mut families = entries
+        .iter()
+        .filter(|(_, e)| e.get("owner").and_then(Value::str) == Some("family"));
+    let (Some((_, family)), None) = (families.next(), families.next()) else {
+        return false;
+    };
+    let mut entry = family.clone();
+    if let Value::Obj(o) = &mut entry {
+        for (k, v) in o.iter_mut() {
+            if k == "kind" {
+                *v = Value::s(body);
+            }
+        }
+    }
+    entries.push((body.to_owned(), entry));
+    true
+}
+
 fn map(entries: &[(u64, Option<String>)]) -> String {
     let inner: Vec<String> = entries
         .iter()
