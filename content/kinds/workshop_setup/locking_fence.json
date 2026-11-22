@@ -31,16 +31,16 @@
       "at_mm": [
         0,
         0,
-        750
+        600
       ],
       "yaw_mdeg": 180000
     },
     "control": {
       "role": "grip",
       "at_mm": [
-        0,
-        900,
-        250
+        -400,
+        960,
+        300
       ]
     }
   },
@@ -198,18 +198,6 @@
     "table": [
       {
         "part": "fence",
-        "field": "offset",
-        "do": "slide",
-        "axis": "x",
-        "at": {
-          "offset_100": 0,
-          "offset_200": 100,
-          "offset_300": 200
-        },
-        "over_us": 350000
-      },
-      {
-        "part": "lever",
         "field": "offset",
         "do": "slide",
         "axis": "x",
