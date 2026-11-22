@@ -13,11 +13,14 @@
     },
     "jaw_gap": {
       "n": 29,
-      "type": "int",
-      "unit": "mm",
-      "default": 120,
-      "min": 0,
-      "max": 120,
+      "type": "enum",
+      "values": [
+        "gap_0",
+        "gap_40",
+        "gap_80",
+        "gap_120"
+      ],
+      "default": "gap_120",
       "audience": {
         "rule": "everyone"
       }
@@ -95,10 +98,10 @@
         "gap": {
           "type": "value",
           "of": [
-            0,
-            40,
-            80,
-            120
+            "gap_0",
+            "gap_40",
+            "gap_80",
+            "gap_120"
           ]
         }
       },
@@ -200,14 +203,12 @@
         "field": "jaw_gap",
         "do": "slide",
         "axis": "x",
-        "range": [
-          0,
-          120
-        ],
-        "to": [
-          0,
-          120
-        ],
+        "at": {
+          "gap_0": 0,
+          "gap_40": 40,
+          "gap_80": 80,
+          "gap_120": 120
+        },
         "over_us": 350000
       },
       {

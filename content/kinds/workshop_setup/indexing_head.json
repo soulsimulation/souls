@@ -13,11 +13,13 @@
     },
     "index": {
       "n": 29,
-      "type": "int",
-      "unit": "count",
-      "default": 0,
-      "min": 0,
-      "max": 2,
+      "type": "enum",
+      "values": [
+        "index_0",
+        "index_45",
+        "index_90"
+      ],
+      "default": "index_0",
       "audience": {
         "rule": "everyone"
       }
@@ -95,9 +97,9 @@
         "index": {
           "type": "value",
           "of": [
-            0,
-            1,
-            2
+            "index_0",
+            "index_45",
+            "index_90"
           ]
         }
       },
@@ -199,14 +201,11 @@
         "field": "index",
         "do": "rotate",
         "axis": "y",
-        "range": [
-          0,
-          2
-        ],
-        "to": [
-          0,
-          90000
-        ],
+        "at": {
+          "index_0": 0,
+          "index_45": 45000,
+          "index_90": 90000
+        },
         "over_us": 350000
       },
       {

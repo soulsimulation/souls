@@ -13,11 +13,13 @@
     },
     "extension": {
       "n": 29,
-      "type": "int",
-      "unit": "mm",
-      "default": 0,
-      "min": 0,
-      "max": 300,
+      "type": "enum",
+      "values": [
+        "extension_0",
+        "extension_150",
+        "extension_300"
+      ],
+      "default": "extension_0",
       "audience": {
         "rule": "everyone"
       }
@@ -95,9 +97,9 @@
         "extension": {
           "type": "value",
           "of": [
-            0,
-            150,
-            300
+            "extension_0",
+            "extension_150",
+            "extension_300"
           ]
         }
       },
@@ -199,14 +201,11 @@
         "field": "extension",
         "do": "slide",
         "axis": "y",
-        "range": [
-          0,
-          300
-        ],
-        "to": [
-          0,
-          300
-        ],
+        "at": {
+          "extension_0": 0,
+          "extension_150": 150,
+          "extension_300": 300
+        },
         "over_us": 350000
       },
       {

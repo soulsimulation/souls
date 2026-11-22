@@ -159,7 +159,7 @@
         "this": "t",
         "form": "set_jaw_gap",
         "args": {
-          "gap": 40
+          "gap": "gap_40"
         }
       },
       "state": {
@@ -211,7 +211,7 @@
         "this": "t",
         "form": "set_jaw_gap",
         "args": {
-          "gap": 40
+          "gap": "gap_40"
         }
       },
       "state": {
@@ -265,7 +265,7 @@
         "this": "t",
         "form": "set_jaw_gap",
         "args": {
-          "gap": 40
+          "gap": "gap_40"
         }
       },
       "state": {
@@ -470,7 +470,7 @@
         "this": "t",
         "form": "set_jaw_gap",
         "args": {
-          "gap": 40
+          "gap": "gap_40"
         }
       },
       "state": {
@@ -524,7 +524,7 @@
         "this": "t",
         "form": "set_jaw_gap",
         "args": {
-          "gap": 40
+          "gap": "gap_40"
         }
       },
       "state": {
@@ -534,7 +534,7 @@
             "kind": "eden:bench_vice",
             "fields": {
               "clamped": false,
-              "jaw_gap": 40
+              "jaw_gap": "gap_40"
             }
           },
           "b": {
@@ -729,12 +729,12 @@
       }
     },
     {
-      "name": "bench_vice_setting_0",
+      "name": "bench_vice_setting_gap_0",
       "act": {
         "this": "t",
         "form": "set_jaw_gap",
         "args": {
-          "gap": 0
+          "gap": "gap_0"
         }
       },
       "state": {
@@ -744,7 +744,7 @@
             "kind": "eden:bench_vice",
             "fields": {
               "clamped": false,
-              "jaw_gap": 40
+              "jaw_gap": "gap_40"
             }
           },
           "b": {
@@ -782,12 +782,12 @@
       }
     },
     {
-      "name": "bench_vice_setting_40",
+      "name": "bench_vice_setting_gap_40",
       "act": {
         "this": "t",
         "form": "set_jaw_gap",
         "args": {
-          "gap": 40
+          "gap": "gap_40"
         }
       },
       "state": {
@@ -797,7 +797,7 @@
             "kind": "eden:bench_vice",
             "fields": {
               "clamped": false,
-              "jaw_gap": 0
+              "jaw_gap": "gap_0"
             }
           },
           "b": {
@@ -835,12 +835,12 @@
       }
     },
     {
-      "name": "bench_vice_setting_80",
+      "name": "bench_vice_setting_gap_80",
       "act": {
         "this": "t",
         "form": "set_jaw_gap",
         "args": {
-          "gap": 80
+          "gap": "gap_80"
         }
       },
       "state": {
@@ -850,7 +850,7 @@
             "kind": "eden:bench_vice",
             "fields": {
               "clamped": false,
-              "jaw_gap": 0
+              "jaw_gap": "gap_0"
             }
           },
           "b": {
@@ -888,12 +888,12 @@
       }
     },
     {
-      "name": "bench_vice_setting_120",
+      "name": "bench_vice_setting_gap_120",
       "act": {
         "this": "t",
         "form": "set_jaw_gap",
         "args": {
-          "gap": 120
+          "gap": "gap_120"
         }
       },
       "state": {
@@ -903,7 +903,7 @@
             "kind": "eden:bench_vice",
             "fields": {
               "clamped": false,
-              "jaw_gap": 0
+              "jaw_gap": "gap_0"
             }
           },
           "b": {
@@ -1097,7 +1097,7 @@
         "this": "t",
         "form": "index_head",
         "args": {
-          "index": 1
+          "index": "index_45"
         }
       },
       "state": {
@@ -1149,7 +1149,7 @@
         "this": "t",
         "form": "index_head",
         "args": {
-          "index": 1
+          "index": "index_45"
         }
       },
       "state": {
@@ -1203,7 +1203,7 @@
         "this": "t",
         "form": "index_head",
         "args": {
-          "index": 1
+          "index": "index_45"
         }
       },
       "state": {
@@ -1408,7 +1408,7 @@
         "this": "t",
         "form": "index_head",
         "args": {
-          "index": 1
+          "index": "index_45"
         }
       },
       "state": {
@@ -1462,7 +1462,7 @@
         "this": "t",
         "form": "index_head",
         "args": {
-          "index": 1
+          "index": "index_45"
         }
       },
       "state": {
@@ -1472,7 +1472,7 @@
             "kind": "eden:indexing_head",
             "fields": {
               "pin_engaged": false,
-              "index": 1
+              "index": "index_45"
             }
           },
           "b": {
@@ -1667,12 +1667,12 @@
       }
     },
     {
-      "name": "indexing_head_setting_0",
+      "name": "indexing_head_setting_index_0",
       "act": {
         "this": "t",
         "form": "index_head",
         "args": {
-          "index": 0
+          "index": "index_0"
         }
       },
       "state": {
@@ -1682,7 +1682,7 @@
             "kind": "eden:indexing_head",
             "fields": {
               "pin_engaged": false,
-              "index": 1
+              "index": "index_45"
             }
           },
           "b": {
@@ -1720,12 +1720,12 @@
       }
     },
     {
-      "name": "indexing_head_setting_1",
+      "name": "indexing_head_setting_index_45",
       "act": {
         "this": "t",
         "form": "index_head",
         "args": {
-          "index": 1
+          "index": "index_45"
         }
       },
       "state": {
@@ -1735,7 +1735,7 @@
             "kind": "eden:indexing_head",
             "fields": {
               "pin_engaged": false,
-              "index": 0
+              "index": "index_0"
             }
           },
           "b": {
@@ -1773,12 +1773,12 @@
       }
     },
     {
-      "name": "indexing_head_setting_2",
+      "name": "indexing_head_setting_index_90",
       "act": {
         "this": "t",
         "form": "index_head",
         "args": {
-          "index": 2
+          "index": "index_90"
         }
       },
       "state": {
@@ -1788,7 +1788,7 @@
             "kind": "eden:indexing_head",
             "fields": {
               "pin_engaged": false,
-              "index": 0
+              "index": "index_0"
             }
           },
           "b": {
@@ -1982,7 +1982,7 @@
         "this": "t",
         "form": "set_extension",
         "args": {
-          "extension": 150
+          "extension": "extension_150"
         }
       },
       "state": {
@@ -2034,7 +2034,7 @@
         "this": "t",
         "form": "set_extension",
         "args": {
-          "extension": 150
+          "extension": "extension_150"
         }
       },
       "state": {
@@ -2088,7 +2088,7 @@
         "this": "t",
         "form": "set_extension",
         "args": {
-          "extension": 150
+          "extension": "extension_150"
         }
       },
       "state": {
@@ -2293,7 +2293,7 @@
         "this": "t",
         "form": "set_extension",
         "args": {
-          "extension": 150
+          "extension": "extension_150"
         }
       },
       "state": {
@@ -2347,7 +2347,7 @@
         "this": "t",
         "form": "set_extension",
         "args": {
-          "extension": 150
+          "extension": "extension_150"
         }
       },
       "state": {
@@ -2357,7 +2357,7 @@
             "kind": "eden:telescopic_trestle",
             "fields": {
               "collar_locked": false,
-              "extension": 150
+              "extension": "extension_150"
             }
           },
           "b": {
@@ -2552,12 +2552,12 @@
       }
     },
     {
-      "name": "telescopic_trestle_setting_0",
+      "name": "telescopic_trestle_setting_extension_0",
       "act": {
         "this": "t",
         "form": "set_extension",
         "args": {
-          "extension": 0
+          "extension": "extension_0"
         }
       },
       "state": {
@@ -2567,7 +2567,7 @@
             "kind": "eden:telescopic_trestle",
             "fields": {
               "collar_locked": false,
-              "extension": 150
+              "extension": "extension_150"
             }
           },
           "b": {
@@ -2605,12 +2605,12 @@
       }
     },
     {
-      "name": "telescopic_trestle_setting_150",
+      "name": "telescopic_trestle_setting_extension_150",
       "act": {
         "this": "t",
         "form": "set_extension",
         "args": {
-          "extension": 150
+          "extension": "extension_150"
         }
       },
       "state": {
@@ -2620,7 +2620,7 @@
             "kind": "eden:telescopic_trestle",
             "fields": {
               "collar_locked": false,
-              "extension": 0
+              "extension": "extension_0"
             }
           },
           "b": {
@@ -2658,12 +2658,12 @@
       }
     },
     {
-      "name": "telescopic_trestle_setting_300",
+      "name": "telescopic_trestle_setting_extension_300",
       "act": {
         "this": "t",
         "form": "set_extension",
         "args": {
-          "extension": 300
+          "extension": "extension_300"
         }
       },
       "state": {
@@ -2673,7 +2673,7 @@
             "kind": "eden:telescopic_trestle",
             "fields": {
               "collar_locked": false,
-              "extension": 0
+              "extension": "extension_0"
             }
           },
           "b": {
@@ -2867,7 +2867,7 @@
         "this": "t",
         "form": "set_fence_offset",
         "args": {
-          "offset": 200
+          "offset": "offset_200"
         }
       },
       "state": {
@@ -2919,7 +2919,7 @@
         "this": "t",
         "form": "set_fence_offset",
         "args": {
-          "offset": 200
+          "offset": "offset_200"
         }
       },
       "state": {
@@ -2973,7 +2973,7 @@
         "this": "t",
         "form": "set_fence_offset",
         "args": {
-          "offset": 200
+          "offset": "offset_200"
         }
       },
       "state": {
@@ -3178,7 +3178,7 @@
         "this": "t",
         "form": "set_fence_offset",
         "args": {
-          "offset": 200
+          "offset": "offset_200"
         }
       },
       "state": {
@@ -3232,7 +3232,7 @@
         "this": "t",
         "form": "set_fence_offset",
         "args": {
-          "offset": 200
+          "offset": "offset_200"
         }
       },
       "state": {
@@ -3242,7 +3242,7 @@
             "kind": "eden:locking_fence",
             "fields": {
               "lever_locked": false,
-              "offset": 200
+              "offset": "offset_200"
             }
           },
           "b": {
@@ -3437,12 +3437,12 @@
       }
     },
     {
-      "name": "locking_fence_setting_100",
+      "name": "locking_fence_setting_offset_100",
       "act": {
         "this": "t",
         "form": "set_fence_offset",
         "args": {
-          "offset": 100
+          "offset": "offset_100"
         }
       },
       "state": {
@@ -3452,7 +3452,7 @@
             "kind": "eden:locking_fence",
             "fields": {
               "lever_locked": false,
-              "offset": 200
+              "offset": "offset_200"
             }
           },
           "b": {
@@ -3490,12 +3490,12 @@
       }
     },
     {
-      "name": "locking_fence_setting_200",
+      "name": "locking_fence_setting_offset_200",
       "act": {
         "this": "t",
         "form": "set_fence_offset",
         "args": {
-          "offset": 200
+          "offset": "offset_200"
         }
       },
       "state": {
@@ -3505,7 +3505,7 @@
             "kind": "eden:locking_fence",
             "fields": {
               "lever_locked": false,
-              "offset": 100
+              "offset": "offset_100"
             }
           },
           "b": {
@@ -3543,12 +3543,12 @@
       }
     },
     {
-      "name": "locking_fence_setting_300",
+      "name": "locking_fence_setting_offset_300",
       "act": {
         "this": "t",
         "form": "set_fence_offset",
         "args": {
-          "offset": 300
+          "offset": "offset_300"
         }
       },
       "state": {
@@ -3558,7 +3558,7 @@
             "kind": "eden:locking_fence",
             "fields": {
               "lever_locked": false,
-              "offset": 100
+              "offset": "offset_100"
             }
           },
           "b": {

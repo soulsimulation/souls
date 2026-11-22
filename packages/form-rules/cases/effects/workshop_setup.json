@@ -11,7 +11,7 @@
             "kind": "eden:bench_vice",
             "fields": {
               "clamped": true,
-              "jaw_gap": 120
+              "jaw_gap": "gap_120"
             }
           },
           "b": {
@@ -41,7 +41,7 @@
             "this": "t",
             "form": "set_jaw_gap",
             "args": {
-              "gap": 120
+              "gap": "gap_120"
             }
           },
           "receipt": "bench_vice_0",
@@ -84,7 +84,7 @@
             "this": "t",
             "form": "set_jaw_gap",
             "args": {
-              "gap": 120
+              "gap": "gap_120"
             }
           },
           "receipt": "bench_vice_2",
@@ -96,7 +96,7 @@
                 "node": "t",
                 "field": "jaw_gap",
                 "n": 29,
-                "to": 120
+                "to": 3
               }
             ],
             "events": [
@@ -174,7 +174,7 @@
             "this": "t",
             "form": "set_jaw_gap",
             "args": {
-              "gap": 120
+              "gap": "gap_120"
             }
           },
           "receipt": "bench_vice_5",
@@ -186,7 +186,7 @@
                 "node": "t",
                 "field": "jaw_gap",
                 "n": 29,
-                "to": 120
+                "to": 3
               }
             ],
             "events": [
@@ -236,7 +236,7 @@
           "kind": "eden:bench_vice",
           "fields": {
             "clamped": 1,
-            "jaw_gap": 120
+            "jaw_gap": 3
           }
         }
       }
@@ -250,7 +250,7 @@
             "kind": "eden:indexing_head",
             "fields": {
               "pin_engaged": true,
-              "index": 0
+              "index": "index_0"
             }
           },
           "b": {
@@ -280,7 +280,7 @@
             "this": "t",
             "form": "index_head",
             "args": {
-              "index": 2
+              "index": "index_90"
             }
           },
           "receipt": "indexing_head_0",
@@ -323,7 +323,7 @@
             "this": "t",
             "form": "index_head",
             "args": {
-              "index": 2
+              "index": "index_90"
             }
           },
           "receipt": "indexing_head_2",
@@ -413,7 +413,7 @@
             "this": "t",
             "form": "index_head",
             "args": {
-              "index": 0
+              "index": "index_0"
             }
           },
           "receipt": "indexing_head_5",
@@ -489,7 +489,7 @@
             "kind": "eden:telescopic_trestle",
             "fields": {
               "collar_locked": true,
-              "extension": 0
+              "extension": "extension_0"
             }
           },
           "b": {
@@ -519,7 +519,7 @@
             "this": "t",
             "form": "set_extension",
             "args": {
-              "extension": 300
+              "extension": "extension_300"
             }
           },
           "receipt": "telescopic_trestle_0",
@@ -562,7 +562,7 @@
             "this": "t",
             "form": "set_extension",
             "args": {
-              "extension": 300
+              "extension": "extension_300"
             }
           },
           "receipt": "telescopic_trestle_2",
@@ -574,7 +574,7 @@
                 "node": "t",
                 "field": "extension",
                 "n": 29,
-                "to": 300
+                "to": 2
               }
             ],
             "events": [
@@ -652,7 +652,7 @@
             "this": "t",
             "form": "set_extension",
             "args": {
-              "extension": 0
+              "extension": "extension_0"
             }
           },
           "receipt": "telescopic_trestle_5",
@@ -728,7 +728,7 @@
             "kind": "eden:locking_fence",
             "fields": {
               "lever_locked": true,
-              "offset": 100
+              "offset": "offset_100"
             }
           },
           "b": {
@@ -758,7 +758,7 @@
             "this": "t",
             "form": "set_fence_offset",
             "args": {
-              "offset": 300
+              "offset": "offset_300"
             }
           },
           "receipt": "locking_fence_0",
@@ -801,7 +801,7 @@
             "this": "t",
             "form": "set_fence_offset",
             "args": {
-              "offset": 300
+              "offset": "offset_300"
             }
           },
           "receipt": "locking_fence_2",
@@ -813,7 +813,7 @@
                 "node": "t",
                 "field": "offset",
                 "n": 29,
-                "to": 300
+                "to": 2
               }
             ],
             "events": [
@@ -891,7 +891,7 @@
             "this": "t",
             "form": "set_fence_offset",
             "args": {
-              "offset": 100
+              "offset": "offset_100"
             }
           },
           "receipt": "locking_fence_5",
@@ -903,7 +903,7 @@
                 "node": "t",
                 "field": "offset",
                 "n": 29,
-                "to": 100
+                "to": 0
               }
             ],
             "events": [
@@ -953,7 +953,7 @@
           "kind": "eden:locking_fence",
           "fields": {
             "lever_locked": 1,
-            "offset": 100
+            "offset": 0
           }
         }
       }

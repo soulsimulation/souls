@@ -13,11 +13,13 @@
     },
     "offset": {
       "n": 29,
-      "type": "int",
-      "unit": "mm",
-      "default": 100,
-      "min": 100,
-      "max": 300,
+      "type": "enum",
+      "values": [
+        "offset_100",
+        "offset_200",
+        "offset_300"
+      ],
+      "default": "offset_100",
       "audience": {
         "rule": "everyone"
       }
@@ -95,9 +97,9 @@
         "offset": {
           "type": "value",
           "of": [
-            100,
-            200,
-            300
+            "offset_100",
+            "offset_200",
+            "offset_300"
           ]
         }
       },
@@ -199,14 +201,11 @@
         "field": "offset",
         "do": "slide",
         "axis": "x",
-        "range": [
-          100,
-          300
-        ],
-        "to": [
-          0,
-          200
-        ],
+        "at": {
+          "offset_100": 0,
+          "offset_200": 100,
+          "offset_300": 200
+        },
         "over_us": 350000
       },
       {
@@ -214,14 +213,11 @@
         "field": "offset",
         "do": "slide",
         "axis": "x",
-        "range": [
-          100,
-          300
-        ],
-        "to": [
-          0,
-          200
-        ],
+        "at": {
+          "offset_100": 0,
+          "offset_200": 100,
+          "offset_300": 200
+        },
         "over_us": 350000
       },
       {
