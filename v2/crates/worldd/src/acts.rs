@@ -107,11 +107,12 @@ pub fn limits() -> Limits {
 }
 
 /// A gateway walk's route deadline and C21 progress watch. The route is read once N9 grants its actual spot;
-/// unrelated ticks do no route search. Waiting for a link or being carried is not a stalled walking tick.
+/// unrelated ticks do no route search. Waiting for a link or being carried is not a stalled walking tick. The deadline
+/// counts from the tick the route is read, not from the move's start, so a walk whose planning or spot waited still
+/// gets its whole route's time (W11, #4087).
 pub(crate) struct Walk {
     body: Id,
     order: Id,
-    started: Micros,
     planned: bool,
     watch: Watch,
     /// The leg's end last seen on the walk's line.
@@ -136,11 +137,10 @@ fn walk_span(length_mm: u64, links: usize) -> Micros {
 }
 
 impl Walk {
-    pub(crate) fn new(body: Id, order: Id, started: Micros) -> Self {
+    pub(crate) fn new(body: Id, order: Id) -> Self {
         Self {
             body,
             order,
-            started,
             planned: false,
             watch: Watch::new(),
             leg: None,
@@ -159,10 +159,7 @@ impl Walk {
         if !self.planned
             && let Some(metrics) = b.runner.route_metrics(self.body, self.order)
         {
-            due = Some(
-                self.started
-                    .saturating_add(walk_span(metrics.length_mm, metrics.links)),
-            );
+            due = Some(now.saturating_add(walk_span(metrics.length_mm, metrics.links)));
             self.planned = true;
         }
         let fields = b.runner.fields.get(&self.body);
