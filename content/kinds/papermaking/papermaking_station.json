@@ -211,22 +211,28 @@
       ],
       "effects": [
         {
-          "change": "transfer",
+          "change": "set",
           "field": "fibre",
-          "from": "this",
-          "into": "this",
-          "into_field": "mat_fibre",
-          "amount": 10,
-          "event": "fibre_formed"
+          "by": -10,
+          "event": "fibre_used"
         },
         {
-          "change": "transfer",
+          "change": "set",
           "field": "water",
-          "from": "this",
-          "into": "this",
-          "into_field": "mat_water",
-          "amount": 400,
-          "event": "water_formed"
+          "by": -400,
+          "event": "water_used"
+        },
+        {
+          "change": "set",
+          "field": "mat_fibre",
+          "to": 10,
+          "event": "mat_fibre_formed"
+        },
+        {
+          "change": "set",
+          "field": "mat_water",
+          "to": 400,
+          "event": "mat_water_formed"
         },
         {
           "change": "set",
@@ -261,7 +267,10 @@
           "at_most": 400
         },
         {
-          "need": "room"
+          "need": "state",
+          "field": "drain_water",
+          "at_most": 900,
+          "says": "empty_tray_capacity"
         },
         {
           "need": "hand",
@@ -290,13 +299,16 @@
       ],
       "effects": [
         {
-          "change": "transfer",
+          "change": "set",
           "field": "mat_water",
-          "from": "this",
-          "into": "this",
-          "into_field": "drain_water",
-          "amount": 300,
+          "to": 100,
           "event": "mesh_drained"
+        },
+        {
+          "change": "set",
+          "field": "drain_water",
+          "by": 300,
+          "event": "drain_water_retained"
         },
         {
           "change": "set",
@@ -389,7 +401,10 @@
           "at_most": 100
         },
         {
-          "need": "room"
+          "need": "state",
+          "field": "drain_water",
+          "at_most": 1120,
+          "says": "empty_tray_capacity"
         },
         {
           "need": "hand",
@@ -418,13 +433,16 @@
       ],
       "effects": [
         {
-          "change": "transfer",
+          "change": "set",
           "field": "mat_water",
-          "from": "this",
-          "into": "this",
-          "into_field": "drain_water",
-          "amount": 80,
+          "to": 20,
           "event": "sheet_pressed"
+        },
+        {
+          "change": "set",
+          "field": "drain_water",
+          "by": 80,
+          "event": "drain_water_retained"
         },
         {
           "change": "set",
@@ -505,16 +523,6 @@
           "change": "create",
           "kind": "eden:pressed_wet_sheet",
           "into": "out",
-          "set": [
-            {
-              "field": "fibre",
-              "to": 10
-            },
-            {
-              "field": "water",
-              "to": 20
-            }
-          ],
           "event": "wet_sheet_lifted"
         },
         {
@@ -1115,7 +1123,8 @@
     "no_water": "There is not enough supplied water for another mat.",
     "empty_hands": "Put down what you are holding before working the mat.",
     "clear_output": "Take the previous wet sheet off the output shelf before lifting this mat.",
-    "howto": "With empty hands: form a mat, drain its mesh, couch it onto the press bed, press it, and lift one wet sheet onto the output shelf. Take that sheet before the next lift. Each sheet retains 10 g fibre and 20 g water; the tray keeps the other 380 g water. Stocks supply three sheets. This is pressed wet material, with no drying step."
+    "howto": "With empty hands: form a mat, drain its mesh, couch it onto the press bed, press it, and lift one wet sheet onto the output shelf. Take that sheet before the next lift. Each sheet retains 10 g fibre and 20 g water; the tray keeps the other 380 g water. Stocks supply three sheets. This is pressed wet material, with no drying step.",
+    "empty_tray_capacity": "The drain tray has no room for this measured stage."
   },
   "card": {
     "text": "card",

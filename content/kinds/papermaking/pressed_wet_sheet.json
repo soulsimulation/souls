@@ -8,7 +8,7 @@
       "type": "int",
       "unit": "g",
       "default": 10,
-      "min": 0,
+      "min": 10,
       "max": 10,
       "audience": {
         "rule": "everyone"
@@ -19,7 +19,7 @@
       "type": "int",
       "unit": "g",
       "default": 20,
-      "min": 0,
+      "min": 20,
       "max": 20,
       "audience": {
         "rule": "everyone"

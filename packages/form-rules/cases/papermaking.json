@@ -680,7 +680,7 @@
       }
     },
     {
-      "name": "drain_mesh_needs_3_room_",
+      "name": "drain_mesh_needs_3_state_drain_water",
       "act": {
         "this": "p1",
         "form": "drain_mesh"
@@ -701,7 +701,7 @@
               "water": 800,
               "mat_fibre": 10,
               "mat_water": 400,
-              "drain_water": 1200,
+              "drain_water": 901,
               "stage": 1
             },
             "slots": {
@@ -731,8 +731,9 @@
       },
       "expect": {
         "verdict": "no",
-        "reason": "no_room",
-        "need": 3
+        "reason": "field_differs",
+        "need": 3,
+        "says": "empty_tray_capacity"
       }
     },
     {
@@ -1412,7 +1413,7 @@
       }
     },
     {
-      "name": "press_sheet_needs_3_room_",
+      "name": "press_sheet_needs_3_state_drain_water",
       "act": {
         "this": "p1",
         "form": "press_sheet"
@@ -1433,7 +1434,7 @@
               "water": 800,
               "mat_fibre": 10,
               "mat_water": 100,
-              "drain_water": 1200,
+              "drain_water": 1121,
               "stage": 3
             },
             "slots": {
@@ -1463,8 +1464,9 @@
       },
       "expect": {
         "verdict": "no",
-        "reason": "no_room",
-        "need": 3
+        "reason": "field_differs",
+        "need": 3,
+        "says": "empty_tray_capacity"
       }
     },
     {

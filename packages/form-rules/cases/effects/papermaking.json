@@ -1,6 +1,6 @@
 {
   "format": "souls-effect-cases/1",
-  "about": "Exact terminal effects and per-stage conservation; three finite sheets; occupied-slot retry, saved WIP resume and same-receipt idempotency (runner automatically re-applies every result). Native runner cancellation is separate proof.",
+  "about": "Exact committed effects and per-stage conservation; three finite sheets; occupied-slot retry, saved WIP resume and same-receipt idempotency (runner automatically re-applies every result). Native runner cancellation is separate proof.",
   "cases": [
     {
       "name": "stage_0_atomic_material_snapshot",
@@ -60,32 +60,28 @@
                 "node": "p1",
                 "field": "fibre",
                 "n": 28,
-                "to": 20,
-                "by": -10
-              },
-              {
-                "change": "set",
-                "node": "p1",
-                "field": "mat_fibre",
-                "n": 30,
-                "to": 10,
-                "by": 10
+                "to": 20
               },
               {
                 "change": "set",
                 "node": "p1",
                 "field": "water",
                 "n": 29,
-                "to": 800,
-                "by": -400
+                "to": 800
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "mat_fibre",
+                "n": 30,
+                "to": 10
               },
               {
                 "change": "set",
                 "node": "p1",
                 "field": "mat_water",
                 "n": 31,
-                "to": 400,
-                "by": 400
+                "to": 400
               },
               {
                 "change": "set",
@@ -97,18 +93,30 @@
             ],
             "events": [
               {
-                "event": "eden:fibre_formed",
+                "event": "eden:fibre_used",
                 "node": "p1",
                 "changes": [
-                  0,
+                  0
+                ]
+              },
+              {
+                "event": "eden:water_used",
+                "node": "p1",
+                "changes": [
                   1
                 ]
               },
               {
-                "event": "eden:water_formed",
+                "event": "eden:mat_fibre_formed",
                 "node": "p1",
                 "changes": [
-                  2,
+                  2
+                ]
+              },
+              {
+                "event": "eden:mat_water_formed",
+                "node": "p1",
+                "changes": [
                   3
                 ]
               },
@@ -199,16 +207,14 @@
                 "node": "p1",
                 "field": "mat_water",
                 "n": 31,
-                "to": 100,
-                "by": -300
+                "to": 100
               },
               {
                 "change": "set",
                 "node": "p1",
                 "field": "drain_water",
                 "n": 32,
-                "to": 300,
-                "by": 300
+                "to": 300
               },
               {
                 "change": "set",
@@ -223,7 +229,13 @@
                 "event": "eden:mesh_drained",
                 "node": "p1",
                 "changes": [
-                  0,
+                  0
+                ]
+              },
+              {
+                "event": "eden:drain_water_retained",
+                "node": "p1",
+                "changes": [
                   1
                 ]
               },
@@ -405,16 +417,14 @@
                 "node": "p1",
                 "field": "mat_water",
                 "n": 31,
-                "to": 20,
-                "by": -80
+                "to": 20
               },
               {
                 "change": "set",
                 "node": "p1",
                 "field": "drain_water",
                 "n": 32,
-                "to": 380,
-                "by": 80
+                "to": 380
               },
               {
                 "change": "set",
@@ -429,7 +439,13 @@
                 "event": "eden:sheet_pressed",
                 "node": "p1",
                 "changes": [
-                  0,
+                  0
+                ]
+              },
+              {
+                "event": "eden:drain_water_retained",
+                "node": "p1",
+                "changes": [
                   1
                 ]
               },
@@ -536,10 +552,6 @@
                 "to": {
                   "node": "p1",
                   "slot": "out"
-                },
-                "fields": {
-                  "fibre": 10,
-                  "water": 20
                 }
               },
               {
@@ -602,11 +614,7 @@
           }
         },
         "stage4.0": {
-          "kind": "eden:pressed_wet_sheet",
-          "fields": {
-            "fibre": 10,
-            "water": 20
-          }
+          "kind": "eden:pressed_wet_sheet"
         }
       }
     },
@@ -680,32 +688,28 @@
                 "node": "p1",
                 "field": "fibre",
                 "n": 28,
-                "to": 20,
-                "by": -10
-              },
-              {
-                "change": "set",
-                "node": "p1",
-                "field": "mat_fibre",
-                "n": 30,
-                "to": 10,
-                "by": 10
+                "to": 20
               },
               {
                 "change": "set",
                 "node": "p1",
                 "field": "water",
                 "n": 29,
-                "to": 800,
-                "by": -400
+                "to": 800
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "mat_fibre",
+                "n": 30,
+                "to": 10
               },
               {
                 "change": "set",
                 "node": "p1",
                 "field": "mat_water",
                 "n": 31,
-                "to": 400,
-                "by": 400
+                "to": 400
               },
               {
                 "change": "set",
@@ -717,18 +721,30 @@
             ],
             "events": [
               {
-                "event": "eden:fibre_formed",
+                "event": "eden:fibre_used",
                 "node": "p1",
                 "changes": [
-                  0,
+                  0
+                ]
+              },
+              {
+                "event": "eden:water_used",
+                "node": "p1",
+                "changes": [
                   1
                 ]
               },
               {
-                "event": "eden:water_formed",
+                "event": "eden:mat_fibre_formed",
                 "node": "p1",
                 "changes": [
-                  2,
+                  2
+                ]
+              },
+              {
+                "event": "eden:mat_water_formed",
+                "node": "p1",
+                "changes": [
                   3
                 ]
               },
@@ -757,16 +773,14 @@
                 "node": "p1",
                 "field": "mat_water",
                 "n": 31,
-                "to": 100,
-                "by": -300
+                "to": 100
               },
               {
                 "change": "set",
                 "node": "p1",
                 "field": "drain_water",
                 "n": 32,
-                "to": 300,
-                "by": 300
+                "to": 300
               },
               {
                 "change": "set",
@@ -781,7 +795,13 @@
                 "event": "eden:mesh_drained",
                 "node": "p1",
                 "changes": [
-                  0,
+                  0
+                ]
+              },
+              {
+                "event": "eden:drain_water_retained",
+                "node": "p1",
+                "changes": [
                   1
                 ]
               },
@@ -839,16 +859,14 @@
                 "node": "p1",
                 "field": "mat_water",
                 "n": 31,
-                "to": 20,
-                "by": -80
+                "to": 20
               },
               {
                 "change": "set",
                 "node": "p1",
                 "field": "drain_water",
                 "n": 32,
-                "to": 380,
-                "by": 80
+                "to": 380
               },
               {
                 "change": "set",
@@ -863,7 +881,13 @@
                 "event": "eden:sheet_pressed",
                 "node": "p1",
                 "changes": [
-                  0,
+                  0
+                ]
+              },
+              {
+                "event": "eden:drain_water_retained",
+                "node": "p1",
+                "changes": [
                   1
                 ]
               },
@@ -908,10 +932,6 @@
                 "to": {
                   "node": "p1",
                   "slot": "out"
-                },
-                "fields": {
-                  "fibre": 10,
-                  "water": 20
                 }
               },
               {
@@ -1000,32 +1020,28 @@
                 "node": "p1",
                 "field": "fibre",
                 "n": 28,
-                "to": 10,
-                "by": -10
-              },
-              {
-                "change": "set",
-                "node": "p1",
-                "field": "mat_fibre",
-                "n": 30,
-                "to": 10,
-                "by": 10
+                "to": 10
               },
               {
                 "change": "set",
                 "node": "p1",
                 "field": "water",
                 "n": 29,
-                "to": 400,
-                "by": -400
+                "to": 400
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "mat_fibre",
+                "n": 30,
+                "to": 10
               },
               {
                 "change": "set",
                 "node": "p1",
                 "field": "mat_water",
                 "n": 31,
-                "to": 400,
-                "by": 400
+                "to": 400
               },
               {
                 "change": "set",
@@ -1037,18 +1053,30 @@
             ],
             "events": [
               {
-                "event": "eden:fibre_formed",
+                "event": "eden:fibre_used",
                 "node": "p1",
                 "changes": [
-                  0,
+                  0
+                ]
+              },
+              {
+                "event": "eden:water_used",
+                "node": "p1",
+                "changes": [
                   1
                 ]
               },
               {
-                "event": "eden:water_formed",
+                "event": "eden:mat_fibre_formed",
                 "node": "p1",
                 "changes": [
-                  2,
+                  2
+                ]
+              },
+              {
+                "event": "eden:mat_water_formed",
+                "node": "p1",
+                "changes": [
                   3
                 ]
               },
@@ -1077,16 +1105,14 @@
                 "node": "p1",
                 "field": "mat_water",
                 "n": 31,
-                "to": 100,
-                "by": -300
+                "to": 100
               },
               {
                 "change": "set",
                 "node": "p1",
                 "field": "drain_water",
                 "n": 32,
-                "to": 680,
-                "by": 300
+                "to": 680
               },
               {
                 "change": "set",
@@ -1101,7 +1127,13 @@
                 "event": "eden:mesh_drained",
                 "node": "p1",
                 "changes": [
-                  0,
+                  0
+                ]
+              },
+              {
+                "event": "eden:drain_water_retained",
+                "node": "p1",
+                "changes": [
                   1
                 ]
               },
@@ -1159,16 +1191,14 @@
                 "node": "p1",
                 "field": "mat_water",
                 "n": 31,
-                "to": 20,
-                "by": -80
+                "to": 20
               },
               {
                 "change": "set",
                 "node": "p1",
                 "field": "drain_water",
                 "n": 32,
-                "to": 760,
-                "by": 80
+                "to": 760
               },
               {
                 "change": "set",
@@ -1183,7 +1213,13 @@
                 "event": "eden:sheet_pressed",
                 "node": "p1",
                 "changes": [
-                  0,
+                  0
+                ]
+              },
+              {
+                "event": "eden:drain_water_retained",
+                "node": "p1",
+                "changes": [
                   1
                 ]
               },
@@ -1228,10 +1264,6 @@
                 "to": {
                   "node": "p1",
                   "slot": "out"
-                },
-                "fields": {
-                  "fibre": 10,
-                  "water": 20
                 }
               },
               {
@@ -1320,32 +1352,28 @@
                 "node": "p1",
                 "field": "fibre",
                 "n": 28,
-                "to": 0,
-                "by": -10
-              },
-              {
-                "change": "set",
-                "node": "p1",
-                "field": "mat_fibre",
-                "n": 30,
-                "to": 10,
-                "by": 10
+                "to": 0
               },
               {
                 "change": "set",
                 "node": "p1",
                 "field": "water",
                 "n": 29,
-                "to": 0,
-                "by": -400
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "mat_fibre",
+                "n": 30,
+                "to": 10
               },
               {
                 "change": "set",
                 "node": "p1",
                 "field": "mat_water",
                 "n": 31,
-                "to": 400,
-                "by": 400
+                "to": 400
               },
               {
                 "change": "set",
@@ -1357,18 +1385,30 @@
             ],
             "events": [
               {
-                "event": "eden:fibre_formed",
+                "event": "eden:fibre_used",
                 "node": "p1",
                 "changes": [
-                  0,
+                  0
+                ]
+              },
+              {
+                "event": "eden:water_used",
+                "node": "p1",
+                "changes": [
                   1
                 ]
               },
               {
-                "event": "eden:water_formed",
+                "event": "eden:mat_fibre_formed",
                 "node": "p1",
                 "changes": [
-                  2,
+                  2
+                ]
+              },
+              {
+                "event": "eden:mat_water_formed",
+                "node": "p1",
+                "changes": [
                   3
                 ]
               },
@@ -1397,16 +1437,14 @@
                 "node": "p1",
                 "field": "mat_water",
                 "n": 31,
-                "to": 100,
-                "by": -300
+                "to": 100
               },
               {
                 "change": "set",
                 "node": "p1",
                 "field": "drain_water",
                 "n": 32,
-                "to": 1060,
-                "by": 300
+                "to": 1060
               },
               {
                 "change": "set",
@@ -1421,7 +1459,13 @@
                 "event": "eden:mesh_drained",
                 "node": "p1",
                 "changes": [
-                  0,
+                  0
+                ]
+              },
+              {
+                "event": "eden:drain_water_retained",
+                "node": "p1",
+                "changes": [
                   1
                 ]
               },
@@ -1479,16 +1523,14 @@
                 "node": "p1",
                 "field": "mat_water",
                 "n": 31,
-                "to": 20,
-                "by": -80
+                "to": 20
               },
               {
                 "change": "set",
                 "node": "p1",
                 "field": "drain_water",
                 "n": 32,
-                "to": 1140,
-                "by": 80
+                "to": 1140
               },
               {
                 "change": "set",
@@ -1503,7 +1545,13 @@
                 "event": "eden:sheet_pressed",
                 "node": "p1",
                 "changes": [
-                  0,
+                  0
+                ]
+              },
+              {
+                "event": "eden:drain_water_retained",
+                "node": "p1",
+                "changes": [
                   1
                 ]
               },
@@ -1548,10 +1596,6 @@
                 "to": {
                   "node": "p1",
                   "slot": "out"
-                },
-                "fields": {
-                  "fibre": 10,
-                  "water": 20
                 }
               },
               {
@@ -1627,25 +1671,13 @@
           }
         },
         "c0s4.0": {
-          "kind": "eden:pressed_wet_sheet",
-          "fields": {
-            "fibre": 10,
-            "water": 20
-          }
+          "kind": "eden:pressed_wet_sheet"
         },
         "c1s4.0": {
-          "kind": "eden:pressed_wet_sheet",
-          "fields": {
-            "fibre": 10,
-            "water": 20
-          }
+          "kind": "eden:pressed_wet_sheet"
         },
         "c2s4.0": {
-          "kind": "eden:pressed_wet_sheet",
-          "fields": {
-            "fibre": 10,
-            "water": 20
-          }
+          "kind": "eden:pressed_wet_sheet"
         }
       }
     },
@@ -1758,10 +1790,6 @@
                 "to": {
                   "node": "p1",
                   "slot": "out"
-                },
-                "fields": {
-                  "fibre": 10,
-                  "water": 20
                 }
               },
               {
@@ -1836,11 +1864,7 @@
           }
         },
         "retry.0": {
-          "kind": "eden:pressed_wet_sheet",
-          "fields": {
-            "fibre": 10,
-            "water": 20
-          }
+          "kind": "eden:pressed_wet_sheet"
         },
         "collector": {
           "hands": {
@@ -1920,16 +1944,14 @@
                 "node": "p1",
                 "field": "mat_water",
                 "n": 31,
-                "to": 100,
-                "by": -300
+                "to": 100
               },
               {
                 "change": "set",
                 "node": "p1",
                 "field": "drain_water",
                 "n": 32,
-                "to": 300,
-                "by": 300
+                "to": 300
               },
               {
                 "change": "set",
@@ -1944,7 +1966,13 @@
                 "event": "eden:mesh_drained",
                 "node": "p1",
                 "changes": [
-                  0,
+                  0
+                ]
+              },
+              {
+                "event": "eden:drain_water_retained",
+                "node": "p1",
+                "changes": [
                   1
                 ]
               },
@@ -2002,16 +2030,14 @@
                 "node": "p1",
                 "field": "mat_water",
                 "n": 31,
-                "to": 20,
-                "by": -80
+                "to": 20
               },
               {
                 "change": "set",
                 "node": "p1",
                 "field": "drain_water",
                 "n": 32,
-                "to": 380,
-                "by": 80
+                "to": 380
               },
               {
                 "change": "set",
@@ -2026,7 +2052,13 @@
                 "event": "eden:sheet_pressed",
                 "node": "p1",
                 "changes": [
-                  0,
+                  0
+                ]
+              },
+              {
+                "event": "eden:drain_water_retained",
+                "node": "p1",
+                "changes": [
                   1
                 ]
               },
@@ -2071,10 +2103,6 @@
                 "to": {
                   "node": "p1",
                   "slot": "out"
-                },
-                "fields": {
-                  "fibre": 10,
-                  "water": 20
                 }
               },
               {
@@ -2237,16 +2265,14 @@
                 "node": "p1",
                 "field": "mat_water",
                 "n": 31,
-                "to": 20,
-                "by": -80
+                "to": 20
               },
               {
                 "change": "set",
                 "node": "p1",
                 "field": "drain_water",
                 "n": 32,
-                "to": 380,
-                "by": 80
+                "to": 380
               },
               {
                 "change": "set",
@@ -2261,7 +2287,13 @@
                 "event": "eden:sheet_pressed",
                 "node": "p1",
                 "changes": [
-                  0,
+                  0
+                ]
+              },
+              {
+                "event": "eden:drain_water_retained",
+                "node": "p1",
+                "changes": [
                   1
                 ]
               },
@@ -2306,10 +2338,6 @@
                 "to": {
                   "node": "p1",
                   "slot": "out"
-                },
-                "fields": {
-                  "fibre": 10,
-                  "water": 20
                 }
               },
               {
@@ -2443,16 +2471,14 @@
                 "node": "p1",
                 "field": "mat_water",
                 "n": 31,
-                "to": 20,
-                "by": -80
+                "to": 20
               },
               {
                 "change": "set",
                 "node": "p1",
                 "field": "drain_water",
                 "n": 32,
-                "to": 380,
-                "by": 80
+                "to": 380
               },
               {
                 "change": "set",
@@ -2467,7 +2493,13 @@
                 "event": "eden:sheet_pressed",
                 "node": "p1",
                 "changes": [
-                  0,
+                  0
+                ]
+              },
+              {
+                "event": "eden:drain_water_retained",
+                "node": "p1",
+                "changes": [
                   1
                 ]
               },
@@ -2512,10 +2544,6 @@
                 "to": {
                   "node": "p1",
                   "slot": "out"
-                },
-                "fields": {
-                  "fibre": 10,
-                  "water": 20
                 }
               },
               {
@@ -2665,10 +2693,6 @@
                 "to": {
                   "node": "p1",
                   "slot": "out"
-                },
-                "fields": {
-                  "fibre": 10,
-                  "water": 20
                 }
               },
               {
