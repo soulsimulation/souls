@@ -14,7 +14,8 @@
 //!   walk keeps a place behind a wall far; the weight fills the rings nearest the target first. When the target is
 //!   itself clear ground, a place must also be joined to it on foot: a walk between them within [`DETOUR`] times
 //!   their straight gap plus a pitch. A target that is not (in a box, a wall, a doorway, on a stair, on water, off the
-//!   ground) is bound to the nearest clear place beside it the same way.
+//!   ground) is bound to the nearest clear place beside it the same way, and so is a clear target the asker's walk
+//!   does not reach (a pocket of ground walled in by a desk's legs and the chairs round it, #4072).
 //! - **Recorded as the engine's.** Each grant is an [`Entry::Grant`] with the actor the world and the cause the
 //!   asker's order; the same marks give the same grants every run (integers, id order, no hashing).
 //! - **Released** when its holder no longer asks for it: it left (its mark asks for another target or none,
@@ -265,6 +266,32 @@ impl Table {
         let Some((_, a)) = g.stand(ask.node, ask.from) else {
             return Err("spot-none-free");
         };
+        let found = self.nearest_by(g, ask, a, blocked, self.clear);
+        // A clear target the asker's walk does not reach (a pocket under a desk, #4072) is bound to the nearest place
+        // beside it, as a target in a box is. A crowd that holds every joined place of a reached target is still
+        // refused.
+        match found {
+            Err(_)
+                if self.clear
+                    && g.walk(ask.node, ask.from, ask.target.node, ask.target.point())
+                        .is_none() =>
+            {
+                self.nearest_by(g, ask, a, blocked, false)
+            }
+            r => r,
+        }
+    }
+
+    /// [`Table::nearest`] from the asker's place in the ground's frame `a`; with `joined`, only places joined on foot
+    /// to the target count.
+    fn nearest_by(
+        &mut self,
+        g: &mut dyn Ground,
+        ask: &Ask,
+        a: Vec3,
+        blocked: &BTreeSet<usize>,
+        joined: bool,
+    ) -> Result<(usize, i64), &'static str> {
         let t = ask.target;
         let gap = |p: &Place| flat(p.at, t.point());
         // Free places by a bound below their cost: the straight way there plus the weighted gap.
@@ -281,7 +308,7 @@ impl Table {
             if best.is_some_and(|b| bound > b.0) {
                 break;
             }
-            if self.clear && !self.joined(g, t, i) {
+            if joined && !self.joined(g, t, i) {
                 continue;
             }
             let Some(walk) = g.walk(ask.node, ask.from, t.node, self.places[i].at) else {
@@ -314,7 +341,8 @@ impl Table {
 /// Between the rings [`within`] tries, and between neighbouring places on a ring, µm.
 pub const REACH_PITCH: i64 = 100_000;
 
-/// Where a body may stand to act at `target` (C15, #3447): the target itself when a body may stand there; else the
+/// Where a body may stand to act at `target` (C15, #3447): the target itself when a body may stand there and the
+/// asker's walk reaches it (#4072); else the
 /// nearest place within `reach` of it, on rings [`REACH_PITCH`] apart (`⌊2πk⌋` places on ring `k`), on walkable
 /// ground and out of doorways and off stairs, as a table's places are. Nearest as a table's nearest: the least walk
 /// from `from` (the asker's node and where it stands) plus [`WEIGHT`] times the place's gap to the target, ties by
@@ -326,10 +354,29 @@ pub fn within(
     from: Option<(Id, Vec3)>,
 ) -> Option<Vec3> {
     let t = target.point();
-    if g.stand(target.node, t).is_some() {
+    let from = from.and_then(|(node, p)| Some((node, p, g.stand(node, p)?.1)));
+    // A point a body may stand on is its own place, unless the asker's walk cannot reach it (a pocket under a desk,
+    // walled in by its legs and the chairs round it, #4072): then the rings are tried, and the point is kept only
+    // when none of them is reached either.
+    let standable = g.stand(target.node, t).is_some();
+    if standable && from.is_none_or(|(node, p, _)| g.walk(node, p, target.node, t).is_some()) {
         return Some(t);
     }
-    let from = from.and_then(|(node, p)| Some((node, p, g.stand(node, p)?.1)));
+    let found = rings(g, target, reach, from);
+    if found.is_none() && standable {
+        return Some(t);
+    }
+    found
+}
+
+/// [`within`]'s rings: the place within `reach` of `target` nearest by the asker's walk, or by the gap alone.
+fn rings(
+    g: &mut dyn Ground,
+    target: Target,
+    reach: i64,
+    from: Option<(Id, Vec3, Vec3)>,
+) -> Option<Vec3> {
+    let t = target.point();
     // Places by a bound below their cost: the straight way there plus the weighted gap.
     let mut order: Vec<(i64, i64, i64, Vec3)> = Vec::new();
     for ring in 1..=reach / REACH_PITCH {
