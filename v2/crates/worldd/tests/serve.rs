@@ -313,6 +313,62 @@ fn a1_a2_a5_seeded_world_serves_walks_and_restarts_after_sigkill() {
     serves_walks_and_restarts(w, &d, &dir, body, root, ground);
 }
 
+/// #4013 A1: while it loads, `serve` tells the service manager it made progress (`EXTEND_TIMEOUT_USEC`, as much as
+/// the unit's 30 s `TimeoutStartSec`), then `READY=1`, and no more progress notices after it.
+#[test]
+fn x5_a1_serve_says_progress_while_it_loads_and_none_once_ready() {
+    let d = scratch("x5");
+    let (dir, ..) = seeded(&d);
+    let notify = d.join("n");
+    let manager = std::os::unix::net::UnixDatagram::bind(&notify).expect("a notify socket");
+    manager
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .expect("a read timeout");
+    let w = serve_env(
+        &dir,
+        &d.join("s"),
+        &[],
+        &[("NOTIFY_SOCKET", notify.to_str().expect("a path"))],
+    );
+    let mut said = Vec::new();
+    let mut buf = [0u8; 512];
+    while !said.iter().any(|s: &String| s.starts_with("READY=1")) {
+        let n = manager.recv(&mut buf).expect("a notice before READY=1");
+        said.push(String::from_utf8_lossy(&buf[..n]).into_owned());
+    }
+    let before = said
+        .iter()
+        .filter(|s| *s == "EXTEND_TIMEOUT_USEC=30000000")
+        .count();
+    println!("A1: {before} progress notices, then {:?}", said.last());
+    assert!(before >= 1, "no progress before ready: {said:?}");
+    // The watchdog's thread starts before READY=1, so its word may come first too.
+    let other = said[..said.len() - 1]
+        .iter()
+        .filter(|s| *s != "EXTEND_TIMEOUT_USEC=30000000" && *s != "WATCHDOG=1")
+        .count();
+    assert_eq!(other, 0, "only progress and alive, then ready: {said:?}");
+    // After READY=1, only the watchdog's word, twice a second: no progress notice in the next second.
+    after_ready(&manager);
+    drop(w);
+}
+
+// A real process on the real clock: the second read after READY=1 is real time.
+#[allow(clippy::disallowed_methods)]
+fn after_ready(manager: &std::os::unix::net::UnixDatagram) {
+    let mut buf = [0u8; 512];
+    manager
+        .set_read_timeout(Some(Duration::from_millis(200)))
+        .expect("a read timeout");
+    let end = Instant::now() + Duration::from_secs(1);
+    while Instant::now() < end {
+        if let Ok(n) = manager.recv(&mut buf) {
+            let s = String::from_utf8_lossy(&buf[..n]).into_owned();
+            assert_eq!(s, "WATCHDOG=1", "after READY=1");
+        }
+    }
+}
+
 /// The seeded world: its folder, its Soul's body, its root and its ground.
 fn seeded(d: &Path) -> (PathBuf, Id, Id, Id) {
     let facts = d.join("facts.json");

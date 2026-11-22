@@ -98,3 +98,11 @@ telemetry or paging (#461), synthesize deployment receipts, embed proof previews
 journals remain one click away. The full #583 criteria remain open for live owner/non-owner sign-in qualification,
 private proof delivery if later needed, richer health integration and live deployment validation. Use the normal
 T3 auth review and release-owner process before production activation; no full Modal gate is needed for this slice.
+
+## Soul client versions in use (v2)
+
+The v2 health page (`/ops/health`, `v2/tools/ops/health/page.mjs`) lists, for the last 24 hours, each Soul client
+name and version the gateways saw at sign-in (the `souls-client` header, else `user-agent`), with how many Souls
+signed in with it and how many acts it made. It reads the gateways' receipts files on the machine, answers a
+signed-in site owner only (401 without a token, 403 for another account) and holds counts only: never a Soul id,
+account, token or address, and nothing is sent anywhere.

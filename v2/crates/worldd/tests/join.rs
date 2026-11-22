@@ -1088,3 +1088,6 @@ fn r21_joined_principal_private_turn_uses_body_and_rejects_nonmember() {
     }
     run.stop();
 }
+
+#[path = "join/base_forms.rs"]
+mod base_forms;
