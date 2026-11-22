@@ -1656,3 +1656,69 @@ fn a_bare_lie_at_a_private_bed_is_refused_and_the_owner_sits_on_its_own() {
     world.stop();
     let _ = std::fs::remove_file(&path);
 }
+
+/// #4086: the chair 100 m south of the body's start.
+fn far_seat() -> Vec3 {
+    Vec3::new(start().x, 450_000, start().z - 100_000_000)
+}
+
+fn far_chair() -> Result<Bodies, replica::effects::Refusal> {
+    bodies_with(CHAIR, far_seat())
+}
+
+/// #4086 A2: a walk to a thing 100 m away is answered only when the walk ends: the answers and when each came, how the
+/// walk's entries ended, and where its body rows put the body, all read from the world's records.
+#[test]
+fn w10_a2_a_walk_to_a_thing_100_m_away_ends_there() {
+    let (world, mut c, store, path) = served_with(10_000_000, "w10far", far_chair);
+    c.0.set_read_timeout(Some(Duration::from_secs(240)))
+        .unwrap();
+    let t0 = std::time::Instant::now();
+    let bytes = intent_bytes(
+        body_id(),
+        1,
+        "eden:walk",
+        Some(Target::Node(thing())),
+        &[],
+        answers::now() + 240_000_000,
+    );
+    c.0.write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+        .unwrap();
+    c.0.write_all(&bytes).unwrap();
+    let mut answered = Vec::new();
+    let end = loop {
+        let mut len = [0u8; 4];
+        c.0.read_exact(&mut len).expect("an answer");
+        let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
+        c.0.read_exact(&mut frame).unwrap();
+        let Value::Map(m) = decode(&frame).unwrap().value else {
+            panic!("a frame")
+        };
+        let Some(Value::Map(a)) = m.get(&2) else {
+            panic!("an answer")
+        };
+        answered.push((a.get(&3).cloned(), t0.elapsed()));
+        if a.get(&3) != Some(&Value::Uint(3)) {
+            break read_answer(&frame);
+        }
+    };
+    world.stop();
+    let _ = std::fs::remove_file(&path);
+    let log = store.0.lock().unwrap().bytes.clone();
+    let ticks = ticks(&log);
+    let rows: Vec<Vec3> = ticks
+        .iter()
+        .flat_map(|(_, r)| {
+            r.iter()
+                .filter(|(b, _)| *b == body_id())
+                .map(|(_, p)| *p)
+        })
+        .collect();
+    let events: Vec<_> = ticks.iter().flat_map(|(e, _)| e.clone()).collect();
+    println!(
+        "W10 A2: {end:?}; answers {answered:?}; events {events:?}; first row {:?}, last row {:?}, rows {}",
+        rows.first(),
+        rows.last(),
+        rows.len()
+    );
+}

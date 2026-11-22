@@ -52,11 +52,10 @@ const PLANK: &str = "test:plank";
 const PAIR: &str = "test:pair";
 const CARRY: &str = "test:carry";
 const COURT: &str = "test:court";
-const CAN: &str = "test:can";
 
 /// The kinds in pinned order: (plain name, full name).
 fn kinds() -> Vec<(&'static str, String)> {
-    [PLACE, WALKER, VESSEL, RACK, PLANK, PAIR, CARRY, COURT, CAN]
+    [PLACE, WALKER, VESSEL, RACK, PLANK, PAIR, CARRY, COURT]
         .iter()
         .enumerate()
         .map(|(i, k)| (*k, full(k, i as u8 + 1)))
@@ -137,16 +136,6 @@ fn plank() -> Id {
 fn court() -> Id {
     id(6)
 }
-/// #4086: a watering can 100 m south of the first walker, and a rack 100 m south of it, 5 m to one side.
-fn can() -> Id {
-    id(7)
-}
-fn far_rack() -> Id {
-    id(8)
-}
-fn far(dx: i64) -> Vec3 {
-    Vec3::new(at1().x + dx, 0, at1().z - 100_000_000)
-}
 
 /// Where the bodies stand on the test world's open ground, west of the square, µm.
 fn at1() -> Vec3 {
@@ -205,7 +194,6 @@ fn tree_rules() -> TreeRules {
             (fullname(PAIR), k("activity", &[], &[], None)),
             (fullname(CARRY), k("activity", &[], &[1], None)),
             (fullname(COURT), k("thing", &[], &[], None)),
-            (fullname(CAN), k("thing", &[], &[], Some(1))),
         ]),
         souls: [w1(), w2()].into(),
         audiences: BTreeMap::new(),
@@ -282,23 +270,10 @@ fn entries() -> Json {
           "steps": [], "effects": [{ "change": "set", "field": "disc", "to": "end_b", "event": "threw" }] } } }"#,
     )
     .unwrap();
-    // The watering can's own take (`content/kinds/garden/watering_can.json`): no move and no approach, and only a
-    // free hand as its need (#4086).
-    let can = parse(
-        r#"{ "format": "souls-entry/1", "kind": "test:can", "owner": "thing",
-      "points": { "grip": { "role": "grip", "at_mm": [0, 305, 0] } },
-      "geometry": { "bounds_mm": [760, 360, 240] },
-      "forms": { "take": { "who": "anyone", "starts": "act", "needs": [{ "need": "hand", "free": true }],
-        "steps": [{ "step": "take" }],
-        "effects": [{ "change": "reparent", "what": "this", "into": "actor_hand", "event": "taken" }] } },
-      "motion": { "how": "one_hand" }, "loose": { "ever": true } }"#,
-    )
-    .unwrap();
     Json::Obj(vec![
         (VESSEL.into(), vessel),
         (RACK.into(), rack),
         (COURT.into(), court),
-        (CAN.into(), can),
     ])
 }
 
@@ -345,8 +320,6 @@ fn world() -> Replica {
             g,
             Vec3::new(at1().x, 0, at1().z - 2_000_000),
         ),
-        create(can(), CAN, g, far(0)),
-        create(far_rack(), RACK, g, far(5_000_000)),
     ];
     let effects: Vec<Value> = changes
         .into_iter()
@@ -400,17 +373,6 @@ struct Client(UnixStream, Id, u64);
 
 impl Client {
     fn send(&mut self, verb: &str, target: Option<Id>, parameters: BTreeMap<u64, Value>) {
-        self.send_for(verb, target, parameters, 60_000_000);
-    }
-
-    /// An intent that expires `us` from now.
-    fn send_for(
-        &mut self,
-        verb: &str,
-        target: Option<Id>,
-        parameters: BTreeMap<u64, Value>,
-        us: i64,
-    ) {
         self.2 += 1;
         let i = Intent {
             actor: Actor::Soul(self.1),
@@ -425,7 +387,7 @@ impl Client {
                 sequence: 0,
             }
             .to_value(),
-            expiry: answers::now() + us,
+            expiry: answers::now() + 60_000_000,
             resources: Vec::new(),
             fallbacks: Vec::new(),
             replaces: None,
@@ -439,28 +401,18 @@ impl Client {
         self.0.write_all(&bytes).unwrap();
     }
 
-    /// The next answer frame's answer map.
-    fn frame(&mut self) -> BTreeMap<u64, Value> {
+    /// The next answer: a receipt's entries, or a refusal's reason.
+    fn answer(&mut self) -> Result<Vec<u64>, String> {
         let mut len = [0u8; 4];
         self.0.read_exact(&mut len).expect("an answer");
         let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
         self.0.read_exact(&mut frame).unwrap();
-        let Value::Map(mut m) = decode(&frame).unwrap().value else {
+        let Value::Map(m) = decode(&frame).unwrap().value else {
             panic!("a frame")
         };
-        let Some(Value::Map(a)) = m.remove(&2) else {
+        let Some(Value::Map(a)) = m.get(&2) else {
             panic!("an answer")
         };
-        a
-    }
-
-    /// The next answer: a receipt's entries, or a refusal's reason.
-    fn answer(&mut self) -> Result<Vec<u64>, String> {
-        let a = self.frame();
-        Self::read(&a)
-    }
-
-    fn read(a: &BTreeMap<u64, Value>) -> Result<Vec<u64>, String> {
         match (a.get(&3), a.get(&5)) {
             (Some(Value::Uint(1)), Some(Value::Array(e))) => Ok(e
                 .iter()
@@ -927,91 +879,5 @@ fn i3888_a_forms_needs_are_the_worlds_at_commit() {
     // The disc is at end b now: a's throw from end a is refused by the state need (need 0).
     let again = a.act("test:throw_from_end_a_to_end_b", Some(court()), none());
     assert_eq!(again, Err("field_differs".to_owned()));
-    run.stop();
-}
-
-/// Where node `n` is in its frame, as the world's records have it.
-fn at(r: &Replica, n: Id) -> Vec3 {
-    let t = r.tree();
-    t.node(t.handle(n).expect("the node"))
-        .expect("the node")
-        .place()
-        .expect("a place")
-        .position
-}
-
-/// The bodies' move entries in the log: (event, how it ended, the body's position).
-fn move_events(run: &Run) -> Vec<(String, Option<String>, Vec<Value>)> {
-    let log = run.store.0.lock().unwrap().bytes.clone();
-    let mut out = Vec::new();
-    for rec in recover(&log).unwrap().records {
-        if sim::recorder::is_input(&rec) {
-            continue;
-        }
-        for e in Part::read(&rec).unwrap().effects {
-            for ev in e.events.iter().flatten() {
-                let n = ev.name.as_str();
-                if n != answers::MOVE_STARTED && n != answers::MOVE_ENDED {
-                    continue;
-                }
-                let how = match ev.fields.get(&2) {
-                    Some(Value::Bytes(b)) => Some(String::from_utf8(b.clone()).unwrap()),
-                    _ => None,
-                };
-                let Some(Value::Array(p)) = ev.fields.get(&3) else {
-                    panic!("a position")
-                };
-                out.push((n.to_owned(), how, p.clone()))
-            }
-        }
-    }
-    out
-}
-
-/// #4086 A1: a body 100 m from a loose watering can sends the can's `take` (no move, no approach, a free hand its
-/// one need). The body's place before and after and the can's parent are read from the world's records.
-#[test]
-fn w10_a1_a_take_100_m_away_read_by_position() {
-    let (run, mut a, _) = serve("w10a1");
-    let before = at(&run.replay(), w1());
-    let can_at = at(&run.replay(), can());
-    let t0 = std::time::Instant::now();
-    let take = a.act("test:take", Some(can()), BTreeMap::new());
-    let took = t0.elapsed();
-    let r = run.replay();
-    println!(
-        "W10 A1 take: {take:?} in {took:?}; body before {before:?}, after {:?}; can at {can_at:?}, parent {:?}; moves {:?}",
-        at(&r, w1()),
-        parent(&r, can()),
-        move_events(&run)
-    );
-    run.stop();
-}
-
-/// #4086 A2: a walk to a rack 100 m away: every answer and when it came, how the walk's entries ended and where the
-/// body is, from the world's records.
-#[test]
-fn w10_a2_a_walk_100_m_away_read_by_position() {
-    let (run, mut a, _) = serve("w10a2");
-    a.0.set_read_timeout(Some(Duration::from_secs(240))).unwrap();
-    let before = at(&run.replay(), w1());
-    let t0 = std::time::Instant::now();
-    a.send_for("test:walk", Some(far_rack()), BTreeMap::new(), 240_000_000);
-    let mut answers = Vec::new();
-    let end = loop {
-        let f = a.frame();
-        let code = f.get(&3).cloned();
-        answers.push((code.clone(), t0.elapsed()));
-        if code != Some(Value::Uint(3)) {
-            break Client::read(&f);
-        }
-    };
-    let r = run.replay();
-    println!(
-        "W10 A2 walk: {end:?}; answers {answers:?}; body before {before:?}, after {:?}; rack at {:?}; moves {:?}",
-        at(&r, w1()),
-        at(&r, far_rack()),
-        move_events(&run)
-    );
     run.stop();
 }
