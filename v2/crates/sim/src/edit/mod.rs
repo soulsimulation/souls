@@ -824,6 +824,7 @@ mod doorway_lowering_tests {
         let added = Value::Array(vec![Value::Nint(9_999), Value::Nint(9_999)]);
         let checked = Checked {
             edit: Edit {
+                claim: None,
                 intent: Id::new(Scope([0xec; 16]), 1).unwrap(),
                 actor: Actor::Creator(Id::new(Scope([0xed; 16]), 1).unwrap()),
                 planned: 0,
