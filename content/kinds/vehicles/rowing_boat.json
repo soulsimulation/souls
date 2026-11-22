@@ -5,9 +5,9 @@
   "state": {},
   "points": {"landing":{"role":"stand","at_mm":[0,0,2400],"yaw_mdeg":180000}},
   "slots": {
-    "oars": {"admits":"body","posture":"sit","most":1,"at_mm":[0,390,100],"stand":"landing"},
-    "bow": {"admits":"body","posture":"sit","most":1,"at_mm":[0,390,900],"stand":"landing"},
-    "stern": {"admits":"body","posture":"sit","most":1,"at_mm":[0,390,-600],"stand":"landing"}
+    "oars": {"admits":"body","posture":"sit","most":1,"at_mm":[0,390,100],"stand":"landing","board_mm":5000},
+    "bow": {"admits":"body","posture":"sit","most":1,"at_mm":[0,390,900],"stand":"landing","board_mm":5000},
+    "stern": {"admits":"body","posture":"sit","most":1,"at_mm":[0,390,-600],"stand":"landing","board_mm":5000}
   },
   "geometry": {"bounds_mm":[2339,1030,3200]},
   "forms": {

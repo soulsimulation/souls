@@ -1488,33 +1488,13 @@ fn sweep() -> (BTreeMap<String, Vec<String>>, Vec<String>) {
     )
     .expect("the town");
     let mut bodies = worldd::bodies::Bodies::new(town, 50_000).unwrap();
-    // The seats, as `worldd serve` registers them: a stand point a body cannot stand on moved within reach.
-    let (seats, _) = import_eden::body_slots(&bodies.town.tree, &found);
-    for s in &seats {
-        let view = bodies.town.view();
-        let Some((floor, point, facing)) = view.on_floor(s.thing, s.at) else {
-            continue;
-        };
-        let mut place = sim::slots::PlaceAt {
-            thing: s.thing,
-            place: replica::moves::Place {
-                slot: s.slot,
-                height: s.at.y.max(0),
-                stand: [s.stand.x - s.at.x, s.stand.z - s.at.z],
-            },
-            point,
-            facing,
-            floor,
-        };
-        let stand = place.stand().map(|p| Vec3::new(p.x, point.y - s.at.y, p.z));
-        let [w, x, y, z] = facing.parts();
-        let back = Quat::new(w, -x, -y, -z);
-        if let (Ok(stand), Ok(back)) = (stand, back)
-            && view.stand_near(floor, stand, 1, None).is_none()
-            && let Some(clear) = view.stand_near(floor, stand, skills::form_runner::REACH, None)
-            && let Ok(d) = back.rotate(Vec3::new(clear.x - point.x, 0, clear.z - point.z))
-        {
-            place.place.stand = [d.x, d.z];
+    // The seats, as `worldd serve` registers them (`worldd::seats::places`).
+    let (seats, ..) = worldd::seats::places(&mut bodies.town, &found);
+    for place in seats {
+        if std::env::var("SEAT_DIAG").is_ok() && [8866u64, 9098, 9879].iter().any(|c| show(place.thing).contains(&format!("cd:{c}"))) {
+            let stand = place.stand().unwrap();
+            let gap = sim::spots::flat(stand, place.point);
+            println!("SEAT {} slot {} stand {:?} -> {} um from the slot", show(place.thing), place.place.slot, place.place.stand, gap);
         }
         let _ = bodies.add_place(place);
     }

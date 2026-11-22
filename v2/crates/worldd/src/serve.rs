@@ -1081,101 +1081,6 @@ fn souls(meta: &Json) -> R<Vec<(Id, i64, i64)>> {
         .collect()
 }
 
-/// The seats the world's entries `kinds` declare on its things ([`import_eden::body_slots`]), each placed on the floor a
-/// body stands on: its point and facing there, and its stand point in the slot's frame. A stand point a body cannot
-/// stand on (under a table, against a wall) is moved to the nearest place within a form's reach of it where a body
-/// can (C15's rule, `skills::form_runner::REACH`), so a rise always sets the body down on clear ground; one in a
-/// doorway's clearance is moved out of it ([`out_of_passage`]), so the gateway's walk to the seat ends at it. Returns the
-/// seats, the things they are on, the count of every body slot on those things, the seats that could not be placed (no
-/// floor above the thing) and the stand points moved.
-fn places(town: &mut Town, kinds: &[(String, Json)]) -> (Vec<PlaceAt>, usize, usize, usize, usize) {
-    let (found, all) = import_eden::body_slots(&town.tree, kinds);
-    let (buildings, ground) = (town.buildings.clone(), town.ground);
-    let view = town.view();
-    let (mut out, mut moved) = (Vec::new(), 0);
-    for s in &found {
-        let Some((floor, point, facing)) = view.on_floor(s.thing, s.at) else {
-            continue;
-        };
-        let mut place = PlaceAt {
-            thing: s.thing,
-            place: replica::moves::Place {
-                slot: s.slot,
-                height: s.at.y.max(0),
-                stand: [s.stand.x - s.at.x, s.stand.z - s.at.z],
-            },
-            point,
-            facing,
-            floor,
-        };
-        // The stand point on the floor, at the floor's height under the seat.
-        let stand = place.stand().map(|p| Vec3::new(p.x, point.y - s.at.y, p.z));
-        let [w, x, y, z] = facing.parts();
-        let back = replica::pose::Quat::new(w, -x, -y, -z);
-        // A stand point in a doorway's clearance is one the spot tables never give a walker (N9): a walk to it ends
-        // a ring out, beyond the sit's reach, so it is moved out of the doorway as a blocked one is moved clear.
-        let passage = |p: Vec3| sim::walk::town::in_passage(&buildings, &[], ground, floor, p);
-        let clear = stand.ok().and_then(|stand| {
-            if view.stand_near(floor, stand, 1, None).is_none() {
-                view.stand_near(floor, stand, skills::form_runner::REACH, None)
-            } else if passage(stand) {
-                out_of_passage(&view, floor, stand, point, &passage)
-            } else {
-                None
-            }
-        });
-        if let (Some(clear), Ok(back)) = (clear, back)
-            && let Ok(d) = back.rotate(Vec3::new(clear.x - point.x, 0, clear.z - point.z))
-        {
-            place.place.stand = [d.x, d.z];
-            moved += 1;
-        }
-        out.push(place);
-    }
-    let left = found.len() - out.len();
-    let mut things: Vec<Id> = out.iter().map(|p| p.thing).collect();
-    things.dedup();
-    (out, things.len(), all, left, moved)
-}
-
-/// The nearest place to `at` (µm, `floor`'s frame) within [`skills::form_runner::REACH`] where a body may stand, that
-/// is out of every doorway and stair (`passage`) and no nearer the slot's point `slot_at` than `at` is (so not into the
-/// thing: a bed's mattress is not a solid), on [`sim::spots::within`]'s rings; `None` when none is.
-fn out_of_passage(
-    view: &sim::walk::town::View<'_>,
-    floor: Id,
-    at: Vec3,
-    slot_at: Vec3,
-    passage: &dyn Fn(Vec3) -> bool,
-) -> Option<Vec3> {
-    let pitch = sim::spots::REACH_PITCH;
-    let mut best: Option<(i64, Vec3)> = None;
-    for ring in 1..=skills::form_runner::REACH / pitch {
-        let n = 6_283 * ring / 1_000;
-        for k in 0..n {
-            let Ok(off) = replica::pose::Quat::from_yaw_mdeg(k * 360_000 / n)
-                .and_then(|q| q.rotate(Vec3::new(0, 0, ring * pitch)))
-            else {
-                continue;
-            };
-            let Some(p) =
-                view.stand_near(floor, Vec3::new(at.x + off.x, at.y, at.z + off.z), 1, None)
-            else {
-                continue;
-            };
-            let gap = sim::spots::flat(p, at);
-            let out = sim::spots::flat(p, slot_at) >= sim::spots::flat(at, slot_at);
-            if out && !passage(p) && best.is_none_or(|b| gap < b.0) {
-                best = Some((gap, p));
-            }
-        }
-        if best.is_some() {
-            break;
-        }
-    }
-    best.map(|b| b.1)
-}
-
 /// Original B15 birth choice reader: only admitted exact hashes enter the canonical body.
 fn born(
     meta: &Json,
@@ -2259,7 +2164,7 @@ fn serve(args: &[String]) -> R<()> {
         .prepare_classes(catalogue.classes())
         .map_err(|e| format!("body-classes: {e}"))?;
     stamp("body classes");
-    let (places, things, all, left, moved) = places(&mut town, &kinds);
+    let (places, things, all, left, moved) = worldd::seats::places(&mut town, &kinds);
     stamp("places to sit placed");
     let closed_kinds = worldd::closed::Closed::of(&kinds);
     println!(

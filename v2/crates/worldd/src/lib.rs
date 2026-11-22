@@ -12,6 +12,7 @@ pub mod checkers;
 pub mod closed;
 pub mod directory;
 mod edit_places;
+pub mod seats;
 pub mod engine;
 pub mod loose;
 pub mod measures;
