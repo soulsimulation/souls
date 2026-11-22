@@ -1014,6 +1014,32 @@ impl Part {
         Ok(part)
     }
 
+    /// The part of `effects` under the header hash `header`, as its writer built them: the part
+    /// `Part::read(&encode(&value))` gives for the value `{1: header, 2: [effect, ...]}`, without decoding the bytes it
+    /// has just encoded (0.132 scaling, #1960: the world's motion samples, about 150 a tick at 500 walking Souls, spent
+    /// most of their write in that round trip). A text that is not a name is refused as [`Part::read`] refuses it.
+    /// Only for effects whose value reads back as themselves, which a debug build checks on every call: the motion
+    /// samples and transfers the world writes are.
+    pub fn of_effects(header: Vec<u8>, effects: Vec<Effect>) -> R<Part> {
+        let mut part = Part {
+            header,
+            effects,
+            rest: Rest::new(),
+            stored: Vec::new(),
+        };
+        let v = part.to_value();
+        if let Some(t) = not_a_name(&v) {
+            return refuse("text-not-a-name", t);
+        }
+        part.stored = encode(&v).or_else(|e| refuse("encoding", e.to_string()))?;
+        debug_assert_eq!(
+            Part::read(&part.stored).as_ref(),
+            Ok(&part),
+            "a built part reads back as itself"
+        );
+        Ok(part)
+    }
+
     pub fn to_value(&self) -> Value {
         record(
             vec![

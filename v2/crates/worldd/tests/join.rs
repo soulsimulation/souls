@@ -1018,7 +1018,7 @@ fn motion_history_is_bit_identical_to_its_pinned_hash() {
 }
 
 /// [`motion_history_is_bit_identical_to_its_pinned_hash`]'s effect hash, as `origin/main` (c919d8126) writes it.
-const PINNED_MOTION_HISTORY: &str = "";
+const PINNED_MOTION_HISTORY: &str = "b18f5b817f8e19faaf0174ffbc43f546e27dc4732af99949575138ad374be048";
 
 /// R21: private membership is checked against the joined actor's authoritative body, not its principal id.
 #[test]

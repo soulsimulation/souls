@@ -3182,9 +3182,30 @@ impl Clock {
                 name: "encoding",
                 detail: e.to_string(),
             })
-            .and_then(|b| Part::read(&b))
-            .and_then(|p| self.replica.apply(&p).map(|()| p));
-        let p = part?;
+            .and_then(|b| Part::read(&b));
+        self.own_part(part?)
+    }
+
+    /// [`Clock::try_own`] for the motion samples and transfers [`motion_effects`] builds (0.132 scaling, #1960): the
+    /// same part, its bytes encoded once and not decoded again ([`Part::of_effects`]), since those effects read back
+    /// as themselves. At 500 walking Souls the decode was most of the bodies phase's largest cost.
+    fn try_own_motion(&mut self, effects: Vec<Effect>) -> R<()> {
+        let first = self.replica.version();
+        let effects = effects
+            .into_iter()
+            .zip(first..)
+            .map(|(mut e, sequence)| {
+                e.envelope.sequence = sequence;
+                e
+            })
+            .collect();
+        let part = Part::of_effects(self.replica.header().hash().to_bytes(), effects)?;
+        self.own_part(part)
+    }
+
+    /// Applies the world's own part `p` and keeps it for the tick's record and frozen copy; refused, nothing changes.
+    fn own_part(&mut self, p: Part) -> R<()> {
+        self.replica.apply(&p)?;
         self.unsealed = true;
         self.effects.extend(p.effects.iter().cloned());
         self.parts.push(Arc::new(p));
@@ -3203,7 +3224,7 @@ impl Clock {
             return;
         }
         let all = motion_effects(self.replica.header(), self.replica.version(), &samples);
-        if self.try_own(all).is_ok() {
+        if self.try_own_motion(all).is_ok() {
             return;
         }
         for s in samples {
@@ -3212,7 +3233,7 @@ impl Clock {
                 self.replica.version(),
                 std::slice::from_ref(&s),
             );
-            if let Err(r) = self.try_own(one) {
+            if let Err(r) = self.try_own_motion(one) {
                 eprintln!(
                     "worldd: {}'s motion was not written: {r}",
                     replica::world_model::show(s.handoff.node)
