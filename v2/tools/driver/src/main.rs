@@ -137,8 +137,8 @@ struct Sent {
     /// <answer unix ms> <receipt or refusal name>`, `gone|back <agent> <unix ms>`.
     trace: Vec<String>,
     /// #4154: each act the world took (a receipt or an acceptance naming its intent's id): the id, its send in Unix ms
-    /// and its verb, joined with the public stream's first sight of it.
-    taken: Vec<(Id, u64, String)>,
+    /// its first answer (accepted or receipt) in Unix ms and its verb, joined with the public stream's first sight of it.
+    taken: Vec<(Id, u64, u64, String)>,
     /// #4154's stuck measure: the longest time this agent had an act sent and unanswered with no answer at all, and
     /// the longest time it acted with only refusals back (its Soul moves nowhere); ms. Its last answer's age at the
     /// end of the schedule, ms.
@@ -267,9 +267,10 @@ fn by_tenth(agents: &[Sent], late_ms: u64) -> Vec<serde_like::Obj> {
 /// (ms, from the send), the same per verb, and the stream's own lag per part.
 fn visible_report(agents: &[Sent], seen: &stream::Seen) -> serde_like::Obj {
     let q = |v: &[u64], s: f64| at_share(v, s) as f64;
-    let mut all = Vec::new();
+    let (mut all, mut accepted) = (Vec::new(), Vec::new());
     let mut by_verb: BTreeMap<&str, (u64, Vec<u64>)> = BTreeMap::new();
-    for (id, sent_ms, verb) in agents.iter().flat_map(|a| a.taken.iter()) {
+    for (id, sent_ms, answered_ms, verb) in agents.iter().flat_map(|a| a.taken.iter()) {
+        accepted.push(answered_ms.saturating_sub(*sent_ms));
         let e = by_verb.entry(verb.as_str()).or_default();
         e.0 += 1;
         if let Some(at) = seen.first.get(id) {
@@ -279,6 +280,7 @@ fn visible_report(agents: &[Sent], seen: &stream::Seen) -> serde_like::Obj {
         }
     }
     all.sort_unstable();
+    accepted.sort_unstable();
     let taken: u64 = by_verb.values().map(|v| v.0).sum();
     let verbs: Vec<String> = by_verb
         .iter_mut()
@@ -299,6 +301,11 @@ fn visible_report(agents: &[Sent], seen: &stream::Seen) -> serde_like::Obj {
         .n("taken", taken as f64)
         .n("seen", all.len() as f64)
         .n("seenShare", ratio(all.len() as u64, taken))
+        // Send to the world's first answer taking the act (accepted, or its receipt), over the same acts: a fast
+        // answer with a slow start shows as the gap between these and the act wait below.
+        .n("acceptedP50Ms", q(&accepted, 0.5))
+        .n("acceptedP95Ms", q(&accepted, 0.95))
+        .n("acceptedP99Ms", q(&accepted, 0.99))
         .n("p50Ms", q(&all, 0.5))
         .n("p95Ms", q(&all, 0.95))
         .n("p99Ms", q(&all, 0.99))
@@ -731,7 +738,7 @@ async fn agent(
                             }
                             if let (Some(id), Some((_, sent_ms, _))) = (iid, pending.get(&s)) {
                                 let verb = verb_of.get(&s).map_or("?".into(), |v| v.as_str().to_owned());
-                                out.taken.push((id, *sent_ms, verb));
+                                out.taken.push((id, *sent_ms, unix_ms(), verb));
                             }
                             if kind == 1 && !receipted.insert(s) {
                                 out.duplicates += 1;
@@ -1463,10 +1470,12 @@ async fn main() {
         .raw("stuck", stuck.json());
     if let Some(v) = &visible {
         println!(
-            "Visible on the public stream: {} of {} acts the world took; act wait p50 {} ms, p95 {} ms, p99 {} ms; \
-             the stream's own lag p50 {} ms, p95 {} ms",
+            "Visible on the public stream: {} of {} acts the world took; send to accepted p50 {} ms, p95 {} ms; \
+             send to first visible move p50 {} ms, p95 {} ms, p99 {} ms; the stream's own lag p50 {} ms, p95 {} ms",
             v.get("seen").unwrap_or(0.0),
             v.get("taken").unwrap_or(0.0),
+            v.get("acceptedP50Ms").unwrap_or(0.0),
+            v.get("acceptedP95Ms").unwrap_or(0.0),
             v.get("p50Ms").unwrap_or(0.0),
             v.get("p95Ms").unwrap_or(0.0),
             v.get("p99Ms").unwrap_or(0.0),

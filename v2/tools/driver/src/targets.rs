@@ -83,7 +83,7 @@ pub struct Seen {
 /// #4154: how far from where the Souls stand a thing may be to be acted on, as an agent acts on what it sees: the
 /// radius (mm) doubles from this until at least [`NEAR_LEAST`] things are in it.
 pub const NEAR_MM: i64 = 30_000;
-pub const NEAR_LEAST: usize = 40;
+pub const NEAR_LEAST: usize = 20;
 
 fn entry_ns(e: &Json) -> &str {
     e.get("kind")
@@ -189,13 +189,11 @@ impl Targets {
             .filter(|(id, _)| !is_body(id))
             .filter_map(|(id, k)| Some((*id, *by_kind.get(k.as_str())?)))
             .collect();
-        let things = near(seen, things);
+        // Each kind of target is taken near the Souls on its own (#4154), so seats and things to take are found
+        // even where the nearest things are neither.
         let ids = |f: &dyn Fn(&Json) -> bool| -> Vec<Id> {
-            things
-                .iter()
-                .filter(|(_, e)| f(e))
-                .map(|(id, _)| *id)
-                .collect()
+            let of: Vec<(Id, &Json)> = things.iter().filter(|(_, e)| f(e)).copied().collect();
+            near(seen, of).into_iter().map(|(id, _)| id).collect()
         };
         let mut walk = ids(&|e| has_slot(e, None));
         if walk.is_empty() {

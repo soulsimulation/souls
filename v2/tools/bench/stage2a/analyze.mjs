@@ -35,6 +35,7 @@ export function analyze(D) {
   const out = {
     rung: D.split('/').pop(), agents: rep.agents, describe: rep.describe,
     acts: { intended: rep.intendedActs, achievedShare: rep.achievedShare, perS: +(rep.all.sent / Math.max(1, secs)).toFixed(1), lateP99Ms: rep.all.lateP99Ms, byVerb: rep.byVerb, standIns: rep.standIns, withheld: rep.withheld },
+    accepted: { p50Ms: v.acceptedP50Ms, p95Ms: v.acceptedP95Ms, p99Ms: v.acceptedP99Ms },
     wait: { taken: v.taken, seen: v.seen, seenShare: v.seenShare, p50Ms: v.p50Ms, p95Ms: v.p95Ms, p99Ms: v.p99Ms, maxMs: v.maxMs, within100: v.within100Ms, within300: v.within300Ms, streamLagP50Ms: v.streamLagP50Ms, streamLagP95Ms: v.streamLagP95Ms, byVerb: v.byVerb },
     answer: rep.perMinute.map((m) => ({ p50: m.latencyP50Ms, p95: m.latencyP95Ms, p99: m.latencyP99Ms })),
     tick: { p50Us: w2.h.ticks.p50_us, p99Us: w2.h.ticks.p99_us, maxUs: w2.h.ticks.max_us, meanUs: Math.round(meanWin(w1.h.ticks, w2.h.ticks) ?? 0), count: dCount, over: dOver, onTimeShare: dCount ? +(1 - dOver / dCount).toFixed(4) : null },
@@ -53,13 +54,12 @@ export function analyze(D) {
 const yes = (b) => (b ? 'yes' : '**no**');
 const ms = (us) => (us == null ? '-' : (us / 1000).toFixed(1));
 
-export function tables(rows) {
-  const t = [];
-  t.push('| Rung (agents, arm, rate, cores) | acts/s | act wait p50 / p95 / p99 ms (seen share) | answer p50 / p95 ms | tick p50 / p99 / max ms | ticks on time | stuck (refused-only) | world / gateway / origin cores | world / gateway MB | bar |');
+export function tables(rows, label = '') {
+  const t = label ? [`**${label}**`, ''] : [];
+  t.push('| Rung (agents, arm, rate, cores) | acts/s | send → accepted p50 / p95 ms | send → first visible move p50 / p95 / p99 ms (seen share) | tick p50 / p99 / max ms | ticks on time | stuck (refused-only) | world / gateway / origin cores | world / gateway MB | bar |');
   t.push('|---|---|---|---|---|---|---|---|---|---|');
   for (const r of rows) {
-    const a = r.answer.length ? r.answer[r.answer.length > 1 ? 1 : 0] : {};
-    t.push(`| ${r.rung} | ${r.acts.perS} | ${r.wait.p50Ms} / ${r.wait.p95Ms} / ${r.wait.p99Ms} (${r.wait.seenShare}) | ${a.p50 ?? '-'} / ${a.p95 ?? '-'} | ${ms(r.tick.p50Us)} / ${ms(r.tick.p99Us)} / ${ms(r.tick.maxUs)} | ${r.tick.onTimeShare == null ? '-' : (100 * r.tick.onTimeShare).toFixed(2) + ' %'} | ${r.stuck?.stuck ?? '-'} (${r.stuck?.refusedOnly ?? '-'}) | ${r.cpu.world} / ${r.cpu.gateway} / ${r.cpu.origin} | ${r.cpu.worldMb} / ${r.cpu.gatewayMb} | ${yes(r.bar.met)} |`);
+    t.push(`| ${r.rung} | ${r.acts.perS} | ${r.accepted.p50Ms ?? '-'} / ${r.accepted.p95Ms ?? '-'} | ${r.wait.p50Ms} / ${r.wait.p95Ms} / ${r.wait.p99Ms} (${r.wait.seenShare}) | ${ms(r.tick.p50Us)} / ${ms(r.tick.p99Us)} / ${ms(r.tick.maxUs)} | ${r.tick.onTimeShare == null ? '-' : (100 * r.tick.onTimeShare).toFixed(2) + ' %'} | ${r.stuck?.stuck ?? '-'} (${r.stuck?.refusedOnly ?? '-'}) | ${r.cpu.world} / ${r.cpu.gateway} / ${r.cpu.origin} | ${r.cpu.worldMb} / ${r.cpu.gatewayMb} | ${yes(r.bar.met)} |`);
   }
   t.push('', '**Phase profile** (mean µs per tick over the load window; p99 µs in brackets):', '');
   const keys = [...new Set(rows.flatMap((r) => Object.keys(r.phases)))];
@@ -73,7 +73,8 @@ export function tables(rows) {
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const args = process.argv.slice(2);
   if (args[0] === '--table') {
-    const rows = args.slice(1).map((d) => { try { return analyze(d); } catch (e) { console.error(`${d}: ${e.message}`); return null; } }).filter(Boolean);
-    console.log(tables(rows));
+    const label = args[1] === '--label' ? args[2] : '';
+    const rows = args.slice(label ? 3 : 1).map((d) => { try { return analyze(d); } catch (e) { console.error(`${d}: ${e.message}`); return null; } }).filter(Boolean);
+    console.log(tables(rows, label));
   } else console.log(`rung ${JSON.stringify(analyze(args[0]))}`);
 }
