@@ -44,22 +44,69 @@ that serves a world and sends the schedule as them. Load runs use marked test So
 `worldd seed` writes `souls.tokens`, is read too. Agent k signs in with line k; the file needs at least as many
 Souls as the schedule has agents.
 
+The release owner's command, from a checkout on a machine that reaches the world's gatewayd port (`127.0.0.1:<port>`
+on the world's host; `GATEWAYD_ARGS` in its unit names the port). Pair the test Souls first (#4016), then run each arm:
+
 ```sh
 cd v2
 cargo build --release -p driver
-node tools/driver/loads.mjs ladder-100-uneven --seconds 600 --seed 1 --out <run folder>/schedule.txt
-target/release/driver --schedule <run folder>/schedule.txt --dir <run folder> \
-  --remote ws://<gatewayd host>:<port> --tokens <test Souls' file>
+node tools/ops/test-soul pair <world> 100 --directory <origin> --out <private folder>/souls.tokens
+for arm in uneven even; do
+  node tools/driver/loads.mjs ladder-100-$arm --seconds 600 --seed 1 --out <run folder>/$arm/schedule.txt
+  target/release/driver --schedule <run folder>/$arm/schedule.txt --dir <run folder>/$arm \
+    --remote ws://127.0.0.1:<port> --tokens <private folder>/souls.tokens
+done
 ```
 
 `--remote` takes `ws://<host>:<port>` (the agents' path `/v2/ws` added) or a full `ws://` URL. The driver carries no
-TLS, so it runs where it reaches gatewayd's own port, not through the public proxy. Each act goes with no target and
-no parameter, against the zero basis, except a say, which carries the words `(load test)`; a served world refuses the
-others by name (`move.no-target`, `intent.not-a-form-on-a-node`), counted under `refusals`. Each Soul's sequences
-start at the run's start in Unix milliseconds, past any an earlier run sent. CI's `driver-served` step (`v2/tools/ci.sh`,
-client leg) runs a 60 s `ladder-10-uneven` this way against N2's test world under `worldd serve` and its own gatewayd.
+TLS, so it runs where it reaches gatewayd's own port, not through the public proxy. Each Soul's sequences start at the
+run's start in Unix milliseconds, past any an earlier run sent; every intent goes against the zero basis.
+
+**Targets** (`src/targets.rs`). Once every agent is signed in, and before the clock starts, the driver reads the
+world's ids the way a client does: the first agent syncs its copy over its own socket (R5b's compare and descend:
+its scope's hashes, then every record they reach, each checked against its hash), and the driver fetches the world's
+kind entries (`GET /v2/entries`, which gatewayd serves with `--entries`, as every placed world's unit does). The line
+`targets:` and the report's `targets` say what it found. Then each act of the schedule goes as:
+
+- **walk**: `<ns>:walk` to a thing of the copy with a seat (its stand point), spread over them by agent and act;
+- **sit**: `<ns>:sit` on a thing with a seat of posture `sit`, agent k on the k-th (mod their count), so Souls spread
+  over the seats; a Soul seated by its last sit sends `<ns>:rise` instead of its next walk or sit, as an agent would
+  (a walk while seated is refused, `resource-held`), and a sit refused leaves it standing;
+- **gesture, sit-ground, read, eat, play-music**: the first form of `FORMS` an entry offers (`wave`; `sit_down`;
+  `read`; `eat`, `bite` or `drink`; `play_music` or `play`), on the things of that kind, or on the Soul's own body
+  (its `souls:body-of` link in the copy) for its body family's form. A form that needs the thing held first (a
+  book's `read`, an apple's `bite`) is left out. A kind with no such form, or a Soul whose body is not in the first
+  agent's copy, sends a walk instead, counted under `standIns`;
+- **say**: withheld, counted under `withheld`, so a run on a world people visit says nothing out loud. `--speech`
+  sends them with the words `(load test)`; CI's local run uses it.
+
+The report adds `refusedBy`, the refusals by `<verb> <name>`. Each agent waits 15 s after its last act for its
+answers (a form's receipt comes when it ends); one still open then is `unanswered`.
+
+**Rehearsing locally.** `node tools/driver/slice.mjs --facts <testworld facts> --out <folder>` puts an Eden slice on
+N2's test world (20 benches, 15 chairs, 3 speakers, 2 books, 2 apples, with Eden's own entries and the body's
+family). Seed it and serve it behind a gatewayd with its entries, then run the driver as above:
+
+```sh
+cd v2
+cargo build --release -p gatewayd -p worldd -p testworld -p driver
+target/release/testworld --seed 1 --things 0 --out <folder>
+node tools/driver/slice.mjs --facts <folder>/testworld-s1-t0.facts.json --out <folder>
+target/release/worldd seed --facts <folder>/slice.facts.json --dir <folder>/w --souls 50 --at 0,0 --entries <folder>/entries
+target/release/worldd serve --dir <folder>/w --socket <folder>/w.sock &
+target/release/gatewayd --listen 127.0.0.1:0 --world <folder>/w.sock --tokens <folder>/w/tokens --build 1220 \
+  --entries <folder>/w/entries &       # prints `listening <address>`
+node tools/driver/loads.mjs ladder-50-uneven --seconds 120 --seed 1 --out <folder>/schedule.txt
+target/release/driver --schedule <folder>/schedule.txt --dir <folder>/run --tokens <folder>/w/souls.tokens \
+  --remote ws://<address>
+```
+
+CI's `driver-served` step (`v2/tools/ci.sh`, client leg) runs a 60 s `ladder-10-uneven` with `--speech` against N2's
+test world (no entries: walks go to any node of the copy, and the other kinds stand in as walks) under `worldd serve`
+and its own gatewayd.
 
 Limits: every agent signs in before the clock starts, so a late arrival is a socket that is idle until its first
-act. Walks and forms carry no target yet, so on a served world only the says land; the rest measure the refusal
-path. On macOS nothing pins the driver apart from the world's processes; on a shared machine its lateness includes
-the machine's load.
+act. Targets are read once, from the first agent's scope (the room its body is in), so on a world whose test Souls
+stand in different rooms the others walk to that room's things, and a Soul whose body is elsewhere stands in a walk
+for its body's forms. On macOS nothing pins the driver apart from the world's processes; on a shared machine its
+lateness includes the machine's load.

@@ -231,8 +231,8 @@ step creator-terrain bash -c 'npm install --no-save --no-package-lock --no-audit
 driver_served() {
 # The driver on a served world (X7, #4015): N2's test world seeded with ten Souls (`worldd seed`), run by `worldd serve`
 # behind its own gatewayd; the driver starts nothing and signs in the seeded Souls' tokens (`--remote`, `--tokens`) for
-# a 60 s ladder-10-uneven. Passes when every act is sent and answered (a receipt or a refusal by name), the says with
-# receipts, with no error and no socket closed; the report's minutes are printed.
+# a 60 s ladder-10-uneven, its says sent (`--speech`). Passes when every act is sent and answered (a receipt or a
+# refusal by name), the says with receipts, with no error and no socket closed; the report's minutes are printed.
 step driver-served bash -c 'set -euo pipefail
   cargo build -p gatewayd -p worldd -p testworld -p driver --locked --quiet
   t=${CARGO_TARGET_DIR:-target}/debug d=$(mktemp -d); trap "kill \$(jobs -p) 2>/dev/null; rm -rf $d" EXIT
@@ -243,7 +243,7 @@ step driver-served bash -c 'set -euo pipefail
   "$t"/gatewayd --listen 127.0.0.1:0 --world "$d/w.sock" --tokens "$d/w/tokens" --build 1220 >"$d/g.out" 2>"$d/g.log" &
   for _ in $(seq 100); do grep -q "^listening " "$d/g.out" && break; sleep 0.1; done
   node tools/driver/loads.mjs ladder-10-uneven --seconds 60 --out "$d/schedule.txt"
-  "$t"/driver --schedule "$d/schedule.txt" --dir "$d/run" --tokens "$d/w/souls.tokens" \
+  "$t"/driver --schedule "$d/schedule.txt" --dir "$d/run" --tokens "$d/w/souls.tokens" --speech \
     --remote "ws://$(sed -n "s/^listening //p" "$d/g.out")"
   node -e "const r = JSON.parse(require(\"fs\").readFileSync(process.argv[1], \"utf8\")), m = r.perMinute;
     const sum = (f) => m.reduce((s, x) => s + f(x), 0), n = (o) => Object.values(o).reduce((s, v) => s + v, 0);
