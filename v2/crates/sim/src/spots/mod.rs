@@ -459,8 +459,8 @@ pub const ON_DEPTH: i64 = 400_000;
 /// On each band at most [`BAND_PLACES`] places, a pitch apart or spread evenly round a longer band. Kept, as
 /// [`within`]'s rings are, on walkable ground, out of doorways and off stairs. Nearest as [`within`]'s: the least walk
 /// from `from` plus [`WEIGHT`] times the place's gap to the outline (0 inside it; a place off a walkable thing, its edge
-/// too, counts `reach` more), ties by (band, edge, place); with no `from`, by the gap alone. With no such place, the middle
-/// when a body may stand there, as [`within`] keeps it, else `None`.
+/// too, counts `reach` more), ties by (band, edge, place); with no `from`, by the gap alone. With no such place,
+/// [`within`] at the middle, so a thing reached before still is.
 pub fn within_footprint(
     g: &mut dyn Ground,
     target: Target,
@@ -579,7 +579,9 @@ pub fn within_footprint(
             best.map(|b| b.2)
         }
     };
-    best.or_else(|| g.stand(target.node, t).map(|_| t))
+    // None found (the bands are sampled, and a search gives up after [`MISSES_MOST`] misses): [`within`] at the middle,
+    // so a thing reached before is still reached. A target cut off from the asker costs it lookups, not searches.
+    best.or_else(|| within(g, target, reach, from))
 }
 
 /// Whether a body goes onto a thing to be at it (#4072): its entry is a place (`owner: place`: a deck, a pier, a
