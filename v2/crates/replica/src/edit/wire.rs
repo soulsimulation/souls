@@ -10,6 +10,11 @@
 //!   11: closed, 12: open}`: paired passage metadata, the leaf's backlink and its owned wall solid-row patch,
 //!   millimetres/millidegrees in the owning building's frame.
 //!
+//! An undo or a redo (G4) is the same verb with `{5: 1}` (undo) or `{5: 2}` (redo) and nothing else (not 2: an edit
+//! that carries `{2: ...}` and no batch stays refused, `edit-not-a-batch`); a batch may carry
+//! its build's name and its step's (`{3: build, 4: step}`, both UTF-8 bytes, 1 to [`STEP_NAME_MOST`] each: words are
+//! bytes, T8) so the world keeps it as that build's step.
+//!
 //! A node is an id (`[scope, counter]`) or, for one placed earlier in the batch, its temporary name (an integer). A
 //! spot is `{1: position, 2: orientation, 3: support, 4: slot}` as T4's pose writes them, 4 left out when none.
 
@@ -26,8 +31,27 @@ use std::collections::BTreeMap;
 pub const VERB: &str = "souls:edit";
 /// The parameter that holds the batch.
 pub const OPS: u64 = 1;
-/// The parameter that names the build claim the batch is sent under (#3701), left out when none.
+/// The parameter that asks for an undo ([`UNDO_ONE`]) or a redo ([`REDO_ONE`]) instead of a batch.
+pub const UNDO: u64 = 5;
+pub const UNDO_ONE: u64 = 1;
+pub const REDO_ONE: u64 = 2;
+/// A batch's build and step names (G4's builds with steps).
+pub const BUILD: u64 = 3;
+pub const STEP: u64 = 4;
+/// The longest build or step name, in bytes.
+pub const STEP_NAME_MOST: usize = 64;
+
+/// The parameter that names the build claim a batch is sent under (#3701), left out when none.
 pub const CLAIM: u64 = 6;
+
+/// What an edit intent asks for.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum Asked {
+    /// A batch, with its build's name and its step's when it is a build's step.
+    Batch(Vec<Op>, Option<(String, String)>),
+    Undo,
+    Redo,
+}
 
 type R<T> = Result<T, String>;
 
@@ -295,13 +319,36 @@ pub fn parameters(ops: &[Op]) -> BTreeMap<u64, Value> {
     BTreeMap::from([(OPS, Value::Array(ops.iter().map(op).collect()))])
 }
 
-/// The batch and the claim it is sent under: `{1: [operation, ...], 6: claim id}` (1 to 5 are the batch, builds and undo: #3694).
-pub fn parameters_under(ops: &[Op], claim: Option<&Name>) -> BTreeMap<u64, Value> {
-    let mut p = parameters(ops);
-    if let Some(c) = claim {
-        p.insert(CLAIM, Value::Text(c.clone()));
+/// The parameters of what `asked` asks for, as [`asked`] reads them.
+pub fn parameters_of(asked: &Asked) -> BTreeMap<u64, Value> {
+    match asked {
+        Asked::Undo => BTreeMap::from([(UNDO, Value::Uint(UNDO_ONE))]),
+        Asked::Redo => BTreeMap::from([(UNDO, Value::Uint(REDO_ONE))]),
+        Asked::Batch(ops, step) => {
+            let mut p = parameters(ops);
+            if let Some((b, s)) = step {
+                p.insert(BUILD, Value::Bytes(b.clone().into_bytes()));
+                p.insert(STEP, Value::Bytes(s.clone().into_bytes()));
+            }
+            p
+        }
     }
-    p
+}
+
+/// The batch and the claim it is sent under: `{1: [operation, ...], 6: claim id}` (3 to 5 are builds and undo).
+pub fn parameters_under(ops: &[Op], claim: Option<&Name>) -> BTreeMap<u64, Value> {
+    with_claim(parameters(ops), claim)
+}
+
+/// `parameters` with the claim they are sent under, when there is one.
+pub fn with_claim(
+    mut parameters: BTreeMap<u64, Value>,
+    claim: Option<&Name>,
+) -> BTreeMap<u64, Value> {
+    if let Some(c) = claim {
+        parameters.insert(CLAIM, Value::Text(c.clone()));
+    }
+    parameters
 }
 
 /// The claim an edit's parameters name, if any; `Err` when parameter 6 is not a name.
@@ -321,8 +368,44 @@ pub fn claim(parameters: &BTreeMap<u64, Value>) -> R<Option<Name>> {
 /// Reads an edit intent's parameters: one to [`OPS_MOST`] operations, each in its one byte form. The detail of a
 /// refusal says what was wrong.
 pub fn read(parameters: &BTreeMap<u64, Value>) -> R<Vec<Op>> {
+    match asked(parameters)? {
+        Asked::Batch(ops, _) => Ok(ops),
+        _ => Err("an undo or a redo carries no batch".into()),
+    }
+}
+
+fn step_name(b: &[u8]) -> Option<String> {
+    (!b.is_empty() && b.len() <= STEP_NAME_MOST)
+        .then(|| String::from_utf8(b.to_vec()).ok())
+        .flatten()
+}
+
+/// Reads what an edit intent's parameters ask for: `{5: 1}` an undo, `{5: 2}` a redo, else a batch
+/// (`{1: [...]}`, with `{3: build, 4: step}` both or neither).
+pub fn asked(parameters: &BTreeMap<u64, Value>) -> R<Asked> {
+    // Parameter 6, the claim (#3701), may go with any of them.
     let extra = usize::from(claim(parameters)?.is_some());
-    let (Some(Value::Array(a)), true) = (parameters.get(&OPS), parameters.len() == 1 + extra)
+    if let Some(u) = parameters.get(&UNDO) {
+        return match (u, parameters.len() - extra) {
+            (Value::Uint(UNDO_ONE), 1) => Ok(Asked::Undo),
+            (Value::Uint(REDO_ONE), 1) => Ok(Asked::Redo),
+            _ => Err("an undo is {5: 1} and a redo {5: 2}, alone but for a claim".into()),
+        };
+    }
+    let step = match (parameters.get(&BUILD), parameters.get(&STEP)) {
+        (None, None) => None,
+        (Some(Value::Bytes(b)), Some(Value::Bytes(s))) => match (step_name(b), step_name(s)) {
+            (Some(b), Some(s)) => Some((b, s)),
+            _ => {
+                return Err(format!(
+                    "a build or step name is 1 to {STEP_NAME_MOST} bytes of UTF-8"
+                ));
+            }
+        },
+        _ => return Err("a build's step is {3: build, 4: step}, both bytes".into()),
+    };
+    let named = if step.is_some() { 3 } else { 1 };
+    let (Some(Value::Array(a)), true) = (parameters.get(&OPS), parameters.len() == named + extra)
     else {
         return Err("an edit's parameters are {1: [operation, ...], 6: claim?}".into());
     };
@@ -331,7 +414,7 @@ pub fn read(parameters: &BTreeMap<u64, Value>) -> R<Vec<Op>> {
     }
     let ops = a.iter().map(read_op).collect::<R<Vec<_>>>()?;
     if parameters_equal(&ops, a) {
-        Ok(ops)
+        Ok(Asked::Batch(ops, step))
     } else {
         Err("an operation is not in its one byte form".into())
     }

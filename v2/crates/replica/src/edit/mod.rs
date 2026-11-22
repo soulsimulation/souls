@@ -170,7 +170,7 @@ pub struct DoorGeometry {
 }
 
 /// A doorway leaf's owned wall patch: [wall id, closed rows, open rows].
-pub const DOOR_GEOMETRY: u64 = 29;
+pub const DOOR_GEOMETRY: u64 = 100;
 const SOLIDS: u64 = 12;
 const GEOMETRY_MOST: usize = 64;
 type OwnedDoor = (Ref, Vec<Value>, Vec<Value>, [Ref; 2]);
@@ -230,11 +230,11 @@ struct New {
 
 /// Checks `edit` on `copy` (see the module's notes). Runs off the clock thread.
 pub fn check(edit: Edit, copy: &Replica, world: &World) -> Result<Checked, Refused> {
-    if edit.actor != Actor::Creator(world.creator) {
+    if !claims::admits(&edit, copy, world.creator) {
         return refuse(
             None,
             "edit.not-the-creator",
-            "only the world's creator edits it",
+            "only the world's creator edits it, or a claim's helper under that claim",
         );
     }
     if edit.ops.len() > OPS_MOST {

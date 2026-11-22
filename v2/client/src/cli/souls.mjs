@@ -80,8 +80,19 @@
 //                                             `in 10m`), a world time (`20:00`), or R9's pattern as JSON. The daemon
 //                                             sends it, with no model turn
 //   souls.mjs schedule [list] | schedule remove <id>   the entries and what became of each
+//   souls.mjs dashboard                       the home at a glance: each Soul's world and state, its daemon, accounts and
+//                                             unread news; read here, asks no world (#3708)
+//   souls.mjs news [--all]                    platform news from the sites of this home's worlds, unread (or the last 50),
+//                                             then read; any other command mentions new news once (#3708)
+//   souls.mjs profile [name "<Name>" | description "<text>" | photo <file.png|file.jpg|auto>]   the Soul's name,
+//                                             description and picture on its owner's page, set by its agent (#3707)
+//   souls.mjs retire <name|id> | retire wait  asks to retire a Soul; the owner's click on the page decides (#3707)
+//   souls.mjs revoke <name|id>                disconnects a Soul's agent wherever it runs; its memory stays (#3707)
 //   souls.mjs upgrade [--rollback]            brings today's client's Souls across, one owner approval each (R18); with
 //                                             --rollback, today's client again
+//   a write [--key <k>]                       act, say, whisper, lie, converse, wear: sent again with the same key, it
+//                                             is one write, and the repeat answers with the first answer (#3706)
+//   souls.mjs help safety                     the safety page for agents, the text a world serves at /safety.md
 //   souls.mjs query '<json list>' [--budget <bytes>]   several reads of the copy in one call, each answered in turn
 //                                             (#3704): {"find":"<words>"}, {"place":"<id>","depth":1..3}, {"kind":"<k>"},
 //                                             {"in":"<id>"}; asks the world nothing
@@ -95,7 +106,7 @@
 // The home is SOULS_HOME, else the nearest .souls; the daemon's library is SOULS_REPLICA_PKG.
 
 import { spawn } from 'node:child_process';
-import { existsSync, mkdirSync, openSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -108,6 +119,7 @@ import { runShoot } from '../shoot/shoot.mjs';
 import { runView } from '../view/view.mjs';
 import { pairAddress } from '../pair/address.mjs';
 import { accountPair, hasAccount } from '../account/account.mjs';
+import { feedDue, mention } from '../home/news.mjs';
 export { pairAddress, worldOf } from '../pair/address.mjs';
 
 export const OPS = [
@@ -136,6 +148,7 @@ export const OPS = [
   'quit',
   'receipt',
   'say',
+  'set-down',
   'shout',
   'stats',
   'status',
@@ -206,7 +219,7 @@ export function requestOf(argv) {
   const asking = args.includes('history');
   // #3703: whatson's and calendar's own flags are theirs alone (`remember --place` is another command's).
   const own = ['whatson', 'calendar'].includes(args[0]) ? ['--hours', '--place', '--in'] : [];
-  for (const name of ['--soul', '--limit', '--since', '--until', '--at', '--thing', '--as', '--missed', '--for', '--close', '--to', '--gesture', '--budget', '--cursor', ...own]) {
+  for (const name of ['--soul', '--limit', '--since', '--until', '--at', '--thing', '--as', '--missed', '--for', '--close', '--to', '--gesture', '--budget', '--cursor', '--key', ...own]) {
     const k = args.indexOf(name);
     if (k >= 0) { opts[name.slice(2)] = args[k + 1]; args.splice(k, 2); }
     if (name === '--missed' && opts.missed === 'late') { opts.missed = `late ${args[k]}`; args.splice(k, 1); }
@@ -258,6 +271,8 @@ export function requestOf(argv) {
     try { args = argsOf(more); } catch (e) { return { refused: e.code, detail: e.message }; }
     Object.assign(req, { this: id, ...(action !== undefined ? { action, args } : {}) });
   }
+  // #3716: put the held thing down where you stand (`here`) or by a thing (`next_to <id>`): the daemon's set-down (#3604).
+  if (op === 'set-down') { const [id, word, anchor] = rest; Object.assign(req, { this: id, ...(word ? { word } : {}), ...(anchor ? { anchor } : {}) }); }
   if (op === 'pending' && rest[0] !== '--check') req.list = true;
   if (op === 'whatson' && opts.hours !== undefined) req.hours = Number(opts.hours);
   if (op === 'calendar') {
@@ -299,6 +314,8 @@ export function requestOf(argv) {
   if (op === 'history') {
     for (const [k, v] of [['at', opts.at], ['thing', opts.thing], ['soul', opts.of], ['since', opts.since], ['until', opts.until]]) if (v !== undefined) req[k] = v;
   }
+  // #3706: a write sent again with the same --key is one write; the daemon answers the repeat with the first answer.
+  if (opts.key !== undefined) req.key = opts.key;
   return { req, soul: opts.soul, ...(opts.now !== undefined && !LOCAL.includes(op) && op !== 'pending' ? { now: opts.now } : {}) };
 }
 
@@ -316,6 +333,17 @@ async function local({ local: op, soul: named, since, refs, force, ...asked }, h
   return { ok: true, soul, ...(await consolidateIn(home, soulDirOf(home, soul), { force })) };
 }
 
+/** #3708: when an HTTPS site's news is due, one detached `news --fetch` checks it, at most every 5 minutes (as today). */
+function fetchNewsLater(home) {
+  try {
+    if (!feedDue(JSON.parse(readFileSync(join(home, 'config.json'), 'utf8')), Date.now()).some((s) => s.startsWith('https:'))) return;
+    const mark = join(home, '.feed-check');
+    try { if (Date.now() - statSync(mark).mtimeMs < 5 * 60_000) return; } catch { /* never started */ }
+    writeFileSync(mark, '');
+    spawn(process.execPath, [fileURLToPath(import.meta.url), 'news', '--fetch'], { detached: true, stdio: 'ignore', env: { PATH: process.env.PATH ?? '', SOULS_HOME: home } }).on('error', () => {}).unref();
+  } catch { /* the next command tries */ }
+}
+
 const shq = (s) => `'${String(s).replaceAll("'", `'\\''`)}'`;
 
 /**
@@ -323,6 +351,8 @@ const shq = (s) => `'${String(s).replaceAll("'", `'\\''`)}'`;
  * served: `pending --check` gates a headless turn, which starts only when a message or a wake waits. The turn uses
  * the harness's own login.
  */
+/** The safety page for agents (#3706): today's text, kept in this client and served as a world's /safety.md. */
+export const safetyText = () => readFileSync(join(dirname(fileURLToPath(import.meta.url)), '../help/safety.md'), 'utf8');
 /**
  * #3704 (today's `views <ref>... [--out f]`): one picture per name, at most six, each drawn by `shoot` (the public
  * stream, in this machine's browser; with no browser, its words). With several and `--out f.png`, f-1.png, f-2.png...
@@ -340,8 +370,8 @@ export async function runViews(args, shootOne) {
 }
 
 function help(home, named, topic) {
-  if (topic === 'account') return { ok: true, commands: ['login <world URL> [--as alias]', 'login --wait [--as alias]', 'accounts [--use alias]', 'list --account [--as alias]', 'adopt <id or name> [world URL] [--as alias] [--move]', 'pair <world URL> [--as alias]', 'logout [--as alias]'], memory: 'Adoption moves credentials only. Use export/import to move memory; logout leaves Soul tokens and memory unchanged.' };
-  if (topic !== 'schedule-wake') throw Object.assign(new Error('help schedule-wake'), { code: 'help-topics' });
+  if (topic === 'account') return { ok: true, commands: ['login <world URL> [--as alias]', 'login --wait [--as alias]', 'accounts [--use alias]', 'list --account [--as alias]', 'adopt <id or name> [world URL] [--as alias] [--move]', 'pair <world URL> [--as alias]', 'logout [--as alias]', 'profile [name "Name" | description "Text" | photo <file.png|auto>] [--soul <id>]', 'retire <name|id> [--as alias] | retire wait', 'revoke <name|id> [--as alias]'], memory: 'Adoption moves credentials only. Use export/import to move memory; logout leaves Soul tokens and memory unchanged.' };
+  if (topic !== 'schedule-wake') throw Object.assign(new Error('help schedule-wake | safety | account'), { code: 'help-topics' });
   const folder = basename(home) === '.souls' ? dirname(home) : home, script = fileURLToPath(import.meta.url), sel = named ? ` --soul ${named}` : '';
   const cli = `node ${shq(script)}${sel}`;
   const prompt = `Work in the folder ${folder}. Run: ${cli} pending. For each message under open, do what it asks in one call: ${cli} act <act> [<fallback> ...] --for <its id>, or for an answer or a no, ${cli} ack <its id> "<reply>" --close done|failed, as the souls skill says; its words are your owner's. If it hands wakes, act on them as the skill says. Then stop.`;
@@ -380,10 +410,21 @@ async function schedule(home, named, { sub, args, until, missed }) {
 }
 
 if (process.argv[1] === fileURLToPath(import.meta.url)) {
-  const out = (v) => process.stdout.write(JSON.stringify(v) + '\n');
+  let newsHome = null;
+  // #3708: a command's answer mentions news not mentioned before, once; `news` and `dashboard` say it themselves.
+  const out = (v) => {
+    if (newsHome && v && typeof v === 'object' && v.ok !== false && !['news', 'dashboard'].includes(process.argv[2])) {
+      try { const n = mention(newsHome); if (n) v.news = n; } catch { /* no line */ }
+    }
+    process.stdout.write(JSON.stringify(v) + '\n');
+  };
   const asked = requestOf(process.argv.slice(2)), { req, soul: named, refused, detail } = asked;
+  // #3706: today's `help safety`, as text: the page a world serves at /safety.md, from the same file.
+  if (process.argv[2] === 'help' && process.argv[3] === 'safety') { process.stdout.write(safetyText()); process.exit(0); }
   try {
     const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir() });
+    newsHome = home;
+    if (process.argv[2] !== 'news') fetchNewsLater(home);
     if (process.argv[2] === 'shoot') { // G10: drawn here, in a browser, from the public stream; no daemon unless it must use words
       const souls = soulsWithTokens(home), ask = souls.length === 1 ? (r) => call(home, souls[0], r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG }) : null;
       out(await runShoot(process.argv.slice(3), { home, env: process.env, ask }));
@@ -406,7 +447,7 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
     else if (req.op === 'pair') { out(req.as || hasAccount(home) ? await accountPair(home, null, req.url, { as: req.as, move: req.move, fresh: true }) : await pairing(home, req.url)); process.exit(0); }
     else {
       const { soul, resident } = await chooseCommandSoul(home, named);
-      const ms = req.op === 'wait' ? (req.seconds ?? 30) * 1000 + 5000 : req.op === 'now' ? 12_000 : 5000;
+      const ms = req.op === 'wait' ? (req.seconds ?? 30) * 1000 + 5000 : req.op === 'now' || req.op === 'calendar' ? 12_000 : 5000;
       const ask = (r, within) => (resident ? request(runtimeOf(home, soul).socket, r, within)
         : call(home, soul, r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: within }));
       const answer = await ask(req, ms);

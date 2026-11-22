@@ -547,6 +547,11 @@ impl Forms {
         f
     }
 
+    /// Whether intent `intent` is one the forms hold: its run in progress, or its effects applied.
+    pub fn known(&self, intent: Id) -> bool {
+        self.by_intent.contains_key(&intent) || self.applied.contains_key(&intent)
+    }
+
     /// Marks `node` as ground: a form done there reserves nothing (E21).
     pub fn shared(&mut self, node: Id) {
         self.shared.insert(node);
@@ -588,6 +593,32 @@ impl Forms {
                 )),
                 _ => None,
             })
+            .collect()
+    }
+
+    /// The bodies whose step in progress is a walk that is to be there, not to act from there: no `move`, `sit` or
+    /// `lie` comes next. The world may end such a walk to an area anywhere within reach of the area's circle.
+    pub fn goal_walks(&self) -> BTreeSet<Id> {
+        self.runs
+            .values()
+            .filter(|fr| {
+                matches!(fr.runner.step(), Some(Step::WalkTo { .. }))
+                    && !matches!(
+                        fr.runner.next_step(),
+                        Some(Step::Move { .. } | Step::Sit { .. })
+                    )
+            })
+            .map(|fr| fr.body)
+            .collect()
+    }
+
+    /// The bodies whose run's step in progress is an approach walk, the walk the binding adds before a form's first
+    /// move at a point (#3688), so the world can aim it at clear ground on the body's side of that point.
+    pub fn approaches(&self) -> std::collections::BTreeSet<Id> {
+        self.runs
+            .values()
+            .filter(|fr| matches!(fr.runner.step(), Some(Step::WalkTo { approach: true, .. })))
+            .map(|fr| fr.body)
             .collect()
     }
 
