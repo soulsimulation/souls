@@ -119,38 +119,49 @@ fn has_form(e: &Json, form: &str) -> bool {
     })
 }
 
-/// #4154: the things standing on the ground the Souls' bodies stand on (their most common frame), within a radius of
-/// the bodies' middle that doubles from [`NEAR_MM`] until it holds [`NEAR_LEAST`]; all of them when the copy says no
-/// places or too few things are near. Picked at random across a world as large as Eden, each walk and form would take
-/// minutes, and every act sent meanwhile would be refused `form-running`.
+/// #4154: a node's place in the world, roughly: its position added to its frames' up the chain (rotations left out, so
+/// a thing inside a turned building may be off by its distance from the building's origin). None without a place.
+fn world_xz(seen: &Seen, id: &Id) -> Option<(i64, i64)> {
+    let (mut f, mut x, mut z) = *seen.places.get(id)?;
+    for _ in 0..12 {
+        let Some((up, fx, fz)) = seen.places.get(&f).copied().filter(|p| p.0 != f) else {
+            break;
+        };
+        (f, x, z) = (up, x + fx, z + fz);
+    }
+    Some((x, z))
+}
+
+/// #4154: the things within a radius of the Souls' bodies' middle that doubles from [`NEAR_MM`] until it holds
+/// [`NEAR_LEAST`]; all of them when the copy says no places or too few things are near. Picked at random across a
+/// world as large as Eden, each walk and form would take minutes, and every act sent meanwhile would be refused
+/// `form-running`.
 fn near<'a>(seen: &Seen, things: Vec<(Id, &'a Json)>) -> Vec<(Id, &'a Json)> {
-    let at: Vec<(Id, i64, i64)> = seen
+    let at: Vec<(i64, i64)> = seen
         .bodies
         .values()
-        .filter_map(|b| seen.places.get(b).copied())
+        .filter_map(|b| world_xz(seen, b))
         .collect();
-    let mut frames: BTreeMap<Id, usize> = BTreeMap::new();
-    for (f, _, _) in &at {
-        *frames.entry(*f).or_default() += 1;
-    }
-    let Some((ground, _)) = frames.into_iter().max_by_key(|(_, n)| *n) else {
+    if at.is_empty() {
         return things;
-    };
-    let on: Vec<&(Id, i64, i64)> = at.iter().filter(|p| p.0 == ground).collect();
+    }
     let (cx, cz) = (
-        on.iter().map(|p| p.1).sum::<i64>() / on.len() as i64,
-        on.iter().map(|p| p.2).sum::<i64>() / on.len() as i64,
+        at.iter().map(|p| p.0).sum::<i64>() / at.len() as i64,
+        at.iter().map(|p| p.1).sum::<i64>() / at.len() as i64,
     );
+    let placed: Vec<((Id, &Json), i64)> = things
+        .iter()
+        .filter_map(|t| {
+            let (x, z) = world_xz(seen, &t.0)?;
+            Some((*t, (x - cx).pow(2) + (z - cz).pow(2)))
+        })
+        .collect();
     let mut r = NEAR_MM;
     while r < 4_000_000 {
-        let close: Vec<(Id, &Json)> = things
+        let close: Vec<(Id, &Json)> = placed
             .iter()
-            .filter(|(id, _)| {
-                seen.places.get(id).is_some_and(|(f, x, z)| {
-                    *f == ground && (x - cx).pow(2) + (z - cz).pow(2) <= r * r
-                })
-            })
-            .copied()
+            .filter(|(_, d)| *d <= r * r)
+            .map(|(t, _)| *t)
             .collect();
         if close.len() >= NEAR_LEAST {
             return close;
