@@ -11,7 +11,7 @@
             "kind": "eden:bench_vice",
             "fields": {
               "clamped": true,
-              "jaw_gap": "gap_120"
+              "jaw_gap": "gap_0"
             }
           },
           "b": {
@@ -96,7 +96,7 @@
                 "node": "t",
                 "field": "jaw_gap",
                 "n": 29,
-                "to": 3
+                "to": "gap_120"
               }
             ],
             "events": [
@@ -174,7 +174,7 @@
             "this": "t",
             "form": "set_jaw_gap",
             "args": {
-              "gap": "gap_120"
+              "gap": "gap_0"
             }
           },
           "receipt": "bench_vice_5",
@@ -186,7 +186,7 @@
                 "node": "t",
                 "field": "jaw_gap",
                 "n": 29,
-                "to": 3
+                "to": "gap_0"
               }
             ],
             "events": [
@@ -236,7 +236,7 @@
           "kind": "eden:bench_vice",
           "fields": {
             "clamped": 1,
-            "jaw_gap": 3
+            "jaw_gap": "gap_0"
           }
         }
       }
@@ -335,7 +335,7 @@
                 "node": "t",
                 "field": "index",
                 "n": 29,
-                "to": 2
+                "to": "index_90"
               }
             ],
             "events": [
@@ -425,7 +425,7 @@
                 "node": "t",
                 "field": "index",
                 "n": 29,
-                "to": 0
+                "to": "index_0"
               }
             ],
             "events": [
@@ -475,7 +475,7 @@
           "kind": "eden:indexing_head",
           "fields": {
             "pin_engaged": 1,
-            "index": 0
+            "index": "index_0"
           }
         }
       }
@@ -574,7 +574,7 @@
                 "node": "t",
                 "field": "extension",
                 "n": 29,
-                "to": 2
+                "to": "extension_300"
               }
             ],
             "events": [
@@ -664,7 +664,7 @@
                 "node": "t",
                 "field": "extension",
                 "n": 29,
-                "to": 0
+                "to": "extension_0"
               }
             ],
             "events": [
@@ -714,7 +714,7 @@
           "kind": "eden:telescopic_trestle",
           "fields": {
             "collar_locked": 1,
-            "extension": 0
+            "extension": "extension_0"
           }
         }
       }
@@ -813,7 +813,7 @@
                 "node": "t",
                 "field": "offset",
                 "n": 29,
-                "to": 2
+                "to": "offset_300"
               }
             ],
             "events": [
@@ -903,7 +903,7 @@
                 "node": "t",
                 "field": "offset",
                 "n": 29,
-                "to": 0
+                "to": "offset_100"
               }
             ],
             "events": [
@@ -953,7 +953,7 @@
           "kind": "eden:locking_fence",
           "fields": {
             "lever_locked": 1,
-            "offset": 0
+            "offset": "offset_100"
           }
         }
       }
