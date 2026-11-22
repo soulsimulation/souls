@@ -21,16 +21,16 @@
       "at_mm": [
         -200,
         0,
-        650
+        -650
       ],
-      "yaw_mdeg": 180000
+      "yaw_mdeg": 0
     },
     "crank": {
       "role": "contact",
       "at_mm": [
         -200,
         1100,
-        100
+        -195
       ]
     }
   },
@@ -1564,12 +1564,12 @@
           "kind": "box",
           "at": [
             -200,
-            1040,
+            865,
             -110
           ],
           "size": [
             100,
-            120,
+            470,
             70
           ],
           "tint": "frame"
@@ -1820,10 +1820,10 @@
           "at": [
             -200,
             1100,
-            70
+            -170
           ],
-          "r": 20,
-          "h": 120,
+          "r": 24,
+          "h": 50,
           "segments": 32,
           "pitch": 90000,
           "tint": "shaft"
@@ -2281,8 +2281,8 @@
     "slider_crank": "slider crank",
     "linkage": "connecting rod linkage",
     "wrong_phase": "Choose the turn matching the current phase.",
-    "free_hand": "Put down an object so a hand is free for the shaft control.",
-    "howto_turn": "Use the forward or backward offer matching the current phase. Blue C is the crank, gold R the rigid rod and green S the slider. Forward turns counterclockwise viewed from the front, in sixteen 22.5 degree steps; the pale crank index moves against four fixed red references. The orange crank pin and lavender slider pin span the separated crank and rod planes. A 120 mm crank radius and unchanged 360 mm pin-center rod give 240 mm slider travel along fixed rails. Red marks above the guide show both travel endpoints. Only sixteen endpoint configurations are represented: the rod is not resized, but no intermediate constraint closure, physical force, torque, dead-point drive, engine, pump, output, loose-item custody or team authority is simulated. Turning through a dead point is an indexed depiction, not a force demonstration."
+    "free_hand": "Put down an object so a hand is free for the rear shaft control.",
+    "howto_turn": "Use the forward or backward offer matching the current phase at the rear shaft control. Blue C is the crank, gold R the rigid rod and green S the slider. Forward turns counterclockwise viewed from the front, in sixteen 22.5 degree steps; the pale crank index moves against four fixed red references. The orange crank pin and lavender slider pin span the separated crank and rod planes. A 120 mm crank radius and unchanged 360 mm pin-center rod give 240 mm slider travel along fixed rails. Red marks above the guide show both travel endpoints. Only sixteen endpoint configurations are represented: the rod is not resized, but no intermediate constraint closure, physical force, torque, dead-point drive, engine, pump, output, loose-item custody or team authority is simulated. Turning through a dead point is an indexed depiction, not a force demonstration."
   },
   "card": {
     "text": "card",
