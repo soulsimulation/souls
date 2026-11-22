@@ -58,6 +58,10 @@
 //!     world time; a page plays a still world to there, and no empty part is ever written (rule 3). A record that
 //!     reaches the writer later than [`SETTLE_US`] after its world time is still written, in its own stretch; a page
 //!     that has drawn past it has missed only its motion, never its state.
+//! 12. **A hiding place's contents stay out** (#3948). The public writer opened with the world's closed kinds
+//!     ([`PublicWriter::open_hiding`]) leaves what a closed container holds out of its state and baselines
+//!     ([`crate::closed::Closed::hides`]) and its entries ([`crate::closed::Inside`], the hub's rule), until it is
+//!     taken out. A generation's recovery seed says so (field 17); one begun before keeps them until the next.
 //!
 //! Not here: serving (V2), history (V3), snapshot chunks for a reader that joins late, and drawing the words (W4).
 
