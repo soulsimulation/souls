@@ -790,6 +790,28 @@ fn um(v: Option<&Json>) -> Option<Vec3> {
 }
 
 impl Sight<'_> {
+    /// How far a body seated in slot `slot` of thing `target` is from the thing's point `point`, across x and z in
+    /// the thing's frame, from the body's edge: the slot's and the point's places as its entry names them. `None`
+    /// when the entry names neither.
+    fn reach_in_slot(&self, body: Id, target: Id, slot: u64, point: &Name) -> Option<i64> {
+        let n = self.tree.node(self.tree.handle(target)?)?;
+        let entry = self.kinds.get(plain(n.kind()))?;
+        let held = entry
+            .get("slots")
+            .and_then(Json::obj)?
+            .get(usize::try_from(slot).ok()?.checked_sub(1)?)
+            .and_then(|(_, s)| um(s.get("at_mm")))?;
+        let at = um(entry
+            .get("points")
+            .and_then(|ps| ps.get(point.as_str()))
+            .and_then(|p| p.get("at_mm")))?;
+        Some(
+            flat([held.x, held.z], [at.x, at.z])
+                .saturating_sub(self.builds.get(&body)?.size.radius_mm() * 1000)
+                .max(0),
+        )
+    }
+
     /// How far a body standing at `from` on floor `floor` is from thing `target` across x and z (C22, #3485): from
     /// the body's edge (a standard body's radius from its feet, [`sim::ground::HUMAN_RADIUS`]: a hand reaches from the
     /// shoulder, not the feet) to the nearer of the thing's point `point` its entry names and its nearest surface, the
@@ -877,6 +899,13 @@ impl Reach for Sight<'_> {
             .and_then(|h| self.tree.node(h)?.parent());
         if parent == Some(body) {
             return Some(0);
+        }
+        // A body seated in the thing's own slot reaches from that slot, in the thing's frame (#3713): a player at a
+        // table moves on its board from where it sits, not from where the slot's frame would carry it.
+        if let (true, Some(slot)) = (me.pose.frame.node == target, me.pose.frame.slot)
+            && let Some(d) = self.reach_in_slot(body, target, slot, point)
+        {
+            return Some(d);
         }
         if let Some(d) = self.to_thing(body, sim::walk::node_of(me), a, target, point) {
             return Some(d);
@@ -1623,6 +1652,12 @@ impl Acts {
                     continue;
                 }
             };
+            for (k, n) in args.slots.iter().filter(|(k, _)| counted(k)) {
+                all.insert(
+                    k.clone(),
+                    skills::form_runner::Arg::Int(i64::try_from(*n).unwrap_or(i64::MAX)),
+                );
+            }
             let mut ambiguous = None;
             for (key, value) in counts.iter().chain(&args.values) {
                 if all.insert(key.clone(), value.clone()).is_some() {
