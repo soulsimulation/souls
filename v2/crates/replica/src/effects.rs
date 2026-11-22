@@ -917,6 +917,8 @@ pub struct Header {
     pub moves: Vec<Name>,
     pub rest: Rest,
     stored: Vec<u8>,
+    /// [`Header::hash`], worked out once from `stored` when read: a world names it in every tick's record (#1960).
+    hash: Hash,
 }
 
 impl Header {
@@ -953,6 +955,7 @@ impl Header {
             moves: names(r.take(7, "a header")?, "a header's moves")?,
             rest: std::mem::take(&mut r.0),
             stored: bytes.to_vec(),
+            hash: Hash::of(Purpose::Header, bytes),
         })
     }
 
@@ -978,7 +981,7 @@ impl Header {
 
     /// The `souls/header/1` hash of the stored bytes, which every part of the bundle names.
     pub fn hash(&self) -> Hash {
-        Hash::of(Purpose::Header, &self.stored)
+        self.hash
     }
 }
 
