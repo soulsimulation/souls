@@ -147,7 +147,8 @@ NODE_MAJOR="$(node --version | sed -E 's/^v([0-9]+).*/\1/')"; [[ "$NODE_MAJOR" =
 [ "$DRY" = 1 ] || git -C "$ROOT" fetch -q origin main || pf "cannot fetch origin main"
 git -C "$ROOT" merge-base --is-ancestor "$SHA" origin/main 2>/dev/null || pf "$SHA is not an ancestor of origin/main"
 # --no-switch makes nothing live, so the receipts are reported, never required
-rf() { if [ "$NOSWITCH" = 1 ]; then say "   receipts (not required with --no-switch): $*"; else pf "$*"; fi; }
+# SHIP_GATE=report (release.yml gate=report, Gene 22 Nov 2026: zero users): the gate receipt is reported, never required
+rf() { if [ "$NOSWITCH" = 1 ] || [ "${SHIP_GATE:-required}" = report ]; then say "   receipts (not required$([ "$NOSWITCH" = 1 ] && echo " with --no-switch" || echo ": gate=report")): $*"; else pf "$*"; fi; }
 if [ -z "$RECEIPTS" ]; then rf "SHIP_RECEIPTS is not set: the folder with release-receipt.json (or receipt.json and ship-receipt.json)"
 # a gate blocked only by blockers the maintainer accepted, for this receipt and cut (docs/release.md#accepted-exceptions)
 elif [ -n "${SHIP_EXCEPTIONS:-}" ]; then node "$VERDICT" accepted "$RECEIPTS" "$SHIP_EXCEPTIONS" "$SHA" | sed 's/^/   /'; [ "${PIPESTATUS[0]}" = 0 ] || rf "the receipts are blocked beyond the accepted exceptions"

@@ -339,6 +339,11 @@ Per window it reports the existing columns (tick, act queue and handler time, lo
 The world's own cap is 2,000 sockets (the hub's `MAX_CLIENTS`). Arms above it measure refusals until the viewer thread
 exists. On today's three-core timed runners, the drivers share one physical core with the launcher.
 
+`viewers/v2.mjs` (#4018) is the same swarm on a served v2 Eden: `worldd seed` and `worldd serve`, `gatewayd`, and the
+viewers' origin (`v2/tools/origin/origin.mjs`) under its unit's 256 MB, Souls walking through the gateway, and viewers
+that read the stream files as the page's worker does. It climbs 100 to 5,000 viewers, each step a join wave with slow
+readers, and judges each step by the bars in `viewers/v2-stats.mjs`. Its file header gives the command.
+
 ## Recorded baseline (2026-10-31, before the server-reliability fixes)
 
 Fixture: the compact Eden 2026 copy, sha256 `d0921000a7ef…`, heap cap 768 MB unless noted; two repeats per arm, shown

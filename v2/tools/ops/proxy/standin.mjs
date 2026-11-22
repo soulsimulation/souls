@@ -96,6 +96,7 @@ writeFileSync(join(src, 'routes.mjs'), readFileSync(join(here, 'routes.mjs')));
 const originModules = join(release, 'v2/tools/origin');
 mkdirSync(originModules, { recursive: true });
 writeFileSync(join(originModules, 'world-routes.mjs'), readFileSync(join(here, '../../origin/world-routes.mjs')));
+writeFileSync(join(originModules, 'upgrade-refusal.mjs'), readFileSync(join(here, '../../origin/upgrade-refusal.mjs')));
 writeFileSync(join(etc, 'sim-worlds/production.conf'), `SIM_WORLDS_ARGS="--port ${port.launcher} --data /nowhere"\n`);
 writeFileSync(join(etc, 'caddy/cdn-trust.snippet'), readFileSync(join(today, 'cdn-trust.snippet')));
 writeFileSync(join(etc, 'caddy/Caddyfile'), `{\n\tadmin localhost:${port.admin}\n\tauto_https off\n\timport cdn-trust.snippet\n}\nimport sites/*.caddy\n`);

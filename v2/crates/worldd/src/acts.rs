@@ -1433,7 +1433,7 @@ const NEAR_MM: i64 = 1_500;
 
 /// A node's place in the zone's frame, µm: its position carried up the tree through each parent's place, turns
 /// included.
-fn world_at(tree: &Tree, node: Id) -> Option<Vec3> {
+pub(crate) fn world_at(tree: &Tree, node: Id) -> Option<Vec3> {
     let n = tree.node(tree.handle(node)?)?;
     carried(
         tree,
@@ -1460,7 +1460,13 @@ fn carried(tree: &Tree, frame: Option<Id>, local: Vec3) -> Option<Vec3> {
 
 /// Whether `body` stands within a form's reach of `node`: within its half size (its entry's bounds) and
 /// [`NEAR_MM`], across x and z, in the zone's frame (`body_at` when the body is not a node of the tree).
-fn within_reach(tree: &Tree, entry: &Json, body: Id, body_at: Option<Vec3>, node: Id) -> bool {
+pub(crate) fn within_reach(
+    tree: &Tree,
+    entry: &Json,
+    body: Id,
+    body_at: Option<Vec3>,
+    node: Id,
+) -> bool {
     let (Some(b), Some(n)) = (world_at(tree, body).or(body_at), world_at(tree, node)) else {
         return false;
     };
@@ -2151,6 +2157,9 @@ impl Acts {
                         &all,
                         now,
                     )
+                    .and_then(|()| {
+                        crate::needs::hand_reach(tree, &entry, form, &all, body, body_at, *node)
+                    })
                 {
                     first.get_or_insert(e);
                     continue;
