@@ -129,6 +129,9 @@ Before the switch:
       (`/var/lib/souls/worlds/worlds/<world>/tokens`), so `worldd serve` finds `tokens.souls` (retires and names from
       the owner's page, W11b #3558); otherwise start `worldd serve` with `--directory <that file>`. `check` refuses
       otherwise.
+- [ ] Eden is registered in the directory (`register-world`, [install.md](runbook/install.md#an-imported-world-in-the-directory)),
+      so `GET /v1/worlds` lists `eden` and the authority map's founder matches the directory's. `check` refuses
+      otherwise.
 - [ ] The v2 site owner is configured, so `/ops?json=1` answers (not 503 `owner-access-unconfigured`).
 - [ ] `/etc/souls/cutover.env` names Eden; `cutover.sh check` passes, and shows the placed socket path's length
       (about 98 bytes of 107).

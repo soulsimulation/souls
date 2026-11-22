@@ -9,7 +9,7 @@ sends to these programs once the owner places its site file. Routing between the
 | What | Where | Owner, mode |
 |---|---|---|
 | The unprivileged user and group | `souls`, no shell, no home of its own | system user |
-| The programs: `supervisor`, `worldd`, `gatewayd`, `directoryd`, `deploy` (O7's, for the runbook's `world-deploy.sh`), `gateway-upgrade` (O16's, for `gateway-upgrade.sh`), `import-accounts` (X11), `import-world` (X6), `publish-template` (G9's `templates`, renamed because `/usr/local/lib/souls/templates` is W3b's catalogue, built on the machine from Eden's facts) | `/usr/local/lib/souls/` | root, 755 |
+| The programs: `supervisor`, `worldd`, `gatewayd`, `directoryd`, `deploy` (O7's, for the runbook's `world-deploy.sh`), `gateway-upgrade` (O16's, for `gateway-upgrade.sh`), `import-accounts` (X11), `import-world` (X6), `register-world` (an imported world in the directory), `publish-template` (G9's `templates`, renamed because `/usr/local/lib/souls/templates` is W3b's catalogue, built on the machine from Eden's facts) | `/usr/local/lib/souls/` | root, 755 |
 | The viewers' origin (`origin.mjs`, `cache.mjs`) and the page's files (V5) | `/usr/local/lib/souls/origin/`, `/usr/local/lib/souls/web/` | root, 644 |
 | The served client (R17: `eden.mjs`, the skills, the daemon's library, `soul-client.json`), at the version its skill declares; placed only when absent, so release-v2's move replaces it and a later install never puts an older one back. Today's launcher's cut-over fence checks it (`clientDir`) | `/usr/local/lib/souls/client/` | root, 644 |
 | Data: worlds, the directory's store, the view tier's stream files | `/var/lib/souls/{worlds,directory,views}` | souls, 750 |
@@ -121,6 +121,26 @@ asset index, map and selected backup, and write access only to the fresh facts d
 or worker permission is granted. SQLite opens the backup read-only and immutable. Repeat these two steps for each
 backup (the validator also accepts several facts files). The convenience `import-world.ts` wrapper invokes
 `cargo run`; use the installed validator above on production.
+
+### An imported world in the directory
+
+A world brought over from today's system (Eden: `import-world`, `worldd seed`, `place-world.sh`) is made by no create,
+so nothing else puts it in the directory's list. `register-world` writes its name record and its list row in the store
+the directory reads (the bucket `DIRECTORY_STORE_URL` names, else the folder `DIRECTORYD_WORLD_STORE`), then its entry
+and aliases in the world-authority map. Run it as root after placing the world and before the directory (re)starts
+with the map naming it: a map entry the directory cannot find in its own list stops every pairing
+(`world-authority-unavailable`).
+
+```sh
+DIRECTORYD_WORLD_STORE=/var/lib/souls/worlds/directory /usr/local/lib/souls/register-world eden \
+  --instance <placed instance> --creator <the creator's principal> --label Eden --alias eden-2026 \
+  --env-file /etc/souls/secrets.env --authority /etc/souls/placement-data/authority.json
+```
+
+It is idempotent: a second run says `kept` and changes nothing. It refuses, changing nothing, a name that is another
+world's (`name-taken`), the same world under another name (`world-registered`), another founder (`creator-differs`)
+and a map entry or alias that differs (`authority-conflict`). On a folder store it hands what it made to the folder's
+owner. Rules: `v2/crates/directoryd/src/worlds/list/register.rs`.
 
 ## After the install: the owner's steps
 
