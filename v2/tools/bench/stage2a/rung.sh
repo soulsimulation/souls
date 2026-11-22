@@ -40,7 +40,7 @@ OP=$!
 for _ in $(seq 1 60); do grep -q '^origin' "$D/origin.log" && break; sleep 1; done
 OPORT=$(sed -n 's/^origin \([0-9]*\).*/\1/p' "$D/origin.log" | head -1)
 STREAM=$(node -p 'JSON.parse(require("fs").readFileSync(process.argv[1], "utf8")).stream' "$D/w/views/world.json")
-STREAM_URL="http://127.0.0.1:$OPORT/views/${STREAM#/}"
+STREAM_URL="http://127.0.0.1:$OPORT/${STREAM#/}"
 [ "${STREAM_URL%/}" = "$STREAM_URL" ] && STREAM_URL="$STREAM_URL/"
 echo "rung $N $ARM $RATE cpus=$CPUS: world $WP gateway $GP ($ADDR) origin $OP ($STREAM_URL)"
 

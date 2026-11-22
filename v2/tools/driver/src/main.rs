@@ -1258,8 +1258,16 @@ async fn main() {
         match seen {
             Ok(seen) => {
                 let t = targets::Targets::of(&seen, e);
+                let mut body_kinds: Vec<&str> = seen
+                    .nodes
+                    .iter()
+                    .filter(|(id, _)| seen.bodies.values().any(|b| b == id))
+                    .map(|(_, k)| k.as_str())
+                    .collect();
+                body_kinds.sort_unstable();
+                body_kinds.dedup();
                 println!(
-                    "targets: {} nodes in the copy; {}",
+                    "targets: {} nodes in the copy; bodies' kinds {body_kinds:?}; {}",
                     seen.nodes.len(),
                     t.json()
                 );
