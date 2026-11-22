@@ -20,7 +20,10 @@ win 1 and the named places of win 3. Two steps, both run by hand:
    today's catalog as a JSON file, the difference list by id with a reason.
 
 3. **Bake** (TypeScript, `bake/bake.ts`, V17 #2717), from the repository root after `pnpm install`:
-   `node v2/tools/import-eden/bake/bake.ts [--write-records]`. It replays the same template, runs today's mesh builders
+   `node v2/tools/import-eden/bake/bake.ts [--write-records]`, or for a live world
+   `node v2/tools/import-eden/bake/bake.ts --backup <sim.db> [--world <id>] [--map <map.json>] --out <dir>` (the same
+   backup and map its facts were exported from, so `things` is keyed by the facts' `origin` ids; a template replay's
+   seed gives other ids and maps none of a live world's things). It replays the same template, runs today's mesh builders
    (`apps/web/src/gen-mesh`, unchanged) in Node once per kind and set of geometry parameters (the builder's instance
    key, with tint, variation and stretch left on the instance), and writes each picture as binary glTF named by its T3
    hash (`souls/model/1`, then the bytes; `1220` and 64 hex digits) under `.local/import-eden/models/worlds/models/`, with
@@ -31,7 +34,14 @@ win 1 and the named places of win 3. Two steps, both run by hand:
    (`tools/cdn/approved-derivatives.json`, `generated`), and the dry run
    `node tools/cdn/publish.mjs --dry-run --identity --root .local/import-eden/models --sources <csv> --out <plan>`
    then plans every model; a model with no record is listed as excluded, not published. Path and area shapes that drape
-   on the ground are one per thing and are listed, as are ground and water.
+   on the ground are one per thing and are listed, as are ground and water. A kind made from a stored glTF file (`make: {kind:'mesh'}`; 127 of the
+   Mars campus's 141 kinds, 6 of Eden's) is written as that file's bytes, unchanged: the viewer's rendition today's page
+   gets (`worlds/core-assets/renditions.json`) when there is one, else the core asset (`pnpm assets:pull` brings them).
+   Its kind carries `fit` (`[scale, x, y, z]`, today's `instantiate`: centred on x and z, standing on y = 0, its largest
+   extent matched to the def's box, from the core index's measured bounds) and `flat` for a model a few centimetres
+   thick, drawn a hair towards the camera as today. Its licence is its file's (`modelRecord`: served-public or a
+   reviewed CC0 derivative), so it is not added to `generated`. v2/web loads every model with the meshopt decoder and
+   keeps WebP and AVIF textures.
 
 The mapping, the field numbers and what each node holds are in the module doc of `src/lib.rs`. In short: world →
 open ground → things; a thing with rooms → a floor per level → rooms → the things in them and the windows; a doorway
