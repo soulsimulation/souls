@@ -22,6 +22,7 @@ use super::scene::{Doorway, Scene, Terrain, Xz};
 use super::{Meet, OpenGround, Piece, SQUARE, prepare};
 use replica::ids::Id;
 use replica::tree::Tree;
+use replica::world_model::show;
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
 
@@ -128,6 +129,77 @@ fn bounds(s: &Scene) -> Option<[i64; 4]> {
         ring_bb(&mut bb, a);
     }
     bb
+}
+
+/// How far past the open ground's extent a thing may stand on a ground with no terrain, µm (#3958): 100 m.
+pub const REACH: i64 = 100_000_000;
+
+/// Why the nodes `changed` leave something off the open ground `ground` (#3958), read from the tree `after` they were
+/// changed into from `before`: a child of the ground whose geometry reaches past the ground's extent. The extent is
+/// the box the terrain's tiles cover, or, with no terrain, the box of the ground's children's origins grown by
+/// [`REACH`], each joined with the changed children's old bounds (a thing already there may stay). The open ground is
+/// cut in squares over its whole extent, so a thing far off it would have the walkers' maps cut squares without end.
+pub fn off_ground(
+    before: &Tree,
+    after: &Tree,
+    ground: Id,
+    changed: &[Id],
+) -> Result<Option<String>, String> {
+    let (Some(gb), Some(ga)) = (before.handle(ground), after.handle(ground)) else {
+        return Ok(None);
+    };
+    let index = Index {
+        ground,
+        parts: Arc::default(),
+        gates: Arc::default(),
+        terrain: None,
+        widest: 0,
+    };
+    let terrain = Terrain::extent(before, ground)?;
+    let mut extent = match terrain {
+        Some(t) => Some(t),
+        None => {
+            let mut bb = None;
+            for &c in before.children(gb).unwrap_or(&[]) {
+                if let Some(p) = before.node(c).and_then(|n| n.place()) {
+                    let (x, z) = (p.position.x, p.position.z);
+                    bb = Some(join(bb, [x, z, x, z]));
+                }
+            }
+            bb.map(|b| grow(b, REACH))
+        }
+    };
+    for k in index.children(before, changed) {
+        if let Some(h) = before.handle(k)
+            && let Some(b) = bounds(&Scene::of_child(before, gb, h, None)?)
+        {
+            extent = Some(join(extent, b));
+        }
+    }
+    let Some(extent) = extent else {
+        return Ok(None);
+    };
+    for k in index.children(after, changed) {
+        let Some(h) = after.handle(k) else { continue };
+        let Some(b) = bounds(&Scene::of_child(after, ga, h, None)?) else {
+            continue;
+        };
+        if b[0] < extent[0] || b[1] < extent[1] || b[2] > extent[2] || b[3] > extent[3] {
+            return Ok(Some(format!(
+                "{} reaches x {} to {} mm, z {} to {} mm, past the open ground's x {} to {} mm, z {} to {} mm",
+                show(k),
+                b[0] / 1000,
+                b[2] / 1000,
+                b[1] / 1000,
+                b[3] / 1000,
+                extent[0] / 1000,
+                extent[2] / 1000,
+                extent[1] / 1000,
+                extent[3] / 1000
+            )));
+        }
+    }
+    Ok(None)
 }
 
 /// The square (i, j) as a box, µm.
