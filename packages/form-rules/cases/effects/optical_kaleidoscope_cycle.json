@@ -22,12 +22,20 @@
         {
           "act": {
             "this": "t1",
-            "form": "turn_chamber",
-            "args": {
-              "pattern": "flower"
-            }
+            "form": "turn_backward"
           },
           "receipt": "cycle-0",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs"
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "turn_forward"
+          },
+          "receipt": "cycle-1",
           "expect": {
             "verdict": "yes",
             "changes": [
@@ -36,7 +44,7 @@
                 "node": "t1",
                 "field": "pattern",
                 "n": 28,
-                "to": "flower"
+                "to": 1
               }
             ]
           }
@@ -44,12 +52,115 @@
         {
           "act": {
             "this": "t1",
-            "form": "turn_chamber",
-            "args": {
-              "pattern": "flower"
-            }
+            "form": "turn_forward"
           },
-          "receipt": "cycle-1",
+          "receipt": "cycle-2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "pattern",
+                "n": 28,
+                "to": 2
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "turn_forward"
+          },
+          "receipt": "cycle-3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "pattern",
+                "n": 28,
+                "to": 3
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "turn_forward"
+          },
+          "receipt": "cycle-4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "pattern",
+                "n": 28,
+                "to": 4
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "turn_forward"
+          },
+          "receipt": "cycle-5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "pattern",
+                "n": 28,
+                "to": 5
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "turn_forward"
+          },
+          "receipt": "cycle-6",
+          "expect": {
+            "verdict": "no",
+            "reason": "field_differs"
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "complete_turn"
+          },
+          "receipt": "cycle-7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "pattern",
+                "n": 28,
+                "to": 0
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "complete_turn"
+          },
+          "receipt": "cycle-8",
           "expect": {
             "verdict": "no",
             "reason": "field_differs"
@@ -60,7 +171,7 @@
             "this": "t1",
             "form": "close_eyepiece"
           },
-          "receipt": "cycle-2",
+          "receipt": "cycle-9",
           "expect": {
             "verdict": "yes",
             "changes": [
@@ -77,12 +188,9 @@
         {
           "act": {
             "this": "t1",
-            "form": "turn_chamber",
-            "args": {
-              "pattern": "wheel"
-            }
+            "form": "turn_forward"
           },
-          "receipt": "cycle-3",
+          "receipt": "cycle-10",
           "expect": {
             "verdict": "no",
             "reason": "field_differs"
@@ -93,7 +201,7 @@
             "this": "t1",
             "form": "open_eyepiece"
           },
-          "receipt": "cycle-4",
+          "receipt": "cycle-11",
           "expect": {
             "verdict": "yes",
             "changes": [
@@ -110,12 +218,9 @@
         {
           "act": {
             "this": "t1",
-            "form": "turn_chamber",
-            "args": {
-              "pattern": "wheel"
-            }
+            "form": "turn_forward"
           },
-          "receipt": "cycle-5",
+          "receipt": "cycle-12",
           "expect": {
             "verdict": "yes",
             "changes": [
@@ -124,7 +229,7 @@
                 "node": "t1",
                 "field": "pattern",
                 "n": 28,
-                "to": "wheel"
+                "to": 1
               }
             ]
           }
@@ -132,12 +237,9 @@
         {
           "act": {
             "this": "t1",
-            "form": "turn_chamber",
-            "args": {
-              "pattern": "star"
-            }
+            "form": "turn_backward"
           },
-          "receipt": "cycle-6",
+          "receipt": "cycle-13",
           "expect": {
             "verdict": "yes",
             "changes": [
@@ -146,7 +248,7 @@
                 "node": "t1",
                 "field": "pattern",
                 "n": 28,
-                "to": "star"
+                "to": 0
               }
             ]
           }
@@ -156,7 +258,7 @@
         "t1": {
           "kind": "eden:kaleidoscope",
           "fields": {
-            "pattern": "star",
+            "pattern": 0,
             "shutter": 0
           }
         }

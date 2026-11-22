@@ -5,16 +5,14 @@
   "state": {
     "card": {
       "n": 28,
-      "type": "enum",
-      "default": "none",
+      "type": "int",
+      "unit": "count",
+      "min": 0,
+      "max": 2,
+      "default": 0,
       "audience": {
         "rule": "everyone"
-      },
-      "values": [
-        "none",
-        "mountain",
-        "garden"
-      ]
+      }
     },
     "focus": {
       "n": 29,
@@ -55,7 +53,7 @@
     ]
   },
   "forms": {
-    "fit_card": {
+    "fit_mountain_card": {
       "who": "anyone",
       "starts": "act",
       "needs": [
@@ -63,7 +61,7 @@
           "need": "state",
           "field": "card",
           "says": "remove_first",
-          "is": "none"
+          "is": 0
         },
         {
           "need": "hand",
@@ -86,21 +84,46 @@
         {
           "change": "set",
           "field": "card",
-          "to": {
-            "arg": "card"
-          },
+          "to": 1,
           "event": "stereo_card_fitted"
         }
-      ],
-      "takes": {
-        "card": {
-          "type": "value",
-          "of": [
-            "mountain",
-            "garden"
-          ]
+      ]
+    },
+    "fit_garden_card": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "card",
+          "says": "remove_first",
+          "is": 0
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
         }
-      }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "card",
+          "to": 2,
+          "event": "stereo_card_fitted"
+        }
+      ]
     },
     "remove_card": {
       "who": "anyone",
@@ -109,8 +132,8 @@
         {
           "need": "state",
           "field": "card",
-          "not": "none",
-          "says": "no_card"
+          "says": "no_card",
+          "at_least": 1
         },
         {
           "need": "hand",
@@ -133,7 +156,7 @@
         {
           "change": "set",
           "field": "card",
-          "to": "none",
+          "to": 0,
           "event": "stereo_card_removed"
         }
       ]
@@ -145,8 +168,8 @@
         {
           "need": "state",
           "field": "card",
-          "not": "none",
-          "says": "no_card"
+          "says": "no_card",
+          "at_least": 1
         },
         {
           "need": "state",
@@ -187,8 +210,8 @@
         {
           "need": "state",
           "field": "card",
-          "not": "none",
-          "says": "no_card"
+          "says": "no_card",
+          "at_least": 1
         },
         {
           "need": "state",
@@ -321,7 +344,7 @@
           ],
           "tint": "paper",
           "role": "drawer",
-          "when": "@card!=none"
+          "when": "@card>0"
         },
         {
           "kind": "box",
@@ -375,7 +398,7 @@
     "no_card": "Fit a paired picture card before moving its focus or removing it.",
     "near_stop": "The focus rail is at its near stop; slide it farther.",
     "far_stop": "The focus rail is at its far stop; slide it nearer.",
-    "howto_play": "Fit a mountain or garden picture card, slide the focus nearer and farther, then remove the card.",
+    "howto_play": "Fit a captive mountain or garden picture card, slide the focus nearer and farther, then remove the card. The card field is 0 when empty, 1 for mountain and 2 for garden.",
     "toy": "optical toy"
   },
   "card": {
@@ -390,7 +413,7 @@
       "text": "howto_play",
       "steps": [
         {
-          "form": "fit_card"
+          "form": "fit_mountain_card"
         },
         {
           "form": "focus_nearer"

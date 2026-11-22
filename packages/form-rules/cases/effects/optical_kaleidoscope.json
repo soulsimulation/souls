@@ -3,7 +3,7 @@
   "about": "Exact state changes, named events and timers for every optical control; receipt replay must be idempotent.",
   "cases": [
     {
-      "name": "kaleidoscope_turn_chamber_exact_changes",
+      "name": "kaleidoscope_turn_forward_exact_changes",
       "state": {
         "actor": "b1",
         "now_us": 0,
@@ -11,7 +11,7 @@
           "t1": {
             "kind": "eden:kaleidoscope",
             "fields": {
-              "pattern": "star",
+              "pattern": 0,
               "shutter": false
             }
           },
@@ -27,12 +27,9 @@
         {
           "act": {
             "this": "t1",
-            "form": "turn_chamber",
-            "args": {
-              "pattern": "flower"
-            }
+            "form": "turn_forward"
           },
-          "receipt": "r-kaleidoscope-turn_chamber",
+          "receipt": "r-kaleidoscope-turn_forward",
           "expect": {
             "verdict": "yes",
             "changes": [
@@ -41,12 +38,118 @@
                 "node": "t1",
                 "field": "pattern",
                 "n": 28,
-                "to": "flower"
+                "to": 1
               }
             ],
             "events": [
               {
-                "event": "eden:chamber_turned",
+                "event": "eden:chamber_turned_forward",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "kaleidoscope_turn_backward_exact_changes",
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "t1": {
+            "kind": "eden:kaleidoscope",
+            "fields": {
+              "pattern": 1,
+              "shutter": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "turn_backward"
+          },
+          "receipt": "r-kaleidoscope-turn_backward",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "pattern",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:chamber_turned_backward",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "kaleidoscope_complete_turn_exact_changes",
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "t1": {
+            "kind": "eden:kaleidoscope",
+            "fields": {
+              "pattern": 5,
+              "shutter": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "complete_turn"
+          },
+          "receipt": "r-kaleidoscope-complete_turn",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "pattern",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:chamber_full_turn",
                 "node": "t1",
                 "changes": [
                   0
@@ -67,7 +170,7 @@
           "t1": {
             "kind": "eden:kaleidoscope",
             "fields": {
-              "pattern": "star",
+              "pattern": 0,
               "shutter": false
             }
           },
@@ -120,7 +223,7 @@
           "t1": {
             "kind": "eden:kaleidoscope",
             "fields": {
-              "pattern": "star",
+              "pattern": 0,
               "shutter": true
             }
           },

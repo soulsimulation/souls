@@ -5,19 +5,14 @@
   "state": {
     "pattern": {
       "n": 28,
-      "type": "enum",
-      "default": "star",
+      "type": "int",
+      "unit": "count",
+      "min": 0,
+      "max": 5,
+      "default": 0,
       "audience": {
         "rule": "everyone"
-      },
-      "values": [
-        "star",
-        "flower",
-        "snowflake",
-        "fan",
-        "wheel",
-        "hexagon"
-      ]
+      }
     },
     "shutter": {
       "n": 29,
@@ -55,7 +50,7 @@
     ]
   },
   "forms": {
-    "turn_chamber": {
+    "turn_forward": {
       "who": "anyone",
       "starts": "act",
       "needs": [
@@ -68,10 +63,8 @@
         {
           "need": "state",
           "field": "pattern",
-          "not": {
-            "arg": "pattern"
-          },
-          "says": "different_pattern"
+          "at_most": 4,
+          "says": "last_detent"
         },
         {
           "need": "hand",
@@ -94,25 +87,94 @@
         {
           "change": "set",
           "field": "pattern",
-          "to": {
-            "arg": "pattern"
-          },
-          "event": "chamber_turned"
+          "by": 1,
+          "event": "chamber_turned_forward"
+        }
+      ]
+    },
+    "turn_backward": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "shutter",
+          "says": "open_first",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "pattern",
+          "at_least": 1,
+          "says": "first_detent"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
         }
       ],
-      "takes": {
-        "pattern": {
-          "type": "value",
-          "of": [
-            "star",
-            "flower",
-            "snowflake",
-            "fan",
-            "wheel",
-            "hexagon"
-          ]
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
         }
-      }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "pattern",
+          "by": -1,
+          "event": "chamber_turned_backward"
+        }
+      ]
+    },
+    "complete_turn": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "shutter",
+          "says": "open_first",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "pattern",
+          "is": 5,
+          "says": "turn_to_last"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "pattern",
+          "to": 0,
+          "event": "chamber_full_turn"
+        }
+      ]
     },
     "close_eyepiece": {
       "who": "anyone",
@@ -201,15 +263,15 @@
         "field": "pattern",
         "do": "rotate",
         "axis": "z",
-        "at": {
-          "star": 0,
-          "flower": 60000,
-          "snowflake": 120000,
-          "fan": 180000,
-          "wheel": 240000,
-          "hexagon": 300000
-        },
-        "over_us": 600000
+        "over_us": 600000,
+        "range": [
+          0,
+          5
+        ],
+        "to": [
+          0,
+          300000
+        ]
       },
       {
         "part": "lid",
@@ -307,7 +369,7 @@
             8
           ],
           "tint": "blue",
-          "when": "@pattern=star"
+          "when": "@pattern=0"
         },
         {
           "kind": "box",
@@ -322,7 +384,7 @@
             8
           ],
           "tint": "red",
-          "when": "@pattern=flower"
+          "when": "@pattern=1"
         },
         {
           "kind": "box",
@@ -337,7 +399,7 @@
             8
           ],
           "tint": "blue",
-          "when": "@pattern=snowflake"
+          "when": "@pattern=2"
         },
         {
           "kind": "box",
@@ -352,7 +414,7 @@
             8
           ],
           "tint": "red",
-          "when": "@pattern=fan"
+          "when": "@pattern=3"
         },
         {
           "kind": "box",
@@ -367,7 +429,7 @@
             8
           ],
           "tint": "blue",
-          "when": "@pattern=wheel"
+          "when": "@pattern=4"
         },
         {
           "kind": "box",
@@ -382,7 +444,7 @@
             8
           ],
           "tint": "red",
-          "when": "@pattern=hexagon"
+          "when": "@pattern=5"
         }
       ],
       "palette": {
@@ -405,11 +467,13 @@
     "optical": "optical",
     "empty_hands": "Empty your hands before operating this mounted optical toy.",
     "open_first": "Open the eyepiece before turning the chamber.",
-    "different_pattern": "The chamber already shows that pattern; choose another detent.",
     "already_closed": "The eyepiece is already closed.",
     "already_open": "The eyepiece is already open.",
-    "howto_play": "Open the eyepiece, choose a different chamber pattern, then close the eyepiece.",
-    "toy": "optical toy"
+    "howto_play": "With the eyepiece open, turn forward or backward through six chamber detents, numbered 0 to 5. At 5, complete the turn to return to 0. Close the eyepiece when finished.",
+    "toy": "optical toy",
+    "last_detent": "The chamber is at its last detent; complete the turn or turn backward.",
+    "first_detent": "The chamber is at its first detent; turn it forward.",
+    "turn_to_last": "Turn the chamber forward to its last detent before completing the turn."
   },
   "card": {
     "text": "card",
@@ -423,7 +487,10 @@
       "text": "howto_play",
       "steps": [
         {
-          "form": "turn_chamber"
+          "form": "turn_forward"
+        },
+        {
+          "form": "turn_backward"
         },
         {
           "form": "close_eyepiece"

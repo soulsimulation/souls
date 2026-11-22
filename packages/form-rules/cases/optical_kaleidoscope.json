@@ -3,13 +3,10 @@
   "about": "Mounted optical toys: every declared form has a success and each need has a named refusal.",
   "cases": [
     {
-      "name": "kaleidoscope_turn_chamber_ready",
+      "name": "kaleidoscope_turn_forward_ready",
       "act": {
         "this": "t1",
-        "form": "turn_chamber",
-        "args": {
-          "pattern": "flower"
-        }
+        "form": "turn_forward"
       },
       "state": {
         "actor": "b1",
@@ -18,7 +15,7 @@
           "t1": {
             "kind": "eden:kaleidoscope",
             "fields": {
-              "pattern": "star",
+              "pattern": 0,
               "shutter": false
             }
           },
@@ -40,13 +37,10 @@
       }
     },
     {
-      "name": "kaleidoscope_turn_chamber_refuses_need_0",
+      "name": "kaleidoscope_turn_forward_refuses_need_0",
       "act": {
         "this": "t1",
-        "form": "turn_chamber",
-        "args": {
-          "pattern": "flower"
-        }
+        "form": "turn_forward"
       },
       "state": {
         "actor": "b1",
@@ -55,7 +49,7 @@
           "t1": {
             "kind": "eden:kaleidoscope",
             "fields": {
-              "pattern": "star",
+              "pattern": 0,
               "shutter": true
             }
           },
@@ -80,13 +74,10 @@
       }
     },
     {
-      "name": "kaleidoscope_turn_chamber_refuses_need_1",
+      "name": "kaleidoscope_turn_forward_refuses_need_1",
       "act": {
         "this": "t1",
-        "form": "turn_chamber",
-        "args": {
-          "pattern": "flower"
-        }
+        "form": "turn_forward"
       },
       "state": {
         "actor": "b1",
@@ -95,7 +86,7 @@
           "t1": {
             "kind": "eden:kaleidoscope",
             "fields": {
-              "pattern": "flower",
+              "pattern": 5,
               "shutter": false
             }
           },
@@ -116,17 +107,14 @@
         "verdict": "no",
         "need": 1,
         "reason": "field_differs",
-        "says": "different_pattern"
+        "says": "last_detent"
       }
     },
     {
-      "name": "kaleidoscope_turn_chamber_refuses_need_2",
+      "name": "kaleidoscope_turn_forward_refuses_need_2",
       "act": {
         "this": "t1",
-        "form": "turn_chamber",
-        "args": {
-          "pattern": "flower"
-        }
+        "form": "turn_forward"
       },
       "state": {
         "actor": "b1",
@@ -135,7 +123,303 @@
           "t1": {
             "kind": "eden:kaleidoscope",
             "fields": {
-              "pattern": "star",
+              "pattern": 0,
+              "shutter": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            }
+          },
+          "held": {
+            "kind": "eden:apple"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty",
+        "says": "empty_hands"
+      }
+    },
+    {
+      "name": "kaleidoscope_turn_backward_ready",
+      "act": {
+        "this": "t1",
+        "form": "turn_backward"
+      },
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "t1": {
+            "kind": "eden:kaleidoscope",
+            "fields": {
+              "pattern": 1,
+              "shutter": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "kaleidoscope_turn_backward_refuses_need_0",
+      "act": {
+        "this": "t1",
+        "form": "turn_backward"
+      },
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "t1": {
+            "kind": "eden:kaleidoscope",
+            "fields": {
+              "pattern": 1,
+              "shutter": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs",
+        "says": "open_first"
+      }
+    },
+    {
+      "name": "kaleidoscope_turn_backward_refuses_need_1",
+      "act": {
+        "this": "t1",
+        "form": "turn_backward"
+      },
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "t1": {
+            "kind": "eden:kaleidoscope",
+            "fields": {
+              "pattern": 0,
+              "shutter": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs",
+        "says": "first_detent"
+      }
+    },
+    {
+      "name": "kaleidoscope_turn_backward_refuses_need_2",
+      "act": {
+        "this": "t1",
+        "form": "turn_backward"
+      },
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "t1": {
+            "kind": "eden:kaleidoscope",
+            "fields": {
+              "pattern": 1,
+              "shutter": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            }
+          },
+          "held": {
+            "kind": "eden:apple"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 2,
+        "reason": "hand_not_empty",
+        "says": "empty_hands"
+      }
+    },
+    {
+      "name": "kaleidoscope_complete_turn_ready",
+      "act": {
+        "this": "t1",
+        "form": "complete_turn"
+      },
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "t1": {
+            "kind": "eden:kaleidoscope",
+            "fields": {
+              "pattern": 5,
+              "shutter": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "kaleidoscope_complete_turn_refuses_need_0",
+      "act": {
+        "this": "t1",
+        "form": "complete_turn"
+      },
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "t1": {
+            "kind": "eden:kaleidoscope",
+            "fields": {
+              "pattern": 5,
+              "shutter": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs",
+        "says": "open_first"
+      }
+    },
+    {
+      "name": "kaleidoscope_complete_turn_refuses_need_1",
+      "act": {
+        "this": "t1",
+        "form": "complete_turn"
+      },
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "t1": {
+            "kind": "eden:kaleidoscope",
+            "fields": {
+              "pattern": 0,
+              "shutter": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "field_differs",
+        "says": "turn_to_last"
+      }
+    },
+    {
+      "name": "kaleidoscope_complete_turn_refuses_need_2",
+      "act": {
+        "this": "t1",
+        "form": "complete_turn"
+      },
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "t1": {
+            "kind": "eden:kaleidoscope",
+            "fields": {
+              "pattern": 5,
               "shutter": false
             }
           },
@@ -175,7 +459,7 @@
           "t1": {
             "kind": "eden:kaleidoscope",
             "fields": {
-              "pattern": "star",
+              "pattern": 0,
               "shutter": false
             }
           },
@@ -209,7 +493,7 @@
           "t1": {
             "kind": "eden:kaleidoscope",
             "fields": {
-              "pattern": "star",
+              "pattern": 0,
               "shutter": true
             }
           },
@@ -246,7 +530,7 @@
           "t1": {
             "kind": "eden:kaleidoscope",
             "fields": {
-              "pattern": "star",
+              "pattern": 0,
               "shutter": false
             }
           },
@@ -286,7 +570,7 @@
           "t1": {
             "kind": "eden:kaleidoscope",
             "fields": {
-              "pattern": "star",
+              "pattern": 0,
               "shutter": true
             }
           },
@@ -320,7 +604,7 @@
           "t1": {
             "kind": "eden:kaleidoscope",
             "fields": {
-              "pattern": "star",
+              "pattern": 0,
               "shutter": false
             }
           },
@@ -357,7 +641,7 @@
           "t1": {
             "kind": "eden:kaleidoscope",
             "fields": {
-              "pattern": "star",
+              "pattern": 0,
               "shutter": true
             }
           },

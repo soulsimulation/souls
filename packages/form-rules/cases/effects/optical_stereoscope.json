@@ -3,7 +3,7 @@
   "about": "Exact state changes, named events and timers for every optical control; receipt replay must be idempotent.",
   "cases": [
     {
-      "name": "stereoscope_fit_card_exact_changes",
+      "name": "stereoscope_fit_mountain_card_exact_changes",
       "state": {
         "actor": "b1",
         "now_us": 0,
@@ -11,7 +11,7 @@
           "t1": {
             "kind": "eden:stereoscope",
             "fields": {
-              "card": "none",
+              "card": 0,
               "focus": 0
             }
           },
@@ -27,12 +27,9 @@
         {
           "act": {
             "this": "t1",
-            "form": "fit_card",
-            "args": {
-              "card": "mountain"
-            }
+            "form": "fit_mountain_card"
           },
-          "receipt": "r-stereoscope-fit_card",
+          "receipt": "r-stereoscope-fit_mountain_card",
           "expect": {
             "verdict": "yes",
             "changes": [
@@ -41,7 +38,60 @@
                 "node": "t1",
                 "field": "card",
                 "n": 28,
-                "to": "mountain"
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:stereo_card_fitted",
+                "node": "t1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ]
+    },
+    {
+      "name": "stereoscope_fit_garden_card_exact_changes",
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "t1": {
+            "kind": "eden:stereoscope",
+            "fields": {
+              "card": 0,
+              "focus": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "fit_garden_card"
+          },
+          "receipt": "r-stereoscope-fit_garden_card",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "t1",
+                "field": "card",
+                "n": 28,
+                "to": 2
               }
             ],
             "events": [
@@ -67,7 +117,7 @@
           "t1": {
             "kind": "eden:stereoscope",
             "fields": {
-              "card": "mountain",
+              "card": 1,
               "focus": 0
             }
           },
@@ -94,7 +144,7 @@
                 "node": "t1",
                 "field": "card",
                 "n": 28,
-                "to": "none"
+                "to": 0
               }
             ],
             "events": [
@@ -120,7 +170,7 @@
           "t1": {
             "kind": "eden:stereoscope",
             "fields": {
-              "card": "mountain",
+              "card": 1,
               "focus": 0
             }
           },
@@ -173,7 +223,7 @@
           "t1": {
             "kind": "eden:stereoscope",
             "fields": {
-              "card": "mountain",
+              "card": 1,
               "focus": 1
             }
           },

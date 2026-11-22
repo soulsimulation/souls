@@ -33,10 +33,7 @@
         {
           "act": {
             "this": "t1",
-            "form": "fit_card",
-            "args": {
-              "card": "garden"
-            }
+            "form": "fit_garden_card"
           },
           "receipt": "cycle-1",
           "expect": {
@@ -47,7 +44,7 @@
                 "node": "t1",
                 "field": "card",
                 "n": 28,
-                "to": "garden"
+                "to": 2
               }
             ]
           }
@@ -240,7 +237,7 @@
                 "node": "t1",
                 "field": "card",
                 "n": 28,
-                "to": "none"
+                "to": 0
               }
             ]
           }
@@ -248,10 +245,7 @@
         {
           "act": {
             "this": "t1",
-            "form": "fit_card",
-            "args": {
-              "card": "mountain"
-            }
+            "form": "fit_mountain_card"
           },
           "receipt": "cycle-13",
           "expect": {
@@ -262,7 +256,7 @@
                 "node": "t1",
                 "field": "card",
                 "n": 28,
-                "to": "mountain"
+                "to": 1
               }
             ]
           }
@@ -272,7 +266,7 @@
         "t1": {
           "kind": "eden:stereoscope",
           "fields": {
-            "card": "mountain",
+            "card": 1,
             "focus": 0
           }
         }

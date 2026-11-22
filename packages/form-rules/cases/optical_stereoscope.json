@@ -3,13 +3,10 @@
   "about": "Mounted optical toys: every declared form has a success and each need has a named refusal.",
   "cases": [
     {
-      "name": "stereoscope_fit_card_ready",
+      "name": "stereoscope_fit_mountain_card_ready",
       "act": {
         "this": "t1",
-        "form": "fit_card",
-        "args": {
-          "card": "mountain"
-        }
+        "form": "fit_mountain_card"
       },
       "state": {
         "actor": "b1",
@@ -18,7 +15,7 @@
           "t1": {
             "kind": "eden:stereoscope",
             "fields": {
-              "card": "none",
+              "card": 0,
               "focus": 0
             }
           },
@@ -40,13 +37,10 @@
       }
     },
     {
-      "name": "stereoscope_fit_card_refuses_need_0",
+      "name": "stereoscope_fit_mountain_card_refuses_need_0",
       "act": {
         "this": "t1",
-        "form": "fit_card",
-        "args": {
-          "card": "mountain"
-        }
+        "form": "fit_mountain_card"
       },
       "state": {
         "actor": "b1",
@@ -55,7 +49,7 @@
           "t1": {
             "kind": "eden:stereoscope",
             "fields": {
-              "card": "mountain",
+              "card": 1,
               "focus": 0
             }
           },
@@ -80,13 +74,10 @@
       }
     },
     {
-      "name": "stereoscope_fit_card_refuses_need_1",
+      "name": "stereoscope_fit_mountain_card_refuses_need_1",
       "act": {
         "this": "t1",
-        "form": "fit_card",
-        "args": {
-          "card": "mountain"
-        }
+        "form": "fit_mountain_card"
       },
       "state": {
         "actor": "b1",
@@ -95,7 +86,118 @@
           "t1": {
             "kind": "eden:stereoscope",
             "fields": {
-              "card": "none",
+              "card": 0,
+              "focus": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            }
+          },
+          "held": {
+            "kind": "eden:apple"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 1,
+        "reason": "hand_not_empty",
+        "says": "empty_hands"
+      }
+    },
+    {
+      "name": "stereoscope_fit_garden_card_ready",
+      "act": {
+        "this": "t1",
+        "form": "fit_garden_card"
+      },
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "t1": {
+            "kind": "eden:stereoscope",
+            "fields": {
+              "card": 0,
+              "focus": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "stereoscope_fit_garden_card_refuses_need_0",
+      "act": {
+        "this": "t1",
+        "form": "fit_garden_card"
+      },
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "t1": {
+            "kind": "eden:stereoscope",
+            "fields": {
+              "card": 1,
+              "focus": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "need": 0,
+        "reason": "field_differs",
+        "says": "remove_first"
+      }
+    },
+    {
+      "name": "stereoscope_fit_garden_card_refuses_need_1",
+      "act": {
+        "this": "t1",
+        "form": "fit_garden_card"
+      },
+      "state": {
+        "actor": "b1",
+        "now_us": 0,
+        "nodes": {
+          "t1": {
+            "kind": "eden:stereoscope",
+            "fields": {
+              "card": 0,
               "focus": 0
             }
           },
@@ -135,7 +237,7 @@
           "t1": {
             "kind": "eden:stereoscope",
             "fields": {
-              "card": "mountain",
+              "card": 1,
               "focus": 0
             }
           },
@@ -169,7 +271,7 @@
           "t1": {
             "kind": "eden:stereoscope",
             "fields": {
-              "card": "none",
+              "card": 0,
               "focus": 0
             }
           },
@@ -206,7 +308,7 @@
           "t1": {
             "kind": "eden:stereoscope",
             "fields": {
-              "card": "mountain",
+              "card": 1,
               "focus": 0
             }
           },
@@ -246,7 +348,7 @@
           "t1": {
             "kind": "eden:stereoscope",
             "fields": {
-              "card": "mountain",
+              "card": 1,
               "focus": 0
             }
           },
@@ -280,7 +382,7 @@
           "t1": {
             "kind": "eden:stereoscope",
             "fields": {
-              "card": "none",
+              "card": 0,
               "focus": 0
             }
           },
@@ -317,7 +419,7 @@
           "t1": {
             "kind": "eden:stereoscope",
             "fields": {
-              "card": "mountain",
+              "card": 1,
               "focus": 4
             }
           },
@@ -354,7 +456,7 @@
           "t1": {
             "kind": "eden:stereoscope",
             "fields": {
-              "card": "mountain",
+              "card": 1,
               "focus": 0
             }
           },
@@ -394,7 +496,7 @@
           "t1": {
             "kind": "eden:stereoscope",
             "fields": {
-              "card": "mountain",
+              "card": 1,
               "focus": 1
             }
           },
@@ -428,7 +530,7 @@
           "t1": {
             "kind": "eden:stereoscope",
             "fields": {
-              "card": "none",
+              "card": 0,
               "focus": 1
             }
           },
@@ -465,7 +567,7 @@
           "t1": {
             "kind": "eden:stereoscope",
             "fields": {
-              "card": "mountain",
+              "card": 1,
               "focus": 0
             }
           },
@@ -502,7 +604,7 @@
           "t1": {
             "kind": "eden:stereoscope",
             "fields": {
-              "card": "mountain",
+              "card": 1,
               "focus": 1
             }
           },

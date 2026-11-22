@@ -33,10 +33,7 @@
         {
           "act": {
             "this": "t1",
-            "form": "fit_strip",
-            "args": {
-              "strip": "horse"
-            }
+            "form": "fit_horse_strip"
           },
           "receipt": "cycle-1",
           "expect": {
@@ -47,7 +44,7 @@
                 "node": "t1",
                 "field": "strip",
                 "n": 28,
-                "to": "horse"
+                "to": 1
               }
             ]
           }
@@ -153,7 +150,7 @@
                 "node": "t1",
                 "field": "strip",
                 "n": 28,
-                "to": "none"
+                "to": 0
               }
             ]
           }
@@ -161,10 +158,7 @@
         {
           "act": {
             "this": "t1",
-            "form": "fit_strip",
-            "args": {
-              "strip": "bouncing_ball"
-            }
+            "form": "fit_ball_strip"
           },
           "receipt": "cycle-8",
           "expect": {
@@ -175,7 +169,7 @@
                 "node": "t1",
                 "field": "strip",
                 "n": 28,
-                "to": "bouncing_ball"
+                "to": 2
               }
             ]
           }
@@ -185,7 +179,7 @@
         "t1": {
           "kind": "eden:zoetrope",
           "fields": {
-            "strip": "bouncing_ball",
+            "strip": 2,
             "spinning": 0
           }
         }

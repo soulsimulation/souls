@@ -5,16 +5,14 @@
   "state": {
     "strip": {
       "n": 28,
-      "type": "enum",
-      "default": "none",
+      "type": "int",
+      "unit": "count",
+      "min": 0,
+      "max": 2,
+      "default": 0,
       "audience": {
         "rule": "everyone"
-      },
-      "values": [
-        "none",
-        "horse",
-        "bouncing_ball"
-      ]
+      }
     },
     "spinning": {
       "n": 29,
@@ -52,7 +50,7 @@
     ]
   },
   "forms": {
-    "fit_strip": {
+    "fit_horse_strip": {
       "who": "anyone",
       "starts": "act",
       "needs": [
@@ -66,7 +64,7 @@
           "need": "state",
           "field": "strip",
           "says": "remove_first",
-          "is": "none"
+          "is": 0
         },
         {
           "need": "hand",
@@ -89,21 +87,52 @@
         {
           "change": "set",
           "field": "strip",
-          "to": {
-            "arg": "strip"
-          },
+          "to": 1,
           "event": "picture_strip_fitted"
         }
-      ],
-      "takes": {
-        "strip": {
-          "type": "value",
-          "of": [
-            "horse",
-            "bouncing_ball"
-          ]
+      ]
+    },
+    "fit_ball_strip": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "spinning",
+          "says": "brake_first",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "strip",
+          "says": "remove_first",
+          "is": 0
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
         }
-      }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "strip",
+          "to": 2,
+          "event": "picture_strip_fitted"
+        }
+      ]
     },
     "remove_strip": {
       "who": "anyone",
@@ -118,8 +147,8 @@
         {
           "need": "state",
           "field": "strip",
-          "not": "none",
-          "says": "no_strip"
+          "says": "no_strip",
+          "at_least": 1
         },
         {
           "need": "hand",
@@ -142,7 +171,7 @@
         {
           "change": "set",
           "field": "strip",
-          "to": "none",
+          "to": 0,
           "event": "picture_strip_removed"
         }
       ]
@@ -160,8 +189,8 @@
         {
           "need": "state",
           "field": "strip",
-          "not": "none",
-          "says": "no_strip"
+          "says": "no_strip",
+          "at_least": 1
         },
         {
           "need": "hand",
@@ -593,7 +622,7 @@
             1050,
             0
           ],
-          "when": "@strip=horse"
+          "when": "@strip=1"
         },
         {
           "kind": "box",
@@ -614,7 +643,7 @@
             1050,
             0
           ],
-          "when": "@strip=bouncing_ball"
+          "when": "@strip=2"
         }
       ],
       "palette": {
@@ -640,7 +669,7 @@
     "remove_first": "Remove the fitted strip before choosing another.",
     "no_strip": "Fit a picture strip in the stopped drum first.",
     "already_stopped": "The picture drum is already stopped.",
-    "howto_play": "Fit a horse or bouncing-ball strip, spin the drum, brake it, and remove the strip.",
+    "howto_play": "Fit the captive horse or ball strip, spin the drum, brake it, and remove the strip. The strip field is 0 when empty, 1 for horse and 2 for ball.",
     "toy": "optical toy"
   },
   "card": {
@@ -655,7 +684,7 @@
       "text": "howto_play",
       "steps": [
         {
-          "form": "fit_strip"
+          "form": "fit_horse_strip"
         },
         {
           "form": "spin_drum"
