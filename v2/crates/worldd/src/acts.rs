@@ -1613,9 +1613,10 @@ impl Acts {
         let Some(Target::Node(node)) = &intent.target else {
             return false;
         };
+        // By the entry the node goes by (#3980): a thing that borrows `eden:chair` (field 27) sits as a chair does.
         tree.handle(*node)
             .and_then(|h| tree.node(h))
-            .and_then(|n| self.kinds.get(plain(n.kind())))
+            .and_then(|n| self.kinds.get(entry_of(&n)))
             .is_some_and(|entry| fixture_seat(entry, "sit").is_some())
     }
 }
