@@ -14,6 +14,7 @@ pub mod edit;
 pub mod effects;
 pub mod encode;
 pub mod facts;
+pub mod fields;
 pub mod group;
 pub mod hash;
 pub mod hatch;

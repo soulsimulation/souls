@@ -6,8 +6,9 @@
 //
 // Distance detail (C12, #3683), today's WorldDistanceDetail rules per part: a part whose bounding sphere would be
 // smaller than `minRadiusPx` CSS pixels of radius is not drawn, and a small part farther than `shadowNear +
-// shadowPerMetre·radius` metres is drawn into the same model's batch that casts no shadow (instanced models; a one-off
-// shape keeps its shadow). A building's window frames
+// shadowPerMetre·radius` metres casts no shadow: an instanced model's part moves into the same model's batch that casts
+// none; a one-off shape stays where it is and is left out of its batch's shadow draws (#3787: its own shadow draw list,
+// no second batch). A building's window frames
 // and fittings go first, its walls last, as today. A part moves between its batches (near, far, hidden) only when the
 // eye has moved or things changed, with a margin so it does not flicker at the line.
 import * as THREE from 'three';
@@ -141,10 +142,33 @@ class Batch {
   }
 }
 
-/** One-off shapes sharing a material: one `BatchedMesh`, its geometries added once per model part. */
+/** What three's BatchedMesh keeps of its draws (three 0.187): the draw list it builds from the visible instances, and
+ *  the texture mapping each draw to its instance. Read and swapped for the shadow pass only. */
+type DrawList = {
+  _multiDrawStarts: Int32Array; _multiDrawCounts: Int32Array; _multiDrawCount: number; _indirectTexture: THREE.DataTexture;
+  _updateDrawParameters(camera: THREE.Camera, geometry: THREE.BufferGeometry, material: THREE.Material, format?: string): void;
+  _visibilityChanged: boolean;
+};
+
+/** One-off shapes sharing a material: one `BatchedMesh`, its geometries added once per model part.
+ *
+ *  #3787: an instance can be drawn without a shadow. The batch keeps a second draw list, the visible instances that
+ *  cast, and swaps it in for the shadow pass only (onBeforeShadow / onAfterShadow), rebuilt only when the batch's own
+ *  list was rebuilt or an instance's shadow changed. A second, shadowless `BatchedMesh` per material stalled a phone's
+ *  GPU for about 200 ms every few frames (#3683); this uploads one small texture when something changes. */
 class Shapes {
   mesh: THREE.BatchedMesh;
   geometries = new Map<THREE.BufferGeometry, number>();
+  /** Instances that cast no shadow (by instance id), and the shadow pass's own draw list. */
+  private noShadow = new Uint8Array(256);
+  private dirty = true;
+  private starts = new Int32Array(0);
+  private counts = new Int32Array(0);
+  private count = 0;
+  private indirect: THREE.DataTexture | null = null;
+  private saved: [Int32Array, Int32Array, number, THREE.DataTexture] | null = null;
+  /** Shadow draw lists built (for the measure and tests). */
+  rebuilds = 0;
   /** The batch's room for vertices and indices (it grows by doubling). */
   private room = [65_536, 131_072];
   constructor(layer: ThingLayer, material: THREE.Material) {
@@ -155,6 +179,60 @@ class Shapes {
     this.mesh.frustumCulled = false;
     this.mesh.castShadow = this.mesh.receiveShadow = true;
     layer.group.add(this.mesh);
+    const m = this.mesh as unknown as DrawList, update = m._updateDrawParameters;
+    m._updateDrawParameters = (...a) => {
+      if (m._visibilityChanged) this.dirty = true;
+      update.apply(m, a);
+    };
+    const before = this.mesh.onBeforeShadow;
+    this.mesh.onBeforeShadow = (...a) => {
+      before.apply(this.mesh, a);
+      this.swap();
+    };
+    this.mesh.onAfterShadow = () => {
+      if (!this.saved) return;
+      [m._multiDrawStarts, m._multiDrawCounts, m._multiDrawCount, m._indirectTexture] = this.saved;
+      this.saved = null;
+    };
+  }
+  /** Whether instance `i` casts a shadow. */
+  shadow(i: number, on: boolean): void {
+    if (i >= this.noShadow.length) {
+      const grown = new Uint8Array(Math.max(i + 1, this.noShadow.length * 2));
+      grown.set(this.noShadow);
+      this.noShadow = grown;
+    }
+    if (this.noShadow[i] === (on ? 0 : 1)) return;
+    this.noShadow[i] = on ? 0 : 1;
+    this.dirty = true;
+  }
+  /** Puts the shadow pass's draw list in place of the batch's (rebuilding it first if needed). */
+  private swap(): void {
+    const m = this.mesh as unknown as DrawList, main = m._indirectTexture, n = main.image.data!.length;
+    if (!this.indirect || this.indirect.image.data!.length !== n) {
+      this.indirect?.dispose();
+      this.indirect = new THREE.DataTexture(new Uint32Array(n), main.image.width, main.image.height, main.format as THREE.PixelFormat, main.type);
+      this.starts = new Int32Array(m._multiDrawStarts.length);
+      this.counts = new Int32Array(m._multiDrawCounts.length);
+      this.dirty = true;
+    }
+    if (this.dirty) {
+      const ids = main.image.data as Uint32Array, out = this.indirect.image.data as Uint32Array, off = this.noShadow;
+      let k = 0;
+      for (let d = 0; d < m._multiDrawCount; d++) {
+        const i = ids[d];
+        if (i < off.length && off[i]) continue;
+        this.starts[k] = m._multiDrawStarts[d];
+        this.counts[k] = m._multiDrawCounts[d];
+        out[k++] = i;
+      }
+      this.count = k;
+      this.indirect.needsUpdate = true;
+      this.dirty = false;
+      this.rebuilds++;
+    }
+    this.saved = [m._multiDrawStarts, m._multiDrawCounts, m._multiDrawCount, main];
+    [m._multiDrawStarts, m._multiDrawCounts, m._multiDrawCount, m._indirectTexture] = [this.starts, this.counts, this.count, this.indirect];
   }
   add(g: THREE.BufferGeometry, matrix: THREE.Matrix4, color: THREE.Color): number {
     let id = this.geometries.get(g);
@@ -172,6 +250,7 @@ class Shapes {
     const i = this.mesh.addInstance(id);
     this.mesh.setMatrixAt(i, matrix);
     this.mesh.setColorAt(i, color);
+    this.shadow(i, true);
     return i;
   }
   /** A light's colour on a one-off model's glow part (a `Batch` has the same). */
@@ -267,9 +346,6 @@ export class ThingLayer {
     const px = (s.radius * k) / d;
     if (px < o.minRadiusPx * (s.band === HIDDEN ? 1.15 : 1)) return HIDDEN;
     const line = o.shadowNear + o.shadowPerMetre * s.radius;
-    // A one-off shape stays in its casting batch: a second, shadowless `BatchedMesh` per material stalled the GPU for
-    // about 200 ms every few frames on a phone (measured, #3683); only instanced models get the FAR band.
-    if (s.part && (s.thing.view || (this.share.get(s.thing.model!) ?? 0) < SHARED)) return NEAR;
     return s.radius < o.shadowMaxRadius && d > line * (s.band === FAR ? 0.95 : 1) ? FAR : NEAR;
   }
 
@@ -427,10 +503,12 @@ export class ThingLayer {
       s.batch = batches[k];
       s.index = batches[k].add(s, s.matrix, color);
     } else {
-      const all = this.batched[band];
-      const shapes = all.get(s.part.material) ?? all.set(s.part.material, band === NEAR ? new Shapes(this, s.part.material) : this.far(new Shapes(this, s.part.material))).get(s.part.material)!;
+      // One batch a material, whatever the band: a FAR shape is left out of its shadow draws (#3787).
+      const all = this.batched[NEAR];
+      const shapes = all.get(s.part.material) ?? all.set(s.part.material, new Shapes(this, s.part.material)).get(s.part.material)!;
       s.batch = shapes as unknown as Batch;
       s.index = shapes.add(s.part.geometry, s.matrix, color);
+      if (band === FAR) shapes.shadow(s.index, false);
     }
     if (s.off) this.visible(s);
   }
@@ -467,9 +545,12 @@ export class ThingLayer {
       if (s.gone) continue;
       const band = this.bandOf(s, k);
       if (band !== s.band) {
-        this.unplace(s);
-        s.band = band;
-        this.place(s.thing, s);
+        if (s.batch instanceof Shapes && band !== HIDDEN) (s.band = band), s.batch.shadow(s.index, band === NEAR); // stays in its batch
+        else {
+          this.unplace(s);
+          s.band = band;
+          this.place(s.thing, s);
+        }
         this.moved++;
       }
       this.count[s.band]++;

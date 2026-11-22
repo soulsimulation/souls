@@ -1417,6 +1417,30 @@ fn a_walk_before_a_sit_goes_to_the_seats_own_stand_point() {
     act_at("132.5,-21.7", "e_13a2e4cf", "eden:ride", "c22seat").expect("walked and seated, done");
 }
 
+/// C22 sweep follow-up: Eden's land features are drawn in the world's frame, each placed at the world's origin, so an
+/// entry's points were laid round the origin; now they are laid on the thing's own line or outline. Each from a Soul
+/// born a few metres off it: a channel walked along (today's e_c3bd69c8), a wood's glade (e_062ad11b), a flower
+/// garden wandered (e_71c560a7) and a hedge hidden behind (e_0b36856a). Each ends `done`.
+#[test]
+#[ignore = "needs the generated Eden 2026 facts file and a built worldd (see the module doc)"]
+fn land_features_are_walked_to_on_their_own_shapes() {
+    let ends = [
+        (
+            "-14.0,-296.0",
+            "e_c3bd69c8",
+            "eden:walk_along",
+            "c22channel",
+        ),
+        ("335.0,110.0", "e_062ad11b", "eden:go_to_glade", "c22wood"),
+        ("-190.0,55.0", "e_71c560a7", "eden:wander", "c22garden"),
+        ("45.0,-78.0", "e_0b36856a", "eden:hide_behind", "c22hedge"),
+    ]
+    .map(|(at, id, verb, tag)| (verb, act_at(at, id, verb, tag)));
+    for (verb, end) in ends {
+        end.unwrap_or_else(|e| panic!("{verb}: {e}"));
+    }
+}
+
 /// How one form of a sweep ended ([`sweep`]): `done`, `refused <name>` at its start, `failed <name>` by its run's
 /// ending, or `never-ended` past its deadline.
 fn ending(r: Result<String, String>) -> String {
@@ -1566,9 +1590,14 @@ fn sweep() -> (BTreeMap<String, Vec<String>>, Vec<String>) {
                         None => p,
                     }
                 });
-            let at = walk
-                .or_else(|| first_stand.clone())
-                .and_then(|p| point(&p))
+            let named = walk.or_else(|| first_stand.clone());
+            // A land feature drawn in the world's frame: the point laid on its own shape, as the world walks to it.
+            let drawn = named.as_deref().and_then(|p| {
+                let n = tree.node(tree.handle(thing)?)?;
+                worldd::acts::on_drawn_shape(&n, entry, p)
+            });
+            let at = drawn
+                .or_else(|| named.as_deref().and_then(point))
                 .unwrap_or(Vec3::ZERO);
             let view = bodies.town.view();
             let Some((floor, at, _)) = view.on_floor(thing, at) else {
