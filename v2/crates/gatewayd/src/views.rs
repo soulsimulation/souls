@@ -11,8 +11,9 @@
 //! Items go to the socket that subscribed alone: they are not kept for a resume and never written to a file. The
 //! world sends the public entries and those of the audiences the gateway resolves for the socket's grant: today its
 //! actor's own principal id (T8 rule 1); the audience nodes it is a member of are the directory's to resolve. A socket
-//! whose item queue is full is let go, as a slow stream is. A subscription outlives a restart of the world: it is
-//! sent again on reconnect, and the new hub opens with its grant.
+//! whose item queue is full is let go, as a slow stream is; a view socket is also let go once it falls more than
+//! `socket::VIEW_BEHIND_MOST` behind its stream, a backlog in the kernel's buffers included (`view.behind`, #4078). A
+//! subscription outlives a restart of the world: it is sent again on reconnect, and the new hub opens with its grant.
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;

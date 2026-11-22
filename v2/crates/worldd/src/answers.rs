@@ -3182,9 +3182,30 @@ impl Clock {
                 name: "encoding",
                 detail: e.to_string(),
             })
-            .and_then(|b| Part::read(&b))
-            .and_then(|p| self.replica.apply(&p).map(|()| p));
-        let p = part?;
+            .and_then(|b| Part::read(&b));
+        self.own_part(part?)
+    }
+
+    /// [`Clock::try_own`] for the motion samples and transfers [`motion_effects`] builds (0.132 scaling, #1960): the
+    /// same part, its bytes encoded once and not decoded again ([`Part::of_effects`]), since those effects read back
+    /// as themselves. At 500 walking Souls the decode was most of the bodies phase's largest cost.
+    fn try_own_motion(&mut self, effects: Vec<Effect>) -> R<()> {
+        let first = self.replica.version();
+        let effects = effects
+            .into_iter()
+            .zip(first..)
+            .map(|(mut e, sequence)| {
+                e.envelope.sequence = sequence;
+                e
+            })
+            .collect();
+        let part = Part::of_effects(self.replica.header().hash().to_bytes(), effects)?;
+        self.own_part(part)
+    }
+
+    /// Applies the world's own part `p` and keeps it for the tick's record and frozen copy; refused, nothing changes.
+    fn own_part(&mut self, p: Part) -> R<()> {
+        self.replica.apply(&p)?;
         self.unsealed = true;
         self.effects.extend(p.effects.iter().cloned());
         self.parts.push(Arc::new(p));
@@ -3203,7 +3224,7 @@ impl Clock {
             return;
         }
         let all = motion_effects(self.replica.header(), self.replica.version(), &samples);
-        if self.try_own(all).is_ok() {
+        if self.try_own_motion(all).is_ok() {
             return;
         }
         for s in samples {
@@ -3212,7 +3233,7 @@ impl Clock {
                 self.replica.version(),
                 std::slice::from_ref(&s),
             );
-            if let Err(r) = self.try_own(one) {
+            if let Err(r) = self.try_own_motion(one) {
                 eprintln!(
                     "worldd: {}'s motion was not written: {r}",
                     replica::world_model::show(s.handoff.node)
@@ -5471,6 +5492,77 @@ mod tests {
     use replica::sync::{self, wire};
     use sim::log::{Mem, recover};
     use std::sync::{Condvar, Mutex};
+
+    /// #4117 review (0.132 scaling, #1960): a motion sample whose pose the log's reader refuses fails the tick's
+    /// motion part in every build (this runs in release in CI too), so `write_motion` takes its per-sample fallback:
+    /// the good sample's part is built and the bad one is refused by the reader's own name, never logged.
+    #[test]
+    fn a4117_a_bad_motion_pose_takes_the_per_sample_fallback() {
+        use replica::pose::{HandOff, Owner};
+        let w = toggles::World::build(1, 1, 0);
+        let header = w.replica.header().clone();
+        let id = |n| Id::new(Scope([0x41; 16]), n).unwrap();
+        let sample = |n, slot, support| bodies::Sample {
+            audience: Audience::Everyone,
+            to: None,
+            handoff: HandOff {
+                node: id(n),
+                at: 50_000,
+                from: Owner::Mover,
+                to: Owner::Mover,
+                pose: Pose {
+                    frame: Frame { node: id(1), slot },
+                    position: Vec3::new(1_000_000, 0, 2_000_000),
+                    orientation: Quat::IDENTITY,
+                    support,
+                },
+                linear: Vec3::new(1_400_000, 0, 0),
+                angular: Vec3::ZERO,
+            },
+        };
+        let on_ground = Support::Surface {
+            surface: id(1),
+            height: 0,
+        };
+        let good = sample(10, None, on_ground);
+        // A pose in a slot that says a surface holds it: the reader's `support-not-slot`.
+        let bad = sample(11, Some(1), on_ground);
+        let own = |samples: &[bodies::Sample]| {
+            Part::of_effects(
+                header.hash().to_bytes(),
+                motion_effects(&header, 0, samples),
+            )
+        };
+        let read = |samples: &[bodies::Sample]| {
+            let effects = motion_effects(&header, 0, samples);
+            let v = Value::Map(BTreeMap::from([
+                (1, Value::Bytes(header.hash().to_bytes())),
+                (
+                    2,
+                    Value::Array(effects.iter().map(Effect::to_value).collect()),
+                ),
+            ]));
+            Part::read(&encode(&v).unwrap())
+        };
+        let both = [good.clone(), bad.clone()];
+        let refused = own(&both).expect_err("the tick's part is refused");
+        assert_eq!(refused.name, "support-not-slot");
+        assert_eq!(
+            refused.name,
+            read(&both).unwrap_err().name,
+            "as the reader refuses it"
+        );
+        // The fallback: a part per sample; the good one is written, the bad one named.
+        assert_eq!(
+            own(std::slice::from_ref(&good)),
+            read(std::slice::from_ref(&good))
+        );
+        assert!(own(std::slice::from_ref(&good)).is_ok());
+        assert_eq!(
+            own(std::slice::from_ref(&bad)).unwrap_err().name,
+            "support-not-slot"
+        );
+    }
 
     /// #3784: the frame of Souls' words names each by its grant, as the tokens file does, with its word.
     #[test]
