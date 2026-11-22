@@ -12,7 +12,7 @@
 //     {"op":"act","verb":"...","target":"<scope hex>-<counter>"}  builds the next intent (the target optional) and
 //                                sends it once (now, or at the next sign-in)
 //     {"op":"read"}              gives and clears what happened since the last read (it never wakes the model)
-//     {"op":"stop"}              ends the process (the thin command's `quit`)
+//     {"op":"stop"}              ends the process (the thin command's `quit`); answered once nothing more is written
 //     {"op":"query","questions":[..],"budget":n}   #3704: several reads of the copy, each answered in turn (reads.mjs)
 //     {"op":"catalog"} | {"op":"context","words":"..","cursor":n}   #3704: the kinds in the copy; its named targets
 //     {"op":"batch","reads":[{"op":..},..]}       #3704: several read ops in one call, each answered as alone
