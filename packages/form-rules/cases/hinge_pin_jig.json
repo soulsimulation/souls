@@ -1,0 +1,1554 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "Six exact pin/alignment forms and every unmet need.",
+  "cases": [
+    {
+      "name": "insert_pin_accepted",
+      "act": {
+        "this": "c1",
+        "form": "insert_pin"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:hinge_pin_jig",
+            "fields": {
+              "pin_inserted": false,
+              "leaf_phase": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              400,
+              1000,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "insert_pin_refuses_need_0",
+      "act": {
+        "this": "c1",
+        "form": "insert_pin"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:hinge_pin_jig",
+            "fields": {
+              "pin_inserted": true,
+              "leaf_phase": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              400,
+              1000,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "insert_pin_refuses_need_1",
+      "act": {
+        "this": "c1",
+        "form": "insert_pin"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:hinge_pin_jig",
+            "fields": {
+              "pin_inserted": false,
+              "leaf_phase": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              400,
+              1000,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "insert_pin_refuses_need_2",
+      "act": {
+        "this": "c1",
+        "form": "insert_pin"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:hinge_pin_jig",
+            "fields": {
+              "pin_inserted": false,
+              "leaf_phase": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              400,
+              1000,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "insert_pin_refuses_need_3",
+      "act": {
+        "this": "c1",
+        "form": "insert_pin"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:hinge_pin_jig",
+            "fields": {
+              "pin_inserted": false,
+              "leaf_phase": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "withdraw_pin_accepted",
+      "act": {
+        "this": "c1",
+        "form": "withdraw_pin"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:hinge_pin_jig",
+            "fields": {
+              "pin_inserted": true,
+              "leaf_phase": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              400,
+              1000,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "withdraw_pin_refuses_need_0",
+      "act": {
+        "this": "c1",
+        "form": "withdraw_pin"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:hinge_pin_jig",
+            "fields": {
+              "pin_inserted": false,
+              "leaf_phase": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              400,
+              1000,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "withdraw_pin_refuses_need_1",
+      "act": {
+        "this": "c1",
+        "form": "withdraw_pin"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:hinge_pin_jig",
+            "fields": {
+              "pin_inserted": true,
+              "leaf_phase": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              400,
+              1000,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "withdraw_pin_refuses_need_2",
+      "act": {
+        "this": "c1",
+        "form": "withdraw_pin"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:hinge_pin_jig",
+            "fields": {
+              "pin_inserted": true,
+              "leaf_phase": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              400,
+              1000,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "withdraw_pin_refuses_need_3",
+      "act": {
+        "this": "c1",
+        "form": "withdraw_pin"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:hinge_pin_jig",
+            "fields": {
+              "pin_inserted": true,
+              "leaf_phase": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "swing_00_to_45_accepted",
+      "act": {
+        "this": "c1",
+        "form": "swing_00_to_45"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:hinge_pin_jig",
+            "fields": {
+              "pin_inserted": true,
+              "leaf_phase": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              400,
+              1000,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "swing_00_to_45_refuses_need_0",
+      "act": {
+        "this": "c1",
+        "form": "swing_00_to_45"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:hinge_pin_jig",
+            "fields": {
+              "pin_inserted": false,
+              "leaf_phase": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              400,
+              1000,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "swing_00_to_45_refuses_need_1",
+      "act": {
+        "this": "c1",
+        "form": "swing_00_to_45"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:hinge_pin_jig",
+            "fields": {
+              "pin_inserted": true,
+              "leaf_phase": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              400,
+              1000,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "swing_00_to_45_refuses_need_2",
+      "act": {
+        "this": "c1",
+        "form": "swing_00_to_45"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:hinge_pin_jig",
+            "fields": {
+              "pin_inserted": true,
+              "leaf_phase": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              400,
+              1000,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "swing_00_to_45_refuses_need_3",
+      "act": {
+        "this": "c1",
+        "form": "swing_00_to_45"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:hinge_pin_jig",
+            "fields": {
+              "pin_inserted": true,
+              "leaf_phase": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "swing_45_to_90_accepted",
+      "act": {
+        "this": "c1",
+        "form": "swing_45_to_90"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:hinge_pin_jig",
+            "fields": {
+              "pin_inserted": true,
+              "leaf_phase": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              400,
+              1000,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "swing_45_to_90_refuses_need_0",
+      "act": {
+        "this": "c1",
+        "form": "swing_45_to_90"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:hinge_pin_jig",
+            "fields": {
+              "pin_inserted": false,
+              "leaf_phase": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              400,
+              1000,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "swing_45_to_90_refuses_need_1",
+      "act": {
+        "this": "c1",
+        "form": "swing_45_to_90"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:hinge_pin_jig",
+            "fields": {
+              "pin_inserted": true,
+              "leaf_phase": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              400,
+              1000,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "swing_45_to_90_refuses_need_2",
+      "act": {
+        "this": "c1",
+        "form": "swing_45_to_90"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:hinge_pin_jig",
+            "fields": {
+              "pin_inserted": true,
+              "leaf_phase": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              400,
+              1000,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "swing_45_to_90_refuses_need_3",
+      "act": {
+        "this": "c1",
+        "form": "swing_45_to_90"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:hinge_pin_jig",
+            "fields": {
+              "pin_inserted": true,
+              "leaf_phase": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "swing_90_to_45_accepted",
+      "act": {
+        "this": "c1",
+        "form": "swing_90_to_45"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:hinge_pin_jig",
+            "fields": {
+              "pin_inserted": true,
+              "leaf_phase": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              400,
+              1000,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "swing_90_to_45_refuses_need_0",
+      "act": {
+        "this": "c1",
+        "form": "swing_90_to_45"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:hinge_pin_jig",
+            "fields": {
+              "pin_inserted": false,
+              "leaf_phase": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              400,
+              1000,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "swing_90_to_45_refuses_need_1",
+      "act": {
+        "this": "c1",
+        "form": "swing_90_to_45"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:hinge_pin_jig",
+            "fields": {
+              "pin_inserted": true,
+              "leaf_phase": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              400,
+              1000,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "swing_90_to_45_refuses_need_2",
+      "act": {
+        "this": "c1",
+        "form": "swing_90_to_45"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:hinge_pin_jig",
+            "fields": {
+              "pin_inserted": true,
+              "leaf_phase": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              400,
+              1000,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "swing_90_to_45_refuses_need_3",
+      "act": {
+        "this": "c1",
+        "form": "swing_90_to_45"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:hinge_pin_jig",
+            "fields": {
+              "pin_inserted": true,
+              "leaf_phase": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    },
+    {
+      "name": "swing_45_to_00_accepted",
+      "act": {
+        "this": "c1",
+        "form": "swing_45_to_00"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:hinge_pin_jig",
+            "fields": {
+              "pin_inserted": true,
+              "leaf_phase": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              400,
+              1000,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "swing_45_to_00_refuses_need_0",
+      "act": {
+        "this": "c1",
+        "form": "swing_45_to_00"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:hinge_pin_jig",
+            "fields": {
+              "pin_inserted": false,
+              "leaf_phase": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              400,
+              1000,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "swing_45_to_00_refuses_need_1",
+      "act": {
+        "this": "c1",
+        "form": "swing_45_to_00"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:hinge_pin_jig",
+            "fields": {
+              "pin_inserted": true,
+              "leaf_phase": 2
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              400,
+              1000,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "swing_45_to_00_refuses_need_2",
+      "act": {
+        "this": "c1",
+        "form": "swing_45_to_00"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:hinge_pin_jig",
+            "fields": {
+              "pin_inserted": true,
+              "leaf_phase": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              400,
+              1000,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 2
+      }
+    },
+    {
+      "name": "swing_45_to_00_refuses_need_3",
+      "act": {
+        "this": "c1",
+        "form": "swing_45_to_00"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:hinge_pin_jig",
+            "fields": {
+              "pin_inserted": true,
+              "leaf_phase": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 3
+      }
+    }
+  ]
+}

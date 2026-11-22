@@ -1,0 +1,1570 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:hinge_pin_jig",
+  "owner": "thing",
+  "state": {
+    "pin_inserted": {
+      "n": 28,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "leaf_phase": {
+      "n": 29,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 2,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        400,
+        0,
+        750
+      ],
+      "yaw_mdeg": 180000
+    },
+    "control": {
+      "role": "contact",
+      "at_mm": [
+        400,
+        900,
+        250
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1100,
+      1300,
+      600
+    ]
+  },
+  "forms": {
+    "insert_pin": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "pin_inserted",
+          "is": false,
+          "says": "pin_state"
+        },
+        {
+          "need": "state",
+          "field": "leaf_phase",
+          "is": 0,
+          "says": "aligned"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "pin_inserted",
+          "to": true,
+          "event": "indexed"
+        }
+      ]
+    },
+    "withdraw_pin": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "pin_inserted",
+          "is": true,
+          "says": "pin_state"
+        },
+        {
+          "need": "state",
+          "field": "leaf_phase",
+          "is": 0,
+          "says": "aligned"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "touch",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "pin_inserted",
+          "to": false,
+          "event": "indexed"
+        }
+      ]
+    },
+    "swing_00_to_45": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "pin_inserted",
+          "is": true,
+          "says": "pin_state"
+        },
+        {
+          "need": "state",
+          "field": "leaf_phase",
+          "is": 0,
+          "says": "phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "leaf_phase",
+          "to": 1,
+          "event": "indexed"
+        }
+      ]
+    },
+    "swing_45_to_90": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "pin_inserted",
+          "is": true,
+          "says": "pin_state"
+        },
+        {
+          "need": "state",
+          "field": "leaf_phase",
+          "is": 1,
+          "says": "phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "leaf_phase",
+          "to": 2,
+          "event": "indexed"
+        }
+      ]
+    },
+    "swing_90_to_45": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "pin_inserted",
+          "is": true,
+          "says": "pin_state"
+        },
+        {
+          "need": "state",
+          "field": "leaf_phase",
+          "is": 2,
+          "says": "phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "leaf_phase",
+          "to": 1,
+          "event": "indexed"
+        }
+      ]
+    },
+    "swing_45_to_00": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "pin_inserted",
+          "is": true,
+          "says": "pin_state"
+        },
+        {
+          "need": "state",
+          "field": "leaf_phase",
+          "is": 1,
+          "says": "phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "leaf_phase",
+          "to": 0,
+          "event": "indexed"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:hinge_pin_jig",
+    "table": [
+      {
+        "part": "pin",
+        "field": "pin_inserted",
+        "do": "slide",
+        "axis": "x",
+        "at": {
+          "false": 0,
+          "true": 350
+        }
+      },
+      {
+        "part": "pin",
+        "field": "pin_inserted",
+        "do": "slide",
+        "axis": "z",
+        "at": {
+          "false": 0,
+          "true": -140
+        }
+      },
+      {
+        "part": "moving_leaf",
+        "field": "leaf_phase",
+        "do": "rotate",
+        "axis": "y",
+        "at": {
+          "0": 0,
+          "1": -45000,
+          "2": -90000
+        }
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            40,
+            0
+          ],
+          "size": [
+            1100,
+            80,
+            600
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -200,
+            645,
+            -70
+          ],
+          "size": [
+            40,
+            1130,
+            40
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -200,
+            1018,
+            -45
+          ],
+          "size": [
+            50,
+            20,
+            80
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -200,
+            1180,
+            -45
+          ],
+          "size": [
+            50,
+            16,
+            80
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -200,
+            1100,
+            -40
+          ],
+          "size": [
+            40,
+            144,
+            10
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -200,
+            1100,
+            -16
+          ],
+          "size": [
+            40,
+            144,
+            10
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            200,
+            645,
+            -70
+          ],
+          "size": [
+            40,
+            1130,
+            40
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            200,
+            1018,
+            -45
+          ],
+          "size": [
+            50,
+            20,
+            80
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            200,
+            1180,
+            -45
+          ],
+          "size": [
+            50,
+            16,
+            80
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            200,
+            1100,
+            -40
+          ],
+          "size": [
+            40,
+            144,
+            10
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            200,
+            1100,
+            -16
+          ],
+          "size": [
+            40,
+            144,
+            10
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -150,
+            1100,
+            -28
+          ],
+          "size": [
+            140,
+            144,
+            8
+          ],
+          "tint": "fixed_leaf"
+        },
+        {
+          "kind": "box",
+          "at": [
+            150,
+            1100,
+            -28
+          ],
+          "size": [
+            140,
+            144,
+            8
+          ],
+          "tint": "moving_leaf",
+          "role": "moving_leaf",
+          "pivot": [
+            0,
+            1100,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -50,
+            1051,
+            -28
+          ],
+          "size": [
+            60,
+            46,
+            8
+          ],
+          "tint": "fixed_leaf"
+        },
+        {
+          "kind": "lathe",
+          "at": [
+            0,
+            1051,
+            0
+          ],
+          "profile": [
+            [
+              20,
+              -23
+            ],
+            [
+              36,
+              -23
+            ],
+            [
+              36,
+              23
+            ],
+            [
+              20,
+              23
+            ],
+            [
+              20,
+              -23
+            ]
+          ],
+          "segments": 32,
+          "tint": "fixed_leaf"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -50,
+            1149,
+            -28
+          ],
+          "size": [
+            60,
+            46,
+            8
+          ],
+          "tint": "fixed_leaf"
+        },
+        {
+          "kind": "lathe",
+          "at": [
+            0,
+            1149,
+            0
+          ],
+          "profile": [
+            [
+              20,
+              -23
+            ],
+            [
+              36,
+              -23
+            ],
+            [
+              36,
+              23
+            ],
+            [
+              20,
+              23
+            ],
+            [
+              20,
+              -23
+            ]
+          ],
+          "segments": 32,
+          "tint": "fixed_leaf"
+        },
+        {
+          "kind": "box",
+          "at": [
+            50,
+            1100,
+            -28
+          ],
+          "size": [
+            60,
+            48,
+            8
+          ],
+          "tint": "moving_leaf",
+          "role": "moving_leaf",
+          "pivot": [
+            0,
+            1100,
+            0
+          ]
+        },
+        {
+          "kind": "lathe",
+          "at": [
+            0,
+            1100,
+            0
+          ],
+          "profile": [
+            [
+              20,
+              -24
+            ],
+            [
+              36,
+              -24
+            ],
+            [
+              36,
+              24
+            ],
+            [
+              20,
+              24
+            ],
+            [
+              20,
+              -24
+            ]
+          ],
+          "segments": 32,
+          "tint": "moving_leaf",
+          "role": "moving_leaf",
+          "pivot": [
+            0,
+            1100,
+            0
+          ]
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -350,
+            1100,
+            140
+          ],
+          "r": 14,
+          "h": 148,
+          "segments": 32,
+          "tint": "pin",
+          "role": "pin",
+          "pivot": [
+            -350,
+            1100,
+            140
+          ]
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -350,
+            1178,
+            140
+          ],
+          "r": 28,
+          "h": 12,
+          "segments": 32,
+          "tint": "pin",
+          "role": "pin",
+          "pivot": [
+            -350,
+            1100,
+            140
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -470,
+            680,
+            140
+          ],
+          "size": [
+            40,
+            1200,
+            40
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -425,
+            1166,
+            140
+          ],
+          "size": [
+            90,
+            12,
+            30
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "lathe",
+          "at": [
+            -350,
+            1166,
+            140
+          ],
+          "profile": [
+            [
+              18,
+              -6
+            ],
+            [
+              40,
+              -6
+            ],
+            [
+              40,
+              6
+            ],
+            [
+              18,
+              6
+            ],
+            [
+              18,
+              -6
+            ]
+          ],
+          "segments": 32,
+          "tint": "rack"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -480,
+            1240,
+            166
+          ],
+          "size": [
+            8,
+            44,
+            12
+          ],
+          "tint": "pin"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -470,
+            1258,
+            166
+          ],
+          "size": [
+            20,
+            8,
+            12
+          ],
+          "tint": "pin"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -458,
+            1248,
+            166
+          ],
+          "size": [
+            8,
+            20,
+            12
+          ],
+          "tint": "pin"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -470,
+            1238,
+            166
+          ],
+          "size": [
+            20,
+            8,
+            12
+          ],
+          "tint": "pin"
+        },
+        {
+          "kind": "lathe",
+          "at": [
+            0,
+            990,
+            0
+          ],
+          "profile": [
+            [
+              60,
+              -10
+            ],
+            [
+              280,
+              -10
+            ],
+            [
+              280,
+              10
+            ],
+            [
+              60,
+              10
+            ],
+            [
+              60,
+              -10
+            ]
+          ],
+          "segments": 32,
+          "tint": "deck"
+        },
+        {
+          "kind": "box",
+          "at": [
+            260,
+            1030,
+            0
+          ],
+          "size": [
+            12,
+            60,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            260,
+            1060,
+            0
+          ],
+          "size": [
+            76,
+            48,
+            12
+          ],
+          "tint": "back"
+        },
+        {
+          "kind": "box",
+          "at": [
+            260,
+            1076,
+            12
+          ],
+          "size": [
+            24,
+            4,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            272,
+            1068,
+            12
+          ],
+          "size": [
+            4,
+            16,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            272,
+            1052,
+            12
+          ],
+          "size": [
+            4,
+            16,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            260,
+            1044,
+            12
+          ],
+          "size": [
+            24,
+            4,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            248,
+            1052,
+            12
+          ],
+          "size": [
+            4,
+            16,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            248,
+            1068,
+            12
+          ],
+          "size": [
+            4,
+            16,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            184,
+            1030,
+            184
+          ],
+          "size": [
+            12,
+            60,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            184,
+            1060,
+            184
+          ],
+          "size": [
+            76,
+            48,
+            12
+          ],
+          "tint": "back"
+        },
+        {
+          "kind": "box",
+          "at": [
+            181,
+            1068,
+            196
+          ],
+          "size": [
+            4,
+            16,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            181,
+            1052,
+            196
+          ],
+          "size": [
+            4,
+            16,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            157,
+            1068,
+            196
+          ],
+          "size": [
+            4,
+            16,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            169,
+            1060,
+            196
+          ],
+          "size": [
+            24,
+            4,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            199,
+            1076,
+            196
+          ],
+          "size": [
+            24,
+            4,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            187,
+            1068,
+            196
+          ],
+          "size": [
+            4,
+            16,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            199,
+            1060,
+            196
+          ],
+          "size": [
+            24,
+            4,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            211,
+            1052,
+            196
+          ],
+          "size": [
+            4,
+            16,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            199,
+            1044,
+            196
+          ],
+          "size": [
+            24,
+            4,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1030,
+            260
+          ],
+          "size": [
+            12,
+            60,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1060,
+            260
+          ],
+          "size": [
+            76,
+            48,
+            12
+          ],
+          "tint": "back"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -15,
+            1076,
+            272
+          ],
+          "size": [
+            24,
+            4,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -3,
+            1068,
+            272
+          ],
+          "size": [
+            4,
+            16,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -27,
+            1068,
+            272
+          ],
+          "size": [
+            4,
+            16,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -15,
+            1060,
+            272
+          ],
+          "size": [
+            24,
+            4,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -3,
+            1052,
+            272
+          ],
+          "size": [
+            4,
+            16,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -15,
+            1044,
+            272
+          ],
+          "size": [
+            24,
+            4,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            15,
+            1076,
+            272
+          ],
+          "size": [
+            24,
+            4,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            27,
+            1068,
+            272
+          ],
+          "size": [
+            4,
+            16,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            27,
+            1052,
+            272
+          ],
+          "size": [
+            4,
+            16,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            15,
+            1044,
+            272
+          ],
+          "size": [
+            24,
+            4,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            3,
+            1052,
+            272
+          ],
+          "size": [
+            4,
+            16,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            3,
+            1068,
+            272
+          ],
+          "size": [
+            4,
+            16,
+            12
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -150,
+            1130,
+            -18
+          ],
+          "size": [
+            36,
+            8,
+            12
+          ],
+          "tint": "index"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -166,
+            1110,
+            -18
+          ],
+          "size": [
+            8,
+            48,
+            12
+          ],
+          "tint": "index"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -152,
+            1110,
+            -18
+          ],
+          "size": [
+            28,
+            8,
+            12
+          ],
+          "tint": "index"
+        },
+        {
+          "kind": "box",
+          "at": [
+            132,
+            1110,
+            -18
+          ],
+          "size": [
+            8,
+            48,
+            12
+          ],
+          "tint": "index",
+          "role": "moving_leaf",
+          "pivot": [
+            0,
+            1100,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            168,
+            1110,
+            -18
+          ],
+          "size": [
+            8,
+            48,
+            12
+          ],
+          "tint": "index",
+          "role": "moving_leaf",
+          "pivot": [
+            0,
+            1100,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            144,
+            1120,
+            -18
+          ],
+          "size": [
+            8,
+            30,
+            12
+          ],
+          "tint": "index",
+          "role": "moving_leaf",
+          "pivot": [
+            0,
+            1100,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            156,
+            1120,
+            -18
+          ],
+          "size": [
+            8,
+            30,
+            12
+          ],
+          "tint": "index",
+          "role": "moving_leaf",
+          "pivot": [
+            0,
+            1100,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            400,
+            490,
+            160
+          ],
+          "size": [
+            50,
+            820,
+            60
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            400,
+            900,
+            205
+          ],
+          "r": 32,
+          "h": 90,
+          "segments": 32,
+          "tint": "control",
+          "pitch": 90000
+        }
+      ],
+      "palette": {
+        "frame": "#35424c",
+        "back": "#182b35",
+        "fixed_leaf": "#4e98cb",
+        "moving_leaf": "#65c3ad",
+        "pin": "#e9bd57",
+        "rack": "#917a48",
+        "deck": "#56636c",
+        "reference": "#ef4e49",
+        "index": "#fff4b7",
+        "control": "#ae8bd1"
+      },
+      "tags": [
+        "tool",
+        "assembly",
+        "hinge",
+        "exhibit"
+      ]
+    }
+  },
+  "text": {
+    "work": "work",
+    "card": "Seat one hinge pin, swing the retained leaf, then align and withdraw it.",
+    "hinge_pin": "hinge pin practice",
+    "pin_state": "Choose an offer matching whether the pin is seated or racked.",
+    "aligned": "Align both leaves before inserting or withdrawing the pin.",
+    "phase": "Choose the swing matching the current indexed angle.",
+    "free_hand": "Put down an object so a hand is free for the fixed practice control.",
+    "howto_practice": "Use the purple fixed practice control. The gold P rack holds one original pin; insert moves that same continuous shaft and head into three hollow knuckles, with the head shoulder seated on the upper blue knuckle. Blue F is fixed; green M moves in three indexed endpoints: aligned,45 and90 degrees against red fixed legends. Only the aligned leaves permit insertion or withdrawal. Independent C-shaped retainers capture both leaves while the pin is racked; the separate rack cradle supports its head. Insert, swing outward twice, return twice, then withdraw and reuse. This is an integral teaching jig: it creates no loose pin, output or custody transfer. Its indexed endpoints depict assembly, not continuous insertion or swing, forces, friction, structural restraint, security, real-door authority or engine collision/support changes."
+  },
+  "card": {
+    "text": "card",
+    "category": "work",
+    "synonyms": [
+      "hinge_pin"
+    ]
+  },
+  "howtos": {
+    "practice": {
+      "text": "howto_practice",
+      "steps": [
+        {
+          "form": "insert_pin"
+        },
+        {
+          "form": "swing_00_to_45"
+        },
+        {
+          "form": "swing_45_to_90"
+        },
+        {
+          "form": "swing_90_to_45"
+        },
+        {
+          "form": "swing_45_to_00"
+        },
+        {
+          "form": "withdraw_pin"
+        }
+      ]
+    }
+  }
+}

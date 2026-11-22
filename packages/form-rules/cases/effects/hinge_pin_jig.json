@@ -1,0 +1,393 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Two full insert/swing/return/withdraw cycles; generic duplicate receipt checks prove replay idempotence.",
+  "cases": [
+    {
+      "name": "hinge_pin_return_and_reuse",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:hinge_pin_jig",
+            "fields": {
+              "pin_inserted": false,
+              "leaf_phase": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              400,
+              1000,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          },
+          "touch": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "c1",
+            "form": "insert_pin"
+          },
+          "receipt": "hinge0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "pin_inserted",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "swing_00_to_45"
+          },
+          "receipt": "hinge1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "leaf_phase",
+                "n": 29,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "swing_45_to_90"
+          },
+          "receipt": "hinge2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "leaf_phase",
+                "n": 29,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "swing_90_to_45"
+          },
+          "receipt": "hinge3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "leaf_phase",
+                "n": 29,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "swing_45_to_00"
+          },
+          "receipt": "hinge4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "leaf_phase",
+                "n": 29,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "withdraw_pin"
+          },
+          "receipt": "hinge5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "pin_inserted",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "insert_pin"
+          },
+          "receipt": "hinge6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "pin_inserted",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "swing_00_to_45"
+          },
+          "receipt": "hinge7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "leaf_phase",
+                "n": 29,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "swing_45_to_90"
+          },
+          "receipt": "hinge8",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "leaf_phase",
+                "n": 29,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "swing_90_to_45"
+          },
+          "receipt": "hinge9",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "leaf_phase",
+                "n": 29,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "swing_45_to_00"
+          },
+          "receipt": "hinge10",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "leaf_phase",
+                "n": 29,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "withdraw_pin"
+          },
+          "receipt": "hinge11",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "pin_inserted",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "c1": {
+          "kind": "eden:hinge_pin_jig",
+          "fields": {
+            "pin_inserted": 0,
+            "leaf_phase": 0
+          }
+        }
+      }
+    }
+  ]
+}
