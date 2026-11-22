@@ -835,6 +835,7 @@
       ],
       "after": {
         "bench": {
+          "kind": "eden:bookbinding_bench",
           "fields": {
             "paper_sets": 0,
             "thread_lengths": 0,
@@ -851,7 +852,12 @@
           "hands": {
             "left": "case1.0",
             "right": "case2.0"
-          }
+          },
+          "effector_mm": [
+            -200,
+            1000,
+            450
+          ]
         }
       }
     }
