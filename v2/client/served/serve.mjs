@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 // Answers the served client's addresses from a folder build.mjs wrote (Engine v2 R17, #2818), under any world's
-// address: `<world>/eden.mjs`, `/skill.md`, `/creator.md`, `/instructions.md`, `/replica.js`, `/replica_bg.wasm`, and
+// address: `<world>/eden.mjs`, `/skill.md`, `/creator.md`, `/instructions.md`, `/safety.md`, `/replica.js`, `/replica_bg.wasm`, and
 // `<world>/v1/config` as `{soulClient}`. Plain 200s with no redirect and no sign-in (docs/architecture/api.md,
 // "Soul client upgrade", frozen). Whatever answers a world's address mounts `answer` (R18 #2821); on a machine the
 // release puts the folder at /usr/local/lib/souls/client (v2/tools/ops/release/release.sh `move`).
@@ -17,6 +17,7 @@ const TYPES = {
   'eden.mjs': 'text/javascript; charset=utf-8', 'replica.js': 'text/javascript; charset=utf-8',
   'replica_bg.wasm': 'application/wasm', 'skill.md': 'text/markdown; charset=utf-8',
   'creator.md': 'text/markdown; charset=utf-8', 'instructions.md': 'text/markdown; charset=utf-8',
+  'safety.md': 'text/markdown; charset=utf-8',
 };
 
 /** The answer for `path` (no query), or null when it is not one of the served addresses. */

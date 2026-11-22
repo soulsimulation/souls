@@ -241,7 +241,7 @@ impl Pairing {
                     .and_then(|w| self.authority(Some(w)).ok().flatten())
                     .map(|a| a.world)
                     .or_else(|| m.world.clone());
-                json!({"id":m.soul,"name":m.name,"world":world,"device":m.device})
+                json!({"id":m.soul,"name":m.name,"world":world,"device":m.device,"retireAsked":m.retire_asked})
             })
             .collect::<Vec<_>>();
         Ok(Value::Array(rows))
@@ -344,7 +344,11 @@ impl Pairing {
         let force = b["move"].as_bool() == Some(true);
         let validate = || -> Result<(Option<String>, Option<String>)> {
             if fresh {
-                return Ok((None, None));
+                return if self.at_soul_cap(&login.account)? {
+                    Err("too-many")
+                } else {
+                    Ok((None, None))
+                };
             }
             match self.soul_of(&grant)? {
                 Some((a, _)) if a == login.account => {}
@@ -533,6 +537,18 @@ pub(super) fn route(
                         json!({"account":{"id":login.account},"grant":{"id":login.id,"agentLabel":login.label,"device":{"name":login.name}},"souls":p.account_souls(&app.store,&login.account)?}),
                     ),
                     "/v1/agent/account/logout" => p.end_login(&login.account, &login.id, "logout"),
+                    // #3707: the agent disconnects a Soul's agent wherever it runs, or asks its retire (the owner's
+                    // click on the page still decides), for a Soul of its account.
+                    "/v1/agent/account/revoke" => {
+                        let soul = text(&b, "soul")?;
+                        p.revoke(&login.account, soul)?;
+                        Ok(json!({"ok":true,"soul":soul,"revoked":true}))
+                    }
+                    "/v1/agent/account/retire" => {
+                        let soul = text(&b, "soul")?;
+                        p.ask_retire_of(&login.account, soul)?;
+                        Ok(json!({"ok":true,"soul":soul,"asked":true}))
+                    }
                     _ => Err("not-found"),
                 }
             }
