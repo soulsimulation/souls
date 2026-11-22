@@ -2829,8 +2829,18 @@ fn i3983_the_courtyard_houses_roof_stairs_go_up_onto_their_roofs() {
     let im = import_eden::load(&std::fs::read_to_string(&facts).unwrap()).expect("Eden loads");
     let mut ends = Vec::new();
     for (house, at, stairs, roof) in [
-        ("eden-house-3", "22.0,30.27", "e_303f348f", "e_3d52ac7f/floor-1"),
-        ("eden-house-4", "42.0,30.27", "e_f071fa8e", "e_0c946e80/floor-1"),
+        (
+            "eden-house-3",
+            "22.0,30.27",
+            "e_303f348f",
+            "e_3d52ac7f/floor-1",
+        ),
+        (
+            "eden-house-4",
+            "42.0,30.27",
+            "e_f071fa8e",
+            "e_0c946e80/floor-1",
+        ),
     ] {
         let (up, end) = act_ending(&facts, at, stairs, "eden:go_up", &format!("i3983{house}"));
         ends.push((house, im.nodes[roof], up, end));
