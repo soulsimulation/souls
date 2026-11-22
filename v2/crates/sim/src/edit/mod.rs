@@ -188,7 +188,8 @@ fn plan_with(
             return Err(Refused {
                 op: Some(i),
                 name: "edit.link",
-                detail: "a doorway link is owned by its first end, where its row is read".to_owned(),
+                detail: "a doorway link is owned by its first end, where its row is read"
+                    .to_owned(),
             });
         }
     }
