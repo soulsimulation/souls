@@ -100,6 +100,20 @@ use sim::text::Store;
 /// Where the public writer's core goes (#4192): with `STREAM_PROFILE=1`, each stage's wall time on the writer's
 /// thread, summed and printed to stderr every 10 s with the thread's own processor time. A measurement only: it never
 /// changes a byte written, and off (the default) it reads no clock.
+/// Where a part waits on its way out (C8): with `STREAM_TRACE=1`, a line per source record as it reaches the public
+/// writer (when, and how far behind its newest effect's world time) and per part written (its span, when its cut
+/// began and when it was written). Off (the default), it reads no clock and writes nothing.
+mod trace {
+    pub fn on() -> bool {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ON.get_or_init(|| std::env::var("STREAM_TRACE").is_ok_and(|v| v == "1"))
+    }
+    /// Wall time now, ms.
+    pub fn now_ms() -> i64 {
+        crate::answers::now().div_euclid(1000)
+    }
+}
+
 mod prof {
     // A profile is wall time on the writer's thread, off unless asked for (K7 allows it, as in `measures`).
     #![allow(clippy::disallowed_methods)]
@@ -2999,6 +3013,15 @@ impl<S: ObjectStore> PublicWriter<S> {
         let window = self.window;
         let mut lap = prof::Lap::start();
         self.apply_record(record, raw)?;
+        if trace::on() && !sim::recorder::is_input(raw) {
+            let newest = Part::read(raw)?.effects.iter().map(|e| e.envelope.at).max();
+            let wall = trace::now_ms();
+            eprintln!(
+                "stream-trace record {record} in at {wall} ms, {} ms behind its newest effect; public entries open {}",
+                newest.map_or(0, |at| wall - at.div_euclid(1000)),
+                self.records.len()
+            );
+        }
         lap.mark(0);
         prof::count(1, 0, 0);
         if let (Some(before), Some(last)) = (window, self.records.last())
@@ -3031,6 +3054,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         if self.chunks.is_empty() && !self.force_remainder {
             return Ok(());
         }
+        let began = trace::on().then(trace::now_ms);
         let mut lap = prof::Lap::start();
         // A cut of motion and fields set only (#3799): the published state with the touched nodes' rows replaced, its
         // digest worked out in place; any other cut, the public state whole. The same bytes either way.
@@ -3371,6 +3395,18 @@ impl<S: ObjectStore> PublicWriter<S> {
         immutable(&self.generation_dir().join(format!("{number}.text")), &text)?;
         lap.mark(8);
         self.last_to = Some(sp.to);
+        if let Some(began) = began {
+            let wall = trace::now_ms();
+            eprintln!(
+                "stream-trace part {number} [{}, {}] ms, {} entries, {}: cut began {} ms after its end, written in {} ms",
+                sp.from.div_euclid(1000),
+                sp.to.div_euclid(1000),
+                sp.entries,
+                if after.is_some() { "whole" } else { "by rows" },
+                began - sp.to.div_euclid(1000),
+                wall - began
+            );
+        }
         self.clear_pending();
         self.delete_some(DELETES_PER_PART);
         if self.rollover_due() {
