@@ -19,6 +19,9 @@
 //!   holds the world from empty and a stream written from it draws the whole world. Once compacted (`compactor`,
 //!   #3837), the bytes before `log.cut` are a hole and the log is read from the cut.
 //! - `checkpoints/`: K5's, taken by K18c's rule; a start resumes from the newest that verifies.
+//! - `facts.courses`: the facts as a start uses them (punts' moorings, rides' courses, entries' kinds), kept by the
+//!   first start and keyed by the facts' and entries' SHA-256; a later start with the same reads it instead of cutting
+//!   a town for them (S5, [`courses_cached`]). Deleting it only makes the next start slower.
 //! - `tokens`: the gateway's tokens file, `<grant> <sha-256 hex>` per Soul, never a token. `souls.tokens` (mode 0600)
 //!   holds the Souls' tokens themselves, for a local client; it is never copied off the machine.
 //! - `log.text/`: K16's text store, every word said in the world (O20b, #3523).
@@ -293,6 +296,47 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
 /// The facts with today's rowing punts added (#3603): one moored on each standing water that has room
 /// (`sim::courses::punts`), a thing of kind `core:rowing_punt` at its home, turned with its plank toward the bank, on its
 /// own loop (its course). The same facts give the same punts, so a seed and every serve of the world agree.
+/// Where `worldd serve` keeps [`courses`]' answer for its facts and entries (S5): `<world>/facts.courses`.
+static COURSES_CACHE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// The facts with their punts' moorings, their rides' courses and the entries' own kinds: [`with_punts`] (which loads
+/// the facts and cuts a town only to find where planks and exits stand), [`with_rides`], [`with_entry_kinds`].
+fn courses(facts: &str, entries: &[(String, Json)]) -> R<String> {
+    let punts = with_punts(facts)?;
+    stamp("facts: punts");
+    let rides = with_rides(&punts, entries)?;
+    stamp("facts: rides");
+    with_entry_kinds(&rides, entries)
+}
+
+/// [`courses`] once per facts and entries (S5, 0.133): its answer is a function of them alone, so `worldd serve` keeps
+/// it beside the world, keyed by the SHA-256 of the facts and of each entry, and a start whose facts and entries are
+/// the same reads it back. Anything changed, or no cache, computes it again.
+fn courses_cached(facts: &str, entries: &[(String, Json)]) -> R<String> {
+    let Some(path) = COURSES_CACHE.get() else {
+        return courses(facts, entries);
+    };
+    let mut key = to_hex(&sha256(facts.as_bytes()));
+    for (k, e) in entries {
+        key.push('.');
+        key.push_str(&to_hex(&sha256(format!("{k}\0{}", e.to_json()).as_bytes()))[..16]);
+    }
+    let key = to_hex(&sha256(key.as_bytes()));
+    if let Ok(text) = std::fs::read_to_string(path)
+        && let Some((k, out)) = text.split_once('\n')
+        && k == key
+    {
+        return Ok(out.to_owned());
+    }
+    let out = courses(facts, entries)?;
+    let tmp = path.with_extension("courses.new");
+    // Best effort: a world that cannot keep it computes it at its next start too.
+    if std::fs::write(&tmp, format!("{key}\n{out}")).is_ok() {
+        let _ = std::fs::rename(&tmp, path);
+    }
+    Ok(out)
+}
+
 fn with_punts(facts: &str) -> R<String> {
     let im = import_eden::load(facts)?;
     let Some(&ground) = im.nodes.get("ground") else {
@@ -573,7 +617,8 @@ fn with_rides(facts: &str, entries: &[(String, Json)]) -> R<String> {
 const PUNT_REF: &str = "core-rowing-punt@1";
 
 fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
-    let facts = &with_entry_kinds(&with_rides(&with_punts(facts)?, entries)?, entries)?;
+    let facts = &courses_cached(facts, entries)?;
+    stamp("facts: courses");
     let mut im = import_eden::load(facts)?;
     stamp("facts");
     for (k, id) in (0..).map_while(|k| Some((k, *im.nodes.get(&format!("e_punt{k}"))?))) {
@@ -2013,6 +2058,18 @@ fn serve(args: &[String]) -> R<()> {
         entries(&dir.join("entries"), &mut kinds)?;
     }
     stamp("entries");
+    let _ = COURSES_CACHE.set(dir.join("facts.courses"));
+    // S5: a world's newest checkpoint is read while its facts are built (a fork reads its own below), once for the
+    // towns and the stream and once for the engine, which takes its own copy.
+    let read_newest = || {
+        let d = dir.join("checkpoints");
+        std::thread::spawn(move || match d.is_dir() {
+            true => sim::checkpoint::restore(&d),
+            false => Ok(None),
+        })
+    };
+    let restoring = (meta.get("fork") != Some(&Json::Bool(true))).then(read_newest);
+    let engine_restoring = Some(read_newest());
     let built = build(
         &std::fs::read_to_string(&facts).map_err(io(&facts))?,
         &kinds,
@@ -2137,10 +2194,11 @@ fn serve(args: &[String]) -> R<()> {
         // The newest checkpoint that verifies (K5) is where the engine resumes (`answers::start`), so the towns and
         // the views' hub start from it too, with only the log after it applied: a restart's work follows the log
         // since the last checkpoint, never the world's age (#3837). Without one, the log from record 0.
-        let restored = match dir.join("checkpoints") {
-            d if d.is_dir() => sim::checkpoint::restore(&d).map_err(refusal)?,
-            _ => None,
-        };
+        let restored = restoring
+            .ok_or("checkpoint-restore-missing")?
+            .join()
+            .map_err(|_| "checkpoint-restore-panicked")?
+            .map_err(refusal)?;
         match restored {
             Some(r) => {
                 if r.root.version.lineage != built.header.lineage
@@ -2250,6 +2308,7 @@ fn serve(args: &[String]) -> R<()> {
         n.parse::<u64>().map_err(|_| "--checkpoint-every <bytes>")
     })?;
     cfg.checkpoints = Some((dir.join("checkpoints"), every));
+    cfg.restoring = engine_restoring;
     let compact_after = arg(args, "--compact-after")
         .map_or(Ok(crate::compactor::MIN_DEAD), |n| {
             n.parse::<u64>().map_err(|_| "--compact-after <bytes>")

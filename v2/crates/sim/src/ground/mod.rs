@@ -174,6 +174,9 @@ pub struct Meet {
     pub step: bool,
 }
 
+/// One square's wet pieces, each with its water's index ([`OpenGround::cut_water`]).
+pub type Wet = Vec<(u32, Piece)>;
+
 /// The walkable ground of one node (or one square of the open ground) for one radius.
 #[derive(Clone, Debug)]
 pub struct Patch {
@@ -971,6 +974,44 @@ impl OpenGround {
             }
         }
         out
+    }
+
+    /// Every square's patch, in [`OpenGround::squares`]' order (S5, 0.133): the squares are cut on as many threads
+    /// as the machine has, each square on its own (a cut reads only the ground), and put back in order, so the
+    /// answer is the same as cutting them one by one.
+    pub fn cut_all(&self) -> Vec<((i32, i32), Patch)> {
+        self.each_square(|i, j| self.cut_square(i, j))
+    }
+
+    /// Every square's wet pieces ([`OpenGround::cut_water`]), as [`OpenGround::cut_all`] cuts the dry ones.
+    pub fn cut_all_water(&self) -> Vec<((i32, i32), Wet)> {
+        self.each_square(|i, j| self.cut_water(i, j))
+    }
+
+    /// `f` of every square, on as many threads as the machine has, in [`OpenGround::squares`]' order.
+    fn each_square<T: Send>(&self, f: impl Fn(i32, i32) -> T + Sync) -> Vec<((i32, i32), T)> {
+        let squares = self.squares();
+        let threads = std::thread::available_parallelism()
+            .map_or(1, std::num::NonZeroUsize::get)
+            .min(squares.len().max(1));
+        let chunk = squares.len().div_ceil(threads).max(1);
+        let f = &f;
+        std::thread::scope(|s| {
+            let parts: Vec<_> = squares
+                .chunks(chunk)
+                .map(|c| {
+                    s.spawn(move || {
+                        c.iter()
+                            .map(|&(i, j)| ((i, j), f(i, j)))
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect();
+            parts
+                .into_iter()
+                .flat_map(|h| h.join().unwrap_or_else(|e| std::panic::resume_unwind(e)))
+                .collect()
+        })
     }
 
     /// One square's patch.
