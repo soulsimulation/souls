@@ -4,11 +4,13 @@
 // only turns the records into takes (history.ts). Only the WASM module, the header and the day indexes read are kept
 // between seeks. The node records are read as the stream worker reads them, the fields the bridge reads.
 import init, { historyAt } from 'replica';
-import { decode } from 'cborg';
+import { decode, encode } from 'cborg';
 
 /** A node record, the fields the bridge reads (v2/web/src/source/source.ts NodeRec). */
 export type HistoryNode = { id: string; kind: string; parent: string | null; slot: number | null; pos: [number, number, number];
-  rot: [number, number, number, number]; at: number | null; origin?: string; slots?: number[][]; body?: string; sky?: Record<number, unknown> };
+  rot: [number, number, number, number]; at: number | null; origin?: string; slots?: number[][]; body?: string; sky?: Record<number, unknown>;
+  /** K4 (0.135): a moving node's course (field 80), re-encoded canonically as the stream worker does. */
+  course?: Uint8Array };
 /** A body's motion sample `[body, frame, slot, at µs, x, y, z µm]` (source.ts SampleRec). */
 export type HistorySample = [string, string, number | null, number, number, number, number];
 /** What one seek gives the page: the moment's state, its bundle's samples, and where the next bundle starts. */
@@ -50,6 +52,7 @@ function nodeRec(v: Map<number, unknown>): HistoryNode {
   if (f.get(1) instanceof Uint8Array) rec.origin = text.decode(f.get(1) as Uint8Array);
   if (f.has(13)) rec.slots = rows(f.get(13));
   if (f.has(32)) rec.body = hex(f.get(32) as Uint8Array);
+  if (f.has(80)) rec.course = encode(f.get(80));
   // the world node's calendar (fields 60, 61), which dates each take as the live bridge dates it
   if (f.has(60) && f.has(61)) rec.sky = { 60: num(f.get(60)), 61: num(f.get(61)) };
   return rec;

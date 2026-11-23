@@ -58,6 +58,10 @@ v2 adapter turns the engine's public stream into that frame's input.
    chunks, the format the old server streams. Each tick carries the body's position, its heading (from its motion),
    its activity (walk, idle, sit, lie or a gesture), its speed, seat height and hand prop. A chunk is built only once
    the world is past its end, so a body is never pushed past its newest sample.
+   A thing on a course (a balloon, a punt) is in the chunks too (0.135 K4): a `vehicle` record with a `carrier`,
+   under the page's id for that thing, where the replica's `courseAt` has it at each tick. The page's own layers draw
+   it (the entity layer moves a god's balloon to it); the take only lets the camera follow it and frame a ride with it.
+   A body in its slot rides with it, standing, activity `ride` (hands on the rim), which Broadcast scores as riding.
 5. **The frame.** `LiveWorld.tsx` reads the chunks (`liveChunks`, line 763) and samples them at the depicted
    tick (`sampleTake` in `mars/viewer/engine/take/replay.ts`). It keeps the result as
    `shown.current.entities` (line 951): a position `p` and heading `yaw` for each take entity.

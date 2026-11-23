@@ -13,3 +13,11 @@ export const makeHistoryReader = (replica: string) => {
   if (typeof __SIM_V2_REPLICA_SERVED__ === 'undefined' || __SIM_V2_REPLICA_SERVED__) worker.postMessage({ replica });
   return worker;
 };
+/** K4 (0.135): the replica's `courseAt` on the page's own thread (a balloon's place along its course), from the served
+ *  replica, or the bundled one where V2_REPLICA_PKG bundles it. */
+export const loadCourseAt = async (replica: string): Promise<(field: Uint8Array, t: bigint) => ArrayLike<bigint>> => {
+  const served = typeof __SIM_V2_REPLICA_SERVED__ === 'undefined' || __SIM_V2_REPLICA_SERVED__;
+  const m = (served ? await import(/* @vite-ignore */ replica) : await import('replica')) as { default: () => Promise<unknown>; courseAt: (field: Uint8Array, t: bigint) => ArrayLike<bigint> };
+  await m.default();
+  return m.courseAt;
+};

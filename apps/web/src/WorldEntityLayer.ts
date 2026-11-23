@@ -839,6 +839,8 @@ export class WorldEntityLayer {
     }
     return this.names.map.get(name);
   }
+  /** K4 (0.135): the id of the top-level thing named `name` (a new-engine world records a ride under its thing's id). */
+  idNamed(name: string): string | undefined { return this.entityNamed(name)?.id; }
   /** PERF-STREAM: the records a scan of the world's lights should visit: under streaming only the drawn things (a lamp beyond
    *  the ring lights nothing anyone sees); else null (every record, as before). world-env.ts. */
   lightCandidates(): Iterable<Entity> | null {
@@ -1739,7 +1741,7 @@ export class WorldEntityLayer {
       baked: m.bake(def, e.params ?? {}, e.seed ?? 0, e.shape), model: m, materials: this.lib,
       tint: (key, fallback) => { if (!key) return fallback; const v = params[key]; return typeof v === 'string' && /^#/.test(v) ? v : def.palette?.[key] ?? fallback; },
     };
-    try { const obj = builder.build(ctx); if (obj) { obj.name ||= `entity ${e.name ?? e.id}`; const k = builder.instanceKey?.(ctx); if (k) obj.userData.instanceKey = `${def.make.kind === 'gen' ? def.make.gen : def.make.kind}|${k}`; } return obj; } catch (err) { this.stats.lastError = `${def.ref}: ${String(err)}`; return null; }
+    try { const obj = builder.build(ctx); if (obj) { obj.name ||= `entity ${e.name ?? e.id}`; obj.userData.entity ??= e.id; /* K4: a click on it names its entity (the camera follows one the takes carry) */ const k = builder.instanceKey?.(ctx); if (k) obj.userData.instanceKey = `${def.make.kind === 'gen' ? def.make.gen : def.make.kind}|${k}`; } return obj; } catch (err) { this.stats.lastError = `${def.ref}: ${String(err)}`; return null; }
   }
 
   private material(key: string, make: () => THREE.Material) { let m = this.materials.get(key); if (!m) { m = make(); this.materials.set(key, m); } return m; }
