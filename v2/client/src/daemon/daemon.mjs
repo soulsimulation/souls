@@ -1141,7 +1141,7 @@ async function worldBatch(req) {
   return worldOps(copy, req.world, worldNowOrReal());
 }
 
-async function answer(req) {
+async function answer(req, conn = null) {
   if (req.key !== undefined) {
     if (!KEYED.has(req.op)) return { ok: false, code: 'key-not-a-write', detail: `--key goes on a write: ${[...KEYED].join(', ')}` };
     if (!keyOk(req.key)) return { ok: false, code: 'key-form', detail: '--key takes 1 to 100 printable characters, no spaces' };
@@ -1229,13 +1229,16 @@ async function answer(req) {
     case 'wait': {
       const ms = Math.min(Math.max(Number(req.seconds ?? 30), 0), WAIT_MOST_S) * 1000, until = Date.now() + ms;
       // R13: the queued wakes are handed as one delivery when the budget allows; over it, they wait for it to.
-      let handed = wakes.deliver(Date.now());
-      while (handed.length === 0 && nothingYet() && Date.now() < until) {
+      // A reader whose socket closed takes nothing: what came stays for the next reader (an owner's message, a wake).
+      const gone = () => conn?.destroyed === true;
+      let handed = gone() ? [] : wakes.deliver(Date.now());
+      while (handed.length === 0 && nothingYet() && !gone() && Date.now() < until) {
         const free = wakes.nextFree(Date.now());
         const left = Math.min(until, free ?? until) - Date.now();
         await new Promise((ok) => { const t = setTimeout(ok, Math.max(left, 0)); wakers.push(() => { clearTimeout(t); ok(); }); });
-        handed = wakes.deliver(Date.now());
+        handed = gone() ? [] : wakes.deliver(Date.now());
       }
+      if (gone()) return { ok: false, code: 'reader-gone' };
       if (handed.length) saveWakes();
       const got = events.splice(0);
       const timedOut = handed.length === 0 && !got.some((e) => e.kind !== 'synced');
@@ -1699,7 +1702,7 @@ const server = createServer((c) => {
         const req = JSON.parse(line);
         asked = req;
         op = !OPS.has(req.op) ? 'unknown' : req.op === 'pending' && req.list ? 'pending-list' : req.op; // a listing is the agent's
-        return answer(req);
+        return answer(req, c);
       })
         .catch((e) => ({ ok: false, code: e.code ?? 'refused', detail: String(e.message ?? e).slice(0, 200) }))
         .then((out) => {
@@ -1723,6 +1726,8 @@ const server = createServer((c) => {
     }
   });
   c.on('error', () => {});
+  // A reader that went away (its `wait` stopped) is let go now, so it takes nothing it cannot print.
+  c.on('close', () => { for (const w of wakers.splice(0)) w(); });
 });
 
 // --- The Soul's own schedule (R15, #2757) ------------------------------------------------------------------------
