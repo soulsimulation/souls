@@ -29,7 +29,7 @@ try {
   // Advance recorded history sooner in this fake-only development fixture.
   assert.equal((await owner.request.post(base+'/w/eden/v1/admin', {headers:{authorization:'Bearer dev:admin'},data:{action:'clock_rate',rate:4}})).status(),200);
   page = await owner.newPage(); page.on('pageerror', e => errors.push(e.message));
-  await page.goto(base + '/w/eden?rewind=1');
+  await page.goto(base + '/w/eden');
   // VF1: arriving is one calm card (no warnings, no "Held"), gone once the first frame is drawn.
   const arrival = await page.waitForFunction(() => { const c = document.querySelector('.viewer-arrival[data-done="false"]'); return c && { card: c.textContent, status: document.querySelector('[data-viewer-status]')?.textContent, cls: document.querySelector('[data-viewer-status]')?.className, reasons: document.querySelectorAll('.viewer-reason').length, text: document.body.innerText }; }).then(h => h.jsonValue());
   check('Arrival shows one loading card and a neutral pill, never Held or Reconnecting', /^Loading Eden/.test(arrival.card) && arrival.status === 'Loading…' && arrival.cls === 'loading' && arrival.reasons === 0 && !/Held|Reconnecting/.test(arrival.text));
@@ -113,7 +113,7 @@ try {
   const broken = await browser.newContext();
   await broken.addInitScript(() => { const get = HTMLCanvasElement.prototype.getContext; HTMLCanvasElement.prototype.getContext = function(kind, ...args) { return kind.startsWith('webgl') ? null : get.call(this,kind,...args); }; });
   page = await broken.newPage(); page.on('pageerror',e=>errors.push(e.message));
-  await page.goto(base + '/w/eden?rewind=1');
+  await page.goto(base + '/w/eden');
   await page.getByText('This browser could not start 3D graphics.', {exact:true}).waitFor();
   check('Graphics failure is stated plainly, not as a loading card', await page.locator('.viewer-arrival').count() === 0 && await page.locator('[data-viewer-status]').textContent() === 'View unavailable');
   check('Graphics startup failure remains visible with null drawn tick', await page.locator('.viewer-history').getAttribute('data-viewer-tick') === '');

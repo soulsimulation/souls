@@ -5337,12 +5337,13 @@ pub fn start<S: Storage + 'static>(
             acts
         },
         forming: Vec::new(),
-        // 0.135 C2: a load is carried as its kind's entry states.
-        engine: engine_parts.map(|(rules, kinds)| {
-            Engine::new(engine_header, rules, kinds, engine_scope)
-                .with_beats(beats)
-                .with_loads(&engine_entries)
-        }),
+        engine: engine_parts
+            // 0.135 C2: a load is carried as its kind's entry states.
+            .map(|(rules, kinds)| {
+                Engine::new(engine_header, rules, kinds, engine_scope)
+                    .with_beats(beats)
+                    .with_loads(&engine_entries)
+            }),
         engine_acts: Vec::new(),
         engine_done: Vec::new(),
         order_records,

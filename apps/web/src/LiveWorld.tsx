@@ -4,7 +4,7 @@ import {WorldContextViews} from './WorldContextViews.ts';
 import { whenAssetsSettled } from './gen-mesh/gltf-assets.ts';
 import {ALL_OPTIONAL_APPEARANCE_PROFILES,type OptionalAppearanceProfiles} from './optional-appearance-profiles-all.ts';
 import {historyTakePath,historyTakePage} from './WorldTakeTransport.ts';
-import { v2History } from './v2-engine/history.ts';
+import { playSpeed, v2History } from './v2-engine/history.ts';
 import { seekTick } from './v2-engine/moment-link.ts';
 import {WorldAuthoredBoundaries} from './WorldAuthoredBoundaries.ts';
 import {WorldTouchFree} from './touch/WorldTouchFree.ts';
@@ -808,7 +808,9 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       const p = past.current;
       if (p) {
         const end = p.chunks.at(-1)!;
-        if (p.playing) p.tick = Math.min(end.toTick, p.tick + step / dt); // replays run at the world's normal speed
+        // replays run at the world's normal speed, or as many times it as the viewer chose (K3, a moved world); a gap in
+        // what was recorded (a world stopped for a while) is crossed to the next chunk
+        if (p.playing) { p.tick = Math.min(end.toTick, p.tick + step / dt * playSpeed()); const n = p.chunks.find((c) => c.toTick > p.tick); if (n && n.fromTick > p.tick) p.tick = n.fromTick; }
         // A paused recent seek remains history. Playing history catches the actual
         // delayed live moment, not merely the oldest buffered chunk boundary.
         const liveHead = serverNow(s);
@@ -816,7 +818,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
           p.tick >= Math.max(liveList[0].fromTick, liveHead - liveDelayOf(s))) { goLive(); return; }
         if (p.playing && !p.extending && !p.ended && now > p.retryAt && p.tick > end.toTick - 20 / dt) {
           p.extending = true;
-          void fetchChunks(end.toTick, end.toTick + 60 / dt, 60, abort.signal).then((got) => {
+          void fetchChunks(end.toTick, end.toTick + 60 * playSpeed() / dt, 60 * playSpeed(), abort.signal).then((got) => {
             if (past.current !== p) return;
             const before = p.chunks.at(-1)!.toTick;
             p.chunks = mergeWindow(p.chunks, got, p.tick);

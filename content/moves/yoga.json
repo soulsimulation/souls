@@ -1,0 +1,10 @@
+{
+  "format": "souls-move/1",
+  "move": "yoga",
+  "claims": ["locomotion", "manipulator"],
+  "blocks": ["locomotion", "manipulator"],
+  "cancels_on": ["claim_taken"],
+  "effector": "hand",
+  "reach_mm": 600,
+  "phases": { "start_up_us": 800000, "recovery_us": 4200000 }
+}
