@@ -5,6 +5,10 @@ import { sampleTake } from '../../../../mars/viewer/engine/take/replay.ts';
 import type { Take } from '../../../../mars/viewer/engine/take/types.ts';
 import { V2Bridge } from './bridge.ts';
 import { TICK_US, TICKS } from './takes.ts';
+import { defaultLookOf, entityWithLook } from './take-bodies.ts';
+
+/** The body's take entity: its id with the letter that gives it the v2 page's default look (take-bodies.ts). */
+const E = entityWithLook('v2_b_7', defaultLookOf('b.7'));
 
 const Q = 2 ** 30, T0 = 1_000_000_000_000; // world µs, a whole number of chunks
 const node = (id: string, parent: string | null, pos: [number, number, number], extra: object = {}) => ({ id, kind: 'eden:floor@1', parent, slot: null, pos, rot: [Q, 0, 0, 0] as [number, number, number, number], at: null, ...extra });
@@ -22,9 +26,9 @@ test('a body in a turned building is drawn in the world frame, with the page\'s 
   b.receive({ t: 'snapshot', s: { nodes: [world, building, floor, body], removed: [] } });
   // walks 2 m along the floor's +x over 2 s, sampled every 0.5 s; the parts run 6 s on so whole chunks are made
   for (let n = 0; n < 12; n++) b.receive(part(n, n <= 4 ? [['b.7', 'w.2', null, T0 + n * 500_000, 1_000_000 + n * 500_000, 0, 0]] : []));
-  assert.deepEqual([...b.view.souls.values()], [{ id: 's_abc-7', entityId: 'v2_b_7', name: 'Ada' }]);
+  assert.deepEqual([...b.view.souls.values()], [{ id: 's_abc-7', entityId: E, name: 'Ada' }]);
   const take = b.view.takes.chunks.find((c) => c.fromTick === T0 / TICK_US)!.take as unknown as Take;
-  const at = (s: number) => sampleTake(take, s).entities.v2_b_7;
+  const at = (s: number) => sampleTake(take, s).entities[E];
   // a quarter turn about +y takes the floor's +x to the world's -z: (100 + 0, 3, -1) m at the start
   assert.deepEqual(at(0).p.map((x) => +x.toFixed(3)), [100, 3, -1]);
   assert.deepEqual(at(1).p.map((x) => +x.toFixed(3)), [100, 3, -2]);
@@ -44,8 +48,8 @@ test('no chunk until the world is past it by the v2 page\'s lag; a body the copy
   b.receive(part(6, [], { removed: ['b.7'] })); // into a frame that is not public: the worker says it is gone
   for (let n = 7; n < 16; n++) b.receive(part(n, []));
   const chunks = b.view.takes.chunks, hidden = chunks.filter((c) => c.fromTick * TICK_US >= T0 + 6 * 500_000);
-  assert.ok(chunks.some((c) => 'v2_b_7' in (c.take as { tracks: object }).tracks), 'drawn before it went');
-  assert.ok(hidden.length && hidden.every((c) => !('v2_b_7' in (c.take as { tracks: object }).tracks)), 'not drawn after');
+  assert.ok(chunks.some((c) => E in (c.take as { tracks: object }).tracks), 'drawn before it went');
+  assert.ok(hidden.length && hidden.every((c) => !(E in (c.take as { tracks: object }).tracks)), 'not drawn after');
   assert.equal(b.view.takes.serverTick, chunks.at(-1)!.toTick);
   assert.equal((chunks.at(-1)!.toTick - chunks[0].fromTick) % TICKS, 0);
 });

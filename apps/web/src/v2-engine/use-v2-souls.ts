@@ -53,6 +53,13 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
       bridge.start(stream, () => world.watch(makeReader()));
       // read-only, for checks and proof: what the stream gave (parts played, newest time, the reader's last error)
       (window as unknown as { __soulsV2?: unknown }).__soulsV2 = bridge.view;
+      // The world's body catalogue, where its config (or `?bodies=`, as on the v2 page) names the v2 body assets: each
+      // body is then drawn in the look the v2 world gives it (take-bodies.ts); without it, body kinds stay default people.
+      const { bodiesUrl, catalogueOf } = await import('./take-bodies.ts');
+      const cfg = (window as unknown as { __simConfig?: { v2Bodies?: unknown } }).__simConfig?.v2Bodies;
+      const url = bodiesUrl(new URLSearchParams(location.search).get('bodies') ?? cfg);
+      const rows = url ? catalogueOf(await fetch(url).then((r) => (r.ok ? r.json() : null)).catch(() => null)) : null;
+      if (rows && !stopped) bridge.looks(rows);
      } catch (e) { failed = true; console.warn('v2 stream:', e); }
     })();
     const get = (path: string) => fetch(apiPath(path)).then((r) => (r.ok ? r.json() : null)).catch(() => null);
@@ -61,6 +68,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
       if (bridge) {
         const v = bridge.view;
         st.takes = v.takes;
+        st.edge = v.speech; // what the Souls said aloud (take-speech.ts): the speech layer and dialogue dock read it as public
         conn.replica.tick = v.takes.serverTick;
         // the replica's entities as the old socket keeps them: who is in the world now (search and follow read them)
         const newest = v.takes.chunks.at(-1)?.take as { finalState?: { entities?: Record<string, unknown> } } | undefined;
