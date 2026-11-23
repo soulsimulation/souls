@@ -204,8 +204,9 @@ jobs:
           (cd "$PER_RUN" && grep " $tgz\$" caddy-checksums.txt | sha512sum -c -) && tar -xzf "$PER_RUN/$tgz" -C "$PER_RUN/bin" caddy
           { echo "V2_BIN=$PWD/target/release"; echo "V2_REPLICA_PKG=$PWD/target/wasm-load/pkg"; echo "SOULS_REPLICA_PKG=$PWD/target/wasm-load/pkg"; echo "V2_WEB=$PWD/web/dist"; echo "CADDY=$PER_RUN/bin/caddy"; } >> "$GITHUB_ENV"
           # as the check-0132 job: ci.yml's group check keeps its cargo cache in the shared home from other runners at the
-          # same time, not this job's (its cargo is in the per-run directory)
-          echo "STRAY_EXCLUDE=$STRAY_EXCLUDE,$HOME/.cache/souls-group-check" >> "$GITHUB_ENV"
+          # same time, not this job's (its cargo is in the per-run directory); and the launcher's page shell takes the
+          # machine-wide Chrome lease (tools/god-skill/lib/chrome-lease.mjs, /tmp/eden-chrome-lease.<slot>), shared by design
+          echo "STRAY_EXCLUDE=$STRAY_EXCLUDE,$HOME/.cache/souls-group-check,/tmp/eden-chrome-lease*" >> "$GITHUB_ENV"
       # v2-bench: the channel the ref's v2/rust-toolchain.toml pins, minimal profile, in the per-run directory (no sudo, no
       # shared home); RUSTUP_TOOLCHAIN skips the file's extra components and WASM target, which a native bench never uses.
       - name: Rust toolchain
