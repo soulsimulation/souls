@@ -814,12 +814,18 @@ async function ageAfter({ now = false } = {}) {
  *  its family's forms (E21, #2791). */
 function heldKinds() {
   // Kept while the copy's roots and the folder's files are the same (G-late): a form act read them all each time.
-  const dir = join(home, 'kinds');
-  return kindsKept.get([copy.roots(), folderStamp(dir)], () => {
+  const dir = join(home, 'kinds'), stamp = folderStamp(dir);
+  return kindsKept.get([copy.roots(), stamp], () => {
     const me = [...rowsOf(copy).values()].find((r) => r.id === ME || r.soul === ME);
-    return kindsHeld(dir, copy, me?.kind);
+    const kinds = kindsHeld(dir, copy, me?.kind);
+    // The same entries (the folder's files, the body's kind, and the creator kinds by their full names, which name their
+    // bytes) give the same object back, so the state's memo of records holds across a changed copy.
+    const sig = `${stamp}\n${me?.kind}\n${Object.keys(kinds).sort().join(' ')}`;
+    if (sig !== kindsSame.sig) Object.assign(kindsSame, { sig, kinds });
+    return kindsSame.kinds;
   });
 }
+const kindsSame = { sig: null, kinds: null };
 const kindsKept = keptOne(), stateKept = keptOne(), stateMemo = {};
 /** The rules' state of the copy for this Soul (`stateOf`), kept while the copy's roots and the kinds are the same; when
  *  a sync changed the copy, only the records it changed are read again (`stateMemo`). */
