@@ -67,8 +67,9 @@ struct Spot {
     height: i64,
 }
 
-/// The rule's reading of a world's kinds. Empty (the default) for a world without joining kinds: then no change is
-/// checked.
+/// The rule's reading of a world's kinds, by their names without their hashes (a running world's kinds are pinned by
+/// its facts, its rule read from its entries: the same kinds, other hashes; B20 #3356). Empty (the default) for a world
+/// without joining kinds: then no change is checked.
 #[derive(Debug, Default)]
 pub struct Structure {
     roles: BTreeMap<String, Role>,
@@ -116,6 +117,53 @@ fn height_of(text: &str) -> Option<(String, i64)> {
 }
 
 impl Structure {
+    /// Reads a world's entries (`souls-entry/1`, by name, as a running world's rules carry them: B20, #3356): each
+    /// turned into its kind (K3's `entry_to_kind`, its forms and timed fields left out, as `worldd` loads them for its
+    /// forms) and read as [`Structure::new`] reads kinds. Entries with no joining kind give the empty rule.
+    pub fn from_entries(entries: &replica::rules::json::Value) -> Structure {
+        use replica::rules::json::Value as J;
+        let texts: Vec<(String, String)> = entries
+            .obj()
+            .unwrap_or(&[])
+            .iter()
+            .filter_map(|(name, entry)| {
+                let mut e = entry.clone();
+                if let J::Obj(o) = &mut e {
+                    o.retain(|(k, _)| k != "forms");
+                    if let Some((_, J::Obj(state))) = o.iter_mut().find(|(k, _)| k == "state") {
+                        state.retain(|(_, f)| f.get("type").and_then(J::str) != Some("timed"));
+                    }
+                }
+                let text = replica::kinds::entry::entry_to_kind(&e.to_json()).ok()?;
+                Some((name.clone(), text))
+            })
+            .collect();
+        let sources: Vec<(&str, &str)> = texts
+            .iter()
+            .map(|(n, t)| (n.as_str(), t.as_str()))
+            .collect();
+        let mut kinds = Kinds::default();
+        kinds.load(&sources);
+        Structure::new(&kinds, &sources)
+    }
+
+    /// The kinds the rule read, by name: its bays, its standing parts and its bearing parts (a running world prints
+    /// them as it starts, B20 #3356).
+    pub fn kinds(&self) -> (Vec<&str>, Vec<&str>, Vec<&str>) {
+        let of = |standing: bool| {
+            self.roles
+                .iter()
+                .filter(|(_, r)| matches!(r, Role::Standing { .. }) == standing)
+                .map(|(n, _)| n.as_str())
+                .collect()
+        };
+        (
+            self.bays.keys().map(String::as_str).collect(),
+            of(true),
+            of(false),
+        )
+    }
+
     /// Reads `kinds`, with `sources` (the texts they were loaded from) for their heights.
     pub fn new(kinds: &Kinds, sources: &[(&str, &str)]) -> Structure {
         let heights: BTreeMap<String, i64> =
@@ -152,7 +200,7 @@ impl Structure {
                 s.joints.insert(format!("{ns}:{}", l.name.as_str()));
                 let ends = l.most.unwrap_or(2) as usize;
                 s.roles.insert(
-                    k.name.as_str().to_owned(),
+                    plain(k.name.as_str()).to_owned(),
                     Role::Bearing {
                         crew: crew(k.name.as_str()).unwrap_or(1),
                         ends,
@@ -161,7 +209,7 @@ impl Structure {
                 for o in standing {
                     let h = heights.get(plain(o.name.as_str())).copied().unwrap_or(0);
                     s.roles.insert(
-                        o.name.as_str().to_owned(),
+                        plain(o.name.as_str()).to_owned(),
                         Role::Standing {
                             crew: crew(o.name.as_str()).unwrap_or(1),
                             levels: if h > ONE_LEVEL_MOST_MM { 2 } else { 1 },
@@ -197,7 +245,7 @@ impl Structure {
                     (*n, Spot { column, height: y })
                 })
                 .collect();
-            s.bays.insert(k.name.as_str().to_owned(), spots);
+            s.bays.insert(plain(k.name.as_str()).to_owned(), spots);
         }
         s
     }
@@ -209,11 +257,11 @@ impl Structure {
 
     fn kind_of(&self, tree: &Tree, id: Id, made: &BTreeMap<Id, (Id, String)>) -> Option<String> {
         if let Some((_, k)) = made.get(&id) {
-            return Some(k.clone());
+            return Some(plain(k).to_owned());
         }
         tree.handle(id)
             .and_then(|h| tree.node(h))
-            .map(|n| n.kind().as_str().to_owned())
+            .map(|n| plain(n.kind().as_str()).to_owned())
     }
 
     fn parent_of(tree: &Tree, id: Id, made: &BTreeMap<Id, (Id, String)>) -> Option<Id> {
@@ -328,7 +376,7 @@ impl Structure {
         };
         for c in tree.children(h).unwrap_or(&[]).to_vec() {
             let Some(n) = tree.node(c) else { continue };
-            if let Some(role) = self.roles.get(n.kind().as_str()) {
+            if let Some(role) = self.roles.get(plain(n.kind().as_str())) {
                 b.parts.insert(n.id(), (*role, n.slot()));
             }
         }
@@ -391,7 +439,7 @@ impl Structure {
                 if *node == bay {
                     b.gone = false;
                 } else if pose.frame.node == bay {
-                    if let Some(role) = self.roles.get(kind.as_str()) {
+                    if let Some(role) = self.roles.get(plain(kind.as_str())) {
                         b.parts.insert(*node, (*role, pose.frame.slot));
                     }
                 } else if b.parts.contains_key(&pose.frame.node)
@@ -415,7 +463,7 @@ impl Structure {
                     let kind = tree
                         .handle(*node)
                         .and_then(|h| tree.node(h))
-                        .map(|n| n.kind().as_str().to_owned());
+                        .map(|n| plain(n.kind().as_str()).to_owned());
                     if let Some(role) = kind.and_then(|k| self.roles.get(&k).copied()) {
                         let fresh = !b.parts.contains_key(node);
                         b.parts.insert(*node, (role, pose.frame.slot));

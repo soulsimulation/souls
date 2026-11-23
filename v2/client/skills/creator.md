@@ -44,6 +44,8 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 | Verb | What it does |
 | --- | --- |
 | `place <kind> --in <id> [--at x,y,z] [--slot n] [--field n=v]` | a new thing in `<id>`; the answer's `names["1"]` is its id |
+| `place <kind> --path '[[x,z],...]' [--width m]` | a road, footpath, hedge or wall along a line (metres), on the open ground unless `--in` |
+| `place <kind> --area '[[x,z],...]' \| --rect cx,cz,w,d \| --circle cx,cz,r` | a lawn, pitch, bed or named area (`eden:place`, with `--field 15=<its kind>`) over an area |
 | `move <id> --at x,y,z [--slot n]` | to another spot in the same parent |
 | `move <id> [<id> ...] --by dx,dz [--yaw r]` | each that far over (metres), what is in it riding along; on the open ground it keeps its height over the ground |
 | `clone <id> [--at x,z] [--count n] [--step dx,dz] [--yaw r]` | copies of it and everything in it (its doorways and stairs too), the first one step away unless `--at` (metres); with `--claim`, each of its edits goes under that claim |
@@ -146,6 +148,14 @@ the root, which `describe` shows), and from then on you place it like any other 
   `link` operation), so Souls walk in through the doors and up the stairs. The answer counts the edits, what was
   placed, set and linked, and anything not brought over. A refusal stops it and says how far it got. When the file's
   ground is larger than the world's, its tiles are set first, so the world grows before anything is placed on it.
+
+## Furnishing
+
+- `node souls-god.mjs furnish <building or room id> [--style <s>]` furnishes a building's rooms (or one room) with
+  today's recipes: the building's own style (townhouse, cottage, shop and 36 more), or `--style`. Each piece goes in
+  the room's free space, out of doorways and off the stairs; a piece that does not fit, or whose kind the world does
+  not pin, is dropped and named in the answer. A piece already there (by its recipe name) is left as it is.
+- `check furnish <id>` shows what it would place, and sends nothing.
 
 ## Growing the world
 
