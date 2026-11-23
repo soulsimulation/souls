@@ -460,7 +460,7 @@ fn answer_in(frame: &[u8]) -> (u64, Result<Vec<u64>, String>) {
 }
 
 /// A scripted client on the world's socket, one per Soul.
-struct Client(UnixStream, Id, u64);
+struct Client(UnixStream, Id, u64, Vec<u8>);
 
 impl Client {
     fn send(&mut self, verb: &str, target: Option<Id>, parameters: BTreeMap<u64, Value>) {
@@ -486,10 +486,16 @@ impl Client {
             reflex: false,
         };
         let bytes = encode(&i.to_value()).unwrap();
+        self.raw(&bytes);
+        self.3 = bytes;
+    }
+
+    /// Sends `bytes` as they are: an intent sent again, as the gateway sends the unanswered ones on a reconnect.
+    fn raw(&mut self, bytes: &[u8]) {
         self.0
             .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
             .unwrap();
-        self.0.write_all(&bytes).unwrap();
+        self.0.write_all(bytes).unwrap();
     }
 
     /// The next answer: a receipt's entries, or a refusal's reason. A progress answer (C20, sent as a run starts) is
@@ -541,7 +547,11 @@ struct Run {
 }
 
 fn serve(tag: &str) -> (Run, Client, Client) {
-    let store = Mem::with(Vec::new());
+    serve_on(tag, Mem::with(Vec::new()))
+}
+
+/// [`serve`] on the log `store` holds: a world started again after a stop reads it back.
+fn serve_on(tag: &str, store: Mem) -> (Run, Client, Client) {
     let mut cfg = Config::new(LINEAGE, 1);
     cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
     cfg.engine = Some((
@@ -569,7 +579,7 @@ fn serve(tag: &str) -> (Run, Client, Client) {
     let client = |soul| {
         let s = UnixStream::connect(&path).unwrap();
         s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
-        Client(s, soul, 0)
+        Client(s, soul, 0, Vec::new())
     };
     let (a, b) = (client(w1()), client(w2()));
     (Run { world, store, path }, a, b)
@@ -1460,7 +1470,13 @@ fn n1_a_still_body_in_the_only_way_is_stepped_aside_and_the_walker_arrives() {
         "where the world put it"
     );
     assert!(matches!(answer, (1, Ok(_))), "the walk arrives: {answer:?}");
-    assert_eq!(at(&r, w1()), east(), "the walker arrived");
+    // Arrived: within the walk's reach of its spot (`skills::route::AT_SPOT`); where in it depends on its last steps.
+    let (p, e) = (at(&r, w1()), east());
+    let off = (i128::from(p.x - e.x).pow(2) + i128::from(p.z - e.z).pow(2)).isqrt();
+    assert!(
+        off <= i128::from(skills::route::AT_SPOT),
+        "the walker arrived: {off} µm off"
+    );
     run.world.stop();
 }
 
@@ -1615,4 +1631,78 @@ fn n1_a_body_found_off_the_ground_walks_out() {
 
 fn named(e: &Effect, name: &str) -> bool {
     e.events.iter().flatten().any(|v| v.name.as_str() == name)
+}
+
+/// The form runs' endings the log holds, by name (`souls:form-ended`'s field 3).
+fn endings(run: &Run) -> Vec<String> {
+    let log = run.store.0.lock().unwrap().bytes.clone();
+    let mut out = Vec::new();
+    for rec in recover(&log).unwrap().records {
+        if sim::recorder::is_input(&rec) {
+            continue;
+        }
+        for e in Part::read(&rec).unwrap().effects {
+            for ev in e.events.iter().flatten() {
+                if ev.name.as_str() == "souls:form-ended"
+                    && let Some(Value::Bytes(how)) = ev.fields.get(&3)
+                {
+                    out.push(String::from_utf8_lossy(how).into_owned());
+                }
+            }
+        }
+    }
+    out
+}
+
+/// N2 (0.133): a world stopped with a form's run open (a take, walking to its thing) and a gateway walk under way,
+/// then started again from its log. The open run is ended `restart` in the log in the first tick; each intent, sent
+/// again as the gateway sends the unanswered ones, starts afresh and ends with its receipt, well before its deadline.
+/// (This harness's bodies start where it built them; a served world stands each where the log last had it.)
+#[test]
+// A real world on the real clock: an answer's time is real time.
+#[allow(clippy::disallowed_methods)]
+fn n2_a_run_open_at_a_restart_ends_by_name_and_its_intent_starts_again() {
+    let store = Mem::with(Vec::new());
+    let (run, mut a, mut b) = serve_on("n2a", store.clone());
+    b.send("test:walk", Some(ground()), point(south(12_000_000)));
+    b.started();
+    std::thread::sleep(Duration::from_millis(1500));
+    a.send("test:take", Some(vessel()), BTreeMap::new());
+    a.started();
+    let (take, walk) = (a.3.clone(), b.3.clone());
+    assert_ne!(at(&run.replay(), w2()), at2(), "the walker was under way");
+    run.world.stop();
+
+    let (run, mut a, mut b) = serve_on("n2b", store);
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        endings(&run),
+        ["souls:restart"],
+        "the take's open run ended by name in the first tick"
+    );
+    PROGRESSED.with(|p| p.borrow_mut().clear());
+    let t0 = std::time::Instant::now();
+    a.raw(&take);
+    b.raw(&walk);
+    assert!(
+        matches!(a.answer_of(), (1, Ok(_))),
+        "the take starts again and lands"
+    );
+    assert!(
+        matches!(b.answer_of(), (1, Ok(_))),
+        "the walk is planned again from where it stood and arrives"
+    );
+    assert!(
+        t0.elapsed() < Duration::from_secs(15),
+        "no intent waits to its deadline: {:?}",
+        t0.elapsed()
+    );
+    let r = run.replay();
+    assert_eq!(parent(&r, vessel()).0, Some(w1()), "the vessel in the hand");
+    let off = (at(&r, w2()).z - south(12_000_000).z).abs();
+    assert!(
+        off <= 100_000,
+        "at the walk's goal, within 10 cm: {off} µm off"
+    );
+    run.stop();
 }

@@ -7,7 +7,7 @@
 //! - **Cancels.** `claim_taken` is cancelled by a new claim on any class it claims; `out_of_reach` is B2's own check at
 //!   contact, for every move.
 //! - **Phases** are its `phases`, in order, each named for its key without `_us` (`start_up_us` is `souls:start-up`):
-//!   contact is the end of the first.
+//!   contact is the end of the first. A last `hold_us` holds: it lasts until the move is released.
 //! - **Effector.** A `hand` reaches with the hand it holds; a `held_point` with the hand too: the held thing's tip
 //!   lengthens it (B4), and the step's `at` names the point it reaches.
 //! - **Contact** is the move's own `contact` when it names one (a handshake reaches the other body's `hand_right`, read
@@ -29,7 +29,7 @@ const OWN: [&str; 3] = [
 ];
 
 /// Every file of `content/moves`, by name. A test holds this list to the folder (`tests/content_moves.rs`).
-pub const CONTENT: [(&str, &str); 33] = [
+pub const CONTENT: [(&str, &str); 43] = [
     ("bow", include_str!("../../../../content/moves/bow.json")),
     (
         "cheer",
@@ -50,6 +50,10 @@ pub const CONTENT: [(&str, &str); 33] = [
     ),
     ("fill", include_str!("../../../../content/moves/fill.json")),
     (
+        "fist_bump",
+        include_str!("../../../../content/moves/fist_bump.json"),
+    ),
+    (
         "handshake",
         include_str!("../../../../content/moves/handshake.json"),
     ),
@@ -57,11 +61,23 @@ pub const CONTENT: [(&str, &str); 33] = [
         "high_five",
         include_str!("../../../../content/moves/high_five.json"),
     ),
+    (
+        "hold_hand",
+        include_str!("../../../../content/moves/hold_hand.json"),
+    ),
     ("hug", include_str!("../../../../content/moves/hug.json")),
     ("jump", include_str!("../../../../content/moves/jump.json")),
     (
+        "jumping_jacks",
+        include_str!("../../../../content/moves/jumping_jacks.json"),
+    ),
+    (
         "knock",
         include_str!("../../../../content/moves/knock.json"),
+    ),
+    (
+        "listen",
+        include_str!("../../../../content/moves/listen.json"),
     ),
     ("lock", include_str!("../../../../content/moves/lock.json")),
     ("look", include_str!("../../../../content/moves/look.json")),
@@ -81,12 +97,21 @@ pub const CONTENT: [(&str, &str); 33] = [
     ),
     ("pump", include_str!("../../../../content/moves/pump.json")),
     (
+        "push_ups",
+        include_str!("../../../../content/moves/push_ups.json"),
+    ),
+    (
         "shake_head",
         include_str!("../../../../content/moves/shake_head.json"),
     ),
     (
         "shrug",
         include_str!("../../../../content/moves/shrug.json"),
+    ),
+    ("sing", include_str!("../../../../content/moves/sing.json")),
+    (
+        "sit_ups",
+        include_str!("../../../../content/moves/sit_ups.json"),
     ),
     (
         "slide",
@@ -95,6 +120,10 @@ pub const CONTENT: [(&str, &str); 33] = [
     (
         "slump",
         include_str!("../../../../content/moves/slump.json"),
+    ),
+    (
+        "stargaze",
+        include_str!("../../../../content/moves/stargaze.json"),
     ),
     (
         "steer",
@@ -117,12 +146,17 @@ pub const CONTENT: [(&str, &str); 33] = [
         include_str!("../../../../content/moves/swing.json"),
     ),
     (
+        "tell_story",
+        include_str!("../../../../content/moves/tell_story.json"),
+    ),
+    (
         "touch",
         include_str!("../../../../content/moves/touch.json"),
     ),
     ("tug", include_str!("../../../../content/moves/tug.json")),
     ("turn", include_str!("../../../../content/moves/turn.json")),
     ("wave", include_str!("../../../../content/moves/wave.json")),
+    ("yoga", include_str!("../../../../content/moves/yoga.json")),
 ];
 
 fn refuse<T>(detail: impl Into<String>) -> R<T> {
@@ -189,6 +223,14 @@ pub fn from_content(text: &str) -> R<Move> {
         phases.push(Phase {
             name: name(&format!("souls:{}", p.replace('_', "-")))?,
             length: i64::try_from(*us).or_else(|_| refuse(format!("{mv}: phase {k}")))?,
+            // `hold_us`, the last phase only: it lasts until the move is released (holding hands).
+            held: p == "hold",
+        });
+    }
+    if phases.iter().rev().skip(1).any(|p| p.held) {
+        return Err(Refusal {
+            name: "move-held-not-last",
+            detail: format!("{mv}: hold_us is the last phase"),
         });
     }
     let effector = match m.get("effector").and_then(Json::str) {

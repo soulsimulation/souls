@@ -34,7 +34,7 @@ async function get(url: URL): Promise<Uint8Array | null> {
 
 function readPtr(bytes: Uint8Array): StreamPointer {
   const p = JSON.parse(readPointer(bytes));
-  return { newest: p.newest, newestTo: p.newestTo ?? null, period: p.period, anchorWorld: p.anchorWorld, anchorWallMs: p.anchorWallMs, quietUntil: p.quietUntil ?? null, header: p.header, ...(p.baseline ? { baseline: p.baseline, generation: p.generation } : {}), ...(p.legacyHash ? { legacyVersion: p.legacyVersion, legacyNext: p.legacyNext, legacyHash: p.legacyHash } : {}), ...(p.handoffFrom ? { handoffFrom: p.handoffFrom } : {}) };
+  return { newest: p.newest, newestTo: p.newestTo ?? null, period: p.period, anchorWorld: p.anchorWorld, anchorWallMs: p.anchorWallMs, quietUntil: p.quietUntil ?? null, header: p.header, ...(p.baseline ? { baseline: p.baseline, generation: p.generation } : {}), ...(p.legacyHash ? { legacyVersion: p.legacyVersion, legacyNext: p.legacyNext, legacyHash: p.legacyHash } : {}), ...(p.handoffFrom ? { handoffFrom: p.handoffFrom } : {}), ...(p.asleep ? { asleep: true, stillUntil: p.stillUntil ?? null } : {}) };
 }
 
 /** The reference in a `{21: id}` value, as the page keys it, or null. */
@@ -94,12 +94,18 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
 }
 
 /** B2's move record (`replica::moves::MoveRecord::to_value`, its texts as bytes): `{1: body, 2: move, 5: target, 7: start,
- * 8: [phase end, ...]}`. */
-function moveRec(m: Map<number, unknown>): MoveRec {
+ * 8: [phase end, ...], 9: {1: at, 2: how} once ended}`; `run` is the entry's field 1, a form's run (a number) or an
+ * activity (an id). */
+function moveRec(m: Map<number, unknown>, run?: unknown): MoveRec {
   const ends = (m.get(8) as unknown[]).map(num), raw = m.get(2), start = num(m.get(7));
   const name = raw instanceof Uint8Array ? new TextDecoder().decode(raw) : raw;
   if (typeof name !== 'string' || !ends.length || !Number.isFinite(start)) throw new Error('not a move record');
-  return { body: key(m.get(1) as IdValue), name, start, ends, target: m.has(5) ? key(m.get(5) as IdValue) : null };
+  const rec: MoveRec = { body: key(m.get(1) as IdValue), name, start, ends, target: m.has(5) ? key(m.get(5) as IdValue) : null };
+  if (typeof run === 'number' || typeof run === 'bigint') rec.run = String(run);
+  else if (Array.isArray(run)) rec.run = key(run as IdValue);
+  const e = m.get(9);
+  if (e instanceof Map) rec.ended = { at: num(e.get(1)), how: e.get(2) instanceof Uint8Array ? new TextDecoder().decode(e.get(2) as Uint8Array) : String(e.get(2)) };
+  return rec;
 }
 
 type StreamPointer = Pointer & { header: string; baseline?: string; generation?: string; legacyVersion?: number; legacyNext?: number; legacyHash?: string; handoffFrom?: string };
@@ -250,7 +256,7 @@ async function run(stream: URL) {
         const f = e.get(2) as Map<number, unknown>;
         try {
           if (e.get(1) === RUN_ENDED) runEnds.push({ body: key(f.get(2) as IdValue), at: num(e.get(4)), how: text.decode(f.get(3) as Uint8Array) });
-          else moves.push(moveRec(f.get(3) as Map<number, unknown>));
+          else moves.push(moveRec(f.get(3) as Map<number, unknown>, f.get(1)));
         } catch { /* a record the page cannot read is not drawn */ }
         continue;
       }

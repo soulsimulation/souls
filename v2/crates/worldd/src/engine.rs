@@ -7,7 +7,7 @@
 //!   `souls:` verb is refused `order-unknown` before it reaches the world.
 //! - **Parameters.** The target is the place (propose, offer), the activity (join, start, leave, lift, set down) or the
 //!   offer (accept, decline). Propose: 1 the activity's kind. Offer: 1 the kind, 2 the asker's role, 3 the bodies
-//!   asked (ids). Join: 1 the role, 2 the revision (default 1). Lift: 1 the thing carried, 2 where its front goes (optional, `[x, y, z]` µm: the way there is swept first, 0.135 C2). Its two carriers are the
+//!   asked (ids), 4 for a give the thing the asker holds (0.133 R4: accepting hands it over, `sim::activity::offer`). Join: 1 the role, 2 the revision (default 1). Lift: 1 the thing carried, 2 where its front goes (optional, `[x, y, z]` µm: the way there is swept first, 0.135 C2). Its two carriers are the
 //!   activity's first two members, the first in front. Only a load is lifted, a kind whose entry states its grips
 //!   (`lift-not-a-load`), and only in a carry, an activity whose kind has a slot 1 for a thing (`not-a-carry`, 0.135
 //!   C4). `carrier:steer`, `carrier:stop` and `carrier:land` steer the
@@ -32,6 +32,7 @@ use replica::activity::ActivityKind;
 use replica::effects::{Actor, Cause, Effect, Header, Refusal, read_id};
 use replica::encode::{Name, Value};
 use replica::ids::{Id, Minter, Scope};
+use replica::moves::{Effector, Move};
 use replica::pose::Vec3;
 use replica::rules::json::Value as Json;
 use replica::time::Micros;
@@ -41,7 +42,7 @@ use replica::world_model::show;
 use sim::activity::carry::{Carry, Fixed, Load};
 use sim::activity::{Activities, Ask};
 use sim::controller::Controller;
-use sim::moves::Moves;
+use sim::moves::{Moves, Reach};
 use sim::slots::Slots;
 use sim::timers::DueList;
 
@@ -118,6 +119,8 @@ pub struct Engine {
     out: Vec<Effect>,
     /// The boats steered off their own loops (#3603).
     steered: BTreeSet<Id>,
+    /// The moves an activity's roles may name (0.134 T1): content's, [`crate::moves::library`].
+    library: Vec<Move>,
     /// The loads the world's entries state, by plain kind (0.135 C2, [`Engine::with_loads`]).
     loads: BTreeMap<String, Load>,
     /// Loads found riding a carry at a restart, set down at the first tick (0.135 C3): (activity, load).
@@ -156,6 +159,36 @@ fn break_off(
         None => (Actor::World, Cause::World),
     };
     activities.carry_set_down(tree, carry.activity, carry.board, why, (now, actor, cause))
+}
+
+/// Where bodies stand, read from the controller before a move needs them (0.134 T1): a move one member of an activity
+/// aims at another reaches across x and z from feet to feet, on one floor; on two floors it reaches nothing.
+struct Feet(BTreeMap<Id, (Id, [i64; 2])>);
+
+impl Feet {
+    fn of(c: &Controller, bodies: impl IntoIterator<Item = Id>) -> Feet {
+        Feet(
+            bodies
+                .into_iter()
+                .filter_map(|b| c.body(b).map(|m| (b, sim::index::place_of(m))))
+                .collect(),
+        )
+    }
+}
+
+impl Reach for Feet {
+    fn distance(
+        &self,
+        body: Id,
+        _: &Effector,
+        _: Option<&Name>,
+        target: Id,
+        _: &Name,
+    ) -> Option<i64> {
+        let ((f, a), (g, b)) = (self.0.get(&body)?, self.0.get(&target)?);
+        let (dx, dz) = (i128::from(a[0] - b[0]), i128::from(a[1] - b[1]));
+        (f == g).then(|| i64::try_from((dx * dx + dz * dz).isqrt()).unwrap_or(i64::MAX))
+    }
 }
 
 /// A point `[x, y, z]` µm, parameter `k`.
@@ -254,6 +287,32 @@ impl Engine {
             steered: BTreeSet::new(),
             loads: BTreeMap::new(),
             riding: Vec::new(),
+            library: crate::moves::library().unwrap_or_else(|r| {
+                eprintln!("worldd: no moves for activities: {r}");
+                Vec::new()
+            }),
+        }
+    }
+
+    /// The roles' moves of the activities just started, aimed by each member at the other (0.134 T1). A refused one
+    /// is left out, and the member plays its role without it.
+    fn begin_moves(&mut self, tree: &mut Tree, c: &mut Controller, now: Micros) {
+        let bodies = self.activities.beginning();
+        if bodies.is_empty() {
+            return;
+        }
+        let feet = Feet::of(c, bodies);
+        for (body, r) in self.activities.begin_moves(
+            tree,
+            c,
+            &mut self.moves,
+            &mut self.due,
+            &mut self.mint,
+            &self.library,
+            &feet,
+            now,
+        ) {
+            eprintln!("worldd: {}'s move was not aimed: {r}", show(body));
         }
     }
 
@@ -330,6 +389,14 @@ impl Engine {
                     _ => BTreeSet::new(),
                 };
                 let place = target("offer-needs-a-place")?;
+                // A give (0.133 R4): 4 the thing the asker holds and hands over when the offer is accepted.
+                let given = match a.params.get(&4) {
+                    None => None,
+                    Some(v) => Some(read_id(v).map_err(|_| Refusal {
+                        name: "give-needs-a-thing",
+                        detail: "parameter 4 is the thing given, an id".into(),
+                    })?),
+                };
                 e.offer(
                     &mut tree,
                     &mut self.mint,
@@ -340,6 +407,7 @@ impl Engine {
                     &role,
                     place,
                     asked,
+                    given,
                 )?;
             }
             Verb::Join => {
@@ -361,6 +429,30 @@ impl Engine {
             }
             Verb::Accept => {
                 let offer = target("accept-needs-an-offer")?;
+                // 0.134 T1: a touch starts only where its moves reach; nothing walks the two to their places yet.
+                if let Some((kind, asker)) = e.offered(offer) {
+                    let feet = Feet::of(c, [asker, a.body]);
+                    for mv in kind.roles.iter().filter_map(|r| r.mv.as_ref()) {
+                        let Some(m) = self.library.iter().find(|m| m.name == *mv) else {
+                            continue;
+                        };
+                        let held = Effector::Held;
+                        match feet.distance(asker, &held, None, a.body, &m.contact) {
+                            Some(d) if d <= m.reach => {}
+                            d => {
+                                return Err(refusal(
+                                    "together.too-far",
+                                    format!(
+                                        "{}: {} µm apart, it reaches {} µm: stand closer, facing each other",
+                                        mv.as_str(),
+                                        d.map_or("not on one floor".into(), |d| d.to_string()),
+                                        m.reach
+                                    ),
+                                ));
+                            }
+                        }
+                    }
+                }
                 e.accept(
                     &mut tree,
                     &mut self.mint,
@@ -395,7 +487,7 @@ impl Engine {
                 e.leave(
                     &mut tree,
                     c,
-                    &self.moves,
+                    &mut self.moves,
                     &mut self.due,
                     &mut self.mint,
                     ask,
@@ -539,6 +631,7 @@ impl Engine {
                 }
             }
         }
+        self.begin_moves(&mut tree, c, now);
         self.collect(Some((a.id, a.soul)));
         Ok(())
     }
@@ -578,6 +671,16 @@ impl Engine {
         while let Some(t) = self.due.fire(now) {
             let tr = tree.get_or_insert_with(|| live.frozen());
             self.activities.next = tr.next();
+            // A role's move (0.134 T1): its phases end here, and at contact its reach is asked again.
+            let aimed = self
+                .moves
+                .instance_of(&t)
+                .and_then(|n| self.moves.record(n));
+            if let Some((body, target)) = aimed.map(|r| (r.body, r.target)) {
+                let feet = Feet::of(c, [body, target]);
+                let _ = self.moves.fire(c, &mut self.due, &mut self.mint, &feet, &t);
+                continue;
+            }
             if self
                 .activities
                 .fire(c, &mut self.moves, &mut self.due, &t)
@@ -585,6 +688,9 @@ impl Engine {
             {
                 let _ = self.activities.lapse(tr, c, &mut self.due, &t);
             }
+        }
+        if let Some(tr) = tree.as_mut() {
+            self.begin_moves(tr, c, now);
         }
         let _ = self.activities.settle(c, &self.moves, &mut self.due);
         // 0.135 C3: loads found riding at a restart are set down where their carry last had them.
@@ -693,6 +799,42 @@ impl Engine {
             }
         }
         self.collect(None);
+    }
+
+    /// A move `body` started for `intent` (a walk, a sit) at `now` (0.134 T2): if `body` holds hands, it leaves that
+    /// activity as `activity:leave` does, and both hands come free. Its entries wait in [`Engine::out`].
+    pub fn walked(&mut self, live: &Tree, c: &mut Controller, body: Id, intent: Id, now: Micros) {
+        let Some(activity) = self.activities.holding_hands(&self.moves, body) else {
+            return;
+        };
+        let Some(soul) = self
+            .activities
+            .members(activity)
+            .and_then(|m| m.iter().find(|m| m.body == body))
+            .map(|m| m.soul)
+        else {
+            return;
+        };
+        let mut tree = live.frozen();
+        self.activities.next = tree.next();
+        let ask = Ask {
+            soul,
+            intent,
+            at: now,
+        };
+        if let Err(r) = self.activities.leave(
+            &mut tree,
+            c,
+            &mut self.moves,
+            &mut self.due,
+            &mut self.mint,
+            ask,
+            body,
+            activity,
+        ) {
+            eprintln!("worldd: {}'s walk did not let go: {r}", show(body));
+        }
+        self.collect(Some((intent, soul)));
     }
 
     /// The entries written since the last call, in order, to be numbered and applied.

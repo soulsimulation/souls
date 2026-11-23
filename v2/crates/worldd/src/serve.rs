@@ -237,11 +237,20 @@ fn conversation() -> R<ActivityKind> {
     ActivityKind::from_value(&v.value).map_err(refusal)
 }
 
+/// The give's kind (0.133 R4), as its fixture writes it: an offer that hands a held thing over when accepted.
+fn give() -> R<ActivityKind> {
+    let bytes = fixture_bytes(include_str!("../../replica/fixtures/activities/give.diag"))
+        .map_err(refusal)?;
+    let v = decode(&bytes).map_err(|e| format!("the give's kind: {e:?}"))?;
+    ActivityKind::from_value(&v.value).map_err(refusal)
+}
+
 /// The activity kinds a world's entries declare (C30, #3556): one for each entry whose `roles` (SA-G1a) name two or
 /// more roles (B5 refuses a kind of one), `<entry kind>_activity`, pinned by the hash of its entry's roles. A role
 /// is `<namespace>:<role>`, standing at its entry's first slot (`souls:here` when it has none) and claiming one hand,
 /// so a member walks, sits and talks while it plays; an offer lapses after a minute and a leave takes at most 0.4 s,
-/// as a conversation's. The `now` line (SA-G1b) is not a role.
+/// as a conversation's. A role's `move` (0.134 T1) names a content move, `souls:<move>`, its member aims at the other
+/// member when the activity starts. The `now` line (SA-G1b) is not a role.
 pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
     let mut by_kind = BTreeMap::new();
     for (kind, entry) in entries {
@@ -265,10 +274,18 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
                 .and_then(|s| s.first())
                 .and_then(Json::str);
             let place = slot.map_or("souls:here".to_owned(), |s| format!("{ns}:{s}"));
+            let mv = match v.get("move") {
+                None => None,
+                Some(m) => {
+                    let m = m.str().ok_or("a role's move is a name")?;
+                    Some(Name::new(&format!("souls:{m}")).ok_or("a role's move")?)
+                }
+            };
             out.push(Role {
                 name: Name::new(&format!("{ns}:{role}")).ok_or("a role's name")?,
                 place: Name::new(&place).ok_or("a role's place")?,
                 claims: vec![Want::One(Class::Manipulator)],
+                mv,
             });
         }
         let pin = to_hex(&sha256(
@@ -665,11 +682,16 @@ fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
 fn build_with(cache: Option<&Path>, facts: &str, entries: &[(String, Json)]) -> R<Built> {
     let (prepared, kept) = courses_cached(cache, facts, entries)?;
     stamp("facts: courses");
+    // A kind whose entry joins parts (a rack bay, a beam, a frame stand) takes its slots from its entry (0.135).
+    let texts: Vec<(String, String)> = entries
+        .iter()
+        .map(|(k, e)| (k.clone(), e.to_json()))
+        .collect();
     // A kept text that does not load is never the start's end: it is computed again.
-    let mut im = match import_eden::load(&prepared) {
+    let mut im = match import_eden::load_with(&prepared, &texts) {
         Err(e) if kept => {
             eprintln!("worldd: the kept facts' courses do not load ({e}); computing them again");
-            import_eden::load(&courses(facts, entries)?)?
+            import_eden::load_with(&courses(facts, entries)?, &texts)?
         }
         im => im?,
     };
@@ -681,7 +703,7 @@ fn build_with(cache: Option<&Path>, facts: &str, entries: &[(String, Json)]) -> 
             replica::world_model::show(id)
         );
     }
-    let mut activities = vec![conversation()?];
+    let mut activities = vec![conversation()?, give()?];
     activities.extend(activity_kinds(entries)?);
     stamp("activities");
     for a in &activities {
@@ -2811,6 +2833,59 @@ fn replay_stream(tier: &Tier, found: &sim::log::Recovered, base_record: u64) {
 mod tests {
     use super::*;
 
+    /// 0.134 T1 and T2: each `content/kinds/together` entry is an activity kind of two roles, each aiming the entry's move at
+    /// the other, and the client offers each by the name the world pins (`v2/client/src/together/together.mjs`).
+    #[test]
+    fn t1_together_entries_are_the_activity_kinds_the_client_offers() {
+        let read = |t: &str| json::parse(t).unwrap();
+        let entries = vec![
+            (
+                "eden:handshake".to_owned(),
+                read(include_str!(
+                    "../../../../content/kinds/together/handshake.json"
+                )),
+            ),
+            (
+                "eden:high_five".to_owned(),
+                read(include_str!(
+                    "../../../../content/kinds/together/high_five.json"
+                )),
+            ),
+            (
+                "eden:hug".to_owned(),
+                read(include_str!("../../../../content/kinds/together/hug.json")),
+            ),
+            (
+                "eden:hold_hands".to_owned(),
+                read(include_str!(
+                    "../../../../content/kinds/together/hold_hands.json"
+                )),
+            ),
+        ];
+        let client = include_str!("../../../client/src/together/together.mjs");
+        let kinds = activity_kinds(&entries).unwrap();
+        for (k, mv) in kinds
+            .iter()
+            .zip(["handshake", "high_five", "hold_hand", "hug"])
+        {
+            println!("{}", k.name.as_str());
+            assert_eq!(k.roles.len(), 2);
+            for r in &k.roles {
+                assert_eq!(
+                    r.mv.as_ref().map(Name::as_str),
+                    Some(format!("souls:{mv}").as_str())
+                );
+            }
+        }
+        for k in &kinds {
+            assert!(
+                client.contains(k.name.as_str()),
+                "the client offers {}",
+                k.name.as_str()
+            );
+        }
+    }
+
     #[test]
     fn v9b_public_history_live_binds_restored_header_and_refuses_unsafe_exports() {
         let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))
@@ -3840,8 +3915,8 @@ mod tests {
         let built = build(&facts, &entries).expect("builds");
         assert_eq!(
             built.activities.len(),
-            2,
-            "conversation and entry runtime pins"
+            3,
+            "conversation, give and entry runtime pins"
         );
         let prefix = imported.kind_lines.join("\n") + "\n";
         assert!(

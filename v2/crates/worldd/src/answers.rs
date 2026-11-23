@@ -3966,9 +3966,17 @@ impl Clock {
             }
         }
         let started = b.start(asks);
+        let mut walked = Vec::new();
         for (&body, &(_, id)) in &b.runner.asks {
             if started.iter().any(|(i, r)| *i == id && r.is_ok()) {
                 self.walks.insert(id, acts::Walk::new(body, id));
+                walked.push((body, id));
+            }
+        }
+        // 0.134 T2: a Soul holding hands that walks lets go, as its leave would (`Engine::walked`).
+        if let Some(e) = self.engine.as_mut() {
+            for (body, id) in walked {
+                e.walked(self.replica.tree(), &mut b.runner.controller, body, id, now);
             }
         }
         // A walk a new move replaced stopped in this tick: its end is written now, before the new move's start.
@@ -5273,6 +5281,8 @@ pub fn start<S: Storage + 'static>(
                         if let Err(r) = crate::orders::resume(&mut b, &order_parts, at) {
                             eprintln!("worldd: standing orders were not restored: {r}");
                         }
+                        // N2: a form's run open at the kill is ended `restart` in the first tick (`Acts::recover`).
+                        c.forms.recover(&wind_records, at);
                         b.wind_resume(
                             &wind_records,
                             |s| c.life.as_ref().and_then(|l| l.life.body_of(s)),

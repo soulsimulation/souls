@@ -83,7 +83,7 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt }: { flagMode: boole
   // journal, flags: whenever the world's edit counter moves
   useEffect(() => {
     if (seq === undefined) return;
-    if (owner) void G.edits(30).then(setEdits).catch(() => setEdits(null));
+    if (owner && !G.v2Creator()) void G.edits(30).then(setEdits).catch(() => setEdits(null));
     if (!godFeature('flags')) return;   // G5: flags are switched off
     // lane L3h: the entity layer already holds the public snapshot plus its diffs; read the flags there once it has reached
     // this edit (a diff can land just after the status), and download the whole snapshot only when it never does
@@ -148,7 +148,10 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt }: { flagMode: boole
     : !naming && <button className="gp-btn gp-primary" data-signin="1" onClick={signIn}>Sign in</button>;
   const who = (session.label ?? 'you').replace(/^dev:/, '');
   const claim = () => run('claim', G.claim, () => 'This world is yours.');
-  const undoRedo = (which: 'undo' | 'redo') => run(which, () => (which === 'undo' ? G.undo() : G.redo()), (r) => { const x = r as G.UndoResult; return x.accepted ? `${which === 'undo' ? 'Undid' : 'Redid'} edit ${x.reverted}.` : (x.failures?.[0]?.detail ?? `nothing to ${which}`); });
+  // G1 (0.133): on a v2 world undo, redo and the weather are the creator's own edits on its socket; the note shows the
+  // receipt's words or the refusal's name. Strike, flags and Forsake have no creator verb there and are not shown.
+  const v2 = G.v2Creator();
+  const undoRedo = (which: 'undo' | 'redo') => v2 ? run(which, async () => (await v2).undo(which), (r) => r as string) : run(which, () => (which === 'undo' ? G.undo() : G.redo()), (r) => { const x = r as G.UndoResult; return x.accepted ? `${which === 'undo' ? 'Undid' : 'Redid'} edit ${x.reverted}.` : (x.failures?.[0]?.detail ?? `nothing to ${which}`); });
 
   const signedIn = session.authed && !!status && status.you !== 'anonymous';
   // Lane HF (Gene 2026-10-20): the approval stays on screen and on top for everyone, the god included, whatever loads or
@@ -170,7 +173,7 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt }: { flagMode: boole
   useEffect(() => { offerApproval(shownId && signedIn ? { id: shownId, done: () => doneRef.current() } : null); }, [shownId, signedIn]);
   useEffect(() => () => offerApproval(null), []);
   const approvalModal = shownId && !inCard && <ApprovalDialog id={shownId} signedIn={signedIn} onDone={approvalDone} signIn={!signedIn && <>{signInButton}{signInForm}</>} />;
-  const canUndo = (edits ?? []).some((e) => !e.undone && e.kind !== 'undo' && e.ops.length > 0);
+  const canUndo = !!v2 || (edits ?? []).some((e) => !e.undone && e.kind !== 'undo' && e.ops.length > 0);
   // a new owner whose agent is not connected yet: God opens by itself once (it shows the line to give the agent)
   useEffect(() => {
     if (!owner || !status || shotMode || joinHash) return;
@@ -230,7 +233,7 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt }: { flagMode: boole
 
   // ---- the world's god: everything in the one God Mode view ----
   const env = (body: unknown) => G.god('/v1/god/env', { method: 'POST', body: JSON.stringify(body) });
-  const weather = (kind: 'rain' | 'lightning' | 'haze') => run(kind, async () => {
+  const weather = (kind: 'rain' | 'lightning' | 'haze') => v2 && kind !== 'lightning' ? run(kind, async () => (await v2).weather(kind === 'rain' ? 'rain' : 'fog'), (r) => r as string) : run(kind, async () => {
     if (kind === 'rain') return env({ weather: { kind: 'rain', intensity: 0.8 }, note: 'weather' });
     if (kind === 'haze') return env({ weather: { kind: 'fog', intensity: 0.6 }, note: 'weather' });
     await env({ weather: { kind: 'storm', intensity: 0.8 }, note: 'weather' });
@@ -267,7 +270,7 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt }: { flagMode: boole
     </div>
     <div className="gm-tool-group" role="group" aria-label="Weather" data-weather="1" title="The same as your agent's weather and strike: each press is one edit">
       <button type="button" className="gm-tool" data-weather-kind="rain" disabled={!!busy} onClick={() => weather('rain')}>Rain</button>
-      <button type="button" className="gm-tool" data-weather-kind="lightning" disabled={!!busy} onClick={() => weather('lightning')}>Lightning</button>
+      {!v2 && <button type="button" className="gm-tool" data-weather-kind="lightning" disabled={!!busy} onClick={() => weather('lightning')}>Lightning</button>}
       <button type="button" className="gm-tool" data-weather-kind="haze" disabled={!!busy} onClick={() => weather('haze')}>Haze</button>
     </div>
   </>;
@@ -305,7 +308,7 @@ export function GodPanel({ flagMode, onFlagMode, entitiesAt }: { flagMode: boole
     {approvalModal}
     {ghostBar}
     {god.open && <OwnerGod banner={banner} connectUrl={connectUrl} paired={agentsPaired} tools={tools} prayers={<PrayersWaiting />} more={more}
-      forsake={<ForsakeWorld name={name} />} />}
+      forsake={v2 ? null : <ForsakeWorld name={name} />} />}
   </>;
 }
 

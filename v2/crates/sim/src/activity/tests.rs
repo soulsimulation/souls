@@ -35,6 +35,8 @@ const GROUND: &str =
 const WALKER: &str =
     "test:walker@12200000000000000000000000000000000000000000000000000000000000000002";
 const PAIR: &str = "test:pair@12200000000000000000000000000000000000000000000000000000000000000003";
+/// A book a walker holds in one hand (0.133 R4's give).
+const BOOK: &str = "test:book@12200000000000000000000000000000000000000000000000000000000000000004";
 /// The pair's bound on a leave, µs: shorter than some phases of the fixture moves and longer than others.
 const LEAVE_WITHIN: Micros = 400_000;
 
@@ -95,7 +97,7 @@ fn pair() -> ActivityKind {
 }
 
 fn header(zone: Id) -> Header {
-    let kinds = [GROUND, WALKER, PAIR]
+    let kinds = [GROUND, WALKER, PAIR, BOOK]
         .iter()
         .map(|k| Value::Text(n(k)))
         .collect();
@@ -121,11 +123,21 @@ fn rules(souls: &[Id]) -> Rules {
         slots: BTreeMap::new(),
         hands: None,
     };
+    // A walker's hands hold things (the give, 0.133 R4); a book takes one hand.
+    let mut walker = kind("family", &[]);
+    for h in crate::slots::hands::hands(&family()) {
+        walker
+            .slots
+            .insert(h.slot, BTreeSet::from(["thing".to_owned()]));
+    }
+    let mut book = kind("thing", &[]);
+    book.hands = Some(1);
     Rules {
         kinds: BTreeMap::from([
             (GROUND.to_owned(), kind("place", &["body", "test:pair"])),
-            (WALKER.to_owned(), kind("family", &[])),
+            (WALKER.to_owned(), walker),
             (PAIR.to_owned(), kind("activity", &[])),
+            (BOOK.to_owned(), book),
         ]),
         souls: souls.iter().copied().collect(),
         audiences: BTreeMap::new(),
@@ -304,7 +316,7 @@ impl World {
             .leave(
                 &mut self.tree,
                 &mut self.c,
-                &self.moves,
+                &mut self.moves,
                 &mut self.due,
                 &mut self.mint,
                 ask,
@@ -715,4 +727,6 @@ fn a4_after_a_restart_mid_activity_both_still_belong_and_either_can_leave() {
 
 /// E8 (#2779): offers, accepted, declined and lapsed, on this file's world.
 mod call;
+mod give;
 mod offers;
+mod together;
