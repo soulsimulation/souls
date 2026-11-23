@@ -300,6 +300,25 @@ impl Moves {
         self.end(c, instance, at, how)
     }
 
+    /// Ends move `instance` now, `released`: how a move in its held phase ends (a member lets go and leaves its
+    /// activity). A move not yet holding is ended the same way. Its timer, if any, is cleared and its driver released.
+    pub fn release(
+        &mut self,
+        c: &mut Controller,
+        due: &mut DueList,
+        instance: Instance,
+        at: Micros,
+    ) -> Option<MoveRecord> {
+        self.cancel(c, due, instance, at, name("released"))
+    }
+
+    /// Whether move `instance` is in its held phase.
+    pub fn holding(&self, instance: Instance) -> bool {
+        self.live
+            .get(&instance)
+            .is_some_and(|l| l.mv.phases.get(l.phase).is_some_and(|p| p.held))
+    }
+
     /// Runs a timer the due list handed back, at its due time: `None` when it is not a move's. The phase it ends
     /// gives way to the next, whose end becomes the move's one timer, or the move is done. A move whose driver a later
     /// claim ended is cancelled `claim-taken`; at contact the reach is asked again, and beyond it the move is
@@ -343,6 +362,15 @@ impl Moves {
         }
         if phase == l.mv.phases.len() {
             return self.end(c, n, t.due, name("done")).map(Fired::Done);
+        }
+        // A held phase (the last, 0.134) has no end: no timer, and the move lasts until it is released.
+        if l.mv.phases[phase].held {
+            self.by_timer.remove(&t.id);
+            if let Some(l) = self.live.get_mut(&n) {
+                l.phase = phase;
+                l.timer = (Micros::MAX, t.id);
+            }
+            return Some(Fired::Phase { instance: n, phase });
         }
         let next = l.record.ends[phase];
         let Ok(id) = mint.mint() else {
