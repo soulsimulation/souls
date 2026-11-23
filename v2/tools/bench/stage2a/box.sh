@@ -12,12 +12,14 @@
 #
 # Arms (env): WORLD_CPUS (default `all`: every core) holds worldd, gatewayd and the viewers' origin; DRIVER_CPUS
 # (default the last core) the driver, whose own cost is about 0.05 of a core at 500 agents. For an 8-core arm on a
-# 16-core box: WORLD_CPUS=0-7 DRIVER_CPUS=15. REPEATS (default 2), RATES (default "every4 burst"), ARMS (default
-# "even uneven"). The world's folder is on the box's disk (its log syncs as a production world's does); WORLD_ROOT
+# 16-core box: WORLD_CPUS=0-7 DRIVER_CPUS=15. REPEATS (default 2), RATES (default "every4 burst gene17": gene17 is
+# 17 acts/s at 500), ARMS (default "even uneven"). FIVE_K=1 adds the 5,000-present rung (5000x500: 5,000 Souls signed
+# in, 500 of them acting). The world's folder is on the box's disk (its log syncs as a production world's does); WORLD_ROOT
 # moves it (e.g. /dev/shm). The rungs go to OUT (default .local/stage2a); the tables print at the end.
 set -euo pipefail
 FACTS=$(cd "$(dirname "${1:?Eden facts file}")" && pwd)/$(basename "$1")
 COUNTS=${2:-100 200 350 500} SECS=${3:-120}
+[ "${FIVE_K:-0}" = 1 ] && COUNTS="$COUNTS 5000x500"
 ROOT=$(cd "$(dirname "$0")/../../../.." && pwd)
 export CARGO_TARGET_DIR=${CARGO_TARGET_DIR:-$ROOT/v2/target}
 export EDEN_FACTS=$FACTS OUT=${OUT:-$ROOT/.local/stage2a} REPEATS=${REPEATS:-2}
@@ -29,4 +31,4 @@ mkdir -p "$OUT"
 { echo "box: $(nproc) cores, $(free -g | awk '/Mem:/ {print $2}') GB, $(uname -r), commit $(git -C "$ROOT" rev-parse --short HEAD)"
   echo "arms: world ${WORLD_CPUS:-all}, driver $DRIVER_CPUS, repeats $REPEATS, $SECS s a rung"; } | tee "$OUT.box.txt"
 LABEL=${LABEL:-"stage 2a, dedicated box ($(nproc) cores), world on ${WORLD_CPUS:-all}"} \
-  bash "$ROOT/v2/tools/bench/stage2a/ladder.sh" "${WORLD_CPUS:-all}" "$SECS" "$COUNTS" "${RATES:-every4 burst}" "${ARMS:-even uneven}"
+  bash "$ROOT/v2/tools/bench/stage2a/ladder.sh" "${WORLD_CPUS:-all}" "$SECS" "$COUNTS" "${RATES:-every4 burst gene17}" "${ARMS:-even uneven}"
