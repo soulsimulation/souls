@@ -270,7 +270,12 @@ class BoxSocket implements Sock {
   stop(): void { this.stopped = true; if (this.timer) clearTimeout(this.timer); this.ws?.close(); }
 }
 
-const configOf = () => (window as unknown as { __simConfig?: Record<string, unknown> }).__simConfig;
+// Read when this module loads: the page's main takes the inline config, and deletes it, when it mounts (inline-config.ts),
+// so a later read finds neither the stream nor the mailbox's paths (B3-2).
+const PAGE_CONFIG = typeof window === 'undefined' ? undefined : (window as unknown as { __simConfig?: Record<string, unknown> }).__simConfig;
+const PAGE_STREAM = typeof window === 'undefined' ? null : v2Stream();
+/** This page's v2 stream as its inline config named it when the page loaded; null on an old-engine world. */
+export const v2World = (): string | null => PAGE_STREAM;
 
 /** B3-2: the page's Soul ids the signed-in person owns on this v2 world (the view token's grants), for the old card's
  *  owner view; empty on an old-engine world, signed out, or while the directory cannot be asked. */
@@ -278,8 +283,7 @@ export function useV2OwnedSouls(): readonly string[] {
   const s = useSession();
   const [owned, setOwned] = useState<readonly string[]>([]);
   useEffect(() => {
-    const stream = typeof window === 'undefined' ? null : v2Stream();
-    const place = stream ? mailboxPlace(location.href, configOf(), stream) : null;
+    const place = PAGE_STREAM ? mailboxPlace(location.href, PAGE_CONFIG, PAGE_STREAM) : null;
     if (!place || (!s.authed && !('testName' in place.session))) { setOwned([]); return; }
     let live = true;
     void (async () => {
@@ -297,11 +301,11 @@ const boxes = new Map<string, V2OwnerMailbox>();
 /** The page's box for `soulId` on this v2 world (one per Soul a page), or null on an old-engine world. */
 export function v2OwnerMailbox(soulId: string): V2OwnerMailbox | null {
   if (typeof window === 'undefined') return null;
-  const stream = v2Stream();
+  const stream = PAGE_STREAM;
   if (!stream) return null;
   const key = `${soulId} ${pageSession().label ?? ''}`, known = boxes.get(key); // a new sign-in, a new exchange
   if (known) return known;
-  const place = mailboxPlace(location.href, configOf(), stream);
+  const place = mailboxPlace(location.href, PAGE_CONFIG, stream);
   const mb = new V2OwnerMailbox(async (self) => {
     if (!place) throw new Error('This world\'s mailbox is not reachable from this page.');
     // the page's Soul ids for v2 grants, loaded only on a v2 world

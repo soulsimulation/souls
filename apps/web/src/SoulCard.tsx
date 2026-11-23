@@ -8,7 +8,7 @@ import {apiPath,worldKey,worldPath} from './world-path.ts';
 import {BASE} from './base-path.ts';
 import './SoulCard.css';
 import {SoulMessageBox,soulStartPrompt,useSoulInbox,useWindowCode,type AgentInbox} from './AgentMessageBox.tsx';
-import {v2Stream} from './v2-engine/use-v2-souls.ts';
+import {v2World} from './v2-engine/owner-mailbox.ts';
 import {VisitorFrom} from './SoulTravel.tsx';
 import {clockAt,clockTitle,useAgentPresence,type AgentHere} from './agent-presence.ts';
 import {ApprovalCard} from './god-ui/ApprovalDialog.tsx';
@@ -50,7 +50,7 @@ function OwnerCard({api,soul,camera,signedIn=true,body,now,place}:SoulCardProps&
  const {inbox,send}=useSoulInbox(api,soul.id),here=useAgentPresence(soul.id),code=useWindowCode();
  const link=ownerLink(here?.link??null,here);
  const disconnect=async()=>{const r=await api(`/v1/souls/${encodeURIComponent(soul.id)}/revoke`,{});return r.status===200&&r.data?.ok===true;};
- return <SoulCardView soul={soul} view="owner" link={link} here={here} inbox={inbox} send={send} body={body} now={newest(now,readNow(inbox?.now))} place={place} mailbox={!!v2Stream()}
+ return <SoulCardView soul={soul} view="owner" link={link} here={here} inbox={inbox} send={send} body={body} now={newest(now,readNow(inbox?.now))} place={place} mailbox={!!v2World()}
   prompt={soulStartPrompt(location.origin+apiPath(''),soul.id,soul.name,code)} camera={camera} signedIn={signedIn} disconnect={disconnect} retire={()=>retireSoul(api,soul,()=>true)}/>;
 }
 
