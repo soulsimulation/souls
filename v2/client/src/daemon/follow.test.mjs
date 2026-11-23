@@ -267,25 +267,3 @@ test('R9b A3: losing and regaining the stream resumes by hash and fires no refle
   assert.deepEqual(firings.map((f) => f.event), ['souls:said'], JSON.stringify(firings));
   assert.equal(list.reflexes[0].fired, 2);
 });
-
-test('G-late: an answer that brings the copy current waits for what was owed when it was asked, not for entries named since', async () => {
-  // A renames its body as fast as the world answers: entries of a body near B keep naming newer versions while B's
-  // copy syncs. B's `look` (an act's own check is the same refresh) must not chase them: before, it waited for the
-  // newest version any entry named, which a busy world never let it reach, and each answer took all of REFRESH_WITHIN.
-  let going = true, n = 0;
-  const busy = (async () => { while (going) { const a = await A.act('local:describe', `busy ${n++}`); assert.equal(a.answer, 1, diagnostic(a)); } })();
-  await sleep(500);
-  const took = [];
-  for (let k = 0; k < 5; k++) {
-    const t = performance.now(), a = await ask({ op: 'look' });
-    took.push(Math.round(performance.now() - t));
-    assert.equal(a.ok, true);
-    assert.ok(!a.stale, `a look answered from a current copy: ${JSON.stringify({ stale: a.stale, gap: a.gap })}`);
-    await sleep(100);
-  }
-  going = false;
-  await busy;
-  if (process.env.R9B_REPORT) console.log(JSON.stringify({ lookMs: took, renames: n }));
-  // A sync is a few round trips, and a follow again 250 ms on (the world's seal); 2000 ms is REFRESH_WITHIN, its cap.
-  assert.ok(Math.max(...took) < 1000, `each look within 1 s while the world is busy: ${took.join(', ')} ms (${n} renames)`);
-});

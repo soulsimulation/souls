@@ -142,7 +142,7 @@ import { find } from '../find/find.mjs';
 import { publicNameHydration } from '../find/public-names.mjs';
 import { achievedOf, causeOf, openTrace } from '../stats/trace.mjs';
 import { stats, transcriptOf } from '../stats/stats.mjs';
-import { FOLLOW_AGAIN_MS, ageOf, followsAgain } from './age.mjs';
+import { FOLLOW_AGAIN_MS, ageOf, followsAgain, refreshed } from './age.mjs';
 import { moveForm, moveVerdict, seatedAfter } from './moves.mjs';
 import { BATCH_MOST, BATCH_READS, catalog, context, query } from './reads.mjs';
 import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check/check.mjs';
@@ -550,7 +550,7 @@ function syncAnswer(sock, n, refused, bytes) {
   // is carried to the follow again. Entries named since keep the copy following, but an answer never waits on them: in
   // a busy world they outrun the world's seals, and an act's check waited all of REFRESH_WITHIN (G-late, 0.132).
   const at = sequenceOf(copyVersion);
-  if (behind) for (const w of waiters) { if (w.need !== undefined && w.need <= at) w(true); else carried.push(w); }
+  if (behind) for (const w of waiters) { if (w.need !== undefined && refreshed({ at, need: w.need })) w(true); else carried.push(w); }
   else for (const w of waiters) w(true);
   // A refresh (R7) brings the copy current for an answer, and a follow for an entry (R9b); the stream's cursor stays
   // the last frame it was given.

@@ -42,3 +42,10 @@ export const FOLLOW_AGAIN_MOST = 8;
  * or an entry named since sign-in), and fewer than FOLLOW_AGAIN_MOST follows again were made in a row (`again`).
  */
 export const followsAgain = ({ at, owed, again }) => at < owed && again < FOLLOW_AGAIN_MOST;
+
+/**
+ * Whether a sync that ended at sequence `at` answers a refresh asked when `need` was owed (G-late, 0.132): the copy
+ * holds what was owed then. Versions named since (another Soul's entries in a busy world) keep the copy following, but
+ * never hold the answer: they outrun the world's seals, and an act's check once waited all of REFRESH_WITHIN for them.
+ */
+export const refreshed = ({ at, need }) => need <= at;

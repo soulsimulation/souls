@@ -3,7 +3,7 @@
 
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { ASLEEP_AFTER_MS, FOLLOW_AGAIN_MOST, FOLLOW_AGAIN_MS, FRESH_MS, ageOf, followsAgain } from './age.mjs';
+import { ASLEEP_AFTER_MS, FOLLOW_AGAIN_MOST, FOLLOW_AGAIN_MS, FRESH_MS, ageOf, followsAgain, refreshed } from './age.mjs';
 
 test('A1: age is the steady time since the copy was confirmed, and a gap says since when and why', () => {
   const at = { startedAt: 0, confirmedAt: 1000, changedAt: 1000, cutAt: null, why: null };
@@ -41,4 +41,12 @@ test('#1960: a follow that ends behind the version a receipt named follows again
   // A version that never comes (a world restarted under it) stops after FOLLOW_AGAIN_MOST tries in a row.
   assert.equal(followsAgain({ at: 41, owed: 42, again: FOLLOW_AGAIN_MOST - 1 }), true);
   assert.equal(followsAgain({ at: 41, owed: 42, again: FOLLOW_AGAIN_MOST }), false);
+});
+
+test('G-late: a refresh is answered once the copy holds what was owed when it was asked, though newer versions are owed', () => {
+  // Asked at owed 42; the follow ended at 42 while entries since named 45: the copy keeps following, the answer goes.
+  assert.equal(followsAgain({ at: 42, owed: 45, again: 0 }), true);
+  assert.equal(refreshed({ at: 42, need: 42 }), true);
+  // This Soul's own receipt named 42 before it asked; a follow that ended at the seal before it holds the answer.
+  assert.equal(refreshed({ at: 41, need: 42 }), false);
 });
