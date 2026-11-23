@@ -1,0 +1,107 @@
+# The planner thread at 500 agents in bursts, before and after a change (0.133 S7). One timed runner on the build
+# machine builds worldd, gatewayd and the driver from two commits (the pull request's base and its head, or the two
+# given), then runs stage 2a's rung (v2/tools/bench/stage2a/rung.sh: 500 Souls under the real Soul Actions mix in
+# bursts, 120 s, fake minds, loopback only) for each, alternating, even and uneven arms, two repeats. It prints, per
+# rung, the planner thread's cores over the load window (the sampler's per-thread processor seconds) beside the
+# world's ticks on time and acts sent. One rung at a time; the world on every runner core but the last, the driver on
+# that one. Manual, or on a same-repository pull request that changes this file.
+name: planner-500
+on:
+  workflow_dispatch:
+    inputs:
+      base: { description: 'commit before', required: true }
+      head: { description: 'commit after', required: true }
+  pull_request:
+    paths:
+      - .github/workflows/planner-500.yml
+permissions:
+  contents: read
+concurrency: { group: planner-500, cancel-in-progress: false }
+jobs:
+  measure:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: [self-hosted, souls-timed]
+    timeout-minutes: 120
+    env:
+      BASE: ${{ github.event_name == 'workflow_dispatch' && inputs.base || github.event.pull_request.base.sha }}
+      HEAD: ${{ github.event_name == 'workflow_dispatch' && inputs.head || github.event.pull_request.head.sha }}
+    steps:
+      - name: Mask host-identifying values
+        run: |
+          for v in "$HOME" "$GITHUB_WORKSPACE" "$RUNNER_WORKSPACE" "$RUNNER_TEMP" "$RUNNER_TOOL_CACHE" "$(hostname)" "$(id -un)"; do
+            if [ "${#v}" -ge 4 ]; then echo "::add-mask::$v"; fi
+          done
+      # Nothing installed here outlives this run (the runners share one account home).
+      - name: Per-run directories
+        run: |
+          d="$RUNNER_TEMP/planner-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$d/tmp"
+          {
+            echo "PER_RUN=$d"
+            echo "TMPDIR=$d/tmp"
+            echo "npm_config_store_dir=$d/pnpm-store"
+            echo "npm_config_cache_dir=$d/pnpm-cache"
+            echo "npm_config_state_dir=$d/pnpm-state"
+            echo "npm_config_cache=$d/npm-cache"
+          } >> "$GITHUB_ENV"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { path: head, ref: '${{ env.HEAD }}', persist-credentials: false }
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { path: base, ref: '${{ env.BASE }}', persist-credentials: false }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: 22 }
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with: { package_json_file: head/package.json, dest: '${{ env.PER_RUN }}/setup-pnpm' }
+      # Eden's facts (N1's export), once, from the head's content: both builds seed the same world.
+      - name: Eden's facts
+        working-directory: head
+        run: |
+          pnpm install --frozen-lockfile --store-dir "$npm_config_store_dir" > "$PER_RUN/install.log" 2>&1 || { tail -30 "$PER_RUN/install.log"; exit 1; }
+          node v2/tools/import-eden/export/export.ts --out "$PER_RUN/eden.facts.json" | tail -3
+      - name: Rust toolchain
+        working-directory: head/v2
+        run: |
+          channel=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' rust-toolchain.toml)
+          export RUSTUP_HOME="$PER_RUN/rustup" CARGO_HOME="$PER_RUN/cargo"
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o "$PER_RUN/rustup-init.sh"
+          sh "$PER_RUN/rustup-init.sh" -y --quiet --no-modify-path --profile minimal --default-toolchain "$channel" > /dev/null
+          { echo "RUSTUP_HOME=$RUSTUP_HOME"; echo "CARGO_HOME=$CARGO_HOME"; echo "RUSTUP_TOOLCHAIN=$channel"; } >> "$GITHUB_ENV"
+          echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
+      # Each build's programs copied out of one shared target folder, as rung.sh reads them: <dir>/release/<program>.
+      - name: Build both
+        run: |
+          for r in base head; do
+            (cd "$r/v2" && CARGO_TARGET_DIR="$PER_RUN/target" cargo build --release --locked -q -p worldd -p gatewayd -p driver)
+            mkdir -p "$PER_RUN/bin-$r/release"
+            cp "$PER_RUN/target/release/"{worldd,gatewayd,driver} "$PER_RUN/bin-$r/release/"
+            echo "$r: $(git -C "$r" rev-parse --short HEAD)"
+          done
+      - name: Rungs
+        run: |
+          cpus=$(taskset -pc $$ | sed 's/.*: //')
+          all=$(for p in ${cpus//,/ }; do if [[ $p == *-* ]]; then seq "${p%-*}" "${p#*-}"; else echo "$p"; fi; done)
+          export DRIVER_CPUS=$(echo "$all" | tail -1)
+          world=$(echo "$all" | head -n -1 | paste -sd, -)
+          echo "runner: $(echo "$all" | wc -l) CPUs; world on $(echo "$all" | head -n -1 | wc -l) of them, the driver on the last"
+          export EDEN_FACTS="$PER_RUN/eden.facts.json"
+          for k in 1 2; do
+            for arm in even uneven; do
+              for r in base head; do
+                d="$PER_RUN/out/$r/500-$arm-burst-r$k"
+                mkdir -p "$(dirname "$d")"
+                CARGO_TARGET_DIR="$PER_RUN/bin-$r" bash "$r/v2/tools/bench/stage2a/rung.sh" 500 "$arm" burst "$world" 120 "$d" > "$d.log" 2>&1 || true
+                line=$(grep '^rung ' "$d.log" | tail -1)
+                if [ -z "$line" ]; then echo "$r $arm r$k: no result"; tail -5 "$d.log" || true; continue; fi
+                node -e '
+                  const [r, arm, k, line] = process.argv.slice(1); const o = JSON.parse(line.slice(5));
+                  const pl = (o.threads.world.find(([n]) => n === "planner") ?? [, 0])[1];
+                  console.log(`| ${r} | ${arm} | ${k} | ${pl} | ${o.threads.world.slice(0, 4).map(([n, c]) => n + " " + c).join(", ")} | ${(o.tick.onTimeShare * 100).toFixed(2)} | ${o.acts.perS} | ${o.cpu.world} |`);
+                ' "$r" "$arm" "$k" "$line" | tee -a "$PER_RUN/table.md"
+              done
+            done
+          done
+          { echo "| build | arm | repeat | planner cores | busiest world threads | ticks on time % | acts sent / s | world cores |"
+            echo "|---|---|---|---|---|---|---|---|"; cat "$PER_RUN/table.md"; } >> "$GITHUB_STEP_SUMMARY"
+      - name: Clean up
+        if: always()
+        run: rm -rf "$PER_RUN"
