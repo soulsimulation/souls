@@ -1,4 +1,5 @@
-// Touch by offer and accept (0.134 T1, T2): a handshake, a hug, a high five or holding hands, offered to one Soul. When the other accepts,
+// Touch by offer and accept (0.134 T1, T2): a handshake, a hug, a high five or holding hands, offered to one Soul.
+// Dancing together (T3) is offered to up to seven at once; each who accepts dances, all on one beat. When the other accepts,
 // the activity starts and the world aims each one's move at the other (`content/kinds/together/`, each role naming
 // its move). Each command is the intents it sends, built here with no daemon and no world, so it is read and tested
 // on its own.
@@ -13,6 +14,7 @@
 
 /** Each touch's activity kind, as the world pins it from its entry (`serve::activity_kinds`), and the offerer's role. */
 export const KINDS = Object.freeze({
+  dance: 'eden:dance_together_activity@1220a3ede05c7ef3bdc371c94c11e865fc9da0a19efc4ac736ddeea2dbfd53d3333b',
   handshake: 'eden:handshake_activity@1220b6204784ae7087cc16cd7d3b0b22bc7f851c2de8c2af7ae6b677d0a59b381682',
   'high-five': 'eden:high_five_activity@1220fd403508fcecb98fb4aff58e9b5450e67696a75b6fef0c7307b130be85453111',
   'hold-hands': 'eden:hold_hands_activity@1220117af957e071c2126cdc18220b7ec1220944908b29afadb24f89e9a5ef6531f5',
@@ -21,7 +23,7 @@ export const KINDS = Object.freeze({
 export const OFFERER = 'eden:one';
 
 const ID = /^[0-9a-f]{32}-\d+$/;
-const USAGE = `together offer <${Object.keys(KINDS).join('|')}> <body id> | together accept|decline <offer id>`;
+const USAGE = `together offer <${Object.keys(KINDS).join('|')}> <body id> (a dance: up to seven) | together accept|decline <offer id>`;
 const no = (code, detail) => ({ code, detail });
 
 /** The intents a `together` request sends, or a refusal by name. `place` is the node the offer goes under. */
@@ -29,9 +31,12 @@ export function togetherIntents(req, { place }) {
   switch (req.do) {
     case 'offer': {
       const kind = KINDS[req.touch];
-      if (!kind || !ID.test(String(req.to ?? ''))) return no('together-usage', USAGE);
+      // A dance is offered to up to seven at once (0.134 T3); a touch to one.
+      const to = [req.to].flat();
+      const most = req.touch === 'dance' ? 7 : 1;
+      if (!kind || !to.length || to.length > most || !to.every((t) => ID.test(String(t ?? '')))) return no('together-usage', USAGE);
       if (!ID.test(String(place ?? ''))) return no('together-no-place', 'this Soul stands nowhere in its copy yet: look first');
-      return [{ verb: 'activity:offer', target: place, params: { 1: kind, 2: OFFERER, 3: [req.to] } }];
+      return [{ verb: 'activity:offer', target: place, params: { 1: kind, 2: OFFERER, 3: to } }];
     }
     case 'accept': case 'decline': {
       if (!ID.test(String(req.offer ?? ''))) return no('together-names-an-offer', `together ${req.do} <offer id>`);

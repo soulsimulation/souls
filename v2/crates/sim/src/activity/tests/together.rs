@@ -11,7 +11,7 @@ use replica::effects::{Refusal, read_id};
 use replica::encode::Value;
 use replica::ids::Id;
 use replica::moves::Move;
-use replica::time::Micros;
+use replica::time::{Mapping, Micros, Tempo, TickRate, Timeline};
 
 use super::{Activities, Near, PAIR, World, header, moves, n, pair, rules, world};
 
@@ -90,6 +90,12 @@ impl World {
             &mut self.mint,
             &[handshake(), hold_hand()],
             &Near,
+            &Timeline::start(
+                Mapping::new(0, 0, 1, 1).expect("rate one"),
+                TickRate::new(0, 0, 20).expect("20 a second"),
+                Tempo::per_minute(0, 0, 120).expect("120 a minute"),
+            )
+            .expect("a line"),
             at,
         )
     }
@@ -261,8 +267,8 @@ fn t2_hands_held_while_both_stay_and_freed_when_either_leaves() {
     let _ = w.run(2_000 + LASTS);
     assert!(w.due.is_empty(), "a held move sets no timer");
     assert!(!w.moves.is_empty(), "both still hold");
-    assert_eq!(w.acts.holding_hands(&w.moves, b0), Some(pair));
-    assert_eq!(w.acts.holding_hands(&w.moves, b1), Some(pair));
+    assert_eq!(w.acts.walk_leaves(&w.moves, b0), Some(pair));
+    assert_eq!(w.acts.walk_leaves(&w.moves, b1), Some(pair));
 
     // Soul 1 leaves: both holds are released at once, each written again ended `released`, and both hands are free.
     let at = 3_000 + LASTS;
@@ -290,7 +296,7 @@ fn t2_hands_held_while_both_stay_and_freed_when_either_leaves() {
         .collect();
     assert_eq!(released, BTreeSet::from([b0, b1]));
     assert!(w.free(b1), "the one who left holds nothing");
-    assert_eq!(w.acts.holding_hands(&w.moves, b0), None);
+    assert_eq!(w.acts.walk_leaves(&w.moves, b0), None);
     println!(
         "t2: held past {LASTS} µs with no timer; one leave freed both hands, each written `released`"
     );

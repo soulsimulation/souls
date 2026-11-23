@@ -49,6 +49,8 @@ const HANDSHAKE: &str = "test:handshake";
 const BRIEF: &str = "test:brief_handshake";
 /// Holding hands (0.134 T2): each role names content's `hold_hand`, whose last phase holds until released.
 const HOLD: &str = "test:hold_hands";
+/// Dancing together (0.134 T3).
+const DANCE: &str = "test:dance";
 const GIVER: &str = "test:giver";
 const TAKER: &str = "test:taker";
 
@@ -68,6 +70,7 @@ fn kinds() -> Vec<(&'static str, String)> {
         (HANDSHAKE, pinned(HANDSHAKE, 3)),
         (BRIEF, pinned(BRIEF, 4)),
         (HOLD, pinned(HOLD, 5)),
+        (DANCE, pinned(DANCE, 6)),
     ]
 }
 
@@ -95,6 +98,17 @@ fn touch(plain: &str, lasts: Micros, mv: &str) -> ActivityKind {
         roles: vec![role(GIVER), role(TAKER)],
         proposal_lasts: lasts,
         leave_within: 400_000,
+        most: 2,
+        beat: false,
+    }
+}
+
+/// Dancing together (0.134 T3): content's `dance` on the world's beat, up to eight members.
+fn dance() -> ActivityKind {
+    ActivityKind {
+        most: 8,
+        beat: true,
+        ..touch(DANCE, 60_000_000, "souls:dance")
     }
 }
 
@@ -152,14 +166,15 @@ fn soul(n: u64) -> Id {
 }
 
 /// Where the bodies stand on the test world's open ground, west of the square, µm: Souls 1 and 2 0.6 m apart, as a
-/// handshake's roles place them, and Soul 3 2 m on.
+/// handshake's roles place them, and Soul 3 2 m on; Soul 4 a dancer 1.5 m north of them.
 fn at(n: u64) -> Vec3 {
     let x = match n {
         1 => -40_000_000,
         2 => -40_600_000,
+        4 => -41_600_000,
         _ => -42_600_000,
     };
-    Vec3::new(x, 0, 30_000_000)
+    Vec3::new(x, 0, if n == 4 { 28_500_000 } else { 30_000_000 })
 }
 
 fn header(zone: Id) -> Header {
@@ -196,13 +211,17 @@ fn tree_rules() -> TreeRules {
     };
     TreeRules {
         kinds: BTreeMap::from([
-            (full(PLACE), k("place", &["body", HANDSHAKE, BRIEF, HOLD])),
+            (
+                full(PLACE),
+                k("place", &["body", HANDSHAKE, BRIEF, HOLD, DANCE]),
+            ),
             (full(WALKER), k("family", &[])),
             (full(HANDSHAKE), k("activity", &[])),
             (full(BRIEF), k("activity", &[])),
             (full(HOLD), k("activity", &[])),
+            (full(DANCE), k("activity", &[])),
         ]),
-        souls: [soul(1), soul(2), soul(3)].into(),
+        souls: [soul(1), soul(2), soul(3), soul(4)].into(),
         audiences: BTreeMap::new(),
     }
 }
@@ -212,7 +231,7 @@ fn world() -> Replica {
     let g = ground();
     let h = header(g);
     let mut r = Replica::start(h.stored()).expect("a replica");
-    let effects: Vec<Value> = (1..=3)
+    let effects: Vec<Value> = (1..=4)
         .map(|n| {
             Effect {
                 envelope: Envelope {
@@ -266,7 +285,7 @@ fn bodies() -> Result<Bodies, replica::effects::Refusal> {
         node: ground,
         slot: None,
     };
-    let placed = (1..=3)
+    let placed = (1..=4)
         .map(|n| town.surfaces[&ground].place(soul(n), frame, at(n), Quat::IDENTITY))
         .collect::<Result<Vec<_>, _>>()?;
     let mut b = Bodies::new(town, 50_000)?;
@@ -376,6 +395,7 @@ fn serve(tag: &str) -> Run {
             handshake(HANDSHAKE, 60_000_000),
             handshake(BRIEF, 500_000),
             touch(HOLD, 60_000_000, "souls:hold_hand"),
+            dance(),
         ],
     ));
     let rules = Rules {
@@ -424,7 +444,7 @@ impl Run {
             if let Body::Changes(cs) = &e.body {
                 for c in cs {
                     if let Change::Create { node, kind, .. } = &c.change
-                        && [HANDSHAKE, BRIEF, HOLD]
+                        && [HANDSHAKE, BRIEF, HOLD, DANCE]
                             .iter()
                             .any(|k| kind.as_str() == full(k))
                     {
@@ -488,6 +508,36 @@ impl Run {
                 ))
             })
             .collect()
+    }
+
+    /// Each dance move written for viewers in `activity`, in order: its body and the start in its record.
+    fn starts(&self, activity: Id) -> Vec<(Id, Micros)> {
+        self.entries()
+            .into_iter()
+            .flat_map(|e| e.events.into_iter().flatten())
+            .filter(|ev| {
+                ev.name.as_str() == "souls:form-move"
+                    && read_id(&ev.fields[&1]).ok() == Some(activity)
+            })
+            .map(|ev| {
+                let Value::Map(r) = &ev.fields[&3] else {
+                    panic!("a move record")
+                };
+                let Some(Value::Uint(start)) = r.get(&7) else {
+                    panic!("a start after the world began")
+                };
+                (read_id(&ev.fields[&2]).unwrap(), *start as Micros)
+            })
+            .collect()
+    }
+
+    /// The world time of the effect numbered `seq`.
+    fn at_seq(&self, seq: u64) -> Micros {
+        self.entries()
+            .into_iter()
+            .find(|e| e.envelope.sequence == seq)
+            .map(|e| e.envelope.at)
+            .expect("that entry")
     }
 
     /// How many `souls:activity-left` events the log holds.
@@ -633,6 +683,96 @@ fn t2_holding_hands_lasts_until_either_leaves_or_walks() {
     println!(
         "t2: held 1.5 s; a leave freed both hands; held again, a walk freed both ({} released)",
         walked.len()
+    );
+    run.stop();
+}
+
+/// 0.134 T3: four scripted Souls dance together. Soul 1 offers the dance to Souls 2, 3 and 4 at once, and their
+/// accepts arrive up to 500 ms apart. In each of 20 runs, every member's first dance move starts on the same beat of
+/// the world's clock (120 a minute from 0: a whole multiple of 500 ms), at most 2 s after the first accept. In the
+/// first run the dance goes on: each member's next move starts on the next whole beat after the first ends. Every
+/// leave is accepted.
+#[test]
+fn t3_four_souls_dance_on_one_beat_in_20_runs() {
+    let run = serve("dance");
+    let mut c: Vec<Client> = (1..=4).map(|n| run.client(n)).collect();
+    let beat = replica::time::Tempo::per_minute(0, 0, 120).unwrap();
+    let line = replica::time::Timeline::start(
+        replica::time::Mapping::new(0, 0, 1, 1).unwrap(),
+        replica::time::TickRate::new(0, 0, 20).unwrap(),
+        beat,
+    )
+    .unwrap();
+    let on_beat = |t: Micros| line.beat_of(t).and_then(|k| line.beat_time(k)) == Ok(t);
+    let mut spreads = Vec::new();
+    for r in 0..20u64 {
+        let asked = Value::Array((2..=4).map(|n| soul(n).to_value()).collect());
+        let offered = c[0]
+            .act(
+                "activity:offer",
+                Some(ground()),
+                &[
+                    (1, Value::Text(name(&full(DANCE)))),
+                    (2, Value::Text(name(GIVER))),
+                    (3, asked),
+                ],
+            )
+            .expect("offered to three");
+        let dance = run.created(&offered);
+        // Three accepts, each 0 to 249 ms after the one before: at most 500 ms from first to last.
+        let gaps = [0, (r * 37) % 250, (r * 91 + 40) % 250];
+        let mut first = None;
+        for (k, gap) in gaps.iter().enumerate() {
+            std::thread::sleep(Duration::from_millis(*gap));
+            let e = c[k + 1]
+                .act("activity:accept", Some(dance), &[])
+                .unwrap_or_else(|x| panic!("run {r}: Soul {} accepts: {x}", k + 2));
+            first.get_or_insert(run.at_seq(e[0]));
+        }
+        let first = first.unwrap();
+        let starts = run.starts(dance);
+        let members: BTreeSet<Id> = starts.iter().map(|s| s.0).collect();
+        assert_eq!(
+            members,
+            (1..=4).map(soul).collect(),
+            "run {r}: all four dance"
+        );
+        let s0 = starts[0].1;
+        assert!(
+            starts.iter().all(|s| s.1 == s0),
+            "run {r}: one beat for all: {starts:?}"
+        );
+        assert!(on_beat(s0), "run {r}: {s0} µs is a whole beat");
+        assert!(
+            s0 > first && s0 - first <= 2_000_000,
+            "run {r}: the beat is {} µs after the first accept",
+            s0 - first
+        );
+        spreads.push(gaps.iter().sum::<u64>());
+        if r == 0 {
+            // Beat after beat: the dance (0.8 s) ends, and each member's next begins on the next whole beat.
+            let wait = s0 - answers::now() + 1_300_000;
+            std::thread::sleep(Duration::from_micros(u64::try_from(wait).unwrap_or(0)));
+            let again: Vec<(Id, Micros)> = run.starts(dance).split_off(4);
+            assert_eq!(
+                again.iter().map(|s| s.0).collect::<BTreeSet<_>>(),
+                members,
+                "each member dances again: {again:?}"
+            );
+            assert!(
+                again.iter().all(|s| s.1 == s0 + 1_000_000),
+                "the next whole beat after the first dance: {again:?}"
+            );
+        }
+        for (k, cl) in c.iter_mut().enumerate() {
+            cl.act("activity:leave", Some(dance), &[])
+                .unwrap_or_else(|x| panic!("run {r}: Soul {} leaves: {x}", k + 1));
+        }
+        // Let the leaves end the moves in progress (at most the kind's 400 ms).
+        std::thread::sleep(Duration::from_millis(600));
+    }
+    println!(
+        "t3: 20 runs, four Souls on one beat each; accepts spread over {spreads:?} ms; leaves accepted"
     );
     run.stop();
 }

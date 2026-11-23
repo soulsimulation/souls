@@ -4888,6 +4888,7 @@ pub fn start<S: Storage + 'static>(
     };
     // Body time is the next world tick start, not the real-time deadline returned by Ticker::due.
     let body_start = line.tick_start(last.map_or(0, |n| n + 1)).map_err(time)?;
+    let beats = line.clone();
     let mut ticker = Ticker::new(line, mapping, last, real0).map_err(time)?;
     let beat = Arc::new(Heartbeat::new(real0));
     let tier = match cfg.views {
@@ -5098,8 +5099,9 @@ pub fn start<S: Storage + 'static>(
             acts
         },
         forming: Vec::new(),
-        engine: engine_parts
-            .map(|(rules, kinds)| Engine::new(engine_header, rules, kinds, engine_scope)),
+        engine: engine_parts.map(|(rules, kinds)| {
+            Engine::new(engine_header, rules, kinds, engine_scope).with_beats(beats)
+        }),
         engine_acts: Vec::new(),
         engine_done: Vec::new(),
         order_records,

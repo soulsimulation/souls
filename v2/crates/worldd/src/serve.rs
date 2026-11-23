@@ -265,7 +265,19 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
         }
         let ns = kind.split_once(':').map_or("world", |(n, _)| n);
         let mut out = Vec::new();
+        // 0.134 T3: a role's link's `most` is how many take it (a dance's offer, to several); `on_beat` puts its move
+        // on the world's beat.
+        let (mut most, mut beat) = (0, false);
         for (role, v) in &roles {
+            most += match entry
+                .get("links")
+                .and_then(|l| l.get(role))
+                .and_then(|l| l.get("most"))
+            {
+                Some(Json::Int(n)) => usize::try_from(*n).map_err(|_| "a role's most")?,
+                _ => 1,
+            };
+            beat |= v.get("on_beat") == Some(&Json::Bool(true));
             let slot = v
                 .get("places")
                 .and_then(|p| p.get("slots"))
@@ -303,6 +315,8 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
                 roles: out,
                 proposal_lasts: 60_000_000,
                 leave_within: 400_000,
+                most,
+                beat,
             },
         );
     }
@@ -2801,12 +2815,18 @@ fn replay_stream(tier: &Tier, found: &sim::log::Recovered, base_record: u64) {
 mod tests {
     use super::*;
 
-    /// 0.134 T1 and T2: each `content/kinds/together` entry is an activity kind of two roles, each aiming the entry's move at
+    /// 0.134 T1, T2 and T3: each `content/kinds/together` entry is an activity kind of two roles, each aiming the entry's move at
     /// the other, and the client offers each by the name the world pins (`v2/client/src/together/together.mjs`).
     #[test]
     fn t1_together_entries_are_the_activity_kinds_the_client_offers() {
         let read = |t: &str| json::parse(t).unwrap();
         let entries = vec![
+            (
+                "eden:dance_together".to_owned(),
+                read(include_str!(
+                    "../../../../content/kinds/together/dance_together.json"
+                )),
+            ),
             (
                 "eden:handshake".to_owned(),
                 read(include_str!(
@@ -2834,10 +2854,13 @@ mod tests {
         let kinds = activity_kinds(&entries).unwrap();
         for (k, mv) in kinds
             .iter()
-            .zip(["handshake", "high_five", "hold_hand", "hug"])
+            .zip(["dance", "handshake", "high_five", "hold_hand", "hug"])
         {
             println!("{}", k.name.as_str());
             assert_eq!(k.roles.len(), 2);
+            // 0.134 T3: the dance takes up to eight, on the beat; each touch is a pair.
+            let dance = mv == "dance";
+            assert_eq!((k.most, k.beat), if dance { (8, true) } else { (2, false) });
             for r in &k.roles {
                 assert_eq!(
                     r.mv.as_ref().map(Name::as_str),

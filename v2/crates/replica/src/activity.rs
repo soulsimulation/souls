@@ -12,7 +12,7 @@
 //!   with one owner, `v2/docs/zones.md` rule 4), so the node and its links are in the log and survive a restart.
 //!
 //! A kind is decoded from `{1: name, 2: revision, 3: [{1: role, 2: place, 3: [want, ...]}, ...], 4: proposal lasts
-//! µs, 5: leave within µs}`, a want as in a move (`replica::moves`): `{1: 1 every | 2 one | 3 named, 2: class number
+//! µs, 5: leave within µs, 6?: members at most (two when absent), 7?: 1 when its moves go on the world's beat}`, a want as in a move (`replica::moves`): `{1: 1 every | 2 one | 3 named, 2: class number
 //! or resource name}`.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -68,6 +68,11 @@ pub struct ActivityKind {
     pub proposal_lasts: Micros,
     /// µs a leave may take at most: a body in a move is let go at the move's next phase end, or at this.
     pub leave_within: Micros,
+    /// How many members it takes at most (0.134 T3): two for a pair; a dance's offer, to several, takes up to eight.
+    pub most: usize,
+    /// Its roles' moves go on the world's beat (0.134 T3, `v2/docs/time.md` rule 7): each member's move begins on one
+    /// beat, aimed at its own body, and begins again on the next beat after it ends, until the member leaves.
+    pub beat: bool,
 }
 
 fn uint(v: Option<&Value>, what: &str) -> R<u64> {
@@ -109,7 +114,7 @@ impl ActivityKind {
         let Value::Map(m) = v else {
             return refuse("not-an-activity", "an activity kind is a map");
         };
-        if let Some(k) = m.keys().find(|k| **k == 0 || **k > 5) {
+        if let Some(k) = m.keys().find(|k| **k == 0 || **k > 7) {
             return refuse("not-an-activity", format!("field {k}"));
         }
         let name = text(m.get(&1), "the name")?;
@@ -168,12 +173,32 @@ impl ActivityKind {
                 format!("{}: {leave_within} µs; 1 to {LEAVE_MOST}", name.as_str()),
             );
         }
+        let most = match m.get(&6) {
+            None => roles.len(),
+            v => usize::try_from(uint(v, "the members at most")?).unwrap_or(usize::MAX),
+        };
+        if most < roles.len() {
+            return refuse(
+                "not-an-activity",
+                format!(
+                    "{}: {most} members for {} roles",
+                    name.as_str(),
+                    roles.len()
+                ),
+            );
+        }
+        let beat = match m.get(&7) {
+            None => false,
+            v => uint(v, "on the beat")? == 1,
+        };
         Ok(ActivityKind {
             name,
             revision,
             roles,
             proposal_lasts,
             leave_within,
+            most,
+            beat,
         })
     }
 

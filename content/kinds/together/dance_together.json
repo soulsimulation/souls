@@ -1,0 +1,71 @@
+{
+ "format": "souls-entry/1",
+ "kind": "eden:dance_together",
+ "owner": "thing",
+ "links": {
+  "one": {
+   "n": 1,
+   "from": "body",
+   "most": 1,
+   "audience": {
+    "rule": "everyone"
+   }
+  },
+  "other": {
+   "n": 2,
+   "from": "body",
+   "most": 7,
+   "audience": {
+    "rule": "everyone"
+   }
+  }
+ },
+ "geometry": {
+  "bounds_mm": [
+   3000,
+   100,
+   3000
+  ]
+ },
+ "forms": {},
+ "roles": {
+  "one": {
+   "need": "required",
+   "places": {
+    "in": "here",
+    "within_mm": 3000
+   },
+   "move": "dance",
+   "on_beat": true
+  },
+  "other": {
+   "need": "required",
+   "places": {
+    "in": "here",
+    "within_mm": 3000
+   },
+   "move": "dance",
+   "on_beat": true
+  }
+ },
+ "motion": {
+  "how": "fixed"
+ },
+ "loose": {
+  "ever": true
+ },
+ "text": {
+  "card": "A dance for two to eight on one beat: offer it to several; leave any time.",
+  "dance": "dance",
+  "dance_together": "dance together",
+  "group_dance": "group dance"
+ },
+ "card": {
+  "text": "card",
+  "category": "dance",
+  "synonyms": [
+   "dance_together",
+   "group_dance"
+  ]
+ }
+}
