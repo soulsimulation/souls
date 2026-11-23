@@ -104,6 +104,26 @@ pub fn limits(kinds: &Kinds) -> Limits {
         .collect()
 }
 
+/// A thing's amount fields: those of the entry its map row borrows (field 27, W14 #4090), as every other read of a
+/// borrowed thing goes, else its own kind's, by full name or, for a kind written without its hash, the one revision
+/// loaded of that `namespace:name`.
+pub(super) fn limits_of<'a>(
+    limits: &'a Limits,
+    kind: Option<&str>,
+    borrowed: Option<&str>,
+) -> Option<&'a BTreeMap<u64, Limit>> {
+    let by_plain = |k: &str| {
+        let mut same = limits.iter().filter(|(n, _)| plain(n) == plain(k));
+        match (same.next(), same.next()) {
+            (Some((_, fs)), None) => Some(fs),
+            _ => None,
+        }
+    };
+    borrowed
+        .and_then(by_plain)
+        .or_else(|| kind.and_then(|k| limits.get(k).or_else(|| by_plain(k))))
+}
+
 /// The tree as of the tick's start, and the entries written since, latest last.
 pub(super) struct View<'a> {
     pub tree: &'a Tree,
@@ -337,31 +357,24 @@ impl Cx<'_> {
         }
     }
 
-    /// Field `field`'s limit on `node`'s kind: by its full name, or, for a kind written without its hash, the one
-    /// revision loaded of that `namespace:name`.
+    /// Field `field`'s limit on `node` ([`limits_of`]).
     fn limit(&self, node: Id, field: u64) -> R<Limit> {
         let kind = self.view.kind(node);
-        let by_plain = |k: &str| {
-            let mut same = self.limits.iter().filter(|(n, _)| plain(n) == plain(k));
-            match (same.next(), same.next()) {
-                (Some((_, fs)), None) => Some(fs),
-                _ => None,
-            }
-        };
-        // A thing whose map row borrows an entry (field 27, W14 #4090) is read by that entry's amounts too.
         let borrowed = match self.view.field(node, 27) {
-            Some(Value::Text(e)) => by_plain(e.as_str()),
+            Some(Value::Text(e)) => Some(e),
             _ => None,
         };
-        kind.as_ref()
-            .and_then(|k| self.limits.get(k.as_str()).or_else(|| by_plain(k.as_str())))
-            .or(borrowed)
-            .and_then(|fs| fs.get(&field))
-            .copied()
-            .ok_or_else(|| Refusal {
-                name: "field-unknown",
-                detail: format!("field {field} of {}", show(node)),
-            })
+        limits_of(
+            self.limits,
+            kind.as_ref().map(Name::as_str),
+            borrowed.as_ref().map(Name::as_str),
+        )
+        .and_then(|fs| fs.get(&field))
+        .copied()
+        .ok_or_else(|| Refusal {
+            name: "field-unknown",
+            detail: format!("field {field} of {}", show(node)),
+        })
     }
 
     /// The first of the body's hands whose slot is free: `take-needs-hands` with none, `hands-full` with none free.
