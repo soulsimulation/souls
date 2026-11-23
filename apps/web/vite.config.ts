@@ -8,7 +8,7 @@ import { changelogHtml } from './src/changelog-page.ts';
 import { buildDocs } from './src/docs-site.ts';
 import { execFileSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
+import { readFileSync, readdirSync, statSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 import { join, relative, resolve as resolvePath } from 'node:path';
 
@@ -281,13 +281,6 @@ function devProxy() {
   return { '^/w/[^/]+/[^?]+': { target: http, ws: true }, [`^/(?:${roots})(?:[/?]|$)`]: http, '^/ws(?:[/?]|$)': { target: http.replace(/^http/, 'ws'), ws: true } };
 }
 
-function replicaModule(): string {
-  const pkg = process.env.V2_REPLICA_PKG ? resolvePath(process.env.V2_REPLICA_PKG) : fileURLToPath(new URL('../../v2/target/wasm-load/pkg', import.meta.url));
-  if (existsSync(join(pkg, 'replica.js'))) return join(pkg, 'replica.js');
-  if (process.env.V2_REPLICA_PKG) throw Error(`V2_REPLICA_PKG: no replica.js in ${process.env.V2_REPLICA_PKG}`);
-  return fileURLToPath(new URL('./src/v2-engine/replica-missing.ts', import.meta.url));
-}
-
 export default defineConfig({
   plugins: [snapshotPrefetch(), cdnPreconnect(), pwa(), phasedEntry(), checkChunks(), changelogPage(), docsSite(), react(), remoteInlineConfig()],
   define: { __BUILD__: JSON.stringify(process.env.BUILD_ID ?? 'dev'), __SIM_ARRIVAL_ENABLED__: process.env.SIM_ARRIVAL_UI_ENABLED==='1', __SIM_GOATCOUNTER__: JSON.stringify(process.env.SIM_GOATCOUNTER ?? 'simeden'),
@@ -295,12 +288,10 @@ export default defineConfig({
     // CDN4: god uploads via the pull-through Worker on assets.eden.art/w/* (default on; needs the CDN switch above)
     __SIM_GOD_UPLOADS_CDN__: process.env.SIM_GOD_UPLOADS_CDN!=='0',
     __SIM_ASSETS_CDN_ORIGIN__: JSON.stringify(process.env.SIM_ASSETS_CDN_ORIGIN ?? 'https://assets.eden.art') },
-  // #4153: the v2 stream reader's worker (v2/web/src/source, reused as it is) imports `replica` (the new engine's WASM)
-  // and `cborg` (ours). #4177: the replica is the package V2_REPLICA_PKG names, else the one v2's build writes
-  // (v2/target/wasm-load/pkg, as v2/web takes it), else a stand-in that refuses. The worker, and so the WASM, is fetched
-  // only by a page whose inline config names a v2 stream.
+  // #4153: the v2 stream reader's worker (v2/web/src/source, reused as it is) imports `replica` (the new engine's WASM,
+  // the package V2_REPLICA_PKG names; a stand-in that refuses when unset, as the default build is) and `cborg` (ours).
   resolve: { alias: [
-    { find: /^replica$/, replacement: replicaModule() },
+    { find: /^replica$/, replacement: process.env.V2_REPLICA_PKG ? resolvePath(process.env.V2_REPLICA_PKG, 'replica.js') : fileURLToPath(new URL('./src/v2-engine/replica-missing.ts', import.meta.url)) },
     { find: /^cborg$/, replacement: fileURLToPath(new URL('./node_modules/cborg/cborg.js', import.meta.url)) },
   ] },
   server: { port: Number(process.env.WEB_PORT ?? 5173), proxy: devProxy() },
