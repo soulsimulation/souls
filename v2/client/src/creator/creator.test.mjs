@@ -875,6 +875,19 @@ test('#3697: a creator uploads a picture through the check and hold point; an al
   assert.equal((await god('upload', join(dir, 'notes.txt'))).code, 'usage');
 });
 
+test('R8d: map reads the world at a glance from the copy: rooms placed show as what stands, with the extent around them', async () => {
+  await connected();
+  const place = (await god('describe')).nodes.find((x) => x.kind === 'souls:place');
+  const room = await god('place', 'room', '--in', place.id, '--at', '80000,0,90000');
+  assert.equal(room.ok, true, JSON.stringify(room));
+  const map = await god('map');
+  assert.equal(map.ok, true, JSON.stringify(map));
+  assert.ok(map.extent && map.extent.things >= 1, JSON.stringify(map.extent));
+  assert.ok(map.extent.east >= 80 && map.extent.south >= 90, 'the extent reaches the room placed at (80, 90) m');
+  for (const k of ['buildings', 'named', 'roads', 'zones']) assert.ok(Array.isArray(map[k].shown), k);
+  assert.equal((await god('map', 'extra')).code, 'usage');
+});
+
 test('R8e: a build session carries its name and step on every edit, shows its steps with their edits, and closes', async () => {
   await connected();
   const started = await god('build', 'start', 'pavilion', '--steps', 'shell,lamp', '--brief', 'a little pavilion');
