@@ -781,7 +781,8 @@ impl Forms {
     /// wakes it; the points it walks to are turned by the node's orientation in the tree ([`form_runner::turn`]). A
     /// resend of an intent whose effects are all in the log gets the first receipt, and one whose run is in progress
     /// joins it. Refused: `intent-expired` past the intent's expiry, `intent-key-reused` for an intent id
-    /// seen with other contents, `form-running` while the body has another run in progress.
+    /// seen with other contents, `form-running` while the body has a run of another actor in progress (its own Soul's
+    /// run is left for the new one, #4187).
     #[allow(clippy::too_many_arguments)]
     pub fn start<G: Geometry, R: Reach>(
         &mut self,
@@ -903,7 +904,9 @@ impl Forms {
     }
 
     /// Opens a run once its intent is known to be new: refused `form-running` or `thing-reserved`, else reserved,
-    /// started and woken.
+    /// started and woken. A Soul's new act preempts its own run in progress (#4187): once nothing else refuses it, the
+    /// old run is left now, as a cancel leaves it (`left`, its move cut, its reservation freed), and the new one
+    /// starts in the same instant. `form-running` stays for a run of another actor on the body.
     #[allow(clippy::too_many_arguments)]
     fn open<G: Geometry, R: Reach>(
         &mut self,
@@ -917,7 +920,14 @@ impl Forms {
         limits: Limits,
         now: Micros,
     ) -> Result<Asked, Refusal> {
-        if self.by_body.contains_key(&body) {
+        let running = self.by_body.get(&body).copied();
+        if let Some(old) = running
+            && !(matches!(intent.actor, Actor::Soul(_))
+                && self
+                    .runs
+                    .get(&old)
+                    .is_some_and(|fr| fr.intent.actor == intent.actor))
+        {
             return Err(replica::effects::Refusal {
                 name: "form-running",
                 detail: replica::world_model::show(body),
@@ -945,7 +955,11 @@ impl Forms {
             });
         }
         let reserves = node != body && !self.shared.contains(&node);
-        if reserves && let Some(holder) = self.holder(node) {
+        // The body's own run, which this act preempts, holds nothing against it.
+        if reserves
+            && let Some(holder) = self.holder(node)
+            && holder != body
+        {
             return Err(Refusal {
                 name: "thing-reserved",
                 detail: format!(
@@ -954,6 +968,9 @@ impl Forms {
                     show(holder)
                 ),
             });
+        }
+        if let Some(old) = running {
+            self.finish(w, old, name("left"), now);
         }
         let link = match reserves {
             true => Some(w.mint.mint().map_err(|e| Refusal {

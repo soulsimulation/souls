@@ -493,6 +493,15 @@ impl Client {
         (*sequence, r)
     }
 
+    /// Waits for the progress answer of the act just sent (C20: sent in the tick its run starts).
+    fn started(&mut self) {
+        let mut len = [0u8; 4];
+        self.0.read_exact(&mut len).expect("an answer");
+        let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
+        self.0.read_exact(&mut frame).unwrap();
+        assert!(progress_once(&frame), "the act's run started");
+    }
+
     /// One act and its one answer.
     fn act(
         &mut self,
@@ -1012,7 +1021,7 @@ fn point(v: Vec3) -> BTreeMap<u64, Value> {
 fn i4187_a_walk_sent_during_an_open_form_run() {
     let (run, mut a, _) = serve("i4187w");
     a.send("test:take", Some(vessel()), BTreeMap::new());
-    std::thread::sleep(Duration::from_millis(150));
+    a.started();
     a.send("test:walk", Some(ground()), point(south(3_000_000)));
     let first = a.answer_of();
     let second = a.answer_of();
@@ -1050,7 +1059,7 @@ fn i4187_a_walk_sent_during_an_open_form_run() {
 fn i4187_a_form_act_sent_during_an_open_form_run() {
     let (run, mut a, _) = serve("i4187f");
     a.send("test:take", Some(vessel()), BTreeMap::new());
-    std::thread::sleep(Duration::from_millis(150));
+    a.started();
     a.send("test:take", Some(near_can()), BTreeMap::new());
     let first = a.answer_of();
     let second = a.answer_of();

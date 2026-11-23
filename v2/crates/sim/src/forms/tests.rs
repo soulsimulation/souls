@@ -392,21 +392,77 @@ fn a3_every_run_reaches_a_named_end() {
     assert_eq!(e.how.as_str(), "out-of-reach");
     b.clean();
 
-    // A second form on a body with one in progress is refused by name.
+    // A second form on a body with one in progress, from another actor, is refused by name (#4187: the Soul's own
+    // new act preempts it instead, below).
     let mut b = Bench::new();
     let (body, node) = b.add(&entry, Vec3::new(0, 0, 3_000_000), Vec3::ZERO);
     b.start(body, node, &entry, &form, Limits::default());
+    let world = Intent {
+        actor: Actor::World,
+        ..intent(body, 1)
+    };
     let r = b
-        .ask(
-            body,
-            node,
-            &entry,
-            &form,
-            Limits::default(),
-            intent(body, 1),
-        )
+        .ask(body, node, &entry, &form, Limits::default(), world)
         .expect_err("refused");
     assert_eq!(r.name, "form-running");
+}
+
+/// #4187: a Soul's own new act, sent while its run is open, leaves that run now (`left`, as a cancel leaves it) and
+/// starts at once, whether the old run is walking or mid-move: no `form-running`, no driver, move or timer of the old
+/// run left behind, and the new run runs to its end.
+#[test]
+fn i4187_a_souls_own_new_act_preempts_its_run_walking_or_mid_move() {
+    let (entry, form) = entries().remove(0);
+    let steps = bind(&entry, &form).expect("binds");
+    let mv = steps
+        .iter()
+        .position(|s| matches!(s, skills::form_runner::Step::Move { .. }))
+        .expect("the form has a hand move");
+    for mid_move in [false, true] {
+        let mut b = Bench::new();
+        let (body, node) = b.add(&entry, Vec3::new(0, 0, 3_000_000), Vec3::ZERO);
+        b.start(body, node, &entry, &form, Limits::default());
+        if mid_move {
+            while b.forms.at(body) != Some(mv) && b.now < 30_000_000 {
+                b.tick();
+            }
+            assert_eq!(b.forms.at(body), Some(mv), "the old run is in its move");
+            assert!(!b.moves.is_empty(), "its move is under way");
+        }
+        let at = b.now;
+        let asked = b
+            .ask(
+                body,
+                node,
+                &entry,
+                &form,
+                Limits::default(),
+                intent(body, 1),
+            )
+            .expect("the Soul's own new act is accepted");
+        assert!(matches!(asked, Asked::Started(_)), "{asked:?}");
+        let [left] = b.forms.ended.as_slice() else {
+            panic!("{:?}", b.forms.ended)
+        };
+        println!(
+            "#4187 (mid-move {mid_move}): the old run ended {} at {} µs, the new one started then",
+            left.how.as_str(),
+            left.at
+        );
+        assert_eq!(
+            (left.how.as_str(), left.at),
+            ("left", at),
+            "left in the same instant"
+        );
+        assert_eq!(b.forms.len(), 1, "only the new run is open");
+        b.forms.ended.clear();
+        b.run(60_000_000);
+        let [e] = b.forms.ended.as_slice() else {
+            panic!("{:?}", b.forms.ended)
+        };
+        assert_eq!(e.how.as_str(), "done", "the new run runs to its end");
+        b.clean();
+    }
 }
 
 /// C20 (#3469): a run is due by its start plus its steps' span, its walk, its move and its pause each by its own
