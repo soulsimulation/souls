@@ -2454,6 +2454,8 @@ fn serve(args: &[String]) -> R<()> {
     )?;
     drop(found);
     let (stream_tx, stream_rx) = channel::<(u64, Vec<u8>)>();
+    // O2 (0.133 S3b): the sleep watch asks the public stream to say the world is still until its next due change.
+    let (sleep_tx, sleep_rx) = channel::<crate::sleep::Ask>();
     // Shipping/archive delivery remains independent of a stopped public observer.
     std::thread::Builder::new()
         .name("synced".into())
@@ -2531,6 +2533,22 @@ fn serve(args: &[String]) -> R<()> {
                         }
                         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                     }
+                    // Going to sleep (S4w, #2731): what is waiting first, then the pointer still until `due`; once
+                    // written, the world exits and this thread with it. Refused (`stream-sleep`): it stays awake.
+                    if let Ok((due, answer)) = sleep_rx.try_recv() {
+                        while let Ok((record, bytes)) = stream_rx.try_recv() {
+                            if record >= writer.source_cursor() {
+                                writer.push(record, &bytes)?;
+                            }
+                        }
+                        let slept = writer.sleep(answers::now(), due).map_err(refusal);
+                        let done = slept.is_ok();
+                        let _ = answer.send(slept);
+                        if done {
+                            published(&writer);
+                            return Ok(());
+                        }
+                    }
                     writer.idle(answers::now())?;
                     published(&writer);
                 }
@@ -2576,6 +2594,7 @@ fn serve(args: &[String]) -> R<()> {
             PathBuf::from(alarms),
             Arc::clone(&world.quiet),
             world.durable.clone(),
+            sleep_tx,
             STARTED.get().map_or(0, |t| {
                 i64::try_from(t.elapsed().as_micros()).unwrap_or(i64::MAX)
             }),

@@ -18,12 +18,14 @@ in the gateway and keep no world awake. The order is fixed:
    after any restart);
 2. its alarm, a real time (its next due change) or `none` (nothing due: only an intent wakes it), sent to the
    machine's alarm daemon, which writes it to the directory and answers `ok`;
-3. `before_exit` (`worldd/src/sleep.rs`, S4's hook for the public stream's still pointer), then exit 75.
-   `worldd@.service` neither restarts it (`RestartPreventExitStatus=75`) nor counts it a failure
+3. the public stream's pointer: still until that due time (S4w, `PublicWriter::sleep`; refused `stream-sleep` when
+   what it published is not the world's still state, and then the world stays up);
+4. exit 75. `worldd@.service` neither restarts it (`RestartPreventExitStatus=75`) nor counts it a failure
    (`SuccessExitStatus=75`).
 
-An alarm not acknowledged (no daemon, the store out of reach) is no sleep: the world stays up and tries again a
-second later, so no wake is ever missed.
+An alarm not acknowledged (no daemon, the store out of reach) is no sleep: the world stays up and waits another quiet
+minute, so no wake is ever missed. An alarm left for a world that stayed up (its stream refused) is harmless: its wake
+finds it running.
 
 ## The alarm daemon
 
