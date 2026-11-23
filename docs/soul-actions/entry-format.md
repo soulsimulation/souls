@@ -589,7 +589,7 @@ under the rule they break; the rest are checked on top (`tools/entry/check.mjs`,
 | `makes` | a `create` that pays for nothing in its own form (a stock's take is paid by its count, lowered by the engine) | where it appears (`into`) |
 | `engine-names` | a name using a word of today's engine | closed lists of steps, needs, changes |
 | `no-waiting` | a timer form that arms itself, a time of day in a name | `wait` is stated microseconds |
-| `bounded` | a link without `most`; state, links, forms or parts over the budget (`BUDGET`) | slots and lists carry `most` |
+| `bounded` | a link without `most`; state, links, forms or parts over the budget (`BUDGET`: 32 forms, 48 for a body's family, which cannot be split) | slots and lists carry `most` |
 | `way-out` | a form no sequence of forms can reach (a chain of needs with no start) | no |
 | `moves` | a thing says neither how it moves nor how long it lasts loose | no |
 | `card` | no card, or a card whose purpose text is over 80 characters | no (a card that is given must name a text entry) |

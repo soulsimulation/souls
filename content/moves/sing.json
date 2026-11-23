@@ -1,0 +1,10 @@
+{
+  "format": "souls-move/1",
+  "move": "sing",
+  "claims": ["voice", "gaze"],
+  "blocks": ["voice", "gaze"],
+  "cancels_on": ["claim_taken"],
+  "effector": "hand",
+  "reach_mm": 600,
+  "phases": { "start_up_us": 400000, "recovery_us": 3600000 }
+}

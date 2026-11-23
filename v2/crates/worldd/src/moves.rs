@@ -28,7 +28,7 @@ const OWN: [&str; 3] = [
 ];
 
 /// Every file of `content/moves`, by name. A test holds this list to the folder (`tests/content_moves.rs`).
-pub const CONTENT: [(&str, &str); 30] = [
+pub const CONTENT: [(&str, &str); 38] = [
     ("bow", include_str!("../../../../content/moves/bow.json")),
     (
         "cheer",
@@ -50,8 +50,16 @@ pub const CONTENT: [(&str, &str); 30] = [
     ("fill", include_str!("../../../../content/moves/fill.json")),
     ("jump", include_str!("../../../../content/moves/jump.json")),
     (
+        "jumping_jacks",
+        include_str!("../../../../content/moves/jumping_jacks.json"),
+    ),
+    (
         "knock",
         include_str!("../../../../content/moves/knock.json"),
+    ),
+    (
+        "listen",
+        include_str!("../../../../content/moves/listen.json"),
     ),
     ("lock", include_str!("../../../../content/moves/lock.json")),
     ("look", include_str!("../../../../content/moves/look.json")),
@@ -71,12 +79,21 @@ pub const CONTENT: [(&str, &str); 30] = [
     ),
     ("pump", include_str!("../../../../content/moves/pump.json")),
     (
+        "push_ups",
+        include_str!("../../../../content/moves/push_ups.json"),
+    ),
+    (
         "shake_head",
         include_str!("../../../../content/moves/shake_head.json"),
     ),
     (
         "shrug",
         include_str!("../../../../content/moves/shrug.json"),
+    ),
+    ("sing", include_str!("../../../../content/moves/sing.json")),
+    (
+        "sit_ups",
+        include_str!("../../../../content/moves/sit_ups.json"),
     ),
     (
         "slide",
@@ -85,6 +102,10 @@ pub const CONTENT: [(&str, &str); 30] = [
     (
         "slump",
         include_str!("../../../../content/moves/slump.json"),
+    ),
+    (
+        "stargaze",
+        include_str!("../../../../content/moves/stargaze.json"),
     ),
     (
         "steer",
@@ -107,12 +128,17 @@ pub const CONTENT: [(&str, &str); 30] = [
         include_str!("../../../../content/moves/swing.json"),
     ),
     (
+        "tell_story",
+        include_str!("../../../../content/moves/tell_story.json"),
+    ),
+    (
         "touch",
         include_str!("../../../../content/moves/touch.json"),
     ),
     ("tug", include_str!("../../../../content/moves/tug.json")),
     ("turn", include_str!("../../../../content/moves/turn.json")),
     ("wave", include_str!("../../../../content/moves/wave.json")),
+    ("yoga", include_str!("../../../../content/moves/yoga.json")),
 ];
 
 fn refuse<T>(detail: impl Into<String>) -> R<T> {

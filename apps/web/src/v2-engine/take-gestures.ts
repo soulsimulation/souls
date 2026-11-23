@@ -6,8 +6,10 @@
 const GESTURES: Readonly<Record<string, string>> = {
   wave: 'wave', bow: 'bow', clap: 'clap', nod: 'nod', shake_head: 'shake-head', cheer: 'cheer', point: 'point',
   dance: 'dance', jump: 'jump', stretch: 'stretch',
-  // No old pose of their own: the nearest one (listed on #3756).
-  shrug: 'shake-head', look_around: 'listen', slump: 'listen',
+  // 0.134 B2: each its own pose, never another move's (shrug, look-around, slump, look and touch were drawn for this).
+  shrug: 'shrug', look_around: 'look-around', slump: 'slump', look: 'look', touch: 'touch', press: 'operate',
+  jumping_jacks: 'jumping-jacks', yoga: 'yoga', push_ups: 'pushups', sit_ups: 'situps', sing: 'sing', listen: 'listen',
+  tell_story: 'tell-story', stargaze: 'stargaze',
 };
 
 /** A gesture as the take draws it: world time µs, its end (planned or cut), the old activity id. */
