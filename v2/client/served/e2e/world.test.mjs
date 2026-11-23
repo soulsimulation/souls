@@ -462,7 +462,7 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
 
   // (a) The wave, from the body's family (#4075), made seated where the body is (#4143): it ends with its receipt, and
   // its run is in the public stream as the entries of a form on A's body itself, started and then ended (the sit's
-  // are the bench's). No entry names the move: the engine writes none (`souls:form-move` was never one).
+  // are the bench's). The move itself is in its `souls:form-move` entry, which the page draws gestures from (#3756).
   assert.ok(accepted(wave.answer), `(a) the wave on the seated body: ${JSON.stringify(wave.answer)}`);
   assert.equal((await answered(A, wave.sent.sequence, 30_000, true)).answer, 1, "(a) the wave ends with its receipt");
   const onA = (name) => v1.parts.slice(fromPart).flatMap((p) => p.happened ?? []).find((h) => h.name === name && h.node === pageKey(meA));
