@@ -1145,7 +1145,7 @@ fn copy_defined(nodes: &BTreeMap<Id, Held>) -> BTreeMap<String, Kind> {
 /// beside the boot kinds, and what a place may name.
 #[wasm_bindgen(js_name = definedKinds)]
 pub fn defined_kinds(copy: &WasmCopy) -> Result<String, JsError> {
-    let nodes = held(&copy.copy).map_err(|e| JsError::new(&e))?;
+    let nodes = held(&copy.copy, &BTreeSet::new()).map_err(|e| JsError::new(&e))?;
     let mut own = copy_defined(&nodes);
     own.remove(&defined::kind().0);
     Ok(kinds_json(&own))
