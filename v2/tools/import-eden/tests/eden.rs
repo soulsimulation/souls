@@ -5,9 +5,9 @@
 
 use import_eden::json::{self, Json};
 use import_eden::{
-    F_DOORWAY, F_DOORWAYS, F_HEIGHT, F_LINE, F_LINE_WIDTH, F_NAME, F_OUTLINE, F_PLACE_KIND,
-    F_PLACE_OF, F_SILL, F_STAIRS, F_TILE_SIZE, F_TILES, F_WIDTH, FLOOR, Import, PLACE, ROOM,
-    WINDOW, base64, count, load, world_of,
+    F_DOORWAY, F_DOORWAYS, F_HEIGHT, F_LINE, F_LINE_WIDTH, F_NAME, F_OUTLINE, F_PARAMS,
+    F_PLACE_KIND, F_PLACE_OF, F_SILL, F_STAIRS, F_TILE_SIZE, F_TILES, F_WIDTH, FLOOR, Import,
+    PLACE, ROOM, WINDOW, base64, count, load, world_of,
 };
 use replica::effects::{Header, Part};
 use replica::encode::{Name, Value};
@@ -448,6 +448,32 @@ fn a_stair_from_a_floor_to_itself_is_noted_not_linked() {
 /// A thing that names another kind's entry (field 27, from its world's map: a Mars sofa borrows `eden:sofa`) is found
 /// by that entry, and its seats are at its own slots (its def's geometry) with the entry's stand offsets; an entry seat
 /// it has no slot for is not offered. A thing naming no entry keeps its kind's name and the entry's own geometry.
+/// W3 (0.135): a thing's def params (the exporter's JSON text) are its field 19, byte for byte; one with none has none.
+#[test]
+fn a_things_params_are_its_field_19() {
+    let params = r#"{\"w\":12,\"material\":\"brick\",\"roofPitch\":22.5}"#;
+    let text = SMALL.replace(
+        r#""name": "test-house","#,
+        &format!(r#""name": "test-house", "params": "{params}","#),
+    );
+    assert_ne!(text, SMALL);
+    let im = load(&text).expect("loads");
+    let field = |im: &Import, key: &str| {
+        let n = im
+            .tree
+            .node(im.tree.handle(im.nodes[key]).unwrap())
+            .unwrap();
+        n.fields().get(&F_PARAMS).cloned()
+    };
+    assert_eq!(
+        field(&im, "e_house"),
+        Some(Value::Bytes(
+            br#"{"w":12,"material":"brick","roofPitch":22.5}"#.to_vec()
+        ))
+    );
+    assert_eq!(field(&im, "e_chair"), None);
+}
+
 #[test]
 fn a_thing_borrowing_an_entry_sits_at_its_own_slots() {
     let text = SMALL.replace(

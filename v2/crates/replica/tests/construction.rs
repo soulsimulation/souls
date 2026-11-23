@@ -10,14 +10,24 @@ fn folder() -> PathBuf {
     PathBuf::from(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds/construction")
 }
 
-/// The four entries, loaded; panics on any refusal.
+/// An entry without its `roles`: they make the crew's activity kind (`worldd::serve::activity_kinds`), not the kind's
+/// meaning, so K3's reader is given the rest (0.135 A2).
+fn without_roles(json: &str) -> String {
+    let mut e = replica::rules::json::parse(json).expect("an entry");
+    if let replica::rules::json::Value::Obj(o) = &mut e {
+        o.retain(|(k, _)| k != "roles");
+    }
+    e.to_json()
+}
+
+/// The construction entries (the rack's four parts and the carry), loaded with their `roles` set aside; panics on any refusal.
 fn loaded() -> Kinds {
     let mut files: Vec<(String, String)> = std::fs::read_dir(folder())
         .unwrap()
         .map(|e| e.unwrap().path())
         .filter(|p| p.extension().is_some_and(|x| x == "json"))
         .map(|p| {
-            let text = entry_to_kind(&std::fs::read_to_string(&p).unwrap())
+            let text = entry_to_kind(&without_roles(&std::fs::read_to_string(&p).unwrap()))
                 .unwrap_or_else(|e| panic!("{}: {e}", p.display()));
             (p.file_name().unwrap().to_string_lossy().into_owned(), text)
         })
@@ -30,7 +40,8 @@ fn loaded() -> Kinds {
         .collect();
     let names = kinds.load(&sources);
     assert!(kinds.refused().is_empty(), "refused: {:?}", kinds.refused());
-    assert_eq!(names.len(), 4);
+    // The rack's four kinds and the carry its crews are (0.135 C4).
+    assert_eq!(names.len(), 5);
     kinds
 }
 
@@ -256,13 +267,13 @@ fn b19_a_frame_bounds_its_crews_and_the_bound_is_in_its_hash() {
         "rack_upright children: {:?}, most {:?}",
         upright.admits.children, upright.most
     );
-    assert!(upright.admits.children.contains("mars:rack_crew"));
-    assert_eq!(upright.most.get("mars:rack_crew"), Some(&2));
+    assert!(upright.admits.children.contains("mars:carry_activity"));
+    assert_eq!(upright.most.get("mars:carry_activity"), Some(&2));
 
     // The bound is part of the meaning: another bound names another kind; none at all is refused by name.
     let json = std::fs::read_to_string(folder().join("rack_upright.json")).unwrap();
-    let two = entry_to_kind(&json).unwrap();
-    let three = entry_to_kind(&json.replace("\"most\": 2", "\"most\": 3")).unwrap();
+    let two = entry_to_kind(&without_roles(&json)).unwrap();
+    let three = entry_to_kind(&without_roles(&json.replace("\"most\": 2", "\"most\": 3"))).unwrap();
     assert_ne!(two, three, "the bound is written into the kind's meaning");
     let load = |text: &str| {
         let mut k = Kinds::default();
@@ -270,7 +281,8 @@ fn b19_a_frame_bounds_its_crews_and_the_bound_is_in_its_hash() {
         k.admits().into_keys().next()
     };
     assert_ne!(load(&two), load(&three), "so the kind's hash moves with it");
-    let none = entry_to_kind(&json.replace(",\n   \"most\": 2", "")).expect_err("refused");
+    let none =
+        entry_to_kind(&without_roles(&json.replace(",\n   \"most\": 2", ""))).expect_err("refused");
     println!("a child with no most: {none}");
     assert!(none.starts_with("entry-value"), "{none}");
 }

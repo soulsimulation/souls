@@ -5,6 +5,7 @@
 
 pub mod acts;
 pub mod answers;
+pub mod assembly;
 pub mod bodies;
 pub mod buildsafe;
 pub mod carrier;

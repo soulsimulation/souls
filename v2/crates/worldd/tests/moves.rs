@@ -1999,3 +1999,158 @@ fn w10_a2_a_walk_to_a_thing_100_m_away_ends_there() {
     let stand = Vec3::new(far_seat().x, 0, far_seat().z + 300_000);
     assert!(near([last.x, last.y, last.z], stand, 500_000), "{last:?}");
 }
+
+/// 0.135 G1: a walk to `to` on the ground at `gait` (parameter 2, `gait:<name>`), as the socket carries it.
+fn gait_walk(sequence: u64, ground: Id, to: Vec3, gait: Option<&str>) -> Vec<u8> {
+    let int =
+        |n: i64| u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint);
+    let mut parameters = BTreeMap::from([(1, Value::Array(vec![int(to.x), int(to.y), int(to.z)]))]);
+    if let Some(g) = gait {
+        parameters.insert(2, Value::Text(name(&format!("gait:{g}"))));
+    }
+    let i = Intent {
+        actor: Actor::Soul(body_id()),
+        verb: name("eden:walk"),
+        target: Some(Target::Node(ground)),
+        parameters,
+        sequence,
+        basis: Version {
+            lineage: LINEAGE,
+            zone: Id::new(LINEAGE, 0).unwrap(),
+            epoch: 1,
+            sequence: 0,
+        }
+        .to_value(),
+        expiry: 600_000_000,
+        resources: Vec::new(),
+        fallbacks: Vec::new(),
+        replaces: None,
+        body: None,
+        reflex: false,
+    };
+    encode(&i.to_value()).unwrap()
+}
+
+/// 0.135 G1: the same 20 m walk on the open ground, at each gait a walk intent may name, on a served world in
+/// lockstep. From the tick its route is planned (its deadline entry) to the tick it arrives, each takes the time its
+/// gait's speed says over the distance it walked, to within one tick (walk 1.4, jog 2.5, run 4.0 m/s); with no gait it
+/// walks. An unknown gait is refused by name.
+#[test]
+fn g1_a_twenty_metre_walk_takes_its_gaits_time() {
+    let store = Mem::with(Vec::new());
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.tick = Duration::from_millis(50);
+    cfg.deadline = 60_000_000;
+    cfg.lockstep = true;
+    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
+    let world = answers::start(
+        toggles::World::build(0, 0, 0).replica,
+        toggles::rules(),
+        store.clone(),
+        cfg,
+    )
+    .expect("the world starts");
+    let ground = bodies().unwrap().town.ground;
+    let (west, east) = (
+        Vec3::new(start().x - 20_000_000, 0, start().z),
+        Vec3::new(start().x, 0, start().z),
+    );
+    // Each walk arrives at a tick, runs to its end, and is answered; the next is sent from there.
+    let mut tick = 0_i64;
+    let mut walked = Vec::new();
+    for (seq, (gait, to)) in [
+        (Some("walk"), west),
+        (Some("jog"), east),
+        (Some("run"), west),
+        (None, east),
+        (Some("sprint"), west),
+    ]
+    .into_iter()
+    .enumerate()
+    {
+        let (reply, rx) = channel();
+        world
+            .events
+            .send(answers::Event::ArrivalAt {
+                tick,
+                bytes: gait_walk(seq as u64 + 1, ground, to, gait),
+                reply,
+            })
+            .unwrap();
+        tick += 400;
+        let (done, ran) = channel();
+        world
+            .events
+            .send(answers::Event::RunTo { tick, done })
+            .unwrap();
+        ran.recv().unwrap();
+        tick += 1;
+        let answer = loop {
+            let frame = rx
+                .recv_timeout(Duration::from_secs(20))
+                .unwrap_or_else(|e| panic!("{gait:?}: an answer: {e}"));
+            if !answers::is_progress(&frame) {
+                break read_answer(&frame);
+            }
+        };
+        walked.push((gait, answer));
+    }
+    world.stop();
+    let bytes = store.0.lock().unwrap().bytes.clone();
+    // Each walk's planning tick (its deadline entry's time) and its end's time.
+    let mut times: BTreeMap<Id, (i64, i64)> = BTreeMap::new();
+    for r in recover(&bytes).unwrap().records {
+        if sim::recorder::is_input(&r) {
+            continue;
+        }
+        for e in Part::read(&r).unwrap().effects {
+            let Cause::Intent(id) = e.envelope.cause else {
+                continue;
+            };
+            for ev in e.events.unwrap_or_default() {
+                let t = times.entry(id).or_insert((0, 0));
+                match ev.name.as_str() {
+                    answers::ACT_DEADLINE => t.0 = e.envelope.at,
+                    MOVE_ENDED => t.1 = e.envelope.at,
+                    _ => {}
+                }
+            }
+        }
+    }
+    let log = logged(&bytes);
+    for (gait, answer) in &walked[..4] {
+        let (id, _) = answer.as_ref().unwrap_or_else(|e| panic!("{gait:?}: {e}"));
+        let l = &log[id];
+        let (from, to) = (l[0].4, l.last().unwrap().4);
+        assert_eq!(l.last().unwrap().2.as_deref(), Some("done"), "{gait:?}");
+        let d = (i128::from(to[0] - from[0]).pow(2) + i128::from(to[2] - from[2]).pow(2)).isqrt();
+        let (planned, ended) = times[id];
+        let took = i128::from(ended - planned);
+        let says = d * 1_000_000 / i128::from(worldd::bodies::speed(*gait));
+        println!(
+            "g1: {:<4} {:.3} m in {:.2} s; its speed says {:.3} s ({:+} µs)",
+            gait.unwrap_or("none"),
+            d as f64 / 1e6,
+            took as f64 / 1e6,
+            says as f64 / 1e6,
+            took - says
+        );
+        assert!(d > 19_000_000, "{gait:?}: walked {d} µm");
+        assert!(
+            (took - says).abs() <= 50_000,
+            "{gait:?}: took {took} µs, its speed says {says} µs"
+        );
+    }
+    assert_eq!(worldd::bodies::speed(Some("jog")), 2_500_000);
+    assert_eq!(worldd::bodies::speed(Some("run")), 4_000_000);
+    assert_eq!(
+        worldd::bodies::speed(None),
+        worldd::bodies::speed(Some("walk"))
+    );
+    let (gait, refused) = &walked[4];
+    assert_eq!(
+        refused,
+        &Err("move.unknown-gait".to_owned()),
+        "{gait:?} refused by name"
+    );
+}

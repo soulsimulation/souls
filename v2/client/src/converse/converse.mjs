@@ -16,6 +16,8 @@
 // The conversation's id: the invitation names it (`wait` shows `{"kind":"conversation","what":"invited",...}`), and
 // the opener finds it in its copy (`converse list`). A turn's words come back from memory and `history`.
 
+import { touchOf } from '../together/together.mjs';
+
 /** The conversation kind's pinned name (`conversation.diag`), its two roles, and the engine's own act verbs. */
 export const KIND = 'souls:conversation@1220070284220bb6e0bbfc46dc1efce8ad751cf0af39f0958875c2e4b9e077135c51';
 export const OPENER = 'souls:opener';
@@ -71,5 +73,10 @@ export function offerNote(ev, me) {
   if (!what) return null;
   const f = ev.fields ?? {}, opener = f[what === 'invited' ? 5 : 2], mine = opener === me;
   if (what === 'invited' ? mine : !mine) return null;
+  // 0.133 R4: an offer that names a thing (field 6) is a give, not a conversation.
+  if (what === 'invited' && f[6] !== undefined) return { kind: 'give', what: 'offered', offer: f[1], thing: f[6], from: opener };
+  // 0.134 T1: an offer of a touch's kind is a handshake, a hug or a high five.
+  const touch = what === 'invited' ? touchOf(f[2]) : null;
+  if (touch) return { kind: 'together', what: 'offered', touch, offer: f[1], from: opener };
   return { kind: 'conversation', what, conversation: f[1], ...(what === 'invited' ? { from: opener } : {}) };
 }

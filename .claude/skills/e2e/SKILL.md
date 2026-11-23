@@ -52,8 +52,11 @@ v2/tools/dev/run.sh --port 4720 --dir $RUN/data > $RUN/world.log 2>&1 &
 # wait for `ready http://127.0.0.1:4720` in $RUN/world.log
 # → http://127.0.0.1:4720/w/dev/ ; signed in as the test person Ada, the world's creator: …/w/dev/?as=Ada
 ```
-The world is N2's test world (`fixture: testworld`); a scenario naming a genesis template is for the old server and
-is not runnable on it. The dev sign-in works on loopback only. Record the URL, pid, port and
+The world is N2's test world (`fixture: testworld`). A scenario on the old page (apps/web, what soul.game shows), or
+one naming a genesis template, boots with
+`node tools/playtest/arena/new-engine/old-page.mjs --template worlds/templates/<name>.json --dir $RUN/data` instead:
+it prints `ready <url>` with the old page on a new-engine world of that template (the proof skill's section 1 says
+what it starts and needs). The dev sign-in works on loopback only. Record the URL, pid, port and
 commit (`git rev-parse HEAD`, dirty or not) in `$RUN/ready.json`. Boot errors (port taken, missing build) are
 relayed verbatim.
 

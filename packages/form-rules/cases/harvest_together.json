@@ -1,0 +1,314 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:harvest_together (0.135 E1): two members, one basket of twelve; the one who offered picks with pick, the other with pick_too.",
+ "cases": [
+  {
+   "name": "pick_every_need_met",
+   "act": {
+    "this": "h1",
+    "form": "pick"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "h1": {
+      "kind": "eden:harvest_together",
+      "links": {
+       "one": [
+        "b1"
+       ],
+       "other": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "pick_basket_full",
+   "act": {
+    "this": "h1",
+    "form": "pick"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "h1": {
+      "kind": "eden:harvest_together",
+      "links": {
+       "one": [
+        "b1"
+       ],
+       "other": [
+        "b2"
+       ]
+      },
+      "fields": {
+       "picked": 12
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "picked",
+     "found": 12,
+     "wanted": {
+      "at_most": 11
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "pick_hands_full",
+   "act": {
+    "this": "h1",
+    "form": "pick"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "h1": {
+      "kind": "eden:harvest_together",
+      "links": {
+       "one": [
+        "b1"
+       ],
+       "other": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "x1": {
+      "kind": "eden:kindling_bundle"
+     },
+     "x2": {
+      "kind": "eden:kindling_bundle"
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 1,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  },
+  {
+   "name": "pick_too_every_need_met",
+   "act": {
+    "this": "h1",
+    "form": "pick_too"
+   },
+   "state": {
+    "actor": "b2",
+    "nodes": {
+     "h1": {
+      "kind": "eden:harvest_together",
+      "links": {
+       "one": [
+        "b1"
+       ],
+       "other": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "pick_too_basket_full",
+   "act": {
+    "this": "h1",
+    "form": "pick_too"
+   },
+   "state": {
+    "actor": "b2",
+    "nodes": {
+     "h1": {
+      "kind": "eden:harvest_together",
+      "links": {
+       "one": [
+        "b1"
+       ],
+       "other": [
+        "b2"
+       ]
+      },
+      "fields": {
+       "picked": 12
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "picked",
+     "found": 12,
+     "wanted": {
+      "at_most": 11
+     }
+    },
+    "fix": null
+   }
+  },
+  {
+   "name": "pick_too_hands_full",
+   "act": {
+    "this": "h1",
+    "form": "pick_too"
+   },
+   "state": {
+    "actor": "b2",
+    "nodes": {
+     "h1": {
+      "kind": "eden:harvest_together",
+      "links": {
+       "one": [
+        "b1"
+       ],
+       "other": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": "x1",
+       "right": "x2"
+      }
+     },
+     "x1": {
+      "kind": "eden:kindling_bundle"
+     },
+     "x2": {
+      "kind": "eden:kindling_bundle"
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "no_free_hand",
+    "need": 1,
+    "detail": {},
+    "fix": {
+     "step": "put"
+    }
+   }
+  }
+ ]
+}

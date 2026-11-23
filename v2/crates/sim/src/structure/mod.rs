@@ -48,6 +48,10 @@ pub const ONE_LEVEL_MOST_MM: i64 = 2_896;
 const UP_MOST: usize = 3;
 /// An activity's state when started (`replica::activity::State`).
 const STARTED: u64 = 2;
+/// A crew's field (0.135 A2): the holders its hold still counts for after its last holder left the world and setting
+/// its part down would have left another hanging. The hold is kept until another crew holds the part; 0 or absent is
+/// none.
+pub const F_KEPT: u64 = 5;
 
 type R<T> = Result<T, Refusal>;
 
@@ -75,6 +79,10 @@ pub struct Structure {
     roles: BTreeMap<String, Role>,
     bays: BTreeMap<String, BTreeMap<u64, Spot>>,
     joints: BTreeSet<String>,
+    /// Each joining kind's connectors: (its connector's kind, the kind it mates), by plain kind name.
+    connectors: BTreeMap<String, BTreeSet<(String, String)>>,
+    /// The kinds a standing part admits among its children, by plain name: its crews (B19's holders, 0.135 A2).
+    crews: BTreeSet<String>,
     checks: AtomicU64,
 }
 
@@ -87,6 +95,8 @@ struct Bay {
     joints: BTreeMap<Id, (Id, Id)>,
     /// activity → (the part it holds, started, membership links)
     acts: BTreeMap<Id, (Id, bool, BTreeSet<Id>)>,
+    /// activity → the holders its kept hold stands for ([`F_KEPT`]).
+    kept: BTreeMap<Id, u64>,
 }
 
 fn uint(v: Option<&Value>) -> Option<u64> {
@@ -129,7 +139,7 @@ impl Structure {
             .filter_map(|(name, entry)| {
                 let mut e = entry.clone();
                 if let J::Obj(o) = &mut e {
-                    o.retain(|(k, _)| k != "forms");
+                    o.retain(|(k, _)| k != "forms" && k != "roles");
                     if let Some((_, J::Obj(state))) = o.iter_mut().find(|(k, _)| k == "state") {
                         state.retain(|(_, f)| f.get("type").and_then(J::str) != Some("timed"));
                     }
@@ -182,6 +192,15 @@ impl Structure {
             })
         };
         let mut s = Structure::default();
+        for k in defs.iter().filter(|k| k.joins()) {
+            let set = k
+                .points
+                .values()
+                .filter_map(|p| p.connector.as_ref())
+                .map(|c| (c.kind.as_str().to_owned(), c.mates.as_str().to_owned()))
+                .collect();
+            s.connectors.insert(plain(k.name.as_str()).to_owned(), set);
+        }
         // Bearing kinds declare a link to a kind that joins; that kind stands.
         for k in &defs {
             if !k.joins() {
@@ -216,6 +235,21 @@ impl Structure {
                         },
                     );
                 }
+            }
+        }
+        // A standing part's crew: a kind its entry names among its children (a frame admits the crew that holds it).
+        for k in &defs {
+            if matches!(
+                s.roles.get(plain(k.name.as_str())),
+                Some(Role::Standing { .. })
+            ) {
+                s.crews.extend(
+                    k.admits
+                        .children
+                        .iter()
+                        .filter(|c| c.contains(':'))
+                        .cloned(),
+                );
             }
         }
         // A bay: a kind whose slots admit a standing kind and a bearing one (a stand that holds frames is not a bay).
@@ -388,6 +422,8 @@ impl Structure {
                 let Some(n) = tree.node(a) else { continue };
                 if let Some((started, members)) = Self::act(tree, n.id()) {
                     b.acts.insert(n.id(), (p, started, members));
+                    b.kept
+                        .insert(n.id(), uint(n.fields().get(&F_KEPT)).unwrap_or(0));
                 }
             }
         }
@@ -406,6 +442,50 @@ impl Structure {
             .map(|e| e.link)
             .collect();
         Some((state == STARTED, members))
+    }
+
+    /// Whether `kind` (a plain or full name) stands: others join to it, and it is held until it is braced.
+    pub fn stands(&self, kind: &str) -> bool {
+        matches!(self.roles.get(plain(kind)), Some(Role::Standing { .. }))
+    }
+
+    /// Whether `kind` (a plain or full name) is a part the rule reads: one that stands or one that bears.
+    pub fn is_part(&self, kind: &str) -> bool {
+        self.roles.contains_key(plain(kind))
+    }
+
+    /// Whether `kind` (a plain or full name) is a crew: a kind a standing part admits as its holders.
+    pub fn is_crew(&self, kind: &str) -> bool {
+        self.crews.contains(plain(kind))
+    }
+
+    /// Whether `kind` (a plain or full name) is a bay: its slots take standing and bearing parts.
+    pub fn is_bay(&self, kind: &str) -> bool {
+        self.bays.contains_key(plain(kind))
+    }
+
+    /// The joints' link type, when the kinds declare one (a running world's seating makes its joints of it).
+    pub fn joint_type(&self) -> Option<&str> {
+        self.joints.iter().next().map(String::as_str)
+    }
+
+    /// `connectors-do-not-mate` unless a connector of kind `a` mates one of kind `b` both ways (plain or full names):
+    /// a part joins only where its kind and the other's have mating connectors.
+    pub fn mates(&self, a: &str, b: &str) -> R<()> {
+        let of = |k: &str| self.connectors.get(plain(k));
+        let fits = match (of(a), of(b)) {
+            (Some(ca), Some(cb)) => ca
+                .iter()
+                .any(|(ka, ma)| cb.iter().any(|(kb, mb)| ma == kb && mb == ka)),
+            _ => false,
+        };
+        if fits {
+            return Ok(());
+        }
+        Err(Refusal {
+            name: "connectors-do-not-mate",
+            detail: format!("{} has no connector that mates with {}", plain(a), plain(b)),
+        })
     }
 
     /// Whether links of type `ty` (a full link type name) are joints: the rule reads them.
@@ -479,6 +559,18 @@ impl Structure {
                 {
                     // An activity comes to a part (B19: a carry becomes a hold), with its members.
                     b.acts.insert(*node, (pose.frame.node, a.0, a.1));
+                    let kept = tree
+                        .handle(*node)
+                        .and_then(|h| tree.node(h))
+                        .and_then(|n| uint(n.fields().get(&F_KEPT)));
+                    b.kept.insert(*node, kept.unwrap_or(0));
+                }
+            }
+            Change::Set {
+                node, field, to, ..
+            } if *field == F_KEPT => {
+                if b.acts.contains_key(node) {
+                    b.kept.insert(*node, uint(Some(to)).unwrap_or(0));
                 }
             }
             Change::Set {
@@ -532,9 +624,9 @@ impl Bay {
 
     fn holders(&self, part: Id) -> usize {
         self.acts
-            .values()
-            .filter(|a| a.0 == part && a.1)
-            .map(|a| a.2.len())
+            .iter()
+            .filter(|(_, a)| a.0 == part && a.1)
+            .map(|(id, a)| a.2.len() + self.kept.get(id).copied().unwrap_or(0) as usize)
             .sum()
     }
 

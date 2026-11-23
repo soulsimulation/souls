@@ -241,6 +241,11 @@ fn answer(
             objects.insert(path, (hash.clone(), body.to_vec()));
             (200, Some(hash), Vec::new())
         }
+        // DeleteObject (#3833), as S3 answers it: 204 whether or not the key was there.
+        "DELETE" => {
+            objects.remove(&path);
+            (204, None, Vec::new())
+        }
         _ => (405, None, Vec::new()),
     }
 }

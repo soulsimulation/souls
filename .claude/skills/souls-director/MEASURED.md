@@ -48,6 +48,12 @@ checkout loads that project, and is refused; harness output in `console.log`), l
 - **Server root** (`--server-root`, default: the checkout) must be a built Souls checkout containing
   `tools/god-skill/dev-world.mjs`, `apps/web/dist/index.html` and `tools/world-launcher/soul/eden.mjs`; the scripts
   refuse otherwise. Build with `pnpm install --frozen-lockfile && pnpm build`. Say which root you used.
+- **On the new engine** (0.135 P2): `node tools/playtest/playtest.mjs direct <cast> --engine v2 [--headless]` plays a
+  cast of scripted-owner seats on a world of the cast's template served by `v2/tools/dev/run.sh`: each seat is paired,
+  named and joined through the new client, reads its owner's messages with `pending` and closes them with `ack`, and the
+  verdict reads the world's public stream (no model runs; a live seat is refused there). An eval battery runs the same
+  way: `node tools/playtest/eval/soul-eval.mjs run --battery m4-hamlet-v1 --seat scripted --engine v2`; a step the new
+  client has no verb for is listed in its REPORT.md and skipped.
 - Optional read-only check: `node tools/playtest/playtest.mjs preflight --server-root <root>` (usage, CLI versions,
   load, free memory; starts nothing).
 - Cameras need Playwright and Chromium (`PLAYWRIGHT_BROWSERS_PATH`, `/opt/pw-browsers` when present). No GPU needed.

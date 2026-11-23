@@ -145,6 +145,7 @@ fn b16_a_silent_soul_walks_out_sleeps_and_wakes_on_its_agents_act() {
         ask: Ask::Walk {
             node: pose.frame.node,
             point: Some(Vec3::new(at[0] + 3_000_000, 0, at[1])),
+            gait: None,
         },
         fallbacks: Vec::new(),
     };

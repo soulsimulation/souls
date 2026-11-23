@@ -14,6 +14,11 @@ path = "src/main.rs"
 name = "deploy"
 path = "src/deploy.rs"
 
+# `world-aside <world> [--back <label>] [--dry-run]`: one world's objects in the directory's store set aside and back.
+[[bin]]
+name = "world-aside"
+path = "src/world_aside.rs"
+
 # The planted bad builds' world: dies at start, stalls, or refuses every act, only when served.
 [[bin]]
 name = "o7-plant"

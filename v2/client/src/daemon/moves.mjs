@@ -9,11 +9,14 @@ export function moveForm(verb) {
   return m && m[1] !== 'souls' ? m[2] : null;
 }
 
-/** The verdict on move intent `{verb, this?, point?}`: `check` is the WASM build's `move_check`. */
+/** The verdict on move intent `{verb, this?, point?, gait?}` (a walk's gait also as its `gait=` argument, 0.135 G1):
+ *  `check` is the WASM build's `move_check`. */
 export function moveVerdict(check, intent, { nodes, seated }) {
   const has = intent.this != null && nodes?.[intent.this] != null;
   const input = { verb: intent.verb, has, ...(intent.this != null ? { this: String(intent.this) } : {}) };
   if (Array.isArray(intent.point)) input.point = intent.point;
+  const gait = intent.gait ?? intent.args?.gait;
+  if (gait != null) input.gait = String(gait);
   if (typeof seated === 'boolean') input.seated = seated;
   return JSON.parse(check(JSON.stringify(input)));
 }
