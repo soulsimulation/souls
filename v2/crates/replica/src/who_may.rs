@@ -387,10 +387,32 @@ pub fn ownership_by(
     fields: impl Fn(crate::ids::Id) -> Option<std::collections::BTreeMap<u64, crate::encode::Value>>,
     parent: impl Fn(crate::ids::Id) -> Option<crate::ids::Id>,
 ) -> Option<(Option<Owner>, bool, crate::ids::Id)> {
+    marks_by(
+        node,
+        |id| {
+            fields(id).map(|f| {
+                let mut m = std::collections::BTreeMap::new();
+                for k in [F_OWNER, F_ACCESS] {
+                    m.extend(f.get(&k).map(|v| (k, v.clone())));
+                }
+                m
+            })
+        },
+        parent,
+    )
+}
+
+/// [`ownership_by`] from each node's two marks alone (C6): `marks` answers a node's [`F_OWNER`] and [`F_ACCESS`]
+/// fields, none when the node is not there, so no node's other fields are copied.
+fn marks_by(
+    node: crate::ids::Id,
+    marks: impl Fn(crate::ids::Id) -> Option<std::collections::BTreeMap<u64, crate::encode::Value>>,
+    parent: impl Fn(crate::ids::Id) -> Option<crate::ids::Id>,
+) -> Option<(Option<Owner>, bool, crate::ids::Id)> {
     let mut at = Some(node);
     let mut steps = 0;
     while let Some(id) = at {
-        let f = fields(id)?;
+        let f = marks(id)?;
         let owner = f.get(&F_OWNER).and_then(|v| Owner::read(v).ok()).flatten();
         let access = match f.get(&F_ACCESS) {
             Some(crate::encode::Value::Uint(a)) => *a,
@@ -414,9 +436,19 @@ pub fn ownership(
     node: crate::ids::Id,
 ) -> Option<(Option<Owner>, bool, crate::ids::Id)> {
     let n = |id| tree.handle(id).and_then(|h| tree.node(h));
-    ownership_by(
+    // Each node's two marks only: an ancestor's other fields (a room's, the ground's) are never copied (C6: at 500
+    // agents a whole copy per ancestor per act was an eighth of the clock thread).
+    marks_by(
         node,
-        |id| n(id).map(|x| x.fields().clone()),
+        |id| {
+            n(id).map(|x| {
+                let f = x.fields();
+                [F_OWNER, F_ACCESS]
+                    .into_iter()
+                    .filter_map(|k| f.get(&k).map(|v| (k, v.clone())))
+                    .collect()
+            })
+        },
         |id| n(id).and_then(|x| x.parent()),
     )
 }

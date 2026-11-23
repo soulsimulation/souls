@@ -7,15 +7,17 @@
 //!   reaches for, by name, on the thing it acts on (K3's named points).
 //! - **Phases.** A phase includes its start and excludes its end. Contact is one instant: the end of the first phase
 //!   (start-up), which is the start of the second. A contact that lasts is a phase after it. At least two phases.
-//! - **Reach** is one distance from the effector, asked of the geometry; the engine solves no limbs. It is at most
-//!   [`REACH_MOST`]: a straight arm pops in the viewer, so a move reaches less than a full arm.
+//! - **Reach** is one distance from the effector, asked of the geometry; the engine solves no limbs. A move that touches
+//!   reaches at most [`REACH_MOST`]: a straight arm pops in the viewer, so a move reaches less than a full arm. A move
+//!   that **aims** ([`Effector::Aim`]: a point, a wave, a nod, a bow, a look) touches nothing: its reach is sight, at most
+//!   [`AIM_MOST`] (0.134 B1).
 //! - **The record** ([`MoveRecord`]) is what the log carries of one move in progress: the move and its revision, the
 //!   limbs it holds, the thing and the contact point, its start and each phase's end, and, once over, how it ended.
 //!
 //! Decoded from `{1: name, 2: revision, 3: [want, ...], 4: [class, ...] blocks, 5: [class, ...] cancelled by,
 //! 6: [{1: phase, 2: µs}, ...], 7: effector, 8: reach µm, 9: contact point}`, a want `{1: 1 every | 2 one | 3 named,
 //! 2: class number or resource name}`, an effector `{1: 1}` the body, `{1: 2}` the resource the move holds, or
-//! `{1: 3, 2: point}` a named point of the thing held in it. Fixtures: `v2/crates/replica/fixtures/moves/`.
+//! `{1: 3, 2: point}` a named point of the thing held in it, or `{1: 4}` none: the move aims. Fixtures: `v2/crates/replica/fixtures/moves/`.
 //!
 //! - **Moves come from content** (F13, #3383). A `souls-move/1` entry (`content/moves/<name>.json`, SA-D4) is read by
 //!   [`Move::from_entry`], and a world's moves are a [`Library`]: each move by its hash (`souls/move/1` over its
@@ -41,6 +43,8 @@ fn refuse<T>(name: &'static str, detail: impl Into<String>) -> R<T> {
 
 /// The longest reach a move may state, µm: under a full arm, so the viewer's arm never pops straight.
 pub const REACH_MOST: i64 = 700_000;
+/// The longest reach an aimed move ([`Effector::Aim`]) may state, µm: sight, not an arm (0.134 B1).
+pub const AIM_MOST: i64 = 20_000_000;
 
 /// The part a move reaches with.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -51,6 +55,19 @@ pub enum Effector {
     Held,
     /// 3: a named point of the thing held in that resource (a jug's spout); reach is measured from it.
     HeldPoint(Name),
+    /// 4: nothing touches: the move aims at its target (a point, a wave, a look), whose distance is its reach, up to
+    /// [`AIM_MOST`].
+    Aim,
+}
+
+impl Effector {
+    /// The longest reach a move with this effector may state, µm.
+    pub fn reach_most(&self) -> i64 {
+        match self {
+            Effector::Aim => AIM_MOST,
+            _ => REACH_MOST,
+        }
+    }
 }
 
 /// One phase: its name and length, µs.
@@ -190,16 +207,23 @@ impl Move {
                 (Some(Value::Uint(1)), None) => Effector::Body,
                 (Some(Value::Uint(2)), None) => Effector::Held,
                 (Some(Value::Uint(3)), Some(Value::Text(p))) => Effector::HeldPoint(p.clone()),
-                _ => return refuse("not-a-move", "an effector is {1: 1|2} or {1: 3, 2: point}"),
+                (Some(Value::Uint(4)), None) => Effector::Aim,
+                _ => {
+                    return refuse(
+                        "not-a-move",
+                        "an effector is {1: 1|2|4} or {1: 3, 2: point}",
+                    );
+                }
             },
             _ => return refuse("not-a-move", "a move has an effector"),
         };
         let reach = uint(m.get(&8), "the reach")?;
         let reach = i64::try_from(reach).unwrap_or(i64::MAX);
-        if reach == 0 || reach > REACH_MOST {
+        let most = effector.reach_most();
+        if reach == 0 || reach > most {
             return refuse(
                 "move-reach-out-of-range",
-                format!("{}: {reach} µm; 1 to {REACH_MOST}", name.as_str()),
+                format!("{}: {reach} µm; 1 to {most}", name.as_str()),
             );
         }
         let contact = text(m.get(&9), "the contact point")?;
@@ -245,6 +269,7 @@ impl Move {
             Effector::Body => Value::Map(BTreeMap::from([(1, Value::Uint(1))])),
             Effector::Held => Value::Map(BTreeMap::from([(1, Value::Uint(2))])),
             Effector::HeldPoint(p) => map([(1, Value::Uint(3)), (2, Value::Text(p.clone()))]),
+            Effector::Aim => Value::Map(BTreeMap::from([(1, Value::Uint(4))])),
         };
         let phases = self
             .phases
@@ -303,7 +328,8 @@ impl Move {
         };
         let effector = match e.get("effector").and_then(J::str) {
             Some("hand" | "held_point") => Effector::Held,
-            _ => return refuse("not-a-move", "effector: hand or held_point"),
+            Some("aim") => Effector::Aim,
+            _ => return refuse("not-a-move", "effector: hand, held_point or aim"),
         };
         let Some(ps) = e.get("phases").and_then(J::obj) else {
             return refuse("not-a-move", "phases: a table of µs");

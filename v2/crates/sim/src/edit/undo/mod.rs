@@ -679,6 +679,16 @@ impl History {
                 return conflict(format!("{x:?} was put in {node:?} since batch {}", b.first));
             }
         }
+        // `kind.in-use`, as an edit's commit: a reversal that removes a creator's definition while a thing of its kind
+        // is left (one a Soul's form made since, say) is refused, never leaves that thing with no kind (#3697).
+        let removed: Vec<(Option<usize>, Id)> = writes
+            .iter()
+            .filter_map(|w| match w.change {
+                Change::Remove { node } => Some((None, node)),
+                _ => None,
+            })
+            .collect();
+        replica::edit::in_use_on(tree, &removed)?;
         Ok(writes)
     }
 
