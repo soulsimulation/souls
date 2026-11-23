@@ -9,7 +9,7 @@ import {seesawAngle, swingAngle} from './play-motion.ts';
 // roots, contacts, seats and hands stay the engine's; engine hand points / grips always win over this layer.
 
 /** Overlay ids drawn on top of their base posture (sit / idle / sit-ground). */
-export const ACTIVITY_OVERLAYS: ReadonlySet<string> = new Set(['row', 'ride', 'read', 'browse', 'write', 'play-piano', 'play-music', 'paint', 'eat', 'drink', 'cook', 'play-game', 'craft', 'post-letter', 'wave', 'operate', 'use-computer', 'sing', 'listen', 'fish', 'feed', 'garden', 'chalk', 'swing', 'seesaw', 'picnic', 'tell-story', 'bow', 'clap', 'nod', 'shake-head', 'cheer', 'point', 'pick-up', 'put-down', 'hug', 'handshake', 'high-five', 'give', 'take']);
+export const ACTIVITY_OVERLAYS: ReadonlySet<string> = new Set(['row', 'ride', 'read', 'browse', 'write', 'play-piano', 'play-music', 'paint', 'eat', 'drink', 'cook', 'play-game', 'craft', 'post-letter', 'wave', 'operate', 'use-computer', 'sing', 'listen', 'fish', 'feed', 'garden', 'chalk', 'swing', 'seesaw', 'picnic', 'tell-story', 'bow', 'clap', 'nod', 'shake-head', 'cheer', 'point', 'pick-up', 'put-down', 'hug', 'handshake', 'high-five', 'give', 'take', 'shrug', 'look-around', 'slump', 'look', 'touch']);
 /** Whole-body ids: the body point stays put and the viewer lays the body out from it along pose.yaw. */
 export const LYING: ReadonlySet<string> = new Set(['lie', 'nap', 'situps', 'bench-press', 'hammock', 'stargaze']);
 export const FACE_DOWN: ReadonlySet<string> = new Set(['pushups']);
@@ -254,6 +254,13 @@ export function activityFrame(activity: string, base: string, seconds: number, i
     // together/1 gestures (ACTIVITIES-v1 §6a): Core faces the body to the partner/target; the arms do the rest
     case 'nod': f.hands = null; f.look = 0.28 * Math.max(0, Math.sin(t * 6)); return f;
     case 'shake-head': f.hands = null; f.side = 0.05 * Math.sin(t * 9); f.look = 0.05; return f;
+    // 0.134 B2: small poses of their own for moves that borrowed another's
+    case 'shrug': { const k = env(0.35, 1.0);
+      f.hands = [[0.18, 0.22 * k, -0.6 + 0.28 * k], [0.18, 0.22 * k, -0.6 + 0.28 * k]]; f.side = 0; f.look = -0.08 * k; f.hop = 0.03 * k; return f; }
+    case 'look-around': f.hands = null; f.side = 0.07 * Math.sin(since * 1.4); f.look = -0.12 + 0.08 * Math.sin(since * 0.9); return f;
+    case 'slump': { const k = env(0.8, 3.5); f.lean = 0.28 * k; f.look = 0.4 * k; f.hands = [[0.02, 0.02, -0.64], [0.02, 0.02, -0.64]]; return f; }
+    case 'look': { const k = env(0.3, 1.2); f.hands = null; f.look = -0.14 * k; f.lean = -0.03 * k; return f; }
+    case 'touch': { const k = env(0.35, 0.9); f.hands = [null, [0.1 + 0.4 * k, 0.04, -0.6 + 0.3 * k]]; f.lean = 0.1 * k; f.look = 0.2 * k; return f; }
     case 'lie': f.lying = { face: 'back', raise: 0 }; f.hands = [[0.42, 0.1, -0.3], [0.42, 0.1, -0.3]]; return f;
     case 'nap': f.lying = { face: 'back', raise: 0 }; f.hands = [[0.3, -0.12, 0.06], [0.34, -0.08, 0.06]]; return f;
     case 'situps': { const k = S(tri(t * 0.55)); f.lying = { face: 'back', raise: 1.1 * k }; f.hands = [[0.1, -0.12, 0.15], [0.1, -0.12, 0.15]]; return f; }

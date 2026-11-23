@@ -14,7 +14,8 @@ import { hourLabel, setVisitorPreviewHour, subscribeVisitorHour, visitorPreviewH
 import { subscribeWorldZone, worldZone } from './world-zone.ts';
 import { arrivalGate } from './gen-mesh/lazy-assets.ts';
 import { TouchHints } from './touch/hints.tsx';
-import { v2History } from './v2-engine/history.ts';
+import { playSpeed, setPlaySpeed, v2History } from './v2-engine/history.ts';
+import { TICK_US } from './v2-engine/takes.ts';
 import { momentLink, momentTick } from './v2-engine/moment-link.ts';
 // X3: read at module load: Shell rewrites the landing fragment to its tab (#watch) before the scene is ready.
 const landingMoment = typeof location === 'undefined' ? null : momentTick(location.hash);
@@ -96,6 +97,18 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
     void navigator.clipboard?.writeText(link).catch(() => {});
     setCopied(link); setTimeout(() => setCopied(null), 4000);
   };
+  // K3: a moved world plays from its first moment, at a chosen speed, with a scrub bar over everything since
+  const [firstTick, setFirstTick] = useState<number | null>(null), [speed, setSpeed] = useState(playSpeed), [scrub, setScrub] = useState<number | null>(null);
+  const scrubTo = (v: number) => { setScrub(null); void handle?.seek(v); };
+  const fromStart = async () => {
+    const h = v2History(), now = state?.shownTick;
+    if (!h || now == null) return;
+    const us = firstTick !== null ? firstTick * TICK_US : await h.first(now * TICK_US).catch(() => null);
+    if (us === null) return;
+    setFirstTick(Math.floor(us / TICK_US));
+    void handle?.seek(Math.floor(us / TICK_US));
+  };
+  useEffect(() => { if (state?.presentation === 'history' && firstTick === null && state.shownTick != null) void v2History()?.first(state.shownTick * TICK_US).then((us) => { if (us !== null) setFirstTick(Math.floor(us / TICK_US)); }).catch(() => {}); }, [state?.presentation, firstTick]);
   const help = useRef<HTMLDivElement>(null);
   const unavailable = !!state?.unavailableReason;
   const current = state?.shownTick != null && !state.loading && !unavailable;
@@ -206,7 +219,10 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
         {state?.presentation === 'history' && <>
           <button onClick={() => handle?.setPlaying(state.playback !== 'playing')}>{state.playback === 'playing' ? 'Pause recording' : 'Play recording'}</button>
           <button onClick={() => handle?.live()}>Return to live</button>
+          {v2History() && <button type="button" title="Play faster" onClick={() => { const x = speed >= 8 ? 1 : speed * 2; setPlaySpeed(x); setSpeed(x); }}>×{speed}</button>}
+          {v2History() && firstTick !== null && state.shownTick != null && <input type="range" aria-label="Every moment since the world began" min={firstTick} max={Math.max(firstTick + 1, Math.floor(Date.now() * 1000 / TICK_US))} step={1} value={scrub ?? state.shownTick} onChange={(e) => setScrub(Number(e.target.value))} onPointerUp={(e) => scrubTo(Number((e.target as HTMLInputElement).value))} onKeyUp={(e) => { if (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End') scrubTo(Number((e.target as HTMLInputElement).value)); }} />}
         </>}
+        {v2History() && state?.shownTick != null && !state.loading && <button type="button" title="Play this world from the first moment it ran" onClick={() => void fromStart()}>From the start</button>}
       </div>
     </div>;
   // #893: phones get the camera menu as a bottom sheet; Follow appears when a Soul is selected.
