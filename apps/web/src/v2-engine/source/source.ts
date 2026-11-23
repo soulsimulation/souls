@@ -31,6 +31,11 @@ export type NodeRec = {
   outline?: number[][];
   /** A floor's surfaces `[y, [[x, z] …]]` mm in its thing's frame (field 14). */
   surfaces?: [number, number[][]][];
+  /** Today's def ref of an imported thing (import-eden's field 2, `name@version`). */
+  def?: string;
+  /** A path thing's or a river's line `[x, z]` mm, world (field 16), and its width mm (field 17). */
+  line?: number[][];
+  lineWidth?: number;
   /** A water's level, mm (field 18). */
   waterLevel?: number;
   /** Scale in parts per million (field 23). */
@@ -81,7 +86,9 @@ export type RunEndRec = { body: string; at: number; how: string };
 
 /** What one part changed, in the order played; `samples` is every motion sample in it, in entry order; `said` every
  * utterance in it (V1b). */
-export type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; hash: boolean | null; said?: SaidRec[]; happened?: Happened[]; moves?: MoveRec[]; runEnds?: RunEndRec[] };
+export type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; hash: boolean | null; said?: SaidRec[]; happened?: Happened[]; moves?: MoveRec[]; runEnds?: RunEndRec[];
+  /** K4 (0.135): where each node on a course is over the part (../course-samples.ts). */
+  courses?: Record<string, number[]> };
 
 /** The COMPLETE currently drawable public state, including no opaque-frame descendants. A new source/worker
  * cannot know the caller's previous nodes. No invented part time, effects, events or motion. */

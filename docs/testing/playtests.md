@@ -67,6 +67,19 @@ each new one does the same job:
 `node tools/playtest/arena/new-engine/smoke.mjs [--template <file>] [--seats n]` runs all three on a throwaway world under
 `.local/playtest-v2/` and prints one line per check.
 
+`node tools/playtest/arena/new-engine/old-page.mjs [--template <file>]` brings up the old page (apps/web) on such a world
+(0.135 P5; the proof skill's section 1). To stage a scene and record it there, uncut and at real speed, from a camera
+the scene names (follow a Soul, a fixed pose, or a path of poses):
+
+```sh
+node tools/launch-video/scene.mjs tools/launch-video/scenes/hamlet-stroll.json [--size 1280x720] [--keep]
+```
+
+A scene file names its genesis and the things it places, its Souls (paired and joined as above), commands before the take
+and beats during it (the new client's words), and the camera; the head of `tools/launch-video/scene.mjs` has its format
+and known limits. `tools/launch-video/capture.mjs` records one take of any local world page (the canvas and its sound),
+including a past span of its history (`--shot` with a range).
+
 Everything prints JSON on stdout and logs to stderr. `--server-root` is the Souls checkout whose server the dev worlds
 run from (it needs a built `apps/web/dist`). Pass it explicitly, and pass `--out` or `--runs-root` for where runs go.
 

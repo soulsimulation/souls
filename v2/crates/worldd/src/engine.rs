@@ -42,7 +42,7 @@ use replica::ids::{Id, Minter, Scope};
 use replica::moves::{Effector, Move};
 use replica::pose::Vec3;
 use replica::rules::json::Value as Json;
-use replica::time::Micros;
+use replica::time::{Mapping, Micros, Tempo, TickRate, Timeline};
 use replica::tree::{Rules, Tree};
 use replica::world_model::plain;
 use replica::world_model::show;
@@ -141,6 +141,8 @@ pub struct Engine {
     steered: BTreeSet<Id>,
     /// The moves an activity's roles may name (0.134 T1): content's, [`crate::moves::library`].
     library: Vec<Move>,
+    /// The world's clock, whose beats a dance's moves start on (0.134 T3): the world's own ([`Engine::with_beats`]).
+    line: Timeline,
     /// The loads the world's entries state, by plain kind (0.135 C2, [`Engine::with_loads`]).
     loads: BTreeMap<String, Load>,
     /// The crews' seating, when the world's kinds join parts (0.135 A2, [`Engine::with_structure`]).
@@ -322,16 +324,28 @@ impl Engine {
             mint: Minter::new(scope),
             out: Vec::new(),
             steered: BTreeSet::new(),
-            loads: BTreeMap::new(),
             asm: None,
             taking: BTreeMap::new(),
             joining: None,
-            riding: Vec::new(),
             library: crate::moves::library().unwrap_or_else(|r| {
                 eprintln!("worldd: no moves for activities: {r}");
                 Vec::new()
             }),
+            line: Timeline::start(
+                Mapping::new(0, 0, 1, 1).expect("rate one"),
+                TickRate::new(0, 0, 20).expect("20 a second"),
+                Tempo::per_minute(0, 0, 120).expect("120 a minute"),
+            )
+            .expect("a line from zero"),
+            loads: BTreeMap::new(),
+            riding: Vec::new(),
         }
+    }
+
+    /// The engine on the world's own clock `line`, whose beats a dance's moves start on (0.134 T3).
+    pub fn with_beats(mut self, line: Timeline) -> Engine {
+        self.line = line;
+        self
     }
 
     /// The roles' moves of the activities just started, aimed by each member at the other (0.134 T1). A refused one
@@ -350,6 +364,7 @@ impl Engine {
             &mut self.mint,
             &self.library,
             &feet,
+            &self.line,
             now,
         ) {
             eprintln!("worldd: {}'s move was not aimed: {r}", show(body));
@@ -490,8 +505,9 @@ impl Engine {
             }
             Verb::Accept => {
                 let offer = target("accept-needs-an-offer")?;
-                // 0.134 T1: a touch starts only where its moves reach; nothing walks the two to their places yet.
-                if let Some((kind, asker)) = e.offered(offer) {
+                // 0.134 T1: a touch starts only where its moves reach; then the two take their places (0.135 G3).
+                // A dance (T3) touches nobody: its moves are at each member's own body.
+                if let Some((kind, asker)) = e.offered(offer).filter(|(k, _)| !k.beat) {
                     let feet = Feet::of(c, [asker, a.body]);
                     for mv in kind.roles.iter().filter_map(|r| r.mv.as_ref()) {
                         let Some(m) = self.library.iter().find(|m| m.name == *mv) else {
@@ -879,6 +895,17 @@ impl Engine {
             self.begin_moves(tr, c, now);
         }
         let _ = self.activities.settle(c, &self.moves, &mut self.due);
+        // A handshake, a hug or a high-five whose moves have ended ends: both arms free (0.134 T1).
+        if self.activities.finishing() {
+            let tr = tree.get_or_insert_with(|| live.frozen());
+            self.activities.next = tr.next();
+            for (body, r) in
+                self.activities
+                    .finish(tr, c, &mut self.moves, &mut self.due, &mut self.mint, now)
+            {
+                eprintln!("worldd: {} did not leave its touch: {r}", show(body));
+            }
+        }
         // 0.135 C3: loads found riding at a restart are set down where their carry last had them.
         for (activity, load) in std::mem::take(&mut self.riding) {
             let tr = tree.get_or_insert_with(|| live.frozen());
@@ -1702,10 +1729,51 @@ impl Engine {
         }
     }
 
-    /// A move `body` started for `intent` (a walk, a sit) at `now` (0.134 T2): if `body` holds hands, it leaves that
-    /// activity as `activity:leave` does, and both hands come free. Its entries wait in [`Engine::out`].
+    /// The follow `activity` is over (0.135 G2: its follower's order ended): its follower leaves it, as
+    /// `activity:leave` does, caused by the intent that joined, and so the leader too. Its entries wait in
+    /// [`Engine::out`].
+    pub fn end_follow(&mut self, live: &Tree, c: &mut Controller, activity: Id, now: Micros) {
+        let Some((_, _, follower, _)) = self
+            .activities
+            .following()
+            .into_iter()
+            .find(|f| f.0 == activity)
+        else {
+            return;
+        };
+        let Some(m) = self
+            .activities
+            .members(activity)
+            .and_then(|ms| ms.iter().find(|m| m.body == follower).cloned())
+        else {
+            return;
+        };
+        let mut tree = live.frozen();
+        self.activities.next = tree.next();
+        let ask = Ask {
+            soul: m.soul,
+            intent: m.intent,
+            at: now,
+        };
+        if let Err(r) = self.activities.leave(
+            &mut tree,
+            c,
+            &mut self.moves,
+            &mut self.due,
+            &mut self.mint,
+            ask,
+            follower,
+            activity,
+        ) {
+            eprintln!("worldd: {}'s follow did not end: {r}", show(follower));
+        }
+        self.collect(None);
+    }
+
+    /// A move `body` started for `intent` (a walk, a sit) at `now` (0.134 T2): if `body` holds hands, or dances on the
+    /// beat (T3), it leaves that activity as `activity:leave` does, and both hands come free. Its entries wait in [`Engine::out`].
     pub fn walked(&mut self, live: &Tree, c: &mut Controller, body: Id, intent: Id, now: Micros) {
-        let Some(activity) = self.activities.holding_hands(&self.moves, body) else {
+        let Some(activity) = self.activities.walk_leaves(&self.moves, body) else {
             return;
         };
         let Some(soul) = self
@@ -1736,6 +1804,38 @@ impl Engine {
             eprintln!("worldd: {}'s walk did not let go: {r}", show(body));
         }
         self.collect(Some((intent, soul)));
+    }
+
+    /// The places still to take (0.135 G3, `sim::activity::places`), each activity's frame set from where its members
+    /// stand in `c`, on their node (`sim::index::place_of`): `(activity, body, Soul, node, point, facing)`.
+    pub fn pending_places(
+        &mut self,
+        c: &Controller,
+    ) -> Vec<(Id, Id, Id, Id, Vec3, replica::pose::Quat)> {
+        self.activities.pending_places(|b| {
+            c.body(b)
+                .map(|m| (sim::index::place_of(m).0, m.pose.position))
+        })
+    }
+
+    /// Members that have taken their places (0.135 G3), by (activity, body): an activity's moves begin once all
+    /// have, at `now` on a copy of `live`. Its entries wait in [`Engine::out`].
+    pub fn placed(&mut self, live: &Tree, c: &mut Controller, done: &[(Id, Id)], now: Micros) {
+        if done.is_empty() {
+            return;
+        }
+        for &(a, b) in done {
+            self.activities.placed(a, b);
+        }
+        let mut tree = live.frozen();
+        self.activities.next = tree.next();
+        self.begin_moves(&mut tree, c, now);
+        self.collect(None);
+    }
+
+    /// Every follow running (0.135 G2): its activity, the leader's body, and the follower's body and Soul.
+    pub fn following(&self) -> Vec<(Id, Id, Id, Id)> {
+        self.activities.following()
     }
 
     /// The entries written since the last call, in order, to be numbered and applied.

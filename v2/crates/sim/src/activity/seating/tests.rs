@@ -97,6 +97,14 @@ fn kinds() -> (Kinds, Vec<(String, String)>) {
         .expect("the construction kinds")
         .map(|e| e.expect("an entry").path())
         .filter(|p| p.extension().is_some_and(|x| x == "json"))
+        // An activity's entry (its `roles`, 0.135 C4's carry) is not a rack kind.
+        .filter(|p| {
+            let json = std::fs::read_to_string(p).expect("read");
+            replica::rules::json::parse(&json)
+                .expect("json")
+                .get("roles")
+                .is_none()
+        })
         .map(|p| {
             let json = std::fs::read_to_string(&p).expect("read");
             let name = p.file_name().unwrap().to_string_lossy().into_owned();

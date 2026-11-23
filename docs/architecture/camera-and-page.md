@@ -58,6 +58,10 @@ v2 adapter turns the engine's public stream into that frame's input.
    chunks, the format the old server streams. Each tick carries the body's position, its heading (from its motion),
    its activity (walk, idle, sit, lie or a gesture), its speed, seat height and hand prop. A chunk is built only once
    the world is past its end, so a body is never pushed past its newest sample.
+   A thing on a course (a balloon, a punt) is in the chunks too (0.135 K4): a `vehicle` record with a `carrier`,
+   under the page's id for that thing, where the replica's `courseAt` has it at each tick. The page's own layers draw
+   it (the entity layer moves a god's balloon to it); the take only lets the camera follow it and frame a ride with it.
+   A body in its slot rides with it, standing, activity `ride` (hands on the rim), which Broadcast scores as riding.
 5. **The frame.** `LiveWorld.tsx` reads the chunks (`liveChunks`, line 763) and samples them at the depicted
    tick (`sampleTake` in `mars/viewer/engine/take/replay.ts`). It keeps the result as
    `shown.current.entities` (line 951): a position `p` and heading `yaw` for each take entity.
@@ -69,6 +73,21 @@ v2 adapter turns the engine's public stream into that frame's input.
 So the camera sees a v2 body exactly where the page draws it, at the same tick. It follows the page's take entity
 (`soul.entityId`, which `bridge.ts` derives from the v2 node id), never a v2 node directly, and it needs nothing from
 v2 beyond what the takes carry.
+
+## How the old page draws a world from the new engine's stream (0.135 W2)
+
+A moved world's ground, buildings and things are drawn by the entity layer (`WorldEntityLayer.ts`) from the snapshot its
+old world published (`snapshot.json`, `v2/docs/cutover.md`). A world with no such snapshot (one made on the new engine),
+or any v2 world opened with `?scene=stream`, is drawn from its stream alone: `v2-engine/source/stream-scene.ts` builds the
+layer's snapshot from the stream's first copy of the world (the open ground's terrain tiles, waters, and each imported
+thing at its world pose with its library def), and the layer takes it through `scene-offer.ts`. The page's layout then
+falls back to a plain field (`LiveWorld.tsx`, a 404 from `/v1/scene` on a v2 page). What the stream does not carry is
+drawn plain: a def's params beyond a building's size and storeys take the def's defaults, a def the library lacks is
+drawn from the thing's solids as boxes, and `window.__soulsStreamScene.plain` lists each such case.
+
+A thing placed while the world runs (a creator's, or one a Soul makes) is drawn by `creator-kinds.ts`: by a creator's
+own kind, else the def the world's own things of its kind have, else the library def named like its kind, else a box
+the size its entry gives (`take-parts.ts`, from `source/kind-bounds.ts`, which the build fills from `content/kinds`).
 
 ## What follows from the boundary
 

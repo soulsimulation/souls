@@ -5,7 +5,20 @@ import { test } from 'node:test';
 import { addresses, runArgs, WORLD } from './world.mjs';
 import { lastJson, pairArgs, seatEnv } from './seat.mjs';
 import { noOldServer } from './smoke.mjs';
-import { frontDoor, templateName, withRoute } from './old-page.mjs';
+import { frontDoor, genesisFor, templateName, withRoute } from './old-page.mjs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+test("a scene's own genesis, or a template with things added, is the run's own template for both sides", () => {
+  const dir = mkdtempSync(join(tmpdir(), 'genesis-'));
+  try {
+    assert.equal(genesisFor({ template: 'worlds/templates/hello-hamlet.json', dir }).templatesDir, null, 'a committed template is used as it is');
+    const g = genesisFor({ template: 'worlds/templates/hello-hamlet.json', add: [{ op: 'place', def: 'core:bench' }], dir });
+    assert.equal(g.name, 'hello-hamlet'); assert.equal(g.templatesDir, join(dir, 'templates'));
+    assert.deepEqual(JSON.parse(readFileSync(g.template, 'utf8')).batches.at(-1).ops, [{ op: 'place', def: 'core:bench' }]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
 
 test('run.sh is given its port, folder and facts, and its programs are where its header says', () => {
   assert.deepEqual(runArgs({ dir: '/x/world', port: 7400, facts: '/x/g.facts.json' }), ['--port', '7400', '--dir', '/x/world', '--facts', '/x/g.facts.json']);

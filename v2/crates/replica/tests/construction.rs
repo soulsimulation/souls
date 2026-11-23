@@ -26,6 +26,14 @@ fn loaded() -> Kinds {
         .unwrap()
         .map(|e| e.unwrap().path())
         .filter(|p| p.extension().is_some_and(|x| x == "json"))
+        // An activity's entry (its `roles`, 0.135 C4's carry) is not one of the four parts.
+        .filter(|p| {
+            let json = std::fs::read_to_string(p).unwrap();
+            replica::rules::json::parse(&json)
+                .unwrap()
+                .get("roles")
+                .is_none()
+        })
         .map(|p| {
             let text = entry_to_kind(&without_roles(&std::fs::read_to_string(&p).unwrap()))
                 .unwrap_or_else(|e| panic!("{}: {e}", p.display()));

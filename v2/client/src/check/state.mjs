@@ -72,25 +72,39 @@ const plain = (v) => (typeof v === 'bigint' ? Number(v) : v instanceof Uint8Arra
  *  null once cleared (`{}`) or never written, so a need on `is: null` tells them apart. */
 export const textValue = (v) => (v instanceof Map && v.has(21) ? idText(v.get(21)) : null);
 
-/** The copy (R5's `Copy`) as `{actor, nodes}` for `me`, walked from its roots. */
-export function stateOf(copy, kinds, me) {
+/**
+ * The copy (R5's `Copy`) as `{actor, nodes}` for `me`, walked from its roots. `memo` (an object the caller keeps) holds
+ * each record's reading by its hash between calls (G-late): the copy is addressed by hash, so a record already read
+ * reads the same while the kinds are the same, and only what a sync changed is read and decoded again.
+ */
+export function stateOf(copy, kinds, me, memo = null) {
   const nodes = { [me]: {} }, parents = new Map();
+  if (memo && memo.kinds !== kinds) Object.assign(memo, { kinds, byHash: new Map() });
+  const seen = memo ? new Map() : null;
   const todo = Object.values(JSON.parse(copy.roots()));
   while (todo.length) {
-    const bytes = copy.record(todo.pop());
-    if (!bytes) continue;
-    const m = decode(bytes), id = idText(m.get(1)), kind = entryKind(m);
-    // A creator's kind by its full name first (#3697): its own revision's state numbering.
-    const state = (kinds[String(m.get(2))] ?? kinds[kind])?.state ?? {};
-    const byN = Object.fromEntries(Object.entries(state).map(([name, def]) => [def.n, name]));
-    const fields = {};
-    // An enum's value is held as a name (`souls:stand`); the entry lists its values by their local part (`stand`).
-    const valueOf = (def, v) => (def?.type === 'enum' && typeof v === 'string' && def.values?.includes(v.replace(/^[^:]*:/, '')) ? v.replace(/^[^:]*:/, '') : v);
-    if (m.get(6) instanceof Map) for (const [n, v] of m.get(6)) if (byN[n]) fields[byN[n]] = state[byN[n]].type === 'text' ? textValue(v) : valueOf(state[byN[n]], plain(v));
-    nodes[id] = { ...nodes[id], kind, ...(Object.keys(fields).length ? { fields } : {}) };
-    if (m.has(3)) parents.set(id, idText(m.get(3)));
-    for (const c of m.get(10) ?? []) todo.push(Buffer.from(c).toString('hex'));
+    const h = todo.pop();
+    let r = memo?.byHash.get(h);
+    if (!r) {
+      const bytes = copy.record(h);
+      if (!bytes) continue;
+      const m = decode(bytes), kind = entryKind(m);
+      // A creator's kind by its full name first (#3697): its own revision's state numbering.
+      const state = (kinds[String(m.get(2))] ?? kinds[kind])?.state ?? {};
+      const byN = Object.fromEntries(Object.entries(state).map(([name, def]) => [def.n, name]));
+      const fields = {};
+      // An enum's value is held as a name (`souls:stand`); the entry lists its values by their local part (`stand`).
+      const valueOf = (def, v) => (def?.type === 'enum' && typeof v === 'string' && def.values?.includes(v.replace(/^[^:]*:/, '')) ? v.replace(/^[^:]*:/, '') : v);
+      if (m.get(6) instanceof Map) for (const [n, v] of m.get(6)) if (byN[n]) fields[byN[n]] = state[byN[n]].type === 'text' ? textValue(v) : valueOf(state[byN[n]], plain(v));
+      r = { id: idText(m.get(1)), kind, fields: Object.keys(fields).length ? fields : null, parent: m.has(3) ? idText(m.get(3)) : null,
+        children: (m.get(10) ?? []).map((c) => Buffer.from(c).toString('hex')) };
+    }
+    seen?.set(h, r);
+    nodes[r.id] = { ...nodes[r.id], kind: r.kind, ...(r.fields ? { fields: r.fields } : {}) };
+    if (r.parent !== null) parents.set(r.id, r.parent);
+    todo.push(...r.children);
   }
+  if (memo) memo.byHash = seen; // only the records of this walk are kept
   // D8: a body taken into a seat or a bed by the thing's own form (a reparent into its slot) holds no posture field;
   // its posture is the slot's, when the thing's body slots all give one (an armchair's `sit`, a bed's `lie`).
   // D10: nor does that form write over a `stand` a rise wrote before, so a seat's posture wins over a written `stand`.

@@ -227,7 +227,7 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   // #893: phones get the camera menu as a bottom sheet; Follow appears when a Soul is selected.
   const phoneSheet = coarse || (() => { try { return matchMedia('(max-width: 700px)').matches; } catch { return false; } })();
   const followable = state?.selection.soulId ?? null;
-  const cameraLabel=arriving?'Loading':state?.presentation==='history'?'Recorded':kind==='follow'?`Following ${followName??'a Soul'}`:kind==='yours'?'Free':'Broadcast';
+  const cameraLabel=arriving?'Loading':state?.presentation==='history'?'Recorded':kind==='follow'?`Following ${followName??(!state?.selection.soulId&&state?.selection.entityId?'a thing':'a Soul')}`:kind==='yours'?'Free':'Broadcast';
   const cameraAction=kind==='broadcast'?'Switch to Free camera':'Return to Broadcast';
   const cameraBlock=<div className="viewer-camera-chip camera-split" data-camera={kind} data-follow-soul={kind==='follow'?state?.selection.soulId??'':undefined}>
     <button type="button" className="camera-main" disabled={!handle||arriving} aria-label={`${cameraLabel}: ${cameraAction}`} title={cameraAction} data-tooltip={cameraAction} onClick={()=>kind==='broadcast'?yourCamera():toBroadcast()}>

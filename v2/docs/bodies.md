@@ -71,7 +71,14 @@ hatch (F8) is rule 11. The controller (B1) is summarised under [The controller](
    44 (1: the shoulder turn, no body pushes it), field 45 (a new route, `[count, [[x, y, z] or [x, y, z, link],
    ...]]`, walked from its first leg: N10's reroute, or the way to a standing spot N9 granted) and field 46 (1: the
    world walks it out to legal ground, and the walk stands); it shows field 47 (1) on a body standing on its own
-   granted spot. Ending a walk by name is the world's: it ends the run.
+   granted spot. Ending a walk by name is the world's: it ends the run. Field 48 is the queue spot the world assigns
+   a body (B7, `[x, y, z]` in its floor's frame). **Crowds (0.133 A2-4).** A wide link is taken in turns too while
+   its mouth is crowded: a walker near it that sees three bodies within 1.5 m of its end marks itself waiting
+   (field 41), and the link shows field 42 until none waits and none is inside on its turn. Grants are fair, at any link
+   taken in turns: a waiter passed over by later ones twice (six times at a narrow link) goes next. A walk held near its goal by a body at rest nearer it sets field 49 (1)
+   on its own body and is done short of it; the world writes its `souls:move-ended` as
+   `done.as-near-as-the-crowd-allows` and takes the field off. A walk to its own granted spot ends so only when a
+   body at rest stands on that spot, or once held there past a way round's ticks; its spot is then released.
 9. **What survives a restart is the log.** Nodes and links survive, so a joint activity and a moving group do. A
    skill in progress is not stored: on a restart each active intent is handed to its skill again, or ended with a
    named reason (K13 builds it).
