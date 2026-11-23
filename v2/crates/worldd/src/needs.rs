@@ -136,7 +136,8 @@ impl State<'_> {
     /// Node `id` as `{kind, fields, links, slots}`; `None` for a node not in the tree.
     fn record(&self, id: Id) -> Option<Vec<(String, Value)>> {
         let n = self.tree.handle(id).and_then(|h| self.tree.node(h))?;
-        let kind = plain(n.kind().as_str()).to_owned();
+        // The entry the node goes by (#3980): one it borrows (field 27) names its fields, else its kind's.
+        let kind = plain(import_eden::entry_name(n.kind().as_str(), n.fields())).to_owned();
         let mut out = vec![("kind".to_owned(), Value::s(&kind))];
         if let Some(entry) = self.entry(&kind) {
             let stored = n.fields();
@@ -387,7 +388,7 @@ pub fn check(
     let this_kind = tree
         .handle(node)
         .and_then(|h| tree.node(h))
-        .map(|n| plain(n.kind().as_str()).to_owned())
+        .map(|n| plain(import_eden::entry_name(n.kind().as_str(), n.fields())).to_owned())
         .unwrap_or_default();
     let narrowed = decided_needs(entry, form);
     let (form_entry, index): (&Value, Option<&[usize]>) = match &narrowed {
