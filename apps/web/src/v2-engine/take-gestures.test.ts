@@ -5,7 +5,7 @@ import { sampleTake } from '../../../../mars/viewer/engine/take/replay.ts';
 import type { Take } from '../../../../mars/viewer/engine/take/types.ts';
 import { readFileSync } from 'node:fs';
 import { ACTIVITY_OVERLAYS, CYCLES, FACE_DOWN, LYING } from '../../../../mars/viewer/app/engine-view/activity-poses.ts';
-import { cut, gestureAt, gestureFrom, gestureOf } from './take-gestures.ts';
+import { cut, endGesture, gestureAt, gestureFrom, gestureOf, LOOP_HOLD } from './take-gestures.ts';
 import { chunkOf, TICK_US, type Body } from './takes.ts';
 
 const FROM = 2000, t0 = FROM * TICK_US, frame = { rulesVersion: 'test/1', datetime: null };
@@ -89,4 +89,33 @@ test('an aimed gesture (0.134 B1) turns the standing body toward its target whil
   const seated: Body = { ...body, entity: 'v2_a_4', samples: [{ at: t0 - 1_000_000, p: [0, 0, 0], seat: { height: 450, lie: false } }] };
   assert.ok(Math.abs(sampleTake(chunkOf([seated], FROM, frame).take as unknown as Take, 0.4).entities.v2_a_4.yaw) < 0.01, 'seated, it keeps its seat\'s way');
   assert.equal(gestureFrom({ name: 'eden:clap', start: t0, ends: [t0 + 1] })!.toward, undefined, 'no target: unaimed');
+});
+
+test('0.134 T3: dancers on one beat dance on between cycles, in step (one partner phase), and stop after the last', () => {
+  // Each cycle 0.8 s, the next on the next whole beat 0.3 s after it ends; aimed at the dancer's own body.
+  const cycle = (node: string, start: number) => gestureFrom({ name: 'eden:dance', start, ends: [start + 400_000, start + 800_000], target: node, run: 'act-1' })!;
+  const cycles = (node: string) => [cycle(node, t0), cycle(node, t0 + 1_100_000)];
+  const A: Body = { entity: 'v2_a', node: 'n-a', soul: 's-a', name: 'Ada', heading: 0, samples: [{ at: t0 - 1_000_000, p: [0, 0, 0] }], gestures: cycles('n-a') };
+  const B: Body = { entity: 'v2_b', node: 'n-b', soul: 's-b', name: 'Bo', heading: 0, samples: [{ at: t0 - 1_000_000, p: [1500, 0, 0] }], gestures: cycles('n-b') };
+  const C: Body = { entity: 'v2_c', node: 'n-c', soul: 's-c', name: 'Cy', heading: 0, samples: [{ at: t0 - 1_000_000, p: [3000, 0, 0] }],
+    gestures: [{ ...cycle('n-c', t0), run: 'act-2' }] };
+  const take = chunkOf([A, B, C], FROM, frame, 60).take as unknown as Take, at = (s: number) => sampleTake(take, s).entities;
+  for (const s of [0.4, 0.95, 1.5]) {
+    assert.equal(at(s).v2_a.activity, 'dance', `A dances at ${s} s`);
+    assert.equal(at(s).v2_b.activity, 'dance', `B dances at ${s} s`);
+    assert.equal(at(s).v2_b.state.partner, 'v2_a', 'B dances in step with A');
+    assert.equal(at(s).v2_a.state.partner ?? null, null, 'the first names none');
+    assert.ok(Math.abs(at(s).v2_a.yaw) < 0.01, 'a dance at oneself turns nothing');
+  }
+  assert.equal(at(0.4).v2_c.state.partner ?? null, null, 'another dance is not in step with this one');
+  assert.equal(at((1_100_000 + 800_000 + LOOP_HOLD + 100_000) / 1e6).v2_a.activity, 'idle', 'stopped after the last cycle');
+});
+
+test('0.134 T2: a held hand let go (its record again, ended) ends that hold then', () => {
+  const g = gestureFrom({ name: 'eden:hold_hand', start: t0, ends: [t0 + 500_000, Number.MAX_SAFE_INTEGER], target: 'n-b' })!;
+  const other = gestureFrom({ name: 'eden:wave', start: t0 + 100_000, ends: [t0 + 900_000] })!;
+  const gestures = [g, other];
+  endGesture(gestures, t0, t0 + 2_000_000);
+  assert.equal(g.end, t0 + 2_000_000);
+  assert.equal(other.end, t0 + 900_000, 'another move is left as it was');
 });
