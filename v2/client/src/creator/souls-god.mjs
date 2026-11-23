@@ -6,6 +6,8 @@
 //
 //   souls-god.mjs pair <world url> --creator <creator grant>   asks the world's directory for the creator's token
 //   souls-god.mjs describe                       what is there (id, kind, parent) and what each kind admits
+//   souls-god.mjs map                            the world at a glance: the extent of what stands, its buildings, named
+//                                                things, roads and zones, each with its centre and size in metres (R8d)
 //   souls-god.mjs place <kind> --in <id> [--at x,y,z] [--slot n] [--field n=v ...]   a new thing; mm in the parent
 //   souls-god.mjs move <id> --at x,y,z [--slot n]                                     to another spot, same parent
 //   souls-god.mjs set <id> <field> <value>       one numbered field: an integer, true, false or a name
@@ -107,6 +109,8 @@ import { F_HOURS, hoursRows } from '../schedule/hours.mjs';
 import { parseShoot, runShoot } from '../shoot/shoot.mjs';
 import { parseSpace, runSpace } from './space.mjs';
 import { TRACE_MOST } from './trace.mjs';
+import { mapOf } from './map.mjs';
+import { kindsIn } from '../check/state.mjs';
 
 export const VERBS = [
   'about',
@@ -128,6 +132,7 @@ export const VERBS = [
   'layers',
   'listen',
   'look',
+  'map',
   'move',
   'own',
   'pair',
@@ -428,6 +433,8 @@ export function requestOf(argv) {
     return { listen: { seconds: Number(secs), follow }, creator };
   }
   if (verb === 'visitors') return { directory: '/v1/worlds/visitors', body: {}, creator };
+  // R8d: the world at a glance, read from the copy (map.mjs)
+  if (verb === 'map') { if (rest.length) throw usage('map'); return { map: true, creator }; }
   if (verb === 'status' || verb === 'stop' || verb === 'describe' || verb === 'redo') return { req: { op: verb }, creator };
   if (verb === 'upload') {
     if (rest.length !== 1 || !/\.(glb|png|jpe?g)$/i.test(rest[0])) throw usage('upload <file.glb|png|jpg>');
@@ -869,6 +876,13 @@ if (isMain(import.meta.url)) {
     // A helper's home sends every edit under its claim (#3727).
     const scoped = helperClaim(home);
     if (scoped && req && (req.op === 'edit' || req.op === 'check') && req.claim === undefined) req = { ...req, claim: scoped };
+    if (asked.map) {
+      const d = await ask({ op: 'describe' }, 15_000), root = d.ok === false ? null : await ask({ op: 'fields' }, 15_000);
+      const said = d.ok === false ? d : mapOf(d, root?.ok === false ? {} : root?.fields ?? {}, kindsIn(join(home, 'kinds')));
+      out(withFix(said));
+      if (said.ok === false) process.exitCode = 1;
+      process.exit();
+    }
     const answer = asked.build ? await runBuild(asked.build, ask, (minutes, claim) => mintHelper(home, creator, minutes, claim)) : asked.layer ? await runLayer(asked.layer, ask) : await ask(req);
     out(withFix({ ...answer, ...(asked.say ?? {}) }));
     if (answer.ok === false) process.exitCode = 1;
