@@ -33,7 +33,7 @@ use replica::ids::{Id, Minter, Scope};
 use replica::moves::{Effector, Move};
 use replica::pose::Vec3;
 use replica::rules::json::Value as Json;
-use replica::time::Micros;
+use replica::time::{Mapping, Micros, Tempo, TickRate, Timeline};
 use replica::tree::{Rules, Tree};
 use replica::world_model::plain;
 use replica::world_model::show;
@@ -119,6 +119,8 @@ pub struct Engine {
     steered: BTreeSet<Id>,
     /// The moves an activity's roles may name (0.134 T1): content's, [`crate::moves::library`].
     library: Vec<Move>,
+    /// The world's clock, whose beats a dance's moves start on (0.134 T3): the world's own ([`Engine::with_beats`]).
+    line: Timeline,
     /// The loads the world's entries state, by plain kind (0.135 C2, [`Engine::with_loads`]).
     loads: BTreeMap<String, Load>,
     /// Loads found riding a carry at a restart, set down at the first tick (0.135 C3): (activity, load).
@@ -289,7 +291,19 @@ impl Engine {
                 eprintln!("worldd: no moves for activities: {r}");
                 Vec::new()
             }),
+            line: Timeline::start(
+                Mapping::new(0, 0, 1, 1).expect("rate one"),
+                TickRate::new(0, 0, 20).expect("20 a second"),
+                Tempo::per_minute(0, 0, 120).expect("120 a minute"),
+            )
+            .expect("a line from zero"),
         }
+    }
+
+    /// The engine on the world's own clock `line`, whose beats a dance's moves start on (0.134 T3).
+    pub fn with_beats(mut self, line: Timeline) -> Engine {
+        self.line = line;
+        self
     }
 
     /// The roles' moves of the activities just started, aimed by each member at the other (0.134 T1). A refused one
@@ -308,6 +322,7 @@ impl Engine {
             &mut self.mint,
             &self.library,
             &feet,
+            &self.line,
             now,
         ) {
             eprintln!("worldd: {}'s move was not aimed: {r}", show(body));
@@ -428,7 +443,8 @@ impl Engine {
             Verb::Accept => {
                 let offer = target("accept-needs-an-offer")?;
                 // 0.134 T1: a touch starts only where its moves reach; nothing walks the two to their places yet.
-                if let Some((kind, asker)) = e.offered(offer) {
+                // A dance (T3) touches nobody: its moves are at each member's own body.
+                if let Some((kind, asker)) = e.offered(offer).filter(|(k, _)| !k.beat) {
                     let feet = Feet::of(c, [asker, a.body]);
                     for mv in kind.roles.iter().filter_map(|r| r.mv.as_ref()) {
                         let Some(m) = self.library.iter().find(|m| m.name == *mv) else {
@@ -750,10 +766,10 @@ impl Engine {
         self.collect(None);
     }
 
-    /// A move `body` started for `intent` (a walk, a sit) at `now` (0.134 T2): if `body` holds hands, it leaves that
-    /// activity as `activity:leave` does, and both hands come free. Its entries wait in [`Engine::out`].
+    /// A move `body` started for `intent` (a walk, a sit) at `now` (0.134 T2): if `body` holds hands, or dances on the
+    /// beat (T3), it leaves that activity as `activity:leave` does, and both hands come free. Its entries wait in [`Engine::out`].
     pub fn walked(&mut self, live: &Tree, c: &mut Controller, body: Id, intent: Id, now: Micros) {
-        let Some(activity) = self.activities.holding_hands(&self.moves, body) else {
+        let Some(activity) = self.activities.walk_leaves(&self.moves, body) else {
             return;
         };
         let Some(soul) = self

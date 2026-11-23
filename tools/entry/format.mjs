@@ -687,7 +687,9 @@ function roles(entry, err) {
     const p = `roles.${name}`;
     if (!(isObj(links[name]) && (links[name].from === 'body' || links[name].from === 'soul'))) err(p, 'a role is a link type of this kind whose from end is a body or a Soul');
     if (!isObj(r)) { err(p, 'a role is an object: {"need", "places"}'); continue; }
-    only(r, ['need', 'places', 'move'], p, err);
+    only(r, ['need', 'places', 'move', 'on_beat'], p, err);
+    // 0.134 T3: the move begins on the world's beat, and again on the next after it ends, until the member leaves.
+    if (r.on_beat !== undefined && r.on_beat !== true) err(`${p}.on_beat`, 'true, or left out');
     if (!ROLE_NEEDS.includes(r.need)) err(`${p}.need`, `one of ${ROLE_NEEDS.join(', ')}`);
     // 0.134 T1: the move (content/moves) a member of this role aims at the other member when the activity starts.
     if (r.move !== undefined && !(typeof r.move === 'string' && /^[a-z][a-z0-9_]*$/.test(r.move))) err(`${p}.move`, 'a move of content/moves, by name');

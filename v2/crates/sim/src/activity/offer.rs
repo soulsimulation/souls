@@ -10,6 +10,8 @@
 //!   pair with the asker, with its own expiry: the first one joins the offer's own node, each later one a new node.
 //!   Pairs are held in order of arrival; the one at the front starts when both its bodies are free: at once, or when
 //!   the pair before it is left.
+//! - **A kind that takes more than two** (`most`, 0.134 T3: a dance offered to several): the first accept makes the
+//!   pair as above, and each later one joins that same activity, taking its role's claims at once if it has started.
 //! - **Declining is an intent** ([`Activities::decline`]) and **a lapse is a timer** ([`Activities::lapse`]). Each
 //!   reaches the asker as a named outcome, `souls:offer-declined` or `souls:offer-lapsed`. An offer that every body
 //!   asked declined, or that nobody accepted in time, ends: its node goes. A pair that waited past its own expiry lapses
@@ -312,6 +314,9 @@ impl Activities {
             return self.give(tree, mint, c, due, ask, body, offer, &o, thing);
         }
         let k = &self.kinds[&o.kind];
+        if o.taken && k.most > 2 {
+            return self.join_offer(tree, mint, c, ask, body, offer, &o);
+        }
         let expires = ask.at.saturating_add(k.proposal_lasts);
         let revision = k.revision;
         let first = !o.taken;
@@ -434,6 +439,100 @@ impl Activities {
             .push_back(pair);
         self.advance(tree, c, due, body, ask.at);
         Ok(pair)
+    }
+
+    /// A later accept of an offer whose kind takes more than two (0.134 T3: a dance, offered to several): `body`
+    /// joins the offer's own activity in the other role, its role's claims taken now if it has started (else at its
+    /// start, with every member's). Returns the activity. `activity-full`, `already-member`, `body-in-activity`, T9's
+    /// refusals by name.
+    #[allow(clippy::too_many_arguments)]
+    fn join_offer(
+        &mut self,
+        tree: &mut Tree,
+        mint: &mut Minter,
+        c: &mut Controller,
+        ask: Ask,
+        body: Id,
+        offer: Id,
+        o: &Open,
+    ) -> R<Id> {
+        let k = &self.kinds[&o.kind];
+        let Some(l) = self.live.get(&offer) else {
+            return refuse("offer-withdrawn", show(offer));
+        };
+        if l.node.members.len() >= k.most {
+            return refuse(
+                "activity-full",
+                format!("{}: {} members", show(offer), k.most),
+            );
+        }
+        if l.node.members.iter().any(|m| m.body == body) {
+            return refuse("already-member", show(body));
+        }
+        let driver = match l.node.state {
+            State::Started => {
+                if let Some(other) = self.holding.get(&body) {
+                    return refuse(
+                        "body-in-activity",
+                        format!("{} is held by {}", show(body), show(*other)),
+                    );
+                }
+                let role = k.role(&o.other).expect("the offer's other role");
+                Some(c.claim(body, &k.shape(role))?)
+            }
+            State::Proposed => None,
+        };
+        let link = minted(mint)?;
+        let mut node = l.node.clone();
+        node.members.push(Member {
+            role: o.other.clone(),
+            body,
+            soul: ask.soul,
+            link,
+            intent: ask.intent,
+        });
+        let changes = vec![
+            Change::Link {
+                link,
+                ty: name(MEMBER),
+                ends: [body, offer],
+                owner: End::Second,
+                audience: o.audience,
+            },
+            Change::Set {
+                node: offer,
+                field: F_MEMBERS,
+                to: node.members_value(),
+                by: None,
+            },
+        ];
+        let fields = BTreeMap::from([(1, offer.to_value())]);
+        let by = (ask.at, Actor::Soul(ask.soul), Cause::Intent(ask.intent));
+        if let Err(r) = self.emit(
+            tree,
+            offer,
+            o.audience,
+            by,
+            "souls:activity-joined",
+            fields,
+            changes,
+        ) {
+            if let Some(d) = driver {
+                let _ = c.release(body, d);
+            }
+            return Err(r);
+        }
+        if let Some(l) = self.live.get_mut(&offer) {
+            l.node = node;
+            if let Some(d) = driver {
+                l.drivers.insert(body, d);
+                self.holding.insert(body, offer);
+            }
+        }
+        if let Some(open) = self.offers.open.get_mut(&offer) {
+            open.answered.insert(body);
+        }
+        Ok(offer)
     }
 
     /// A give's accept (see the module's notes): the thing from the asker's hand to a free hand of `body`, then the

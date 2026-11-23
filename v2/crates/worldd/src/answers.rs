@@ -4983,6 +4983,7 @@ pub fn start<S: Storage + 'static>(
         .into_iter()
         .map(|(at, n)| (i64::try_from(at).unwrap_or(i64::MAX), n))
         .collect();
+    let beats = line.clone();
     let mut ticker = Ticker::new(line, mapping, last, real0).map_err(time)?;
     let beat = Arc::new(Heartbeat::new(real0));
     let tier = match cfg.views {
@@ -5199,7 +5200,9 @@ pub fn start<S: Storage + 'static>(
         engine: engine_parts
             // 0.135 C2: a load is carried as its kind's entry states.
             .map(|(rules, kinds)| {
-                Engine::new(engine_header, rules, kinds, engine_scope).with_loads(&engine_entries)
+                Engine::new(engine_header, rules, kinds, engine_scope)
+                    .with_beats(beats)
+                    .with_loads(&engine_entries)
             }),
         engine_acts: Vec::new(),
         engine_done: Vec::new(),
