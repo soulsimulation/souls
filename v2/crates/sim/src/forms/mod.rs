@@ -1806,6 +1806,24 @@ impl Forms {
             }
             self.wake(w, run, Woke::Planning, now);
         }
+        // A run whose walk lost its claim on the legs (its Soul's own walk took them, intents rule 10) ends
+        // `claim-taken`, as one waiting for its plan does (S11). Its walk's inputs went nowhere, it asked no way, so
+        // C21's watch never saw it, and the run stood at its walk step, its act never answered.
+        let lost: Vec<RunId> = self
+            .runs
+            .iter()
+            .filter(|(_, fr)| {
+                fr.walk.is_some_and(|driver| {
+                    !w.controller
+                        .claims(fr.body)
+                        .is_some_and(|c| c.running().contains_key(&driver))
+                })
+            })
+            .map(|(run, _)| *run)
+            .collect();
+        for run in lost {
+            self.finish(w, run, name("claim-taken"), now);
+        }
         if self.walks.is_empty() {
             return;
         }

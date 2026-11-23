@@ -118,9 +118,9 @@ jobs:
                 # The stuck agents' acts (S11): verb, accepted or unanswered, counted, with the longest time since sent.
                 node -e '
                   const [r, rung, arm, k, line] = process.argv.slice(1); const o = JSON.parse(line.slice(5));
-                  const by = {}; for (const a of o.stuck?.stuckActs ?? []) { const [v, st, ms] = a.split(" "); const e = (by[v + " " + st] ??= { n: 0, ms: 0 }); e.n++; e.ms = Math.max(e.ms, parseInt(ms)); }
+                  const by = {}; for (const a of o.stuck?.stuckActs ?? []) { const [v, st, ms, how] = a.split(" "); const e = (by[v + " " + st + " " + (how ?? "")] ??= { n: 0, ms: 0 }); e.n++; e.ms = Math.max(e.ms, parseInt(ms)); }
                   const t = Object.entries(by).sort((x, y) => y[1].n - x[1].n).map(([key, e]) => `${key} ${e.n} (up to ${Math.round(e.ms / 1000)} s)`).join("; ");
-                  if (t) console.log(`stuck ${r} ${rung} ${arm} r${k}: ${t}; refused only ${o.stuck.refusedOnly}, longest stall ${Math.round(o.stuck.stallMaxMs / 1000)} s`);
+                  if (t) console.log(`long acts ${r} ${rung} ${arm} r${k}: ${t}; stuck ${o.stuck.stuck} (${o.stuck.rule ?? "unanswered 60 s"}), on their way ${o.stuck.onTheirWay ?? "-"} (${o.stuck.unseen ?? "-"} never seen on the stream); refused only ${o.stuck.refusedOnly}, longest stall ${Math.round(o.stuck.stallMaxMs / 1000)} s`);
                 ' "$r" "$rung" "$arm" "$k" "$line"
               done
             done
