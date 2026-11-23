@@ -7,7 +7,8 @@ each due change at its due time.
 
 ## Going to sleep
 
-`worldd serve --sleep <alarm socket>` (the launcher passes `--sleep $WORLDS_ROOT/alarms.sock`; 0.133 S3b,
+`worldd serve --sleep <alarm socket>` (the launcher passes `--sleep $WORLDS_ROOT/alarms.sock` only with
+`SOULS_SLEEP=1` in the unit's environment, off by default until S4p and S5; 0.133 S3b,
 `worldd/src/sleep.rs`) reads its clock each second: **still** (no intent queued or open, no act forming or checking,
 no body moving for an intent or for the wind-down) and its **next due time**, the earliest over its due lists (the
 sky's light, day and weather, the bodies' moves and wind-down, the activities and boats, the loose things' ends).
