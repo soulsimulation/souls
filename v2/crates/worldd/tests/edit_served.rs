@@ -1980,3 +1980,104 @@ fn an_oversize_rows_edit_is_refused_by_name_and_the_world_keeps_answering() {
     let got = edit(vec![wall(&w, -30 * M, 30 * M)]);
     assert_eq!(got.kind, 1, "the world still answers and edits: {got:?}");
 }
+
+/// The 0.132 release check's gesture (#1960): a Soul's wave on its own body in a served world, three times. Its run
+/// starts in the act's tick, its move (`souls:form-move`, the record the page draws the gesture from) starts in the same
+/// tick, and its `done` receipt comes when the move ends, 1.2 s on (`wave`: 0.3 s to the contact, 0.9 s after): the
+/// receipt never goes out before the move plays. World times from the log; the answers' wall times are printed.
+#[test]
+fn a_gestures_move_starts_in_its_acts_tick_and_its_receipt_comes_when_it_ends() {
+    let d = scratch("gesture");
+    let entries = d.join("entries");
+    std::fs::create_dir_all(&entries).unwrap();
+    let root =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds/body/humanoid.json");
+    std::fs::copy(root, entries.join("humanoid.json")).unwrap();
+    let w = seed_entries(
+        &d,
+        &testworld::generate(1, 0).unwrap().text,
+        1,
+        (-40, 30),
+        Some(&entries),
+    );
+    let socket = d.join("s");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 60);
+    let mut souls = connect_socket(&socket);
+    souls
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    walk(&mut souls, &w, w.souls[0], 1, -37 * M, 30 * M);
+    let got = socket_end(&mut souls);
+    assert_eq!(got.kind, 1, "the Soul's walk births it: {got:?}");
+    let (copy, _) = served_copy(&w);
+    let t = copy.tree();
+    let body = t
+        .links_at(w.souls[0])
+        .iter()
+        .filter(|e| t.ty(e).as_str() == "souls:body-of")
+        .find_map(|e| Some(t.link(e.link)?.1[0]))
+        .expect("the Soul's body");
+    for round in 0..3u64 {
+        let i = Intent {
+            actor: Actor::Soul(w.souls[0]),
+            verb: Name::new("eden:wave").unwrap(),
+            target: Some(Target::Node(body)),
+            parameters: BTreeMap::new(),
+            sequence: 2 + round,
+            basis: basis(w.root.scope(), 0),
+            expiry: answers::now() + 120_000_000,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+            reflex: false,
+        };
+        let bytes = encode(&i.to_value()).unwrap();
+        let (sent, from) = (Instant::now(), answers::now());
+        souls
+            .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+            .unwrap();
+        souls.write_all(&bytes).unwrap();
+        let mut kinds = Vec::new();
+        loop {
+            let got = socket_answer(&mut souls);
+            kinds.push((got.kind, sent.elapsed().as_millis()));
+            if got.kind != 3 {
+                break;
+            }
+        }
+        // The run's entries, in world time.
+        let log = std::fs::read(w.dir.join("log")).unwrap();
+        let mut at = BTreeMap::new();
+        for rec in sim::log::recover(&log).unwrap().records {
+            if sim::recorder::is_input(&rec) {
+                continue;
+            }
+            for e in replica::effects::Part::read(&rec).unwrap().effects {
+                for v in e.events.iter().flatten().filter(|_| e.envelope.at >= from) {
+                    at.entry(v.name.as_str().to_owned())
+                        .or_insert(e.envelope.at);
+                }
+            }
+        }
+        let (started, moved, ended) = (
+            at["souls:form-started"],
+            at["souls:form-move"],
+            at["souls:form-ended"],
+        );
+        println!(
+            "wave {round}: answers (kind, ms after the send) {kinds:?}; run started +{} ms, move +{} ms, ended +{} ms",
+            (started - from) / 1000,
+            (moved - from) / 1000,
+            (ended - from) / 1000
+        );
+        assert_eq!(kinds.first().map(|k| k.0), Some(3), "accepted first");
+        assert_eq!(kinds.last().map(|k| k.0), Some(1), "then done");
+        assert!(
+            moved - started <= 100_000,
+            "the move starts within two ticks of the run"
+        );
+        assert_eq!(ended - moved, 1_200_000, "done when the move ends");
+    }
+}
