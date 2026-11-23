@@ -5,7 +5,9 @@
 // here as the v2 page reads them (v2/web/src/owner/box.ts `OwnerBox`, source/socket.ts `exchange`, owner/mail-socket.ts
 // `MailSocket`). This file turns the box's messages into the old box's `AgentInbox`, so the old card draws them
 // unchanged. Nothing here makes a Soul act, and the token stays in memory only.
+import { useEffect, useState } from 'react';
 import type { AgentInbox } from '../AgentMessageBox.tsx';
+import { session as pageSession, useSession } from '../auth-session.ts';
 import { v2Stream } from './use-v2-souls.ts';
 
 /** One message, as the v2 page's box keeps it (v2/web/src/owner/box.ts `Message`). */
@@ -18,7 +20,10 @@ export type BoxMessage = {
   reply?: string | null;
   notes?: string[];
 };
-type Session = { testName: string };
+/** The directory's test sign-in by name (`?as=` on a loopback page), or the page's own sign-in (B3-2): its session is
+ *  exchanged for the gateway's view token (a provider's session token as the bearer; a local `dev:<name>` as the
+ *  directory's test sign-in by that name, which only a directory with the test sign-in on accepts). */
+type Session = { testName: string } | { page: true };
 /** Where this world's mailbox is: the directory (an origin) and the gateway's view socket, and the session to use. */
 export type MailboxPlace = { directory: string; gateway: string; session: Session };
 
@@ -31,8 +36,8 @@ const PATH = /^\/[A-Za-z0-9._/-]*$/;
 /**
  * The mailbox of this page's v2 world, or null (an old-engine world, or a v2 world whose page names no mailbox).
  * The inline config names same-origin paths (`v2Gateway`, `v2Directory`); a loopback page may name loopback ones with
- * `?gateway=` and `?directory=` (as the v2 page does). The session is the directory's local test sign-in
- * (`?as=<person>` on loopback); a signed-in session from the old page's provider is the sign-in row's (#1960 stage 4).
+ * `?gateway=` and `?directory=` (as the v2 page does). The session is the page's own sign-in, or on loopback the
+ * directory's test sign-in by `?as=<person>`.
  */
 export function mailboxPlace(href: string, cfg: { v2Stream?: unknown; v2Gateway?: unknown; v2Directory?: unknown } | undefined, stream: string | null): MailboxPlace | null {
   if (!stream) return null;
@@ -46,7 +51,7 @@ export function mailboxPlace(href: string, cfg: { v2Stream?: unknown; v2Gateway?
     if (d) { const u = new URL(d, at); if (local(u) && !u.search && !u.hash) directory = u.origin; }
   }
   const name = local(at) ? q.get('as')?.trim() : '';
-  return gateway && directory && name ? { directory, gateway, session: { testName: name } } : null;
+  return gateway && directory ? { directory, gateway, session: name ? { testName: name } : { page: true } } : null;
 }
 
 /** The old box's inbox for the v2 box's messages: the newest one (refusals are thrown at send, not kept). */
@@ -194,9 +199,16 @@ export class V2OwnerMailbox {
 
 /** The directory's session exchange (V13b, v2/web/src/source/socket.ts `exchange`): a short-lived view token, held in
  *  memory alone, and the grants it may watch. */
-export async function viewToken(place: MailboxPlace, post: typeof fetch = fetch): Promise<{ token: string; expires: number; owned: { grant: string }[] }> {
-  const res = await post(`${place.directory}/v1/account/view-token`, { method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ name: place.session.testName }), cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' });
+export async function viewToken(place: MailboxPlace, post: typeof fetch = fetch, signedIn: () => Promise<string | null> = () => pageSession().getToken()): Promise<{ token: string; expires: number; owned: { grant: string }[] }> {
+  let name = 'testName' in place.session ? place.session.testName : null, bearer: string | null = null;
+  if (!name) {
+    const t = await signedIn().catch(() => null);
+    if (!t) throw new Error('no view: not signed in');
+    if (t.startsWith('dev:')) name = t.slice(4); else bearer = t;
+  }
+  const res = await post(`${place.directory}/v1/account/view-token`, { method: 'POST',
+    headers: bearer ? { authorization: `Bearer ${bearer}` } : { 'content-type': 'application/json' },
+    ...(bearer ? {} : { body: JSON.stringify({ name }) }), cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' });
   const body = await res.json() as { token?: unknown; expires?: unknown; owned?: { grant: string }[]; refused?: string };
   if (!res.ok || typeof body.token !== 'string') throw new Error(`no view: the directory said ${body.refused ?? res.status}`);
   return { token: body.token, expires: Number(body.expires), owned: body.owned ?? [] };
@@ -258,15 +270,38 @@ class BoxSocket implements Sock {
   stop(): void { this.stopped = true; if (this.timer) clearTimeout(this.timer); this.ws?.close(); }
 }
 
+const configOf = () => (window as unknown as { __simConfig?: Record<string, unknown> }).__simConfig;
+
+/** B3-2: the page's Soul ids the signed-in person owns on this v2 world (the view token's grants), for the old card's
+ *  owner view; empty on an old-engine world, signed out, or while the directory cannot be asked. */
+export function useV2OwnedSouls(): readonly string[] {
+  const s = useSession();
+  const [owned, setOwned] = useState<readonly string[]>([]);
+  useEffect(() => {
+    const stream = typeof window === 'undefined' ? null : v2Stream();
+    const place = stream ? mailboxPlace(location.href, configOf(), stream) : null;
+    if (!place || (!s.authed && !('testName' in place.session))) { setOwned([]); return; }
+    let live = true;
+    void (async () => {
+      try {
+        const [{ soulIdOf }, g] = await Promise.all([import('./bridge.ts'), viewToken(place)]);
+        if (live) setOwned(g.owned.map((o) => soulIdOf(o.grant)));
+      } catch { if (live) setOwned([]); }
+    })();
+    return () => { live = false; };
+  }, [s.authed, s.mode, s.label]);
+  return owned;
+}
+
 const boxes = new Map<string, V2OwnerMailbox>();
 /** The page's box for `soulId` on this v2 world (one per Soul a page), or null on an old-engine world. */
 export function v2OwnerMailbox(soulId: string): V2OwnerMailbox | null {
   if (typeof window === 'undefined') return null;
   const stream = v2Stream();
   if (!stream) return null;
-  const known = boxes.get(soulId);
+  const key = `${soulId} ${pageSession().label ?? ''}`, known = boxes.get(key); // a new sign-in, a new exchange
   if (known) return known;
-  const place = mailboxPlace(location.href, (window as unknown as { __simConfig?: Record<string, unknown> }).__simConfig, stream);
+  const place = mailboxPlace(location.href, configOf(), stream);
   const mb = new V2OwnerMailbox(async (self) => {
     if (!place) throw new Error('This world\'s mailbox is not reachable from this page.');
     // the page's Soul ids for v2 grants, loaded only on a v2 world
@@ -277,6 +312,6 @@ export function v2OwnerMailbox(soulId: string): V2OwnerMailbox | null {
     if (!own) throw new Error('This Soul is not yours on this world.');
     self.attach(new MailBox(), new BoxSocket(place.gateway, g, renew), own.grant);
   });
-  boxes.set(soulId, mb);
+  boxes.set(key, mb);
   return mb;
 }

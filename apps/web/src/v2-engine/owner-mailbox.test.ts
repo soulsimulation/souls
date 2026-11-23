@@ -6,7 +6,7 @@ import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 // the page modules it loads read `location` when loaded
 Object.assign(globalThis, { location: { origin: 'http://localhost:5960', pathname: '/w/eden/', search: '', hash: '', href: 'http://localhost:5960/w/eden/' } });
-const { MailBox: OwnerBox, V2OwnerMailbox, inboxOf, mailboxPlace } = await import('./owner-mailbox.ts');
+const { MailBox: OwnerBox, V2OwnerMailbox, inboxOf, mailboxPlace, viewToken } = await import('./owner-mailbox.ts');
 
 const GRANT = `soul-${'2b'.repeat(16)}-2`;
 
@@ -89,6 +89,21 @@ test('the mailbox place: only on a v2 world; same-origin config paths, loopback 
     { directory: 'http://localhost:5173', gateway: 'ws://localhost:5173/w/eden/v2/ws', session: { testName: 'gene' } });
   assert.deepEqual(mailboxPlace('http://127.0.0.1:5173/?as=a&gateway=ws://127.0.0.1:9001/v2/ws&directory=http://127.0.0.1:9002', {}, '/s/eden/'),
     { directory: 'http://127.0.0.1:9002', gateway: 'ws://127.0.0.1:9001/v2/ws', session: { testName: 'a' } });
-  assert.equal(mailboxPlace('https://example.test/?as=a&gateway=ws://127.0.0.1:9001/v2/ws&directory=/', cfg, '/s/eden/'), null, 'no test sign-in off loopback');
+  assert.deepEqual(mailboxPlace('https://example.test/?as=a&gateway=ws://127.0.0.1:9001/v2/ws&directory=/', cfg, '/s/eden/'),
+    { directory: 'https://example.test', gateway: 'wss://example.test/w/eden/v2/ws', session: { page: true } }, 'off loopback: the config\'s paths and the page\'s own sign-in, never ?as= or the overrides');
+  assert.deepEqual(mailboxPlace('http://localhost:5173/', cfg, '/s/eden/')?.session, { page: true }, 'no ?as=: the page\'s sign-in');
   assert.equal(mailboxPlace('http://localhost:5173/?as=a', { v2Gateway: 'https://elsewhere.test/ws', v2Directory: '/' }, '/s/eden/'), null, 'config names same-origin paths only');
+});
+
+test('B3-2: the page\'s sign-in is exchanged for the view token: a provider session as the bearer, a local dev name as the test sign-in', async () => {
+  const place = { directory: 'http://127.0.0.1:9002', gateway: 'ws://127.0.0.1:9001/v2/ws', session: { page: true as const } };
+  const asked: { url: string; init: RequestInit }[] = [];
+  const post = (async (url: string, init: RequestInit) => { asked.push({ url, init }); return new Response(JSON.stringify({ token: 'v', expires: 9, owned: [{ grant: GRANT }] })); }) as typeof fetch;
+  assert.deepEqual(await viewToken(place, post, async () => 'provider.jwt'), { token: 'v', expires: 9, owned: [{ grant: GRANT }] });
+  assert.equal(asked[0].url, 'http://127.0.0.1:9002/v1/account/view-token');
+  assert.deepEqual(asked[0].init.headers, { authorization: 'Bearer provider.jwt' }); assert.equal(asked[0].init.body, undefined);
+  await viewToken(place, post, async () => 'dev:Ada');
+  assert.equal(asked[1].init.body, JSON.stringify({ name: 'Ada' }), 'a local dev session: the directory\'s test sign-in by that name');
+  await assert.rejects(viewToken(place, post, async () => null), /not signed in/);
+  assert.equal(asked.length, 2, 'signed out: nothing asked');
 });
