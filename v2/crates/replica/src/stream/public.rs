@@ -567,12 +567,15 @@ fn row_index(rows: &[Value], id: Id) -> R<Option<usize>> {
     Ok(None)
 }
 
-/// What a delta played in place swaps into the state (#3799): the version, node rows by index, and the timers whole.
-/// Swapped in, it holds what it replaced, so swapping it in again puts the state back.
+/// What a delta played in place swaps into the state (#3799): the version, node rows by index, and the timers and
+/// links whole. Swapped in, it holds what it replaced, so swapping it in again puts the state back.
 struct Plan {
     v1: Value,
     rows: Vec<(usize, Value)>,
     timers: Option<Value>,
+    links: Option<Value>,
+    /// The nodes whose frame the delta changes, each with its new parent (#4192).
+    moved: Vec<(Id, Option<Id>)>,
 }
 
 impl Plan {
@@ -591,16 +594,119 @@ impl Plan {
         if let (Some(t), Some(v)) = (self.timers.as_mut(), m.get_mut(&6)) {
             std::mem::swap(v, t);
         }
+        if let (Some(l), Some(v)) = (self.links.as_mut(), m.get_mut(&3)) {
+            std::mem::swap(v, l);
+        }
     }
 }
 
-/// Whether `delta` can be played in place on `state` (#3799): it holds the version (key 1), and at most rows of key 2,
-/// each replacing a live node's row with one in the same frame (parent and slot), each node valid alone, and rows of
-/// key 6, timers set, changed or cleared, each owned by a node of the state. No node comes or goes and no frame
-/// changes, so the whole-state checks (frames, depth, links, flights) read nothing that changes but these rows. Its
-/// plan; none when the delta is any other.
-fn in_place(header: &Header, state: &Value, delta: &BTreeMap<u64, Value>) -> R<Option<Plan>> {
-    if delta.keys().any(|k| ![1, 2, 6].contains(k)) {
+/// Every node `validate` walks the frames of (live, opaque and in public flights), each with its parent, and the
+/// children of each (#4192): what a delta that moves nodes to new frames is checked against without the whole state.
+#[derive(Default)]
+struct Frames {
+    parent: BTreeMap<Id, Option<Id>>,
+    children: BTreeMap<Id, BTreeSet<Id>>,
+}
+
+impl Frames {
+    fn of(state: &Value) -> R<Frames> {
+        let m = map(state)?;
+        let mut f = Frames::default();
+        let mut add = |rows: &Value| -> R<()> {
+            for row in arr(rows)? {
+                let r = arr(row)?;
+                if r.len() != 2 {
+                    return bad("expected an id/value pair");
+                }
+                let parent = match map(&r[1])?.get(&2) {
+                    Some(p) => Some(read_id(p)?),
+                    None => None,
+                };
+                let id = read_id(&r[0])?;
+                f.parent.insert(id, parent);
+                if let Some(p) = parent {
+                    f.children.entry(p).or_default().insert(id);
+                }
+            }
+            Ok(())
+        };
+        add(field(m, 2)?)?;
+        add(field(m, 8)?)?;
+        for row in arr(field(m, 4)?)? {
+            add(field(map(&arr(row)?[1])?, 5)?)?;
+        }
+        Ok(f)
+    }
+    fn reparent(&mut self, id: Id, to: Option<Id>) {
+        if let Some(Some(old)) = self.parent.insert(id, to)
+            && let Some(c) = self.children.get_mut(&old)
+        {
+            c.remove(&id);
+        }
+        if let Some(p) = to {
+            self.children.entry(p).or_default().insert(id);
+        }
+    }
+    /// Whether `validate`'s frame walk passes for every node whose frame chain the moves change: the moved nodes and
+    /// everything under them. Any other node's chain is as it was, already valid.
+    fn allow(&self, moved: &BTreeMap<Id, Option<Id>>) -> bool {
+        let up = |id: &Id| -> Option<Id> {
+            match moved.get(id) {
+                Some(p) => *p,
+                None => self.parent.get(id).copied().flatten(),
+            }
+        };
+        let mut todo: Vec<Id> = moved.keys().copied().collect();
+        let mut seen = BTreeSet::new();
+        while let Some(n) = todo.pop() {
+            if !seen.insert(n) {
+                continue;
+            }
+            // `validate`'s walk, on the moved frames.
+            let mut parent = up(&n);
+            let mut visited = BTreeSet::new();
+            for _ in 0..=DEPTH_LIMIT {
+                let Some(id) = parent else { break };
+                if !visited.insert(id) {
+                    return false;
+                }
+                parent = if self.parent.contains_key(&id) {
+                    up(&id)
+                } else {
+                    None
+                };
+                if parent.is_none() {
+                    break;
+                }
+            }
+            if parent.is_some() {
+                return false;
+            }
+            todo.extend(
+                self.children
+                    .get(&n)
+                    .into_iter()
+                    .flatten()
+                    .filter(|c| !moved.contains_key(c)),
+            );
+        }
+        true
+    }
+}
+
+/// Whether `delta` can be played in place on `state` (#3799, #4192): it holds the version (key 1), rows of key 2, each
+/// replacing a live node's row, each node valid alone, and a frame changed only where the frame walk of `validate`
+/// still passes for the node and everything under it; rows of key 3, links added, changed or removed, each added one
+/// public and owned by a live node; and rows of key 6, timers set, changed or cleared, each owned by a node of the
+/// state. No node comes or goes and no flight changes, so the whole-state checks read nothing that changes but these
+/// rows. Its plan; none when the delta is any other, or when it is unsure: the whole path then decides.
+fn in_place(
+    header: &Header,
+    state: &Value,
+    delta: &BTreeMap<u64, Value>,
+    frames: &std::cell::RefCell<Option<Frames>>,
+) -> R<Option<Plan>> {
+    if delta.keys().any(|k| ![1, 2, 3, 6].contains(k)) {
         return Ok(None);
     }
     let Some(v1) = delta.get(&1) else {
@@ -611,6 +717,7 @@ fn in_place(header: &Header, state: &Value, delta: &BTreeMap<u64, Value>) -> R<O
     let rows = arr(field(m, 2)?)?;
     let mut out = Vec::new();
     let mut ids = BTreeSet::new();
+    let mut moved = BTreeMap::new();
     for row in delta.get(&2).map(arr).transpose()?.unwrap_or(&[]) {
         let r = arr(row)?;
         if r.len() != 2 {
@@ -627,12 +734,58 @@ fn in_place(header: &Header, state: &Value, delta: &BTreeMap<u64, Value>) -> R<O
             NodeState::read(&arr(&rows[i])?[1])?,
             NodeState::read(&r[1])?,
         );
-        if old.parent != new.parent || old.slot != new.slot || id == header.zone {
+        if id == header.zone {
             return Ok(None);
+        }
+        if old.parent != new.parent || old.slot != new.slot {
+            moved.insert(id, new.parent);
         }
         validate_node(header, id, &new)?;
         out.push((i, Value::Array(vec![id.to_value(), r[1].clone()])));
     }
+    if !moved.is_empty() {
+        let mut f = frames.borrow_mut();
+        if f.is_none() {
+            *f = Some(Frames::of(state)?);
+        }
+        if !f.as_ref().is_some_and(|f| f.allow(&moved)) {
+            return Ok(None);
+        }
+    }
+    let links = match delta.get(&3) {
+        None => None,
+        Some(d) => {
+            let mut l = pairs(field(m, 3)?)?;
+            let mut ids = BTreeSet::new();
+            for row in arr(d)? {
+                let r = arr(row)?;
+                if !(1..=2).contains(&r.len()) {
+                    return Ok(None);
+                }
+                let id = read_id(&r[0])?;
+                if !ids.insert(id) {
+                    return Ok(None);
+                }
+                if r.len() == 1 {
+                    if l.remove(&id).is_none() {
+                        return Ok(None);
+                    }
+                    continue;
+                }
+                // The link checks of `validate`, on this row alone: public, and its owning end a live node.
+                let Ok(link) = LinkState::read(&r[1]) else {
+                    return Ok(None);
+                };
+                if !public(link.audience)
+                    || row_index(rows, link.ends[usize::from(link.owner == End::Second)])?.is_none()
+                {
+                    return Ok(None);
+                }
+                l.insert(id, r[1].clone());
+            }
+            Some(paired(l))
+        }
+    };
     let timers = match delta.get(&6) {
         None => None,
         Some(d) => {
@@ -681,6 +834,8 @@ fn in_place(header: &Header, state: &Value, delta: &BTreeMap<u64, Value>) -> R<O
         v1: v1.clone(),
         rows: out,
         timers,
+        links,
+        moved: moved.into_iter().collect(),
     }))
 }
 
@@ -717,6 +872,7 @@ fn streamed_digest(state: &Value, enc: &[Vec<u8>], plan: Option<&Plan>) -> R<Vec
                     timers: Some(t), ..
                 }),
             ) => h.update(&encoded(t)?),
+            (3, Some(Plan { links: Some(l), .. })) => h.update(&encoded(l)?),
             _ => h.update(&encoded(v)?),
         }
     }
@@ -734,6 +890,8 @@ pub struct PublicPlayer {
     /// Each live node's link rows as a node query lists them, by node, once worked out (#3799): links change only in
     /// a part played whole, which drops it.
     incident: std::cell::RefCell<Option<BTreeMap<Id, Vec<Value>>>>,
+    /// Each node's frame, once worked out, kept as nodes move in place (#4192).
+    frames: std::cell::RefCell<Option<Frames>>,
     next: u64,
     changed: BTreeMap<Id, u64>,
     samples: Vec<HandOff>,
@@ -765,6 +923,7 @@ impl PublicPlayer {
             digest: digest(&state)?,
             enc: None,
             incident: std::cell::RefCell::new(None),
+            frames: std::cell::RefCell::new(None),
             state,
             next: 0,
             changed,
@@ -781,14 +940,16 @@ impl PublicPlayer {
     pub fn digest(&self) -> &[u8] {
         &self.digest
     }
-    /// The delta from the state to one at version `next` whose node rows `rows` (by id) replace the live ones, the
-    /// rows equal to the live ones left out (#3799): as [`context`] works it out from the two whole states. None when it
-    /// cannot be played in place (a new or gone node, a new frame, no new version); the caller then works it out whole.
+    /// The delta from the state to one at version `next` whose node rows `rows`, timers `timers` and links `links` (by
+    /// id; `None`, gone) replace the live ones, those equal to the live ones left out (#3799, #4192): as [`context`]
+    /// works it out from the two whole states. None when it cannot be played in place (a new or gone node, a frame
+    /// walk `validate` would refuse, no new version); the caller then works it out whole.
     pub fn row_delta(
         &self,
         next: u64,
         mut rows: Vec<(Id, Value)>,
         timers: Vec<(Id, Option<Value>)>,
+        links: Vec<(Id, Option<Value>)>,
     ) -> R<Option<Value>> {
         if next == self.version() {
             return Ok(None);
@@ -824,14 +985,32 @@ impl PublicPlayer {
         if !t.is_empty() {
             delta.insert(6, Value::Array(std::mem::take(&mut t)));
         }
-        if in_place(&self.header, &self.state, &delta)?.is_none() {
+        // Links added, changed or removed (#4192): the same, by id.
+        if !links.is_empty() {
+            let live = pairs(field(map(&self.state)?, 3)?)?;
+            let l: Vec<Value> = links
+                .into_iter()
+                .filter(|(id, v)| live.get(id) != v.as_ref())
+                .map(|(id, v)| {
+                    let mut row = vec![id.to_value()];
+                    row.extend(v);
+                    (id, Value::Array(row))
+                })
+                .collect::<BTreeMap<Id, Value>>()
+                .into_values()
+                .collect();
+            if !l.is_empty() {
+                delta.insert(3, Value::Array(l));
+            }
+        }
+        if in_place(&self.header, &self.state, &delta, &self.frames)?.is_none() {
             return Ok(None);
         }
         Ok(Some(Value::Map(delta)))
     }
     /// The digest of the state `delta` (from [`PublicPlayer::row_delta`]) would make, the state left as it is.
     pub fn digest_with(&mut self, delta: &Value) -> R<Vec<u8>> {
-        let Some(plan) = in_place(&self.header, &self.state, map(delta)?)? else {
+        let Some(plan) = in_place(&self.header, &self.state, map(delta)?, &self.frames)? else {
             return bad("not an in-place delta");
         };
         self.encodings()?;
@@ -929,10 +1108,10 @@ impl PublicPlayer {
         }
         let old_version = self.version();
         let flying = flying_ids(&self.state)?;
-        // In place (#3799): a delta that only moves existing nodes in their own frames (the version, and rows of
-        // key 2 replacing live nodes with the same parent and slot) changes nothing the whole-state checks read but
-        // those rows, so only they are checked, and they are swapped into the state, swapped back on any refusal.
-        let plan = in_place(&self.header, &self.state, map(field(&c, 5)?)?)?;
+        // In place (#3799, #4192): a delta of the version and rows of live nodes, links and timers, no node coming or
+        // going and no flight changing, is checked row by row (a moved node with the frames under it), and its rows
+        // are swapped into the state, swapped back on any refusal.
+        let plan = in_place(&self.header, &self.state, map(field(&c, 5)?)?, &self.frames)?;
         let whole = match &plan {
             Some(_) => None,
             None => Some(self.whole_next(&c)?),
@@ -967,6 +1146,7 @@ impl PublicPlayer {
                         self.state = w;
                         self.enc = None;
                         self.incident.replace(None);
+                        self.frames.replace(None);
                     }
                     (None, Some(p)) => {
                         // The swapped rows' new encodings.
@@ -979,6 +1159,14 @@ impl PublicPlayer {
                         if let Some(enc) = self.enc.as_mut() {
                             for (i, e) in new {
                                 enc[i] = e;
+                            }
+                        }
+                        if p.links.is_some() {
+                            self.incident.replace(None);
+                        }
+                        if let Some(f) = self.frames.borrow_mut().as_mut() {
+                            for (id, to) in &p.moved {
+                                f.reparent(*id, *to);
                             }
                         }
                     }
@@ -1441,6 +1629,43 @@ impl PublicPlayer {
             _ => return bad("query is 1 through 6"),
         };
         encoded(&out)
+    }
+}
+
+#[cfg(test)]
+mod i4192_frame_tests {
+    use super::*;
+    use crate::ids::Scope;
+
+    /// A move in place passes only where `validate`'s frame walk would: no cycle, and no node under the moved one
+    /// deeper than the limit.
+    #[test]
+    fn a_move_in_place_is_refused_where_the_whole_check_would_refuse_it() {
+        let id = |n| Id::new(Scope([7; 16]), n).unwrap();
+        let mut f = Frames::default();
+        // A chain from the root 0: 0 <- 1 <- 2 <- ... <- 20, and 100 beside it under 0.
+        f.reparent(id(0), None);
+        for n in 1..=20 {
+            f.reparent(id(n), Some(id(n - 1)));
+        }
+        f.reparent(id(100), Some(id(0)));
+        let moved = |n, to| BTreeMap::from([(id(n), Some(id(to)))]);
+        assert!(
+            f.allow(&moved(100, 20)),
+            "under the chain's end, within the limit"
+        );
+        assert!(f.allow(&moved(5, 100)), "a subtree moved beside");
+        assert!(!f.allow(&moved(5, 12)), "under its own subtree: a cycle");
+        assert!(!f.allow(&moved(5, 5)), "under itself");
+        // Twenty more under 100 and the chain moved under them: 1 + 20 + 20 frames is past the limit of 32.
+        for n in 101..=120 {
+            f.reparent(id(n), Some(id(n - 1)));
+        }
+        assert!(
+            !f.allow(&moved(1, 120)),
+            "too deep for the nodes under the moved one"
+        );
+        assert!(f.allow(&moved(15, 120)), "a short tail fits");
     }
 }
 

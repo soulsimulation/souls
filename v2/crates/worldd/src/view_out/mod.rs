@@ -1084,6 +1084,13 @@ pub struct PublicWriter<S> {
     touched: std::collections::BTreeSet<Id>,
     /// The timers the open cut set or cleared (#3799).
     timers: std::collections::BTreeSet<Id>,
+    /// The links the open cut made or ended, the transfers it began and the nodes they moved, with what is under
+    /// them (#4192): a take or a sit, a leave and its arrive in the same cut, changes only these rows.
+    links: std::collections::BTreeSet<Id>,
+    left: std::collections::BTreeSet<Id>,
+    moved: std::collections::BTreeSet<Id>,
+    /// Cuts worked out whole since the writer opened (#4192).
+    pub whole_cuts: u64,
     /// The references each node row of the published state holds, and those of the rest of it (#3799).
     /// Kept with the version of the state they are of.
     #[allow(clippy::type_complexity)]
@@ -1481,6 +1488,10 @@ impl<S: ObjectStore> PublicWriter<S> {
             structural: true,
             touched: std::collections::BTreeSet::new(),
             timers: std::collections::BTreeSet::new(),
+            links: std::collections::BTreeSet::new(),
+            left: std::collections::BTreeSet::new(),
+            moved: std::collections::BTreeSet::new(),
+            whole_cuts: 0,
             refs: None,
             still_at: None,
         };
@@ -1768,12 +1779,45 @@ impl<S: ObjectStore> PublicWriter<S> {
             self.refs = Some((at, rows, replica::audience::references(&Value::Map(m))));
         }
         if after.is_none()
-            && let (Some((at, rows, _)), Some(d)) = (&mut self.refs, delta)
+            && let (Some((at, rows, rest)), Some(d)) = (&mut self.refs, delta)
         {
             *at = version(d);
             let Value::Map(d) = d else {
                 return Err(fault("stream-words", "a delta is a map"));
             };
+            // Links or timers changed (#4192): the rest of the state's references, read again from the published
+            // state with the delta's rows of them in place. The node rows are not copied.
+            if d.contains_key(&3) || d.contains_key(&6) {
+                let Value::Map(st) = self.player.state() else {
+                    return Err(fault("stream-words", "a state is a map"));
+                };
+                let mut m: BTreeMap<u64, Value> = st
+                    .iter()
+                    .filter(|(k, _)| **k != 2)
+                    .map(|(k, v)| (*k, v.clone()))
+                    .collect();
+                for k in [3, 6] {
+                    let (Some(Value::Array(rows)), Some(Value::Array(old))) =
+                        (d.get(&k), m.get(&k))
+                    else {
+                        continue;
+                    };
+                    // The order of the rows does not matter to a set of references.
+                    let mut by = BTreeMap::new();
+                    for r in old.iter().chain(rows) {
+                        let Value::Array(p) = r else {
+                            return Err(fault("stream-words", "a row is a pair"));
+                        };
+                        let id = replica::effects::read_id(&p[0])?;
+                        match p.get(1) {
+                            Some(v) => by.insert(id, Value::Array(vec![p[0].clone(), v.clone()])),
+                            None => by.remove(&id),
+                        };
+                    }
+                    m.insert(k, Value::Array(by.into_values().collect()));
+                }
+                *rest = replica::audience::references(&Value::Map(m));
+            }
             let changed: &[Value] = match d.get(&2) {
                 Some(Value::Array(c)) => c,
                 _ => &[],
@@ -2637,8 +2681,9 @@ impl<S: ObjectStore> PublicWriter<S> {
                     .retain(|(seq, _)| self.migration_cut.is_none_or(|cut| *seq >= cut));
                 self.canonical = checked;
             }
-            // What the cut can be published from (#3799): motion, fields set and a node set still in its own
-            // frame touch only their rows.
+            // What the cut can be published from (#3799): motion, fields set and nodes set in a slot touch only their
+            // rows; links made or ended only theirs; a leave whose arrive is in the same cut only the rows of what it
+            // moved (#4192).
             for e in &part.effects {
                 match &e.body {
                     Body::Changes(cs) => {
@@ -2647,23 +2692,18 @@ impl<S: ObjectStore> PublicWriter<S> {
                                 replica::effects::Change::Motion(h) => {
                                     self.touched.insert(h.node);
                                 }
-                                replica::effects::Change::Set { node, .. } => {
+                                replica::effects::Change::Set { node, .. }
+                                | replica::effects::Change::Reparent { node, .. } => {
                                     self.touched.insert(*node);
                                 }
-                                replica::effects::Change::Reparent { node, from, pose }
-                                    if *from == pose.frame =>
-                                {
-                                    self.touched.insert(*node);
+                                replica::effects::Change::Link { link, .. }
+                                | replica::effects::Change::Unlink { link } => {
+                                    self.links.insert(*link);
                                 }
                                 c => {
                                     prof::cause(match c {
                                         replica::effects::Change::Create { .. } => "create",
                                         replica::effects::Change::Remove { .. } => "remove",
-                                        replica::effects::Change::Reparent { .. } => {
-                                            "reparent-moved"
-                                        }
-                                        replica::effects::Change::Link { .. } => "link",
-                                        replica::effects::Change::Unlink { .. } => "unlink",
                                         _ => "other-change",
                                     });
                                     self.structural = true
@@ -2671,6 +2711,14 @@ impl<S: ObjectStore> PublicWriter<S> {
                             }
                         }
                     }
+                    Body::Transfer(replica::effects::TransferRec::Leave {
+                        transfer, node, ..
+                    }) => {
+                        self.left.insert(*transfer);
+                        self.moved.insert(*node);
+                    }
+                    Body::Transfer(replica::effects::TransferRec::Arrive { transfer, carried })
+                        if carried.is_empty() && self.left.contains(transfer) => {}
                     Body::Timers(recs) => {
                         for r in recs {
                             match r {
@@ -2811,6 +2859,9 @@ impl<S: ObjectStore> PublicWriter<S> {
         self.structural = false;
         self.touched.clear();
         self.timers.clear();
+        self.links.clear();
+        self.left.clear();
+        self.moved.clear();
     }
     pub fn flush(&mut self) -> R<()> {
         if self.chunks.is_empty() && !self.force_remainder {
@@ -2826,14 +2877,56 @@ impl<S: ObjectStore> PublicWriter<S> {
             && self.migration_cut.is_none()
         {
             let tree = self.canonical.tree();
-            let rows = self
-                .touched
+            // A moved node's row and those under it (#4192), each read once.
+            let mut ids = self.touched.clone();
+            let mut todo: Vec<Id> = self.moved.iter().copied().collect();
+            while let Some(id) = todo.pop() {
+                ids.insert(id);
+                if let Some(h) = tree.handle(id) {
+                    todo.extend(
+                        tree.children(h)
+                            .unwrap_or(&[])
+                            .iter()
+                            .filter_map(|c| tree.node(*c).map(|n| n.id())),
+                    );
+                }
+            }
+            let rows = ids
                 .iter()
                 .filter_map(|id| {
                     let n = tree.node_state_of(*id)?;
                     (n.audience == Audience::Everyone).then(|| (*id, n.to_value()))
                 })
                 .collect();
+            // A link's row as the public state holds it: public, with no end a node here that is not public; none once
+            // ended. One with an end not live here (a node in flight, or gone) is left to the whole cut.
+            let links: Option<Vec<(Id, Option<Value>)>> = self
+                .links
+                .iter()
+                .map(|id| match tree.link(*id) {
+                    None => Some((*id, None)),
+                    Some((ty, ends, owner, audience)) => {
+                        let mut public = audience == Audience::Everyone;
+                        for e in ends {
+                            public &= tree.node_state_of(e)?.audience == Audience::Everyone;
+                        }
+                        Some((
+                            *id,
+                            public.then(|| {
+                                replica::effects::LinkState {
+                                    ty: ty.clone(),
+                                    ends,
+                                    owner,
+                                    audience,
+                                }
+                                .to_value()
+                            }),
+                        ))
+                    }
+                })
+                .collect();
+            // Every leave of the cut arrived in it: no flight is open at the cut.
+            let landed = self.left.iter().all(|t| tree.flight(*t).is_none());
             // A timer's row as the public state holds it: of a public live owner; none once cleared. One whose
             // owner is not live here (in flight) is left to the whole cut.
             let int = |n: i64| {
@@ -2859,9 +2952,11 @@ impl<S: ObjectStore> PublicWriter<S> {
                     }
                 })
                 .collect();
-            match timers {
-                Some(timers) => self.player.row_delta(tree.next(), rows, timers)?,
-                None => None,
+            match (timers, links, landed) {
+                (Some(timers), Some(links), true) => {
+                    self.player.row_delta(tree.next(), rows, timers, links)?
+                }
+                _ => None,
             }
         } else {
             None
@@ -2876,6 +2971,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         };
         lap.mark(1);
         prof::count(0, 0, after.is_some() as u64);
+        self.whole_cuts += after.is_some() as u64;
         if self.records.is_empty()
             && let Some(after) = &after
         {
