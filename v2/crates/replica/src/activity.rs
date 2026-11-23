@@ -73,8 +73,8 @@ pub struct ActivityKind {
     /// Its roles' moves go on the world's beat (0.134 T3, `v2/docs/time.md` rule 7): each member's move begins on one
     /// beat, aimed at its own body, and begins again on the next beat after it ends, until the member leaves.
     pub beat: bool,
-    /// The role whose member follows the other's (0.135 G2), if any: it walks to its place behind the leader each
-    /// time the leader moves on, by walks the world sends, until either leaves or the follower walks on its own.
+    /// The role whose member follows the other's (0.135 G2), if any: while the activity runs, the follower's own
+    /// `souls:follow` order on the leader (`v2/docs/intents.md` rule 5) walks it along the leader's trail.
     pub follows: Option<Name>,
 }
 

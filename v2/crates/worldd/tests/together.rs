@@ -909,18 +909,59 @@ fn walk_to(x: i64, z: i64) -> Value {
     Value::Array(vec![int(x), int(0), int(z)])
 }
 
-/// 0.135 G2: Soul 2 offers to follow Soul 1, and Soul 1 accepts. Soul 1 walks 30 m with two turns (10 m east,
-/// 8 m south, 12 m east); Soul 2 is walked to its place 1 m behind by the walks the world sends. At every tick either
-/// moved, Soul 2 is within 2.5 m of its place and never moves more than 0.2 m in a tick (walked, never placed). Then
-/// Soul 2 walks on its own: the follow is over for both.
+/// The follower's track since row `from`: the furthest it was from its place (1 m from the leader, toward the
+/// follower) and the most it moved in one tick.
+fn track(run: &Run, from: usize) -> (i64, i64, Vec3, Vec3) {
+    let len = |a: Vec3, b: Vec3| {
+        ((((a.x - b.x) as i128).pow(2) + ((a.z - b.z) as i128).pow(2)).isqrt()) as i64
+    };
+    let rows = run.rows();
+    let (mut l, mut f) = (at(1), at(2));
+    for (body, p) in rows.iter().take(from) {
+        if *body == soul(1) {
+            l = *p;
+        } else if *body == soul(2) {
+            f = *p;
+        }
+    }
+    let (mut worst, mut step) = (0_i64, 0_i64);
+    for (body, p) in rows.into_iter().skip(from) {
+        if body == soul(1) {
+            l = p;
+        } else if body == soul(2) {
+            step = step.max(len(p, f));
+            f = p;
+        } else {
+            continue;
+        }
+        let d = len(f, l).max(1);
+        let place = Vec3::new(
+            l.x + (i128::from(f.x - l.x) * 1_000_000 / i128::from(d)) as i64,
+            0,
+            l.z + (i128::from(f.z - l.z) * 1_000_000 / i128::from(d)) as i64,
+        );
+        worst = worst.max(len(f, place));
+    }
+    (worst, step, l, f)
+}
+
+/// 0.135 G2: Soul 2 offers to follow Soul 1, and Soul 1 accepts; Soul 2's own `souls:follow` order then walks it
+/// along Soul 1's trail. Soul 1 walks 30 m with two turns (10 m east, 8 m south, 12 m east): at every tick either
+/// moved, Soul 2 is within 2.5 m of its place 1 m behind and never moves more than 0.2 m in a tick (walked, never
+/// placed). Soul 2 walking on its own ends the follow for both. Followed again, Soul 1 turns back through Soul 2
+/// (8 m east, then 12 m west), and Soul 2 keeps the same bounds; Soul 2's own order (a held stance) ends that follow
+/// for both too.
 #[test]
 fn g2_a_soul_follows_another_over_a_walk_with_two_turns() {
     let run = serve("follow");
     let (mut a, mut b) = (run.client(1), run.client(2));
+    let len = |a: Vec3, b: Vec3| {
+        ((((a.x - b.x) as i128).pow(2) + ((a.z - b.z) as i128).pow(2)).isqrt()) as i64
+    };
     let follow = run.created(&b.offer(FOLLOW, 1).expect("Soul 2 offers to follow"));
     a.act("activity:accept", Some(follow), &[])
         .expect("Soul 1 accepts");
-    let rows_before = run.rows().len();
+    let from = run.rows().len();
     for (x, z) in [
         (-30_000_000, 30_000_000),
         (-30_000_000, 22_000_000),
@@ -929,27 +970,10 @@ fn g2_a_soul_follows_another_over_a_walk_with_two_turns() {
         a.act("eden:walk", Some(ground()), &[(1, walk_to(x, z))])
             .unwrap_or_else(|e| panic!("Soul 1 walks to ({x}, {z}): {e}"));
     }
-    // The follower arrives behind.
     std::thread::sleep(Duration::from_millis(2_000));
-    let (mut leader, mut follower) = (at(1), at(2));
-    let (mut worst, mut step) = (0_i64, 0_i64);
-    let len = |a: Vec3, b: Vec3| {
-        ((((a.x - b.x) as i128).pow(2) + ((a.z - b.z) as i128).pow(2)).isqrt()) as i64
-    };
-    for (body, p) in run.rows().into_iter().skip(rows_before) {
-        if body == soul(1) {
-            leader = p;
-        } else if body == soul(2) {
-            step = step.max(len(p, follower));
-            follower = p;
-        } else {
-            continue;
-        }
-        let place = sim::activity::follow::place(leader, follower);
-        worst = worst.max(len(follower, place));
-    }
+    let (worst, step, leader, follower) = track(&run, from);
     println!(
-        "g2: the follower within {} mm of its place; at most {} mm a tick",
+        "g2: two turns: the follower within {} mm of its place; at most {} mm a tick",
         worst / 1000,
         step / 1000
     );
@@ -959,7 +983,7 @@ fn g2_a_soul_follows_another_over_a_walk_with_two_turns() {
         "walked, never placed: {step} µm in one tick"
     );
     assert!(
-        len(follower, leader) < 2_000_000,
+        len(follower, leader) < 3_000_000,
         "the follower ended behind: {follower:?} {leader:?}"
     );
     // Soul 2 walks on its own: the follow ends for both.
@@ -967,9 +991,42 @@ fn g2_a_soul_follows_another_over_a_walk_with_two_turns() {
     b.act(
         "eden:walk",
         Some(ground()),
-        &[(1, walk_to(-18_000_000, 26_000_000))],
+        &[(1, walk_to(-19_000_000, 24_000_000))],
     )
     .expect("Soul 2 walks on its own");
+    std::thread::sleep(Duration::from_millis(300));
     assert_eq!(run.lefts(), lefts + 2, "the follow is over for both");
+
+    // Followed again; Soul 1 turns back through Soul 2.
+    let again = run.created(&b.offer(FOLLOW, 1).expect("offered again"));
+    a.act("activity:accept", Some(again), &[])
+        .expect("accepted again");
+    let from = run.rows().len();
+    for (x, z) in [(-10_000_000, 22_000_000), (-22_000_000, 22_000_000)] {
+        a.act("eden:walk", Some(ground()), &[(1, walk_to(x, z))])
+            .unwrap_or_else(|e| panic!("Soul 1 walks to ({x}, {z}): {e}"));
+    }
+    std::thread::sleep(Duration::from_millis(2_000));
+    let (worst, step, _, _) = track(&run, from);
+    println!(
+        "g2: turned back through: the follower within {} mm of its place; at most {} mm a tick",
+        worst / 1000,
+        step / 1000
+    );
+    assert!(worst <= 2_500_000, "within 2.5 m of its place: {worst} µm");
+    assert!(
+        step <= 200_000,
+        "walked, never placed: {step} µm in one tick"
+    );
+    // Soul 2's own order (a held stance) ends the follow for both.
+    let lefts = run.lefts();
+    b.act("souls:hold", None, &[(1, Value::Uint(1))])
+        .expect("Soul 2 holds its stance");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        run.lefts(),
+        lefts + 2,
+        "its own order ends the follow for both"
+    );
     run.stop();
 }

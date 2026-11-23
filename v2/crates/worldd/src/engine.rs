@@ -643,6 +643,47 @@ impl Engine {
         self.collect(None);
     }
 
+    /// The follow `activity` is over (0.135 G2: its follower's order ended): its follower leaves it, as
+    /// `activity:leave` does, caused by the intent that joined, and so the leader too. Its entries wait in
+    /// [`Engine::out`].
+    pub fn end_follow(&mut self, live: &Tree, c: &mut Controller, activity: Id, now: Micros) {
+        let Some((_, _, follower, _)) = self
+            .activities
+            .following()
+            .into_iter()
+            .find(|f| f.0 == activity)
+        else {
+            return;
+        };
+        let Some(m) = self
+            .activities
+            .members(activity)
+            .and_then(|ms| ms.iter().find(|m| m.body == follower).cloned())
+        else {
+            return;
+        };
+        let mut tree = live.frozen();
+        self.activities.next = tree.next();
+        let ask = Ask {
+            soul: m.soul,
+            intent: m.intent,
+            at: now,
+        };
+        if let Err(r) = self.activities.leave(
+            &mut tree,
+            c,
+            &mut self.moves,
+            &mut self.due,
+            &mut self.mint,
+            ask,
+            follower,
+            activity,
+        ) {
+            eprintln!("worldd: {}'s follow did not end: {r}", show(follower));
+        }
+        self.collect(None);
+    }
+
     /// A move `body` started for `intent` (a walk, a sit) at `now` (0.134 T2): if `body` holds hands, or dances on the
     /// beat (T3), it leaves that activity as `activity:leave` does, and both hands come free. Its entries wait in [`Engine::out`].
     pub fn walked(&mut self, live: &Tree, c: &mut Controller, body: Id, intent: Id, now: Micros) {

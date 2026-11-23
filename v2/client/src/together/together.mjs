@@ -1,7 +1,7 @@
 // Touch by offer and accept (0.134 T1, T2): a handshake, a hug, a high five or holding hands, offered to one Soul.
 // Dancing together (T3) is offered to up to seven at once; each who accepts dances, all on one beat. Following
-// (0.135 G2): `together offer follow <body id>` asks to follow that Soul; once it accepts, this Soul walks 1 m behind
-// it wherever it walks, until either leaves or this Soul walks on its own. When the other accepts,
+// (0.135 G2): `together offer follow <body id>` asks to follow that Soul; once it accepts, this Soul's own follow
+// order walks it along that Soul's trail, 1 to 2.5 m behind, until either leaves or this Soul acts on its own. When the other accepts,
 // the activity starts and the world aims each one's move at the other (`content/kinds/together/`, each role naming
 // its move). Each command is the intents it sends, built here with no daemon and no world, so it is read and tested
 // on its own.

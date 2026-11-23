@@ -1009,6 +1009,8 @@ struct Clock {
     moving: Vec<(Id, Asked)>,
     /// Gateway walks with route deadlines and the shared C21 stall watch (C29).
     walks: BTreeMap<Id, acts::Walk>,
+    /// Each follow activity running (0.135 G2): its follower and the `souls:follow` order kept for it, by intent.
+    follows: BTreeMap<Id, (Id, Id)>,
     /// Acts whose deadline passed while their sit, lie or rise was going: each ends `act.timed-out` when its move
     /// ends, so no move outlives its act.
     overdue: BTreeSet<Id>,
@@ -3746,8 +3748,6 @@ impl Clock {
                 &mut b.slots,
                 now,
             );
-            // 0.135 G2: each follower walks to its place behind its leader, by walks the world sends.
-            b.follow(&e.following());
         }
     }
 
@@ -3947,6 +3947,114 @@ impl Clock {
             });
         } else {
             self.end(id, |c| c.refusal(actor, sequence, &how));
+        }
+    }
+
+    /// 0.135 G2: each follow activity running keeps its follower's own `souls:follow` order on the leader
+    /// (`v2/docs/intents.md` rule 5, `sim::orders`): started when the follow starts (or taken up as it is after a
+    /// restart), cancelled when the follow ends. An order that ended by itself (displaced by the follower's own act,
+    /// expired, its leader gone) ends the follow for both. The orders' entries go out with the next step's.
+    fn follow_orders(&mut self, now: Micros) {
+        let (Some(e), Some(b)) = (self.engine.as_mut(), self.bodies.as_mut()) else {
+            return;
+        };
+        let running = e.following();
+        let ids: BTreeSet<Id> = running.iter().map(|f| f.0).collect();
+        let basis = Version {
+            lineage: self.lineage,
+            zone: self.zone,
+            epoch: 1,
+            sequence: self.replica.version(),
+        }
+        .to_value();
+        let gone: Vec<Id> = self
+            .follows
+            .keys()
+            .filter(|a| !ids.contains(a))
+            .copied()
+            .collect();
+        for a in gone {
+            let Some((follower, order)) = self.follows.remove(&a) else {
+                continue;
+            };
+            let Some(o) = b
+                .orders
+                .open(follower)
+                .filter(|o| o.intent == order)
+                .cloned()
+            else {
+                continue;
+            };
+            let Some(id) = Id::new(self.lineage, self.next_intent) else {
+                continue;
+            };
+            self.next_intent += 1;
+            let cancel = Intent {
+                actor: o.actor,
+                verb: Name::new(replica::intents::CANCEL).unwrap_or_else(|| unreachable!("a name")),
+                target: None,
+                parameters: BTreeMap::new(),
+                sequence: o.sequence.saturating_add(1),
+                basis: basis.clone(),
+                expiry: now.saturating_add(60_000_000),
+                resources: Vec::new(),
+                fallbacks: Vec::new(),
+                replaces: Some(o.sequence),
+                body: None,
+                reflex: false,
+            };
+            let _ = crate::orders::accept(b, &cancel, follower, id, now);
+        }
+        for (a, leader, follower, soul) in running {
+            let open = b.orders.open(follower).cloned();
+            let follows_leader = |o: &sim::orders::Order| matches!(o.what, sim::orders::What::Follow { leader: l, .. } if l == leader);
+            match self.follows.get(&a) {
+                Some(&(_, order)) => {
+                    if open.as_ref().is_none_or(|o| o.intent != order) {
+                        self.follows.remove(&a);
+                        e.end_follow(self.replica.tree(), &mut b.runner.controller, a, now);
+                    }
+                }
+                // After a restart the order is in the log, open again: taken up as it is.
+                None if open.as_ref().is_some_and(follows_leader) => {
+                    if let Some(o) = open {
+                        self.follows.insert(a, (follower, o.intent));
+                    }
+                }
+                None => {
+                    let Some(id) = Id::new(self.lineage, self.next_intent) else {
+                        continue;
+                    };
+                    self.next_intent += 1;
+                    let order = Intent {
+                        actor: Actor::Soul(soul),
+                        verb: Name::new(skills::orders::FOLLOW)
+                            .unwrap_or_else(|| unreachable!("a name")),
+                        target: Some(Target::Node(leader)),
+                        parameters: BTreeMap::new(),
+                        sequence: 0,
+                        basis: basis.clone(),
+                        expiry: now.saturating_add(sim::orders::LONGEST),
+                        resources: Vec::new(),
+                        fallbacks: Vec::new(),
+                        replaces: None,
+                        body: None,
+                        reflex: false,
+                    };
+                    match crate::orders::accept(b, &order, follower, id, now) {
+                        Ok(()) => {
+                            self.follows.insert(a, (follower, id));
+                        }
+                        Err(r) => {
+                            eprintln!(
+                                "worldd: {}'s follow order was refused: {r}",
+                                replica::world_model::show(follower)
+                            );
+                            e.end_follow(self.replica.tree(), &mut b.runner.controller, a, now);
+                        }
+                    }
+                }
+            }
         }
     }
 
@@ -4195,6 +4303,7 @@ impl Clock {
         self.set_downs(now);
         self.start_forms(now);
         self.start_moves(now);
+        self.follow_orders(now);
         self.write_forms(now);
         // 4. What the tick's acts made loose or kept: its timers, in the same tick (F10b, #3476).
         self.set_loose(now);
@@ -5183,6 +5292,7 @@ pub fn start<S: Storage + 'static>(
         bodies: None,
         moving: Vec::new(),
         walks: BTreeMap::new(),
+        follows: BTreeMap::new(),
         overdue: BTreeSet::new(),
         edits,
         editing,
