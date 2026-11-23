@@ -88,6 +88,65 @@ use replica::world_model::{Audience, End};
 use crate::views::{Delivery, Subscriber};
 use sim::text::Store;
 
+/// Where the public writer's core goes (#4192): with `STREAM_PROFILE=1`, each stage's wall time on the writer's
+/// thread, summed and printed to stderr every 10 s with the thread's own processor time. A measurement only: it never
+/// changes a byte written, and off (the default) it reads no clock.
+mod prof {
+    use std::cell::RefCell;
+    use std::time::Instant;
+    pub const NAMES: [&str; 13] = [
+        "push.apply", "flush.state", "flush.context", "flush.encode", "flush.put", "flush.words", "flush.play",
+        "flush.commit", "flush.files", "flush.prune", "flush.pointer", "idle.check", "idle.pointer",
+    ];
+    struct P { ns: [u128; 13], records: u64, parts: u64, whole: u64, since: Instant, cpu0: u64 }
+    thread_local!(static P_: RefCell<Option<P>> = const { RefCell::new(None) });
+    fn on() -> bool {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ON.get_or_init(|| std::env::var("STREAM_PROFILE").is_ok_and(|v| v == "1"))
+    }
+    fn cpu() -> u64 {
+        std::fs::read_to_string("/proc/thread-self/stat").ok().and_then(|s| {
+            let f: Vec<&str> = s[s.rfind(')')? + 2..].split(' ').collect();
+            Some(f.get(11)?.parse::<u64>().ok()? + f.get(12)?.parse::<u64>().ok()?)
+        }).unwrap_or(0)
+    }
+    pub struct Lap(Option<Instant>);
+    impl Lap {
+        pub fn start() -> Lap { Lap(on().then(Instant::now)) }
+        pub fn mark(&mut self, stage: usize) {
+            let Some(t) = self.0 else { return };
+            let now = Instant::now();
+            let d = now.duration_since(t).as_nanos();
+            self.0 = Some(now);
+            P_.with(|p| {
+                let mut p = p.borrow_mut();
+                let p = p.get_or_insert_with(|| P { ns: [0; 13], records: 0, parts: 0, whole: 0, since: now, cpu0: cpu() });
+                p.ns[stage] += d;
+            });
+        }
+    }
+    pub fn count(records: u64, parts: u64, whole: u64) {
+        if !on() { return; }
+        P_.with(|p| {
+            let mut g = p.borrow_mut();
+            let Some(p) = g.as_mut() else { return };
+            p.records += records; p.parts += parts; p.whole += whole;
+            let wall = p.since.elapsed();
+            if wall.as_secs() < 10 { return; }
+            let c = cpu();
+            let ms = |n: u128| n as f64 / 1e6;
+            let busy: u128 = p.ns.iter().sum();
+            let mut line = format!(
+                "public-stream profile: wall {:.1}s cpu {:.2}s staged {:.0}ms records {} parts {} whole-cuts {}",
+                wall.as_secs_f64(), (c - p.cpu0) as f64 / 100.0, ms(busy), p.records, p.parts, p.whole
+            );
+            for (i, n) in NAMES.iter().enumerate() { line += &format!(" {n} {:.0}ms", ms(p.ns[i])); }
+            eprintln!("{line}");
+            *g = None;
+        });
+    }
+}
+
 type R<T> = Result<T, Refusal>;
 
 enum Start {
@@ -2622,7 +2681,10 @@ impl<S: ObjectStore> PublicWriter<S> {
     }
     pub fn push(&mut self, record: u64, raw: &[u8]) -> R<()> {
         let window = self.window;
+        let mut lap = prof::Lap::start();
         self.apply_record(record, raw)?;
+        lap.mark(0);
+        prof::count(1, 0, 0);
         if let (Some(before), Some(last)) = (window, self.records.last())
             && stream_effect(&self.header, last.clone())?
                 .envelope
@@ -2650,6 +2712,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         if self.chunks.is_empty() && !self.force_remainder {
             return Ok(());
         }
+        let mut lap = prof::Lap::start();
         // A cut of motion and fields set only (#3799): the published state with the touched nodes' rows replaced, its
         // digest worked out in place; any other cut, the public state whole. The same bytes either way.
         let delta = if self.incremental
@@ -2707,6 +2770,8 @@ impl<S: ObjectStore> PublicWriter<S> {
                 (Some(a), h)
             }
         };
+        lap.mark(1);
+        prof::count(0, 0, after.is_some() as u64);
         if self.records.is_empty()
             && let Some(after) = &after
         {
@@ -2853,6 +2918,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             )?,
             (None, None) => unreachable!("a cut is worked out whole or by rows"),
         };
+        lap.mark(2);
         let mut value = object_map(&sp.to_bytes()?)?;
         value.insert(10, Value::Bytes(context));
         let bytes = wire(Value::Map(value))?;
@@ -2870,11 +2936,16 @@ impl<S: ObjectStore> PublicWriter<S> {
                 ),
             ),
         ])))?;
+        lap.mark(3);
         let chunk_hash = self.put(&chunk)?;
         let part_hash = self.put(&bytes)?;
+        lap.mark(4);
         let text = self.words_after(after.as_ref(), delta.as_ref())?;
+        lap.mark(5);
         let text_hash = self.put(&text)?;
+        lap.mark(4);
         self.player.play(&bytes)?;
+        lap.mark(6);
         let manifest = wire(Value::Map(BTreeMap::from([
             (1, Value::Bytes(self.seed.clone())),
             (2, Value::Bytes(self.head.clone().unwrap_or_default())),
@@ -2885,17 +2956,23 @@ impl<S: ObjectStore> PublicWriter<S> {
             (7, Value::Uint(self.cursor)),
         ])))?;
         self.commit(&manifest)?;
+        lap.mark(7);
         // Commit exact recovery bytes before exposing local immutable files. A killed publication replays the
         // same committed bytes, never a new cut at an orphan file's address.
         immutable(&self.generation_dir().join(number.to_string()), &bytes)?;
         immutable(&self.generation_dir().join(format!("{number}.text")), &text)?;
+        lap.mark(8);
         self.last_to = Some(sp.to);
         self.clear_pending();
         self.delete_some(DELETES_PER_PART);
         if self.rollover_due() {
             self.rollover()?;
         }
-        self.pointer(None)
+        lap.mark(9);
+        self.pointer(None)?;
+        lap.mark(10);
+        prof::count(0, 1, 0);
+        Ok(())
     }
     fn pointer(&self, quiet: Option<i64>) -> R<()> {
         let real = crate::answers::now();
@@ -2958,6 +3035,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         if !self.records.is_empty() {
             return Ok(());
         }
+        let mut lap = prof::Lap::start();
         let at = (
             self.canonical.version(),
             self.player.version(),
@@ -2972,10 +3050,14 @@ impl<S: ObjectStore> PublicWriter<S> {
                 a.insert(1, b[&1].clone());
             }
             if published != current {
+                lap.mark(11);
                 return Ok(());
             }
             self.still_at = Some(at);
         }
-        self.pointer(Some(world.saturating_sub(SETTLE_US)))
+        lap.mark(11);
+        self.pointer(Some(world.saturating_sub(SETTLE_US)))?;
+        lap.mark(12);
+        Ok(())
     }
 }
