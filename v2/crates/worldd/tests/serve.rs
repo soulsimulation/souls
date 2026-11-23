@@ -836,62 +836,20 @@ fn o3c_a2_a3_ships_history_to_an_s3_bucket_across_three_kills() {
 /// #1960: a restart whose first reads of an S3 bucket go unanswered past the client's timeout tries them again and
 /// starts; with the bucket out of reach for good it still ends, with the store's refusal, in bounded time.
 // A real process on the real clock: the stalls and the bound are real time.
-/// 0.132.1: a fresh seed whose entries have a stand point C13 moves (the chess table's, inside its own solids) serves.
-/// The seed built its header before the move and `serve` after it, so since G3 put an activity's stands in its kind
-/// every start of such a seed was refused `header-mismatch`.
-#[test]
-fn a_seed_whose_stand_point_is_moved_serves() {
-    let d = scratch("rn-stand");
-    let facts = d.join("facts.json");
-    std::fs::write(
-        &facts,
-        testworld::generate(1, 0).expect("the test world").text,
-    )
-    .expect("facts");
-    let dir = d.join("w");
-    let entries = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds/games");
-    let out = worldd()
-        .args(["seed", "--facts"])
-        .arg(&facts)
-        .arg("--dir")
-        .arg(&dir)
-        .arg("--entries")
-        .arg(&entries)
-        .args(["--souls", "1", "--at", "-40,30"])
-        .output()
-        .expect("seed runs");
-    let said = String::from_utf8_lossy(&out.stdout);
-    assert!(
-        out.status.success(),
-        "seed: {}",
-        String::from_utf8_lossy(&out.stderr)
-    );
-    assert!(
-        said.contains("stand point: eden:chess_table"),
-        "the chess table's stand point is moved: {said}"
-    );
-    let w = serve_env(&dir, &d.join("s"), &[], &[]);
-    w.line("listening");
-    w.kill();
-}
-
-/// 0.132.1 (production, 23 Nov): a fresh Eden's first start on an S3 store writes a stream-recovery object of 11.8 MB;
-/// its restart must read it back. Over ureq's 10 MiB cap the restart's public stream stopped before its first flush
-/// and the world refused to serve (`public-stream: stopped before its first flush`), again and again. With the world's
-/// read cap (`S3::for_world`) it serves. Needs Eden's exported facts (`v2/tools/import-eden/export`): the test world
-/// tops out at 4.3 MB, under the cap.
+/// 0.132.1: a fresh seed whose entries have a stand point C13 moves (Eden's chess table's, inside its own solids)
+/// serves. The seed built its header before the move and `serve` after it, so since G3 put an activity's stands in
+/// its kind every start of a fresh Eden was refused `header-mismatch`. C13 moves a stand point only for a kind the world
+/// places, and the test world places none of them, so this needs Eden's exported facts (`v2/tools/import-eden/export`).
 #[test]
 #[ignore = "needs .local/import-eden/eden-2026.facts.json"]
-fn eden_restarts_on_an_s3_store_whose_stream_recovery_object_passes_10_mib() {
-    use directoryd::directory::stand_in::{KEY_ID, StandIn};
-    use std::ffi::OsStr;
+fn a_seed_whose_stand_point_is_moved_serves() {
     let facts = Path::new(env!("CARGO_MANIFEST_DIR"))
         .join("../../../.local/import-eden/eden-2026.facts.json");
     assert!(
         facts.is_file(),
         "run v2/tools/import-eden/export/export.ts first"
     );
-    let d = scratch("rn-eden-s3");
+    let d = scratch("rn-stand");
     let dir = d.join("w");
     let entries = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
     let out = worldd()
@@ -904,11 +862,60 @@ fn eden_restarts_on_an_s3_store_whose_stream_recovery_object_passes_10_mib() {
         .args(["--souls", "0"])
         .output()
         .expect("seed runs");
+    let said = String::from_utf8_lossy(&out.stdout);
     assert!(
         out.status.success(),
         "seed: {}",
         String::from_utf8_lossy(&out.stderr)
     );
+    assert!(
+        said.contains("stand point: eden:chess_table"),
+        "the chess table's stand point is moved"
+    );
+    let w = serve_env(&dir, &d.join("s"), &[], &[]);
+    w.line("listening");
+    w.kill();
+}
+
+/// 0.132.1 (production, 23 Nov): a fresh Eden's first start on an S3 store writes a stream-recovery object of 11.8 MB.
+/// Production's rehearsal did that on a scratch copy, and the world then started from its own folder and had to read
+/// the object back. Past ureq's 10 MiB cap its public stream stopped before its first flush and the world refused to
+/// serve (`public-stream: stopped before its first flush`), again and again. With the world's read cap
+/// (`S3::for_world`) it serves. Two seeds of the same facts stand for the scratch copy and the world's own folder.
+/// Needs Eden's exported facts (`v2/tools/import-eden/export`): the test world tops out at 4.3 MB, under the cap.
+#[test]
+#[ignore = "needs .local/import-eden/eden-2026.facts.json"]
+fn eden_restarts_on_an_s3_store_whose_stream_recovery_object_passes_10_mib() {
+    use directoryd::directory::stand_in::{KEY_ID, StandIn};
+    use std::ffi::OsStr;
+    let facts = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../.local/import-eden/eden-2026.facts.json");
+    assert!(
+        facts.is_file(),
+        "run v2/tools/import-eden/export/export.ts first"
+    );
+    let d = scratch("rn-eden-s3");
+    let entries = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
+    let seed = |dir: &Path| {
+        let out = worldd()
+            .args(["seed", "--facts"])
+            .arg(&facts)
+            .arg("--dir")
+            .arg(dir)
+            .arg("--entries")
+            .arg(&entries)
+            .args(["--souls", "0"])
+            .output()
+            .expect("seed runs");
+        assert!(
+            out.status.success(),
+            "seed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    let (scratch_copy, own) = (d.join("rehearsal"), d.join("w"));
+    seed(&scratch_copy);
+    seed(&own);
     let s = StandIn::start(1000).expect("a stand-in");
     let spec = format!("{}/rn", s.url("souls"));
     let env = [
@@ -921,17 +928,16 @@ fn eden_restarts_on_an_s3_store_whose_stream_recovery_object_passes_10_mib() {
         OsStr::new("--machine"),
         OsStr::new("test-machine"),
     ];
-    let socket = d.join("s");
-    // The first start: a stream with nothing to recover writes its recovery objects.
-    let w = serve_env(&dir, &socket, &args, &env);
+    // The first start, on the scratch copy: a stream with nothing to recover writes its recovery objects.
+    let w = serve_env(&scratch_copy, &d.join("s1"), &args, &env);
     w.line("listening");
     w.kill();
     assert!(
         s.paths().iter().any(|p| p.contains("/stream-recovery/")),
         "the first start wrote its stream's recovery objects"
     );
-    // The restart reads them back, one of them past 10 MiB.
-    let w = serve_env(&dir, &socket, &args, &env);
+    // The world's own folder starts and reads them back from the store, one of them past 10 MiB.
+    let w = serve_env(&own, &d.join("s2"), &args, &env);
     w.line("listening");
     let said = w.all.lock().map(|a| a.join("\n")).unwrap_or_default();
     assert!(!said.contains("the public stream stopped"), "{said}");
