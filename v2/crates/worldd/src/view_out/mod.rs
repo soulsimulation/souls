@@ -95,24 +95,48 @@ mod prof {
     use std::cell::RefCell;
     use std::time::Instant;
     pub const NAMES: [&str; 13] = [
-        "push.apply", "flush.state", "flush.context", "flush.encode", "flush.put", "flush.words", "flush.play",
-        "flush.commit", "flush.files", "flush.prune", "flush.pointer", "idle.check", "idle.pointer",
+        "push.apply",
+        "flush.state",
+        "flush.context",
+        "flush.encode",
+        "flush.put",
+        "flush.words",
+        "flush.play",
+        "flush.commit",
+        "flush.files",
+        "flush.prune",
+        "flush.pointer",
+        "idle.check",
+        "idle.pointer",
     ];
-    struct P { ns: [u128; 13], records: u64, parts: u64, whole: u64, since: Instant, cpu0: u64, causes: std::collections::BTreeMap<&'static str, u64> }
+    struct P {
+        ns: [u128; 13],
+        records: u64,
+        parts: u64,
+        whole: u64,
+        since: Instant,
+        cpu0: u64,
+        causes: std::collections::BTreeMap<&'static str, u64>,
+    }
     thread_local!(static P_: RefCell<Option<P>> = const { RefCell::new(None) });
     fn on() -> bool {
         static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
         *ON.get_or_init(|| std::env::var("STREAM_PROFILE").is_ok_and(|v| v == "1"))
     }
     fn cpu() -> u64 {
-        std::fs::read_to_string("/proc/thread-self/stat").ok().and_then(|s| {
-            let f: Vec<&str> = s[s.rfind(')')? + 2..].split(' ').collect();
-            Some(f.get(11)?.parse::<u64>().ok()? + f.get(12)?.parse::<u64>().ok()?)
-        }).unwrap_or(0)
+        std::fs::read_to_string("/proc/thread-self/stat")
+            .ok()
+            .and_then(|s| {
+                let f: Vec<&str> = s[s.rfind(')')? + 2..].split(' ').collect();
+                Some(f.get(11)?.parse::<u64>().ok()? + f.get(12)?.parse::<u64>().ok()?)
+            })
+            .unwrap_or(0)
     }
     pub struct Lap(Option<Instant>);
     impl Lap {
-        pub fn start() -> Lap { Lap(on().then(Instant::now)) }
+        pub fn start() -> Lap {
+            Lap(on().then(Instant::now))
+        }
         pub fn mark(&mut self, stage: usize) {
             let Some(t) = self.0 else { return };
             let now = Instant::now();
@@ -120,20 +144,34 @@ mod prof {
             self.0 = Some(now);
             P_.with(|p| {
                 let mut p = p.borrow_mut();
-                let p = p.get_or_insert_with(|| P { ns: [0; 13], records: 0, parts: 0, whole: 0, since: now, cpu0: cpu(), causes: Default::default() });
+                let p = p.get_or_insert_with(|| P {
+                    ns: [0; 13],
+                    records: 0,
+                    parts: 0,
+                    whole: 0,
+                    since: now,
+                    cpu0: cpu(),
+                    causes: Default::default(),
+                });
                 p.ns[stage] += d;
             });
         }
     }
     /// What made a record's cut whole (`structural`), by change kind.
     pub fn cause(name: &'static str) {
-        if !on() { return; }
+        if !on() {
+            return;
+        }
         P_.with(|p| {
-            if let Some(p) = p.borrow_mut().as_mut() { *p.causes.entry(name).or_default() += 1; }
+            if let Some(p) = p.borrow_mut().as_mut() {
+                *p.causes.entry(name).or_default() += 1;
+            }
         });
     }
     pub fn count(records: u64, parts: u64, whole: u64) {
-        if !on() { return; }
+        if !on() {
+            return;
+        }
         P_.with(|p| {
             let mut g = p.borrow_mut();
             let Some(p) = g.as_mut() else { return };
@@ -2582,7 +2620,9 @@ impl<S: ObjectStore> PublicWriter<S> {
                                     prof::cause(match c {
                                         replica::effects::Change::Create { .. } => "create",
                                         replica::effects::Change::Remove { .. } => "remove",
-                                        replica::effects::Change::Reparent { .. } => "reparent-moved",
+                                        replica::effects::Change::Reparent { .. } => {
+                                            "reparent-moved"
+                                        }
                                         replica::effects::Change::Link { .. } => "link",
                                         replica::effects::Change::Unlink { .. } => "unlink",
                                         _ => "other-change",
