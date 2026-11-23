@@ -1276,13 +1276,16 @@ async function answer(req, conn = null) {
     case 'wait': {
       const ms = Math.min(Math.max(Number(req.seconds ?? 30), 0), WAIT_MOST_S) * 1000, until = Date.now() + ms;
       // R13: the queued wakes are handed as one delivery when the budget allows; over it, they wait for it to.
-      let handed = wakes.deliver(Date.now());
-      while (handed.length === 0 && nothingYet() && Date.now() < until) {
+      // A reader whose socket closed takes nothing: what came stays for the next reader (an owner's message, a wake).
+      const gone = () => conn?.destroyed === true;
+      let handed = gone() ? [] : wakes.deliver(Date.now());
+      while (handed.length === 0 && nothingYet() && !gone() && Date.now() < until) {
         const free = wakes.nextFree(Date.now());
         const left = Math.min(until, free ?? until) - Date.now();
         await new Promise((ok) => { const t = setTimeout(ok, Math.max(left, 0)); wakers.push(() => { clearTimeout(t); ok(); }); });
-        handed = wakes.deliver(Date.now());
+        handed = gone() ? [] : wakes.deliver(Date.now());
       }
+      if (gone()) return { ok: false, code: 'reader-gone' };
       if (handed.length) saveWakes();
       const got = events.splice(0);
       const timedOut = handed.length === 0 && !got.some((e) => e.kind !== 'synced');
@@ -1805,7 +1808,7 @@ const server = createServer((c) => {
     }
   });
   c.on('error', () => {});
-  // R5: a reader that went away (its `listen` stopped) is let go now, so it takes no wake it cannot print.
+  // R5: a reader that went away (its `wait` or `listen` stopped) is let go now, so it takes nothing it cannot print.
   c.on('close', () => { for (const w of wakers.splice(0)) w(); });
 });
 
