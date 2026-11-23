@@ -422,7 +422,7 @@ impl Engine {
                 e.leave(
                     &mut tree,
                     c,
-                    &self.moves,
+                    &mut self.moves,
                     &mut self.due,
                     &mut self.mint,
                     ask,
@@ -614,6 +614,42 @@ impl Engine {
             }
         }
         self.collect(None);
+    }
+
+    /// A move `body` started for `intent` (a walk, a sit) at `now` (0.134 T2): if `body` holds hands, it leaves that
+    /// activity as `activity:leave` does, and both hands come free. Its entries wait in [`Engine::out`].
+    pub fn walked(&mut self, live: &Tree, c: &mut Controller, body: Id, intent: Id, now: Micros) {
+        let Some(activity) = self.activities.holding_hands(&self.moves, body) else {
+            return;
+        };
+        let Some(soul) = self
+            .activities
+            .members(activity)
+            .and_then(|m| m.iter().find(|m| m.body == body))
+            .map(|m| m.soul)
+        else {
+            return;
+        };
+        let mut tree = live.frozen();
+        self.activities.next = tree.next();
+        let ask = Ask {
+            soul,
+            intent,
+            at: now,
+        };
+        if let Err(r) = self.activities.leave(
+            &mut tree,
+            c,
+            &mut self.moves,
+            &mut self.due,
+            &mut self.mint,
+            ask,
+            body,
+            activity,
+        ) {
+            eprintln!("worldd: {}'s walk did not let go: {r}", show(body));
+        }
+        self.collect(Some((intent, soul)));
     }
 
     /// The entries written since the last call, in order, to be numbered and applied.
