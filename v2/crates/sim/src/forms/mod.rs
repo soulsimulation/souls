@@ -441,6 +441,9 @@ pub struct Forms {
     last: RunId,
     /// Runs that ended, in order; the caller drains it.
     pub ended: Vec<Ended>,
+    /// Runs of acts that waited on a posture step (#4187), started since: the caller drains it and gives each its
+    /// deadline and progress answer, as it does a run that starts when taken.
+    pub late: Vec<RunId>,
     /// Effects written and not yet handed to the log, sequence 0: the log's writer numbers them, appends them and
     /// hands each back to [`Forms::logged`]. Until then they are not applied.
     pub out: Vec<Effect>,
@@ -683,13 +686,28 @@ impl Forms {
     }
 
     /// The Soul on `body` leaves its run: taken at once (`form-not-running` when there is none), and the run ends
-    /// `left` at the next stable moment (the runner's rule).
+    /// `left` at the next stable moment (the runner's rule). When `intent` names the act waiting on that run (#4187),
+    /// only the waiting act is left: it ends `left` now and never starts, and the run goes on.
     pub fn leave<G: Geometry, R: Reach>(
         &mut self,
         w: &mut World<'_, G, R>,
         body: Id,
+        intent: Option<Id>,
         now: Micros,
     ) -> Result<(), Refusal> {
+        if let Some(p) = self.waiting.get(&body)
+            && Some(p.intent.id) == intent
+        {
+            let run = p.run;
+            self.waiting.remove(&body);
+            self.ended.push(Ended {
+                run,
+                body,
+                at: now,
+                how: name("left"),
+            });
+            return Ok(());
+        }
         let Some(&run) = self.by_body.get(&body) else {
             return Err(Refusal {
                 name: "form-not-running",
@@ -1635,13 +1653,14 @@ impl Forms {
                 now,
                 Some(run),
             );
-            if let Err(r) = opened {
-                self.ended.push(Ended {
+            match opened {
+                Ok(_) => self.late.push(run),
+                Err(r) => self.ended.push(Ended {
                     run,
                     body,
                     at: now,
                     how: name(r.name),
-                });
+                }),
             }
         }
     }

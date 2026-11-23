@@ -1050,7 +1050,7 @@ fn pending_form_plan_holds_the_existing_walk_claim_and_cleans_up_when_replaced()
     );
     let now = b.now;
     let (mut w, forms) = b.world();
-    forms.leave(&mut w, body, now).unwrap();
+    forms.leave(&mut w, body, None, now).unwrap();
     b.clean();
 
     b.snap.defer_walk = true;
@@ -1220,4 +1220,212 @@ fn i4187_a_new_act_waits_for_a_seat_taken_or_left_then_starts() {
             "{mid}: no jump beyond the seat's own hand-off"
         );
     }
+}
+
+/// A bench with one chair (`fixtures/seats/chair.diag`) on the ground at the origin and one body standing at its stand
+/// point: the bench, the body, the chair, its slot and its stand point.
+fn seat_bench() -> (Bench, Id, Id, u64, Vec3) {
+    const CHAIR: &str = include_str!("../../../replica/fixtures/seats/chair.diag");
+    let place = replica::moves::Place::from_value(
+        &decode(&fixture_bytes(CHAIR).expect("bytes"))
+            .expect("decodes")
+            .value,
+    )
+    .expect("the chair's place");
+    let mut b = Bench::new();
+    let chair = b.mint.mint().expect("id");
+    let at = crate::slots::PlaceAt {
+        thing: chair,
+        place: place.clone(),
+        point: Vec3::new(0, place.height, 0),
+        facing: Quat::IDENTITY,
+        floor: fixture(1),
+    };
+    let stand = at.stand().expect("a stand point");
+    let mut seats = crate::slots::Slots::new();
+    seats.add(at).expect("a place");
+    b.seats = Some(seats);
+    let body = b.mint.mint().expect("id");
+    let frame = Frame {
+        node: fixture(1),
+        slot: None,
+    };
+    let placed = b.surfaces[&fixture(1)]
+        .place(body, frame, stand, Quat::IDENTITY)
+        .expect("placed");
+    b.c.add(family(), placed).expect("added");
+    (b, body, chair, place.slot, stand)
+}
+
+impl Bench {
+    /// Starts `steps` on `body` at `node` for `intent`, now.
+    fn steps(
+        &mut self,
+        body: Id,
+        node: Id,
+        steps: Vec<skills::form_runner::Step>,
+        intent: Intent,
+        limits: Limits,
+    ) -> Result<Asked, replica::effects::Refusal> {
+        self.look();
+        let now = self.now;
+        let (mut w, forms) = self.world();
+        forms.start(&mut w, body, node, intent, steps, Vec::new(), limits, now)
+    }
+
+    /// Ticks until `body`'s run is in step `at` with its move under way.
+    fn until_moving(&mut self, body: Id, at: usize) {
+        while (self.moves.is_empty() || self.forms.at(body) != Some(at)) && self.now < 30_000_000 {
+            self.tick();
+        }
+        assert!(!self.moves.is_empty(), "the run is in its move");
+    }
+}
+
+/// #4187 review: an act waiting on its body's seat step that is itself cancelled, or whose deadline passes, is left
+/// alone and never starts. `worldd` does both through one call, the leave naming the act (`souls:cancel` names it by
+/// its sequence; the deadline sweep by its id). The run it waited on goes on and ends `done`.
+#[test]
+fn i4187_a_waiting_act_cancelled_or_timed_out_never_starts() {
+    use skills::form_runner::Step;
+    for why in ["cancel", "deadline"] {
+        let (mut b, body, chair, slot, _) = seat_bench();
+        let sit = Step::Sit {
+            slot,
+            lie: false,
+            stand: false,
+        };
+        let old = intent(body, 0);
+        b.steps(
+            body,
+            chair,
+            vec![sit, Step::Wait(500_000)],
+            old,
+            Limits::default(),
+        )
+        .expect("started");
+        b.until_moving(body, 0);
+        let waiting = intent(body, 1);
+        let Asked::Started(new) = b
+            .steps(
+                body,
+                chair,
+                vec![Step::Wait(300_000)],
+                waiting,
+                Limits::default(),
+            )
+            .expect("accepted")
+        else {
+            panic!("a run number")
+        };
+        let now = b.now;
+        {
+            let (mut w, forms) = b.world();
+            forms
+                .leave(&mut w, body, Some(waiting.id), now)
+                .expect("left");
+        }
+        let [e] = b.forms.ended.as_slice() else {
+            panic!("{:?}", b.forms.ended)
+        };
+        assert_eq!(
+            (e.run, e.how.as_str(), e.at),
+            (new, "left", now),
+            "{why}: the waiting act alone"
+        );
+        assert_eq!(b.forms.len(), 1, "{why}: the old run goes on");
+        b.forms.ended.clear();
+        b.run(30_000_000);
+        let [e] = b.forms.ended.as_slice() else {
+            panic!("{:?}", b.forms.ended)
+        };
+        println!(
+            "#4187 {why}: the waiting act left at {now} µs; the old run ended {} at {} µs",
+            e.how.as_str(),
+            e.at
+        );
+        assert_eq!(
+            e.how.as_str(),
+            "done",
+            "{why}: the old run ends by its own steps"
+        );
+        assert!(
+            b.forms.late.is_empty(),
+            "{why}: the waiting act never started"
+        );
+        assert_eq!(b.forms.due(new), None);
+    }
+}
+
+/// #4187 review: a take that waited on its body's seat step, behind a long walk (20 m, well past an act's 10 s), is
+/// listed as started late when its run starts, so `worldd` gives it its run's own deadline (its start plus its
+/// steps' span) and its progress answer then; it runs to its end.
+#[test]
+fn i4187_a_late_start_has_its_runs_deadline_behind_a_long_walk() {
+    use skills::form_runner::Step;
+    let (entry, form) = entries().remove(0);
+    let (mut b, body, chair, slot, stand) = seat_bench();
+    let thing = b.mint.mint().expect("id");
+    b.snap.things.insert(
+        thing,
+        (Vec3::new(stand.x, 0, stand.z + 20_000_000), points(&entry)),
+    );
+    let limits = Limits {
+        walk: 120_000_000,
+        ..Limits::default()
+    };
+    let sit = Step::Sit {
+        slot,
+        lie: false,
+        stand: false,
+    };
+    b.steps(body, chair, vec![sit, Step::Rise], intent(body, 0), limits)
+        .expect("started");
+    b.until_moving(body, 1);
+    let sent = b.now;
+    let take = bind(&entry, &form).expect("binds");
+    let span = super::span(&take, &limits);
+    let Asked::Started(new) = b
+        .steps(body, thing, take, intent(body, 1), limits)
+        .expect("accepted")
+    else {
+        panic!("a run number")
+    };
+    assert_eq!(b.forms.due(new), None, "waiting: no run yet");
+    while b.forms.late.is_empty() && b.now < 30_000_000 {
+        b.tick();
+    }
+    // The old run's rise was its last step: it ends by its own steps, and the take starts in that instant.
+    let [old] = b.forms.ended.as_slice() else {
+        panic!("{:?}", b.forms.ended)
+    };
+    assert!(old.at > sent, "after the rise");
+    let started = old.at;
+    assert_eq!(
+        std::mem::take(&mut b.forms.late),
+        vec![new],
+        "listed as started late"
+    );
+    let due = b.forms.due(new).expect("its run");
+    println!(
+        "#4187 late start: sent at {sent} µs, started at {started} µs, due {due} µs (span {span} µs, past 10 s: {})",
+        span > 10_000_000
+    );
+    assert_eq!(due, started + span, "its run's own deadline from its start");
+    assert!(span > 10_000_000, "a take behind a walk past an act's 10 s");
+    b.forms.ended.clear();
+    b.run(started + span + 1);
+    let [e] = b.forms.ended.as_slice() else {
+        panic!("{:?}", b.forms.ended)
+    };
+    println!(
+        "#4187 late start: the take ended {} at {} µs",
+        e.how.as_str(),
+        e.at
+    );
+    assert_eq!((e.run, e.how.as_str()), (new, "done"));
+    assert!(
+        e.at > sent + 10_000_000,
+        "it ran past the 10 s an act gets on arrival"
+    );
 }

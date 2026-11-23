@@ -1054,21 +1054,41 @@ fn i4187_a_walk_sent_during_an_open_form_run() {
     run.stop();
 }
 
-/// #4187, the trace: a second form act from the Soul's own controller while its first run is open.
+/// #4187: a second form act from the Soul's own controller while its first run is open. Before this change it was
+/// refused `form-running` and the first ran on. Now it preempts: the first run is left (answered `left`, nothing
+/// taken) and the second starts at once and lands.
 #[test]
 fn i4187_a_form_act_sent_during_an_open_form_run() {
     let (run, mut a, _) = serve("i4187f");
     a.send("test:take", Some(vessel()), BTreeMap::new());
     a.started();
     a.send("test:take", Some(near_can()), BTreeMap::new());
-    let first = a.answer_of();
-    let second = a.answer_of();
-    println!("#4187 trace: take then take answered {first:?} then {second:?}");
+    let mut answers = [a.answer_of(), a.answer_of()];
+    answers.sort_by_key(|(s, _)| *s);
+    println!("#4187: take then take answered {answers:?}");
     let r = run.replay();
     println!(
-        "#4187 trace: vessel parent {:?}, can parent {:?}",
+        "#4187: vessel parent {:?}, can parent {:?}",
         parent(&r, vessel()),
         parent(&r, near_can())
+    );
+    let [(1, first), (2, second)] = answers else {
+        panic!("{answers:?}")
+    };
+    assert_eq!(first, Err("left".to_owned()), "the first run is left");
+    assert!(
+        second.is_ok(),
+        "the Soul's own new act is accepted: {second:?}"
+    );
+    assert_eq!(
+        parent(&r, vessel()),
+        (Some(ground()), None),
+        "nothing of the first"
+    );
+    assert_eq!(
+        parent(&r, near_can()).0,
+        Some(w1()),
+        "the can in the body's hand"
     );
     run.stop();
 }
