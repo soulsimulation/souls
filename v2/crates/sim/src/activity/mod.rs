@@ -251,6 +251,80 @@ impl Activities {
         Ok(())
     }
 
+    /// [`Activities::emit`] with `extra` entries after its effect, in the same part: all or none (a give's transfer).
+    #[allow(clippy::too_many_arguments)]
+    fn emit_with(
+        &mut self,
+        tree: &mut Tree,
+        node: Id,
+        audience: Audience,
+        by: (Micros, Actor, Cause),
+        event: &'static str,
+        fields: BTreeMap<u64, Value>,
+        changes: Vec<Change>,
+        extra: Vec<(Id, Audience, Body)>,
+    ) -> R<()> {
+        let n = changes.len() as u64;
+        let mut effects = vec![Effect {
+            envelope: Envelope {
+                sequence: self.next,
+                at: by.0,
+                cause: by.2,
+                actor: by.1,
+                audience,
+                node,
+            },
+            body: Body::Changes(
+                changes
+                    .into_iter()
+                    .map(|change| ChangeRec {
+                        change,
+                        rest: Rest::new(),
+                    })
+                    .collect(),
+            ),
+            events: Some(vec![Event {
+                name: name(event),
+                fields,
+                changes: (0..n).collect(),
+                rest: Rest::new(),
+            }]),
+            rest: Rest::new(),
+        }];
+        for (i, (node, audience, body)) in extra.into_iter().enumerate() {
+            effects.push(Effect {
+                envelope: Envelope {
+                    sequence: self.next + 1 + i as u64,
+                    at: by.0,
+                    cause: by.2,
+                    actor: by.1,
+                    audience,
+                    node,
+                },
+                body,
+                events: None,
+                rest: Rest::new(),
+            });
+        }
+        let bytes = encode(&Value::Map(BTreeMap::from([
+            (1, Value::Bytes(self.header.hash().to_bytes())),
+            (
+                2,
+                Value::Array(effects.iter().map(Effect::to_value).collect()),
+            ),
+        ])))
+        .map_err(|e| Refusal {
+            name: "encoding",
+            detail: e.to_string(),
+        })?;
+        let part = Part::read(&bytes)?;
+        self.structure.check(tree, &part.effects)?;
+        tree.commit(&self.header, &part, &self.rules)?;
+        self.next += effects.len() as u64;
+        self.stream.extend(effects);
+        Ok(())
+    }
+
     /// Proposes an activity of `kind` under `place`: its node, with no members, expiring after the kind's
     /// `proposal_lasts`. Reserves nothing. `activity-kind-unknown`, `place-missing`.
     pub fn propose(

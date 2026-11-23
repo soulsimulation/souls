@@ -31,6 +31,8 @@
 //   souls.mjs converse say <conversation id> "<text>" [--private]   a turn: out loud by default, members only with
 //                                             --private (remembered for that conversation)
 //   souls.mjs converse list                   the conversations in the copy
+//   souls.mjs give <thing id> --to <body id>   offers that body a thing this Soul holds; it is handed over if accepted
+//   souls.mjs give accept|decline <offer id>   takes an offered thing into a free hand, or declines it
 //   souls.mjs lie <id>                        lies down on that bed (stand again with act <ns>:rise)
 //   souls.mjs pray "<words>"                  a prayer to the world's creator (G11); the answer comes to `wait`
 //   souls.mjs prayers                         this Soul's prayers, each waiting or answered, with the answer
@@ -138,6 +140,7 @@ export const OPS = [
   'conversations',
   'converse',
   'events',
+  'give',
   'find',
   'history',
   'inspect',
@@ -319,6 +322,11 @@ export function requestOf(argv) {
     if (does === 'start') req.with = who;
     else if (who !== undefined) req.conversation = who;
     if (said.length) req.words = said.join(' ');
+  }
+  if (op === 'give') {
+    // 0.133 R4: give <thing id> --to <body id>, or give accept|decline <offer id>.
+    if (rest[0] === 'accept' || rest[0] === 'decline') Object.assign(req, { do: rest[0], offer: rest[1] });
+    else Object.assign(req, { do: 'offer', thing: rest[0], to: opts.to });
   }
   if (op === 'wait' && rest[0] !== undefined) req.seconds = Number(rest[0]);
   if (op === 'listen' && rest.includes('--follow')) req.follow = true;

@@ -18,8 +18,16 @@
 //!   its own client (R9, `v2/client/src/reflex/consent.mjs`), which sends the same accept. With that client stopped
 //!   nothing answers, and the offer lapses. The engine holds no setting that fires when an offer arrives (TRUNK T10).
 //!
-//! Not here: lasting groups, a gesture at someone who did not join (E11), handing a thing over (E24), the gateway's
-//! verbs for an accept and a decline (I7), charging an offer per body asked (I8), open offers across a restart.
+//! - **A give** (0.133 R4, the smallest part of E24 #2793) is an offer that names a thing the asker holds: accepting
+//!   it moves that thing from the asker's hand to a free hand of the one who accepts, in one part with the offer's end
+//!   (both sides or neither), and no activity starts. At the accept the world checks again: the asker still holds it
+//!   (`give.not-held`), the two stand on the same floor within [`GIVE_REACH`] (`give.too-far`), and the one who accepts
+//!   has a free hand, two for a two-handed thing (`give.no-free-hand`). A refused accept leaves the offer open: free a
+//!   hand or come closer, and accept again. A decline or a lapse is any offer's.
+//!
+//! Not here: lasting groups, a gesture at someone who did not join (E11), swapping and lending (E24's rest), the
+//! gateway's verbs for an accept and a decline (I7), charging an offer per body asked (I8), open offers across a
+//! restart.
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -29,13 +37,20 @@ use replica::activity::{
 use replica::effects::{Actor, Cause, Change, Refusal};
 use replica::encode::{Name, Value};
 use replica::ids::{Id, Minter};
+use replica::pose::Frame;
 use replica::time::Micros;
 use replica::tree::Tree;
 use replica::world_model::{Audience, End, show};
 
 use super::{Activities, Ask, Live, R, create, minted, name, refuse};
 use crate::controller::Controller;
+use crate::slots::hands::{free_hands, hands, occupies, transfer};
 use crate::timers::{DueList, Timer};
+
+/// The event of a give accepted: `{1: offer, 2: the thing, 3: the giver's body, 4: the taker's body}`.
+pub const GIVEN: &str = "souls:given";
+/// How far apart, µm, two bodies may stand on one floor for a give: an arm's length each.
+pub const GIVE_REACH: i64 = 1_500_000;
 
 /// The due list's name for an offer's expiry.
 const OFFER_TIMER: &str = "souls:offer-lapse";
@@ -71,6 +86,8 @@ struct Open {
     timer: Id,
     /// Whether the offer's own node has its pair.
     taken: bool,
+    /// The thing a give hands over: held by the asker when offered.
+    given: Option<Id>,
 }
 
 /// A pair accepted and not yet started.
@@ -126,7 +143,16 @@ impl Activities {
         role: &Name,
         place: Id,
         mut asked: BTreeSet<Id>,
+        given: Option<Id>,
     ) -> R<Id> {
+        if let Some(thing) = given
+            && holder(tree, thing) != Some(body)
+        {
+            return refuse(
+                "give.not-held",
+                format!("{} holds no {}", show(body), show(thing)),
+            );
+        }
         let Some(k) = self.kinds.get(kind) else {
             return refuse("activity-kind-unknown", kind.as_str());
         };
@@ -179,13 +205,16 @@ impl Activities {
                 audience,
             },
         ];
-        let fields = BTreeMap::from([
+        let mut fields = BTreeMap::from([
             (1, id.to_value()),
             (2, Value::Text(kind.clone())),
             (3, ids(&asked)),
             (4, at(expires)),
             (5, body.to_value()),
         ]);
+        if let Some(thing) = given {
+            fields.insert(6, thing.to_value());
+        }
         let sequence = self.next;
         let by = (ask.at, Actor::Soul(ask.soul), Cause::Intent(ask.intent));
         self.emit(tree, place, audience, by, OFFER, fields, changes)?;
@@ -223,6 +252,7 @@ impl Activities {
                 expires,
                 timer,
                 taken: false,
+                given,
             },
         );
         Ok(id)
@@ -263,6 +293,9 @@ impl Activities {
         offer: Id,
     ) -> R<Id> {
         let o = self.answerable(offer, body, ask.at)?;
+        if let Some(thing) = o.given {
+            return self.give(tree, mint, c, due, ask, body, offer, &o, thing);
+        }
         let k = &self.kinds[&o.kind];
         let expires = ask.at.saturating_add(k.proposal_lasts);
         let revision = k.revision;
@@ -386,6 +419,102 @@ impl Activities {
             .push_back(pair);
         self.advance(tree, c, due, body, ask.at);
         Ok(pair)
+    }
+
+    /// A give's accept (see the module's notes): the thing from the asker's hand to a free hand of `body`, the offer's
+    /// node ended, and [`GIVEN`], in one part. Returns the offer. `give.not-held`, `give.too-far`, `give.no-free-hand`.
+    #[allow(clippy::too_many_arguments)]
+    fn give(
+        &mut self,
+        tree: &mut Tree,
+        mint: &mut Minter,
+        c: &Controller,
+        due: &mut DueList,
+        ask: Ask,
+        body: Id,
+        offer: Id,
+        o: &Open,
+        thing: Id,
+    ) -> R<Id> {
+        if holder(tree, thing) != Some(o.asker) {
+            return refuse(
+                "give.not-held",
+                format!("{} no longer holds {}", show(o.asker), show(thing)),
+            );
+        }
+        let near = match (standing(tree, o.asker), standing(tree, body)) {
+            (Some((fa, pa)), Some((fb, pb))) => {
+                let (dx, dz) = (pa.x - pb.x, pa.z - pb.z);
+                fa == fb
+                    && dx.saturating_mul(dx).saturating_add(dz.saturating_mul(dz))
+                        <= GIVE_REACH * GIVE_REACH
+            }
+            _ => false,
+        };
+        if !near {
+            return refuse(
+                "give.too-far",
+                format!(
+                    "{} and {} are not within {} m on one floor",
+                    show(o.asker),
+                    show(body),
+                    GIVE_REACH / 1_000_000
+                ),
+            );
+        }
+        let all = c
+            .claims(body)
+            .map(|b| hands(b.family()))
+            .unwrap_or_default();
+        let free = free_hands(tree, &self.rules, body, &all);
+        let (kind, audience) = tree
+            .handle(thing)
+            .and_then(|h| tree.node(h))
+            .map(|n| (n.kind().as_str().to_owned(), n.audience()))
+            .ok_or_else(|| Refusal {
+                name: "give.not-held",
+                detail: format!("{} is gone", show(thing)),
+            })?;
+        let needs = usize::from(occupies(&self.rules, &kind).unwrap_or(1).max(1));
+        let Some(hand) = free.first().filter(|_| free.len() >= needs) else {
+            return refuse(
+                "give.no-free-hand",
+                format!("{} has no free hand", show(body)),
+            );
+        };
+        let to = Frame {
+            node: body,
+            slot: Some(hand.slot),
+        };
+        let moved = transfer(&self.header, thing, audience, to, minted(mint)?);
+        let fields = BTreeMap::from([
+            (1, offer.to_value()),
+            (2, thing.to_value()),
+            (3, o.asker.to_value()),
+            (4, body.to_value()),
+        ]);
+        let changes = self.withdraw(offer);
+        let by = (ask.at, Actor::Soul(ask.soul), Cause::Intent(ask.intent));
+        let node = if self.live.contains_key(&offer) {
+            offer
+        } else {
+            o.place
+        };
+        self.emit_with(
+            tree,
+            node,
+            o.audience,
+            by,
+            GIVEN,
+            fields,
+            changes,
+            moved.to_vec(),
+        )?;
+        self.live.remove(&offer);
+        self.offers.open.remove(&offer);
+        self.offers.timers.remove(&o.timer);
+        due.cancel((o.expires, o.timer));
+        Ok(offer)
     }
 
     /// `ask.soul`, asked with `body`, declines `offer`: `souls:offer-declined`, addressed to the asker. When every body
@@ -578,4 +707,18 @@ impl Activities {
             }
         }
     }
+}
+
+/// The body (or node) whose slot `thing` is in: what holds it.
+fn holder(tree: &Tree, thing: Id) -> Option<Id> {
+    tree.handle(thing)
+        .and_then(|h| tree.node(h))
+        .filter(|n| n.slot().is_some())
+        .and_then(|n| n.parent())
+}
+
+/// The floor (its parent) a body stands on, and where on it.
+fn standing(tree: &Tree, body: Id) -> Option<(Id, replica::pose::Vec3)> {
+    let n = tree.handle(body).and_then(|h| tree.node(h))?;
+    Some((n.parent()?, n.place()?.position))
 }

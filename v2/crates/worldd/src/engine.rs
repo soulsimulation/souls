@@ -7,7 +7,7 @@
 //!   `souls:` verb is refused `order-unknown` before it reaches the world.
 //! - **Parameters.** The target is the place (propose, offer), the activity (join, start, leave, lift, set down) or the
 //!   offer (accept, decline). Propose: 1 the activity's kind. Offer: 1 the kind, 2 the asker's role, 3 the bodies
-//!   asked (ids). Join: 1 the role, 2 the revision (default 1). Lift: 1 the thing carried. Its two carriers are the
+//!   asked (ids), 4 for a give the thing the asker holds (0.133 R4: accepting hands it over, `sim::activity::offer`). Join: 1 the role, 2 the revision (default 1). Lift: 1 the thing carried. Its two carriers are the
 //!   activity's first two members, the first in front. `carrier:steer`, `carrier:stop` and `carrier:land` steer the
 //!   boat the Soul sits in ([`crate::carrier`], #3603): the target the boat, steer's 1 a point `[x, z]` µm (land's 1
 //!   optional, a point by its home).
@@ -239,6 +239,14 @@ impl Engine {
                     _ => BTreeSet::new(),
                 };
                 let place = target("offer-needs-a-place")?;
+                // A give (0.133 R4): 4 the thing the asker holds and hands over when the offer is accepted.
+                let given = match a.params.get(&4) {
+                    None => None,
+                    Some(v) => Some(read_id(v).map_err(|_| Refusal {
+                        name: "give-needs-a-thing",
+                        detail: "parameter 4 is the thing given, an id".into(),
+                    })?),
+                };
                 e.offer(
                     &mut tree,
                     &mut self.mint,
@@ -249,6 +257,7 @@ impl Engine {
                     &role,
                     place,
                     asked,
+                    given,
                 )?;
             }
             Verb::Join => {
