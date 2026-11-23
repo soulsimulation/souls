@@ -687,7 +687,9 @@ function roles(entry, err) {
     const p = `roles.${name}`;
     if (!(isObj(links[name]) && (links[name].from === 'body' || links[name].from === 'soul'))) err(p, 'a role is a link type of this kind whose from end is a body or a Soul');
     if (!isObj(r)) { err(p, 'a role is an object: {"need", "places"}'); continue; }
-    only(r, ['need', 'places', 'move', 'on_beat'], p, err);
+    only(r, ['need', 'places', 'move', 'on_beat', 'follows'], p, err);
+    // 0.135 G2: the role whose member follows the other's.
+    if (r.follows !== undefined && r.follows !== true) err(`${p}.follows`, 'true, or left out');
     // 0.134 T3: the move begins on the world's beat, and again on the next after it ends, until the member leaves.
     if (r.on_beat !== undefined && r.on_beat !== true) err(`${p}.on_beat`, 'true, or left out');
     if (!ROLE_NEEDS.includes(r.need)) err(`${p}.need`, `one of ${ROLE_NEEDS.join(', ')}`);

@@ -37,8 +37,8 @@ use replica::world_model::{Audience, Kind};
 use sim::links::Doors;
 use sim::log::{Mem, recover};
 use sim::walk::town::Town;
-use worldd::answers::{self, Config};
-use worldd::bodies::Bodies;
+use worldd::answers::{self, BODIES, Config};
+use worldd::bodies::{Bodies, read_row};
 use worldd::checkers::Rules;
 
 const LINEAGE: Scope = Scope([0x71; 16]);
@@ -49,11 +49,23 @@ const HANDSHAKE: &str = "test:handshake";
 const BRIEF: &str = "test:brief_handshake";
 /// Holding hands (0.134 T2): each role names content's `hold_hand`, whose last phase holds until released.
 const HOLD: &str = "test:hold_hands";
+/// Following (0.135 G2): no move; the giver's role follows.
+fn follow() -> ActivityKind {
+    let mut k = touch(FOLLOW, 60_000_000, "souls:none");
+    for r in &mut k.roles {
+        r.mv = None;
+    }
+    k.follows = Some(name(GIVER));
+    k
+}
+
 /// Dancing together (0.134 T3).
 const DANCE: &str = "test:dance";
 /// A hug and a high-five, as the handshake: each ends with its moves.
 const HUG: &str = "test:hug";
 const HIGH_FIVE: &str = "test:high_five";
+/// Following (0.135 G2): the asker (the giver's role) follows the other.
+const FOLLOW: &str = "test:follow";
 const GIVER: &str = "test:giver";
 const TAKER: &str = "test:taker";
 
@@ -76,6 +88,7 @@ fn kinds() -> Vec<(&'static str, String)> {
         (DANCE, pinned(DANCE, 6)),
         (HUG, pinned(HUG, 7)),
         (HIGH_FIVE, pinned(HIGH_FIVE, 8)),
+        (FOLLOW, pinned(FOLLOW, 9)),
     ]
 }
 
@@ -105,6 +118,7 @@ fn touch(plain: &str, lasts: Micros, mv: &str) -> ActivityKind {
         leave_within: 400_000,
         most: 2,
         beat: false,
+        follows: None,
     }
 }
 
@@ -220,7 +234,9 @@ fn tree_rules() -> TreeRules {
                 full(PLACE),
                 k(
                     "place",
-                    &["body", HANDSHAKE, BRIEF, HOLD, DANCE, HUG, HIGH_FIVE],
+                    &[
+                        "body", HANDSHAKE, BRIEF, HOLD, DANCE, HUG, HIGH_FIVE, FOLLOW,
+                    ],
                 ),
             ),
             (full(WALKER), k("family", &[])),
@@ -230,6 +246,7 @@ fn tree_rules() -> TreeRules {
             (full(DANCE), k("activity", &[])),
             (full(HUG), k("activity", &[])),
             (full(HIGH_FIVE), k("activity", &[])),
+            (full(FOLLOW), k("activity", &[])),
         ]),
         souls: [soul(1), soul(2), soul(3), soul(4)].into(),
         audiences: BTreeMap::new(),
@@ -396,7 +413,11 @@ struct Run {
 }
 
 fn serve(tag: &str) -> Run {
-    let store = Mem::with(Vec::new());
+    serve_on(tag, Mem::with(Vec::new()))
+}
+
+/// [`serve`] from `store`'s log, if it has one: a restart.
+fn serve_on(tag: &str, store: Mem) -> Run {
     let mut cfg = Config::new(LINEAGE, 1);
     cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
     cfg.engine = Some((
@@ -408,6 +429,7 @@ fn serve(tag: &str) -> Run {
             dance(),
             touch(HUG, 60_000_000, "souls:hug"),
             touch(HIGH_FIVE, 60_000_000, "souls:high_five"),
+            follow(),
         ],
     ));
     let rules = Rules {
@@ -456,7 +478,7 @@ impl Run {
             if let Body::Changes(cs) = &e.body {
                 for c in cs {
                     if let Change::Create { node, kind, .. } = &c.change
-                        && [HANDSHAKE, BRIEF, HOLD, DANCE, HUG, HIGH_FIVE]
+                        && [HANDSHAKE, BRIEF, HOLD, DANCE, HUG, HIGH_FIVE, FOLLOW]
                             .iter()
                             .any(|k| kind.as_str() == full(k))
                     {
@@ -864,5 +886,223 @@ fn t2_holds_again_and_with_another_partner() {
         .expect("Soul 3 comes over");
     hold(&mut a, &mut c, 3, "with another partner");
     println!("t2: three holds, each with both moves and both released");
+    run.stop();
+}
+
+impl Run {
+    /// Each body row the log holds, in order: the body and where it stood.
+    fn rows(&self) -> Vec<(Id, Vec3)> {
+        let log = self.store.0.lock().unwrap().bytes.clone();
+        recover(&log)
+            .unwrap()
+            .records
+            .into_iter()
+            .filter(|r| !sim::recorder::is_input(r))
+            .flat_map(|r| match Part::read(&r).unwrap().rest.get(&BODIES) {
+                Some(Value::Array(rows)) => rows.clone(),
+                _ => Vec::new(),
+            })
+            .filter_map(|v| read_row(&v).map(|(b, p, _)| (b, p.position)))
+            .collect()
+    }
+}
+
+fn walk_to(x: i64, z: i64) -> Value {
+    let int =
+        |n: i64| u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint);
+    Value::Array(vec![int(x), int(0), int(z)])
+}
+
+/// The follower's track since row `from`: the furthest it was from its place (1 m from the leader, toward the
+/// follower) and the most it moved in one tick.
+fn track(run: &Run, from: usize) -> (i64, i64, Vec3, Vec3) {
+    let len = |a: Vec3, b: Vec3| {
+        ((((a.x - b.x) as i128).pow(2) + ((a.z - b.z) as i128).pow(2)).isqrt()) as i64
+    };
+    let rows = run.rows();
+    let (mut l, mut f) = (at(1), at(2));
+    for (body, p) in rows.iter().take(from) {
+        if *body == soul(1) {
+            l = *p;
+        } else if *body == soul(2) {
+            f = *p;
+        }
+    }
+    let (mut worst, mut step) = (0_i64, 0_i64);
+    for (body, p) in rows.into_iter().skip(from) {
+        if body == soul(1) {
+            l = p;
+        } else if body == soul(2) {
+            step = step.max(len(p, f));
+            f = p;
+        } else {
+            continue;
+        }
+        let d = len(f, l).max(1);
+        let place = Vec3::new(
+            l.x + (i128::from(f.x - l.x) * 1_000_000 / i128::from(d)) as i64,
+            0,
+            l.z + (i128::from(f.z - l.z) * 1_000_000 / i128::from(d)) as i64,
+        );
+        worst = worst.max(len(f, place));
+    }
+    (worst, step, l, f)
+}
+
+/// 0.135 G2: Soul 2 offers to follow Soul 1, and Soul 1 accepts; Soul 2's own `souls:follow` order then walks it
+/// along Soul 1's trail. Soul 1 walks 30 m with two turns (10 m east, 8 m south, 12 m east): at every tick either
+/// moved, Soul 2 is within 2.5 m of its place 1 m behind and never moves more than 0.2 m in a tick (walked, never
+/// placed). Soul 2 walking on its own ends the follow for both. Followed again, Soul 1 turns back through Soul 2
+/// (8 m east, then 12 m west), and Soul 2 keeps the same bounds; Soul 2's own order (a held stance) ends that follow
+/// for both too.
+#[test]
+fn g2_a_soul_follows_another_over_a_walk_with_two_turns() {
+    let run = serve("follow");
+    let (mut a, mut b) = (run.client(1), run.client(2));
+    let len = |a: Vec3, b: Vec3| {
+        ((((a.x - b.x) as i128).pow(2) + ((a.z - b.z) as i128).pow(2)).isqrt()) as i64
+    };
+    let follow = run.created(&b.offer(FOLLOW, 1).expect("Soul 2 offers to follow"));
+    a.act("activity:accept", Some(follow), &[])
+        .expect("Soul 1 accepts");
+    let from = run.rows().len();
+    for (x, z) in [
+        (-30_000_000, 30_000_000),
+        (-30_000_000, 22_000_000),
+        (-18_000_000, 22_000_000),
+    ] {
+        a.act("eden:walk", Some(ground()), &[(1, walk_to(x, z))])
+            .unwrap_or_else(|e| panic!("Soul 1 walks to ({x}, {z}): {e}"));
+    }
+    std::thread::sleep(Duration::from_millis(2_000));
+    let (worst, step, leader, follower) = track(&run, from);
+    println!(
+        "g2: two turns: the follower within {} mm of its place; at most {} mm a tick",
+        worst / 1000,
+        step / 1000
+    );
+    assert!(worst <= 2_500_000, "within 2.5 m of its place: {worst} µm");
+    assert!(
+        step <= 200_000,
+        "walked, never placed: {step} µm in one tick"
+    );
+    assert!(
+        len(follower, leader) < 3_000_000,
+        "the follower ended behind: {follower:?} {leader:?}"
+    );
+    // Soul 2 walks on its own: the follow ends for both.
+    let lefts = run.lefts();
+    b.act(
+        "eden:walk",
+        Some(ground()),
+        &[(1, walk_to(-19_000_000, 24_000_000))],
+    )
+    .expect("Soul 2 walks on its own");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(run.lefts(), lefts + 2, "the follow is over for both");
+
+    // Followed again; Soul 1 turns back through Soul 2.
+    let again = run.created(&b.offer(FOLLOW, 1).expect("offered again"));
+    a.act("activity:accept", Some(again), &[])
+        .expect("accepted again");
+    let from = run.rows().len();
+    for (x, z) in [(-10_000_000, 22_000_000), (-22_000_000, 22_000_000)] {
+        a.act("eden:walk", Some(ground()), &[(1, walk_to(x, z))])
+            .unwrap_or_else(|e| panic!("Soul 1 walks to ({x}, {z}): {e}"));
+    }
+    std::thread::sleep(Duration::from_millis(2_000));
+    let (worst, step, _, _) = track(&run, from);
+    println!(
+        "g2: turned back through: the follower within {} mm of its place; at most {} mm a tick",
+        worst / 1000,
+        step / 1000
+    );
+    assert!(worst <= 2_500_000, "within 2.5 m of its place: {worst} µm");
+    assert!(
+        step <= 200_000,
+        "walked, never placed: {step} µm in one tick"
+    );
+    // Soul 2's own order (a held stance) ends the follow for both.
+    let lefts = run.lefts();
+    b.act("souls:hold", None, &[(1, Value::Uint(1))])
+        .expect("Soul 2 holds its stance");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        run.lefts(),
+        lefts + 2,
+        "its own order ends the follow for both"
+    );
+    run.stop();
+}
+
+/// 0.135 G2, review R1 and R2: a follow survives a restart. The follower's order is taken up from the log as it is;
+/// an intent arriving after the restart never takes the order's id (the world made the order on the intents'
+/// counter); and the leader's leave then ends the follow for both and cancels the order, in the same tick.
+#[test]
+fn g2_a_follow_across_a_restart() {
+    let run = serve("follow-restart");
+    let (mut a, mut b) = (run.client(1), run.client(2));
+    let follow = run.created(&b.offer(FOLLOW, 1).expect("Soul 2 offers to follow"));
+    a.act("activity:accept", Some(follow), &[])
+        .expect("Soul 1 accepts");
+    std::thread::sleep(Duration::from_millis(300));
+    let order = |run: &Run, name: &str| -> Vec<Id> {
+        let log = run.store.0.lock().unwrap().bytes.clone();
+        recover(&log)
+            .unwrap()
+            .records
+            .into_iter()
+            .filter(|r| !sim::recorder::is_input(r))
+            .flat_map(|r| Part::read(&r).unwrap().effects)
+            .flat_map(|e| e.events.into_iter().flatten())
+            .filter(|ev| ev.name.as_str() == name)
+            .filter_map(|ev| read_id(&ev.fields[&1]).ok())
+            .collect()
+    };
+    let orders = order(&run, "souls:order");
+    assert_eq!(orders.len(), 1, "the follower's own follow order");
+    let Run { world, store, path } = run;
+    world.stop();
+    let _ = std::fs::remove_file(&path);
+    let run = serve_on("follow-restart-2", store);
+    let mut a = run.client(1);
+    a.2 = 100;
+    // An intent after the restart: its effects name its own id, never the order's.
+    let walked = a
+        .act(
+            "eden:walk",
+            Some(ground()),
+            &[(1, walk_to(-36_000_000, 30_000_000))],
+        )
+        .expect("Soul 1 walks after the restart");
+    let log = run.store.0.lock().unwrap().bytes.clone();
+    let causes: BTreeSet<Id> = recover(&log)
+        .unwrap()
+        .records
+        .into_iter()
+        .filter(|r| !sim::recorder::is_input(r))
+        .flat_map(|r| Part::read(&r).unwrap().effects)
+        .filter(|e| walked.contains(&e.envelope.sequence))
+        .filter_map(|e| match e.envelope.cause {
+            Cause::Intent(i) => Some(i),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        !causes.is_empty() && !causes.contains(&orders[0]),
+        "a fresh id: {causes:?}"
+    );
+    // The order was taken up as it is: no second order, and the leader's leave ends both and cancels it.
+    let lefts = run.lefts();
+    a.act("activity:leave", Some(follow), &[])
+        .expect("Soul 1 leaves");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(run.lefts(), lefts + 2, "the follow is over for both");
+    assert_eq!(order(&run, "souls:order"), orders, "no second order");
+    assert_eq!(
+        order(&run, "souls:order-ended"),
+        orders,
+        "the order ended with the follow"
+    );
     run.stop();
 }

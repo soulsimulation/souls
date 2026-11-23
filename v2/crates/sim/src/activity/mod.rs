@@ -20,6 +20,12 @@
 //! - **A touch ends with its moves.** When every member's move of a touch has ended by itself, each member leaves it
 //!   ([`Activities::finish`]), so its role claims are let go: both arms are free, and the next touch between the
 //!   same two starts and plays its moves. A touch whose move holds (T2) is not ended this way.
+//! - **Following another Soul (0.135 G2).** A kind may name the role that follows
+//!   ([`replica::activity::ActivityKind::follows`]); the other member leads. The offer and its accept are the consent;
+//!   while it runs, worldd keeps the follower's own `souls:follow` order on the leader (`v2/docs/intents.md` rule 5,
+//!   `crate::orders`), so following is the one existing order and its skill. Either member's leave ends it for both;
+//!   the follower's own walk leaves it ([`Activities::walk_leaves`]); its order ending (displaced by the follower's
+//!   own act, expired, the leader gone) ends it too ([`Activities::following`]).
 //! - **A held move lasts while both stay (0.134 T2).** A role's move whose last phase holds (`hold_hand`) holds until
 //!   a member leaves: then every member's held move is released, so both hands come free, each release goes out
 //!   for viewers as its record again, ended `released`, and the others leave the hold too ([`Activities::leave`]). A walk sent by a member ends it the same
@@ -878,9 +884,11 @@ impl Activities {
     ) -> R<Micros> {
         // A hold (T2) lasts while both stay: when one leaves, the rest leave it too, so nobody is kept in a hold that
         // is over and the next hold between them starts.
+        // 0.135 G2: a follow is over for both when either leaves, as a hold is.
         let holds = self.live.get(&activity).is_some_and(|l| {
             l.node.members.iter().any(|m| m.body == body)
-                && l.moves.values().any(|n| held(moves, *n))
+                && (self.kinds[&l.kind].follows.is_some()
+                    || l.moves.values().any(|n| held(moves, *n)))
         });
         let at = self.leave_one(tree, c, moves, due, mint, ask, body, activity)?;
         if holds {
@@ -998,7 +1006,29 @@ impl Activities {
     pub fn walk_leaves(&self, moves: &Moves, body: Id) -> Option<Id> {
         let a = *self.holding.get(&body)?;
         let l = self.live.get(&a)?;
-        (self.kinds[&l.kind].beat || l.moves.values().any(|n| held(moves, *n))).then_some(a)
+        let kind = &self.kinds[&l.kind];
+        // 0.135 G2: the follower's own walk ends the follow; the leader's walks are what it follows.
+        let follower = kind.follows.as_ref().is_some_and(|f| {
+            l.node
+                .members
+                .iter()
+                .any(|m| m.body == body && m.role == *f)
+        });
+        (kind.beat || follower || l.moves.values().any(|n| held(moves, *n))).then_some(a)
+    }
+
+    /// Every follow running (0.135 G2): its activity, the leader's body, and the follower's body and Soul.
+    pub fn following(&self) -> Vec<(Id, Id, Id, Id)> {
+        self.live
+            .iter()
+            .filter(|(_, l)| l.node.state == State::Started)
+            .filter_map(|(a, l)| {
+                let f = self.kinds[&l.kind].follows.as_ref()?;
+                let follower = l.node.members.iter().find(|m| m.role == *f)?;
+                let leader = l.node.members.iter().find(|m| m.role != *f)?;
+                Some((*a, leader.body, follower.body, follower.soul))
+            })
+            .collect()
     }
 
     /// Releases every member's held move in `activity` (0.134 T2), so both hands come free, each written for viewers
