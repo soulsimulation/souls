@@ -404,8 +404,8 @@ pnpm install, media, the old page and the character set, Playwright's Chromium, 
 the new page, caddy), runs the check and removes the run's world folders and checkout after:
 
 ```sh
-gh workflow run check-0132.yml --ref main -f ref=main          # -f runner=souls-wide -f agents=100 -f seconds=600 -f only=2,3,4
-gh run download <run-id> -D .local/check-0132-<run-id>          # report.json, table.md, check.log, clip/*.webm
+gh workflow run timed-run.yml --ref main -f command=check-0132 -f ref=main -f args='--agents 100 --seconds 600 --only 2,3,4'
+gh run download <run-id> -D .local/check-0132-<run-id>   # report.json, table.md, check.log, clip/*.webm
 ```
 
 The table is also in the run's summary.
