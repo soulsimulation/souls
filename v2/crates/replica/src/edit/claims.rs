@@ -745,7 +745,7 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
                     add(&mut t, points_of(tree, &placed, *r));
                 }
             }
-            Op::Set { node, .. } | Op::Rows { node, .. } => {
+            Op::Set { node, field, to } => {
                 if *node == root.map_or(Ref::New(u64::MAX), Ref::Node) {
                     t.root = true;
                 } else {
@@ -766,6 +766,14 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
                             }
                         }
                     }
+                }
+            }
+            // A rows edit (#3956) touches the thing where it is, as a set does.
+            Op::Rows { node, .. } => {
+                if *node == root.map_or(Ref::New(u64::MAX), Ref::Node) {
+                    t.root = true;
+                } else {
+                    add(&mut t, points_of(tree, &placed, *node));
                 }
             }
             Op::Remove { node } => {
