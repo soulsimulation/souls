@@ -2841,7 +2841,7 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     const H: i64 = 1_200_000;
     let d = scratch("a2seat");
     let (facts, slots) = yard_world(&d);
-    let w = seed_entries(&d, &facts, 4, (36, -20), Some(&d.join("entries")));
+    let w = seed_entries(&d, &facts, 5, (36, -20), Some(&d.join("entries")));
     let (creator_id, creator_actor) = creator(0xa2);
     static_creator(&w, creator_id);
     let socket = d.join("s");
@@ -3363,14 +3363,64 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
         "nothing changed"
     );
 
-    // Frame B's last holder, Soul 4, leaves the world with beam 1 joined to frame B (review round seven, B18 on the
-    // retire): beam 1 would hang by frame B's one end, so it is laid down first, then frame B, and B18 judges both
-    // together. Frame A stays, held by crew D; no part is left hanging.
+    // Frame B's last holder, Soul 4, leaves the world with beam 1 joined to frame B and walls round beam 1 (review
+    // round eight): beam 1 would hang by frame B and has no room to be laid down, so nothing moves. The structure is
+    // kept as it stands, its hold still counting for B18 (`souls:holder-left-structure-kept`), never frozen: a new
+    // crew (Souls 2 and 5) takes the hold over.
     assert!(joints_at(&w, b1) > 0, "beam 1 joined");
+    let mut walls = Vec::new();
+    for (x, z, what) in [
+        (bl.x - 1_500_000, bl.z, "out of the bay from beam 1"),
+        (bl.x, bl.z + 2_000_000, "past frame B from beam 1"),
+        (bl.x + 400_000, bl.z - 2_000_000, "past frame A from beam 1"),
+    ] {
+        let got = creator_edit(wall(&w, x, z));
+        println!("the creator puts a wall {what}: {got:?}");
+        assert_eq!(got.kind, 1, "a wall");
+        walls.push(got.names[&1]);
+    }
     hands[3].send_to(answers::LEAVE, None, BTreeMap::new());
     let got = socket_end(&mut hands[3].s);
-    println!("Soul 4, frame B's last holder, leaves with beam 1 joined to frame B: {got:?}");
-    assert_eq!(got.kind, 1, "Soul 4 leaves the world");
+    println!("Soul 4, frame B's last holder, leaves with beam 1 boxed in: {got:?}");
+    assert_eq!(
+        got.kind, 1,
+        "Soul 4 leaves the world: the retire is never refused"
+    );
+    let kept = whys(&w, &got.entries, "souls:hold-kept");
+    println!("kept: {kept:?}");
+    assert_eq!(
+        kept,
+        vec![(fb, "souls:holder-left-structure-kept".to_owned())],
+        "the structure kept, named"
+    );
+    assert_eq!(
+        (where_is(&w, fb).0, where_is(&w, b1).0),
+        (Some(bay), Some(bay)),
+        "nothing moved"
+    );
+    for wall_id in walls {
+        let got = creator_edit(Op::Remove {
+            node: Ref::Node(wall_id),
+        });
+        assert_eq!(got.kind, 1, "a wall taken away: {got:?}");
+    }
+    let (p, q) = across(ub, 800_000);
+    both(&mut hands, (1, 4), p, q, "Souls 2 and 5 to frame B");
+    let crew_e = crew(&mut hands, (1, 4), fb);
+    println!("crew E holds frame B");
+    assert_eq!(
+        leave(&mut hands, 4, crew_e).kind,
+        1,
+        "Soul 5 lets go; Soul 2 holds frame B"
+    );
+
+    // Soul 2, frame B's last holder now, leaves the world, the walls gone: beam 1 would hang by frame B's one end, so
+    // it is laid down first, then frame B, and B18 judges both together. Frame A stays, held by crew D; no part is
+    // left hanging.
+    hands[1].send_to(answers::LEAVE, None, BTreeMap::new());
+    let got = socket_end(&mut hands[1].s);
+    println!("Soul 2, frame B's last holder, leaves with beam 1 joined to frame B: {got:?}");
+    assert_eq!(got.kind, 1, "Soul 2 leaves the world");
     let set_down = whys(&w, &got.entries, "souls:carry-set-down");
     println!("its set-downs: {set_down:?}");
     assert!(

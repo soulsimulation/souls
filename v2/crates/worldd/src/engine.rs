@@ -833,6 +833,11 @@ impl Engine {
                 }
             }
         }
+        if a.verb == Verb::Accept
+            && let Some(t) = a.target
+        {
+            self.unkeep(&mut tree, now, t)?;
+        }
         self.begin_moves(&mut tree, c, now);
         self.collect(Some((a.id, a.soul)));
         Ok(())
@@ -1328,6 +1333,17 @@ impl Engine {
         };
         let act = (now, Actor::Soul(by.1), Cause::Intent(by.0));
         let Some((load, place, yaw, why)) = rest.filter(|_| whole) else {
+            // The hold keeps counting, for B18, the holders it has now, once its holder's body (and so its membership
+            // link) is gone: the bay stays as B18 had it until another crew holds the part ([`Engine::unkeep`]).
+            let holding = tree
+                .handle(activity)
+                .and_then(|h| tree.links_of(h))
+                .unwrap_or(&[])
+                .iter()
+                .filter(|e| tree.ty(e).as_str() == replica::activity::MEMBER)
+                .count()
+                .max(1) as u64;
+            self.mark(tree, now, activity, crew_audience, holding)?;
             self.activities.next = tree.next();
             self.activities.hold_kept(
                 tree,
@@ -1352,6 +1368,73 @@ impl Engine {
             Some(by),
         )?;
         Ok(true)
+    }
+
+    /// Sets crew `activity`'s kept holders ([`sim::structure::F_KEPT`]) to `holding` on `tree`, its entry added to the
+    /// activities' entries.
+    fn mark(
+        &mut self,
+        tree: &mut Tree,
+        now: Micros,
+        activity: Id,
+        audience: replica::world_model::Audience,
+        holding: u64,
+    ) -> R<()> {
+        use replica::effects::{Body, Change, ChangeRec, Rest};
+        let mut log =
+            sim::slots::hands::Log::new(self.header.clone(), self.rules.clone(), tree.next());
+        let set = Change::Set {
+            node: activity,
+            field: sim::structure::F_KEPT,
+            to: Value::Uint(holding),
+            by: None,
+        };
+        log.write(
+            tree,
+            now,
+            vec![(
+                activity,
+                audience,
+                Body::Changes(vec![ChangeRec {
+                    change: set,
+                    rest: Rest::new(),
+                }]),
+            )],
+        )?;
+        self.activities.stream.extend(log.parts.drain(..).flatten());
+        self.activities.next = tree.next();
+        Ok(())
+    }
+
+    /// Crew `activity` has started holding a part (0.135 A2): every kept hold on that part (its last holder gone,
+    /// [`Engine::holder_left`]) stops counting, as the new crew holds it now.
+    fn unkeep(&mut self, tree: &mut Tree, now: Micros, activity: Id) -> R<()> {
+        if !self.activities.started(activity) {
+            return Ok(());
+        }
+        let Some(part) = tree
+            .handle(activity)
+            .and_then(|h| tree.node(h))
+            .and_then(|n| n.parent())
+        else {
+            return Ok(());
+        };
+        let kept: Vec<(Id, replica::world_model::Audience)> = tree
+            .handle(part)
+            .and_then(|h| tree.children(h))
+            .unwrap_or(&[])
+            .iter()
+            .filter_map(|h| tree.node(*h))
+            .filter(|n| n.id() != activity)
+            .filter(|n| {
+                matches!(n.fields().get(&sim::structure::F_KEPT), Some(Value::Uint(k)) if *k > 0)
+            })
+            .map(|n| (n.id(), n.audience()))
+            .collect();
+        for (k, audience) in kept {
+            self.mark(tree, now, k, audience, 0)?;
+        }
+        Ok(())
     }
 
     /// The parts of `part`'s bay joined to it (B18's joints): each would hang by it.
@@ -1655,7 +1738,7 @@ impl Engine {
             return Err(refusal("laydown.no-room", show(part)));
         };
         // At the ground's height where it rests (raised or sloped terrain), as C4's set-down rests a load at its
-        // carriers' feet.
+        // carriers' feet; read near its bay's base (its own, out of a bay), never near a far-off holder's feet.
         let base = sim::ground::scene::Terrain::within(
             tree,
             ground,
@@ -1663,7 +1746,7 @@ impl Engine {
         )
         .ok()
         .flatten();
-        let floor = sim::ground::scene::Terrain::ground(base.as_ref(), c0[0], c0[1], at.y);
+        let floor = sim::ground::scene::Terrain::ground(base.as_ref(), c0[0], c0[1], bay_at.y);
         let place = Vec3::new(c0[0], floor + sim::activity::carry::HEIGHT, c0[1]);
         Ok((
             ground,
