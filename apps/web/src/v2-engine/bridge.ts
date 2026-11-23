@@ -22,6 +22,8 @@ type Msg = { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'snap
 export type V2View = {
   /** Samples not drawn: in a frame the public copy cannot place. */
   unplaced: number;
+  /** The last frames (node ids) a sample could not be placed in, and the slot it named, newest last: for checks. */
+  unplacedFrames: string[];
   takes: { serverTick: number; chunks: RecordedChunk[]; receivedAt: number };
   souls: Map<string, { id: string; entityId: string; name: string }>;
   /** World time (µs) the parts reach. */
@@ -47,13 +49,14 @@ const mul = (a: Mat['q'], b: Mat['q']): Mat['q'] => [a[0] * b[0] - a[1] * b[1] -
 
 /** A body: a node with a public Soul (its body-of link), or one of a body kind. */
 const isBody = (n: NodeRec) => !!n.soul || /:(humanoid|body)$/.test(n.kind.split('@')[0]);
+const samePlace = (a: NodeRec, b: NodeRec) => a.parent === b.parent && a.slot === b.slot && a.pos.every((v, i) => v === b.pos[i]);
 /** Chunks the page keeps, as useSouls keeps the socket's. */
 const KEEP = 12;
 /** Samples kept a body: a minute of world time before the oldest chunk kept. */
 const KEEP_US = (KEEP * TICKS * TICK_US) + 60_000_000;
 
 export class V2Bridge {
-  readonly view: V2View = { unplaced: 0, takes: { serverTick: 0, chunks: [], receivedAt: 0 }, souls: new Map(), newestTo: null, error: null, parts: 0, speech: [] };
+  readonly view: V2View = { unplaced: 0, unplacedFrames: [], takes: { serverTick: 0, chunks: [], receivedAt: 0 }, souls: new Map(), newestTo: null, error: null, parts: 0, speech: [] };
   private readonly nodes = new Map<string, NodeRec>();
   /** Each body's samples, its last record and, while the public copy cannot draw it (a frame that is not public, or it
    *  left), since when: it is not drawn from then until it is back. */
@@ -115,8 +118,11 @@ export class V2Bridge {
       }
       const t = this.tracks.get(n.id);
       if (t) {
-        // Into or out of a seat with no motion sample: the body is where its record has it from this part on.
-        if (n.parent && (t.node?.parent !== n.parent || t.node?.slot !== n.slot)) this.sample(n.id, n.parent, n.slot, at, n.pos);
+        // Every later move of its record (a frame, slot or place) with no motion sample: the body is where its record has
+        // it from then on, so a body first seen standing is not held there until its next motion sample (#4217). Never
+        // before the part that shows the move: a sit moves the record into the seat's slot without a motion sample, so
+        // its `at` (its newest motion sample) is older than the move, and a sample there would be dropped (#4175).
+        if (n.parent && (!t.node || !samePlace(t.node, n))) this.sample(n.id, n.parent, n.slot, Math.max(n.at ?? at, at), n.pos);
         t.node = n; t.gone = null;
       }
       // A placed body with no motion yet stands where its record has it.
@@ -161,7 +167,12 @@ export class V2Bridge {
    *  place is not drawn. */
   private sample(id: string, frame: string, slot: number | null, at: number, pos: [number, number, number]): void {
     const f = this.inSlot(this.world(frame), frame, slot);
-    if (!f) { this.view.unplaced++; return; }
+    if (!f) {
+      this.view.unplaced++;
+      const why = `${frame}${slot !== null ? `/${slot}` : ''}${this.nodes.has(frame) ? ' (a frame above it is not public)' : ' (not in the public copy)'}`;
+      this.view.unplacedFrames = [...this.view.unplacedFrames.filter((x) => x !== why), why].slice(-16);
+      return;
+    }
     const r = rotate(f.q, pos);
     const p: [number, number, number] = [(f.p[0] + r[0]) / 1000, (f.p[1] + r[1]) / 1000, (f.p[2] + r[2]) / 1000];
     // In a slot a body sits (or lies) on it: the take has its feet on the floor under the seat and the seat's height.

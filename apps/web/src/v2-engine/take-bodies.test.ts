@@ -131,3 +131,21 @@ test('the catalogue is read from the v2 body assets the page names, and a body k
   assert.ok(before > 0 && looks.slice(0, before).every((x) => x === undefined), 'before: the default person');
   assert.ok(looks.length > before && looks.slice(before).every((x) => JSON.stringify(x) === JSON.stringify(pip)), 'after: its own look');
 });
+
+test('a sit that moves the record into a seat with no motion sample is drawn seated; an unplaceable frame is named', () => {
+  const b = new V2Bridge({ rulesVersion: 'test/1' });
+  b.receive({ t: 'snapshot', s: { nodes: [world, chair, { ...body, pos: [2_000_000, 0, 0] }], removed: [] } as never });
+  b.receive(part(0, [], [['b.7', 'w.0', null, T0 + 200_000, 2_000_000, 0, 0]])); // its newest motion sample, at 0.2 s
+  b.receive(part(1));
+  // at 1 s the sit moves its record into the chair's slot; `at` is still its newest motion sample's time (0.2 s)
+  b.receive(part(2, [{ ...body, parent: 'w.3', slot: 0, pos: [0, 0, 0], at: T0 + 200_000 }]));
+  for (let n = 3; n < 12; n++) b.receive(part(n));
+  assert.equal(on(b, 0.5).activity, 'idle');
+  assert.equal(on(b, 1.5).activity, 'sit', 'seated from the part that moved it');
+  assert.equal(on(b, 3).activity, 'sit', 'and while it stays');
+  assert.equal(b.view.unplaced, 0);
+  // a sample in a frame the copy does not hold is not drawn, and the page can say which
+  b.receive(part(12, [], [['b.7', 'w.99', 2, T0 + 6_100_000, 0, 0, 0]]));
+  assert.equal(b.view.unplaced, 1);
+  assert.deepEqual(b.view.unplacedFrames, ['w.99/2 (not in the public copy)']);
+});
