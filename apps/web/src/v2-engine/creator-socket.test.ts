@@ -1,0 +1,88 @@
+// 0.133 G1: the old god panel's undo, redo and weather as the creator's edits on its socket, and its command box on the
+// creator's mailbox.
+import { strict as assert } from 'node:assert';
+import { test } from 'node:test';
+import { decode, encode } from 'cborg';
+// the page modules it loads read `location` when loaded
+Object.assign(globalThis, { location: { origin: 'http://localhost:5960', pathname: '/w/eden/', search: '', hash: '', href: 'http://localhost:5960/w/eden/' } });
+const { CreatorSession, creatorGrant, creatorToken, idOf, ticketOf, weatherSets, VERB } = await import('./creator-socket.ts');
+const { MailBox, V2OwnerMailbox } = await import('./owner-mailbox.ts');
+
+const SCOPE = '2b'.repeat(16), CREATOR = `creator-${SCOPE}-7`, WORLD = `${'1a'.repeat(16)}.1`;
+const cbor = { encode, decode } as never;
+const dec = (b: Uint8Array) => decode(b, { useMaps: true }) as Map<number, unknown>;
+const version = (n: number) => [new Uint8Array(16), [new Uint8Array(16), 0], 0, n];
+const answer = (sequence: number, kind: 1 | 2, n: number, reason?: string) => encode(new Map<number, unknown>([[1, version(n)], [2, new Map<number, unknown>([[2, sequence], [3, kind], ...(reason ? [[4, reason] as [number, string]] : [])])]]));
+
+/** A session signed in on a stand-in socket that keeps what the page sent. */
+function signedIn() {
+  const sent: Uint8Array[] = [];
+  const s = new CreatorSession({ send: (b) => sent.push(b) }, cbor, idOf(CREATOR.replace(/^creator-/, '')), 'tok-1', 100);
+  s.frame(encode(new Map([[1, 2]])));          // the gateway's first frame: the page signs in
+  s.frame(encode(new Map([[4, 'stream.started']])));
+  return { s, sent };
+}
+
+test('the session says hello, signs in with the exchanged token by message, and opens on the gateway\'s outcome', () => {
+  const { s, sent } = signedIn();
+  assert.deepEqual([...dec(sent[0]!)], [[1, 2], [2, new Uint8Array(0)]], 'T10 hello, protocol 2');
+  assert.deepEqual([...dec(sent[1]!)], [[1, 'tok-1']], 'the sign-in carries the token (a browser sets no headers)');
+  assert.equal(s.state, 'open');
+});
+
+test('undo and redo are the creator\'s souls:edit intents ({5: 1}, {5: 2}); the receipt resolves the press', async () => {
+  const { s, sent } = signedIn();
+  const undo = s.edit({ undo: 'undo' });
+  const i = dec(sent.at(-1)!);
+  assert.deepEqual([...(i.get(1) as Map<number, unknown>)], [[1, 2], [2, [Uint8Array.from(Buffer.from(SCOPE, 'hex')), 7]]], 'by the creator');
+  assert.equal(i.get(2), VERB);
+  assert.deepEqual([...(i.get(4) as Map<number, unknown>)], [[5, 1]]);
+  assert.equal(i.get(5), 100, 'the first sequence');
+  s.frame(answer(100, 1, 9));
+  assert.equal((await undo).t, 'receipt');
+  void s.edit({ undo: 'redo' });
+  const r = dec(sent.at(-1)!);
+  assert.deepEqual([...(r.get(4) as Map<number, unknown>)], [[5, 2]]);
+  assert.equal((r.get(6) as unknown[])[3], 9, 'planned against the newest version an answer carried');
+});
+
+test('a refusal is answered by name; a stale weather is sent once more against the newer version', async () => {
+  const { s, sent } = signedIn();
+  const rain = s.edit(weatherSets(WORLD, 'rain', 5_000_000_000));
+  const ops = (dec(sent.at(-1)!).get(4) as Map<number, unknown>).get(1) as Map<number, unknown>[];
+  assert.deepEqual(ops.map((o) => [o.get(1), o.get(3), o.get(4)]), [[3, 75, 'souls:rain'], [3, 76, 90], [3, 77, 60], [3, 78, 30], [3, 65, 5_000_000_000 + 3_600_000_000]],
+    'E6\'s five weather fields on the world node, as the creator client\'s weather sets them, for an hour');
+  assert.deepEqual(ops[0]!.get(2), [Uint8Array.from(Buffer.from('1a'.repeat(16), 'hex')), 1]);
+  s.frame(answer(100, 2, 12, 'edit.stale'));
+  const again = dec(sent.at(-1)!);
+  assert.equal(again.get(5), 101, 'sent again under a new sequence');
+  assert.equal((again.get(6) as unknown[])[3], 12, 'against the version the refusal carried');
+  s.frame(answer(101, 2, 12, 'edit.weather-no-sky'));
+  assert.deepEqual(await rain, { t: 'refused', sequence: 101, version: version(12), reason: 'edit.weather-no-sky' });
+  const undo = s.edit({ undo: 'undo' });
+  s.frame(answer(102, 2, 12, 'undo.nothing'));
+  assert.equal((await undo as { reason: string }).reason, 'undo.nothing', 'the panel\'s note shows the refusal\'s name');
+});
+
+test('the exchange posts the page\'s session to /v2/creator-token beside the gateway; a refusal is named', async () => {
+  const place = { directory: 'http://127.0.0.1:9', gateway: 'ws://127.0.0.1:8/v2/ws', session: { testName: 'Ada' } };
+  const asked: [string, RequestInit][] = [];
+  const ok = async (url: string, init: RequestInit) => { asked.push([url, init]); return { ok: true, status: 200, json: async () => ({ token: 't', grant: CREATOR, expires_in: 900 }) }; };
+  assert.deepEqual(await creatorToken(place as never, ok as never), { token: 't', grant: CREATOR });
+  assert.equal(asked[0]![0], 'http://127.0.0.1:8/v2/creator-token');
+  assert.equal((asked[0]![1].headers as Record<string, string>).authorization, 'Bearer test:Ada');
+  const no = async () => ({ ok: false, status: 403, json: async () => ({ refused: 'not-the-creator' }) });
+  await assert.rejects(creatorToken(place as never, no as never), /not-the-creator/);
+});
+
+test('the command box puts the creator\'s words in the creator\'s mailbox, the box the creator\'s agent listens on', async () => {
+  const owned = [{ grant: `soul-${SCOPE}-2` }, { grant: CREATOR }];
+  assert.equal(creatorGrant(owned), CREATOR);
+  assert.equal(creatorGrant([{ grant: `soul-${SCOPE}-2` }]), null, 'not the creator: no box');
+  const sock = { onText: null as ((t: string) => void) | null, sent: [] as string[], start() {}, stop() {},
+    sendText(t: string) { sock.sent.push(t); queueMicrotask(() => sock.onText?.(JSON.stringify({ sent: { id: 'm_1' } }))); return true; } };
+  const box = new V2OwnerMailbox(async (self) => self.attach(new MailBox(), sock, creatorGrant(owned)!));
+  const inbox = await box.send('Put a well by the square');
+  assert.deepEqual(sock.sent, [`put ${CREATOR}\nPut a well by the square`]);
+  assert.deepEqual(ticketOf(inbox), { id: 'm_1', text: 'Put a well by the square', state: 'sent', sentAt: ticketOf(inbox)!.sentAt }, 'the command log\'s row');
+});
