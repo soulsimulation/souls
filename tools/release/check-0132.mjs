@@ -345,6 +345,8 @@ else if (ONLY.has('2')) {
     const last = soul ? await probe(page, soul) : null;
     const trace = soul ? await timeline(page, soul, pt0).catch(() => null) : null;
     if (trace) log(`timeline ${name}: ${JSON.stringify(trace)}`);
+    const daemonLog = (() => { try { return readFileSync(join(OUT, 'agent', '.souls', 'souls', agent.soul, 'runtime', 'daemon.log'), 'utf8').split('\n').filter((l) => l.includes(' act check: ')).at(-1)?.replace(/^\S+ /, '') ?? 'none'; } catch { return 'none'; } })();
+    log(`client ${name}: its last form check: ${daemonLog}`);
     log(`client ${name}: sent ${sentMs ?? '?'} ms after the command started, the command answered at ${commandMs} ms; the daemon has ${status?.entries ?? '?'} entries, ${status?.follows ?? '?'} follows, last syncs ${syncs || 'none'}`);
     report.lines[2].steps.push({ name, answer: sent?.ok === false ? sent : { ok: true, sequence: sent?.sequence }, answers, timed, sentMs, commandMs, seenMs, afterAnswer, page: last, trace });
     row(2, name, pass, `${sent?.ok === false ? `refused: ${JSON.stringify(sent).slice(0, 160)}` : `sent at ${sentMs ?? '?'} ms; world: ${answers || 'no answer yet'}`}; on the page ${seenMs === null ? `not within 6 s (it shows ${last ? `${last.doing ?? '?'}, ${last.activity ?? '?'}${last.prop ? `, holding ${last.prop}` : ''}` : 'no such Soul'})` : `after ${seenMs} ms, ${afterAnswer ?? '?'} ms after the world's ${shownBy?.name ?? 'answer'}`}`);

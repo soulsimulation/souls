@@ -822,9 +822,12 @@ function heldKinds() {
 }
 
 /** R2's verdict on each candidate, on the copy as it is now (R8). */
+let verdictsTook = null; // G-late: the last verdicts' parts, ms, for the act check's log line
 function verdicts(candidates) {
-  const kinds = heldKinds(), state = stateOf(copy, kinds, ME);
-  return candidates.map((c) => judge(wire.rules_decide, c, { kinds, state, asker: { sees: [] } }));
+  const t0 = performance.now(), kinds = heldKinds(), t1 = performance.now(), state = stateOf(copy, kinds, ME), t2 = performance.now();
+  const out = candidates.map((c) => judge(wire.rules_decide, c, { kinds, state, asker: { sees: [] } }));
+  verdictsTook = { kinds: Math.round(t1 - t0), state: Math.round(t2 - t1), nodes: Object.keys(state.nodes).length, decide: Math.round(performance.now() - t2) };
+  return out;
 }
 
 /** The age fields of an answer that does not ask the gateway first (status, read, stats, stop, a refusal). */
@@ -1465,9 +1468,12 @@ async function answer(req, conn = null) {
       const basis = shownVersion ?? state.cursor;
       let age = null, keep = candidates, dropped = [];
       if (candidates.some((c) => c.form)) {
+        const t0 = performance.now();
         age = await ageAfter();
-        const current = isCurrent(age, CURRENT_MS);
+        const t1 = performance.now(), current = isCurrent(age, CURRENT_MS);
         ({ keep, dropped } = sift(candidates, current ? verdicts(candidates) : [], current));
+        // G-late (0.132): where a form act's own check spends its time before the act goes, for the release check.
+        log(`act check: copy ${Math.round(t1 - t0)} ms (${current ? 'current' : 'stale'}), ${current ? candidates.length : 0} verdicts ${Math.round(performance.now() - t1)} ms ${current ? JSON.stringify(verdictsTook) : ''}`);
       }
       if (keep.length === 0) {
         trace.write({ k: 'send', seq: `local-${++stopped}`, ranked: candidates.length, cause: 'stopped-locally' });
