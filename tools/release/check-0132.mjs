@@ -169,7 +169,7 @@ async function worldPage(video) {
   // what the world says happened, by name, as the page's v2 reader hands its parts on (the world's own records, such as
   // an act ended at its deadline): counted from the reader worker's messages, read-only
   await page.addInitScript(() => {
-    const W = window.Worker, seen = (window.__happened = {}), parts = (window.__parts = []), pub = (window.__published = []), clock = [];
+    const W = window.Worker, seen = (window.__happened = {}), parts = (window.__parts = []), pub = (window.__published = []), clock = [], named = (window.__named = []);
     // B3-7: the world's time at page time `pt` (ms, performance.now), from the stream's own timestamps: each part's end
     // (it is written only after its end) and each pointer's quiet time plus the writer's 250 ms settle (worldd view_out
     // rule 11: the world's time when it wrote the pointer). Page time less world time is smallest for the sample that
@@ -188,8 +188,10 @@ async function worldPage(video) {
           const p = e.data?.t === 'part' ? e.data.p : null, now = performance.now();
           if (p) clock.push({ at: now, world: p.to });
           else if (e.data?.t === 'pointer' && typeof e.data.p?.quietUntil === 'number') clock.push({ at: now, world: e.data.p.quietUntil + 250_000 });
+          // when the reader's pointer first named each part: a part named long before it is played waited in the reader
+          if (e.data?.t === 'pointer' && typeof e.data.p?.newest === 'number' && e.data.p.newest !== named.at(-1)?.n) { named.push({ n: e.data.p.newest, at: now }); if (named.length > 400) named.shift(); }
           if (clock.length > 600) clock.shift();
-          if (p) parts.push({ from: p.from, to: p.to, at: now, moves: (p.moves ?? []).map((m) => ({ body: m.body, name: m.name, start: m.start, end: m.ends?.at(-1) })),
+          if (p) parts.push({ number: p.number, from: p.from, to: p.to, at: now, moves: (p.moves ?? []).map((m) => ({ body: m.body, name: m.name, start: m.start, end: m.ends?.at(-1) })),
             framed: (p.nodes ?? []).filter((n) => n.parent).map((n) => ({ id: n.id, parent: n.parent, at: n.at })) }), parts.length > 400 && parts.shift();
         });
       }
@@ -233,7 +235,9 @@ const timeline = (page, soul, pt0) => page.evaluate(({ soul, pt0 }) => {
   const ms = (us) => (worldAt === null ? null : Math.round((us - worldAt) / 1000));
   const shown = (us) => { const end = Math.ceil(us / 50_000 / 10) * 10; const q = pub.find((x) => x.tick >= end && x.at >= pt0); return q ? Math.round(q.at - pt0) : null; };
   const after = parts.filter((p) => p.at >= pt0);
-  const of = (pick) => { for (const p of after) { const x = pick(p); if (x !== undefined) return { worldMs: ms(x.at), part: [ms(p.from), ms(p.to)], hadMs: Math.round(p.at - pt0), chunkWholeMs: shown(x.at), what: x.what }; } return null; };
+  // the first pointer naming part n (or a later one) came at: the part was published by then
+  const namedAt = (n) => { const q = (window.__named ?? []).find((x) => x.n >= n); return q ? Math.round(q.at - pt0) : null; };
+  const of = (pick) => { for (const p of after) { const x = pick(p); if (x !== undefined) return { worldMs: ms(x.at), part: [ms(p.from), ms(p.to)], namedMs: namedAt(p.number), hadMs: Math.round(p.at - pt0), chunkWholeMs: shown(x.at), what: x.what }; } return null; };
   return {
     move: of((p) => { const m = p.moves.find((m) => mine(m.body)); return m ? { at: m.start, what: `${m.name} to ${ms(m.end)}` } : undefined; }),
     framed: of((p) => { const n = p.framed.find((n) => mine(n.parent)); return n ? { at: p.from, what: `${n.id}, its record at ${n.at === undefined ? '?' : ms(n.at)}` } : undefined; }),
