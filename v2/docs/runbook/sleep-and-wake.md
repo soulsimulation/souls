@@ -25,6 +25,10 @@ second later, so no wake is ever missed.
 writer of the machine's alarm record, `alarms/$SOULS_MACHINE` (default `local`) in the directory: one line per
 sleeping world, `<world> <due µs from the Unix epoch>` or `<world> none`.
 
+The install (`install.sh apply`, [install.md](install.md)) puts the unit and its drop-in in place, enables it and
+starts it. The drop-in keeps the daemon root (it starts `worldd@` units) in the group souls with `UMask=0007`, so its
+socket is group-writable and a world or a gateway running as souls can reach it.
+
 - **At start** it reads the record and arms every alarm, overdue first. A daemon killed, or a machine rebooted, loses
   no alarm: an alarm that came due while it was down is fired at once.
 - **Early:** a world is started at its due time less the longest wake measured lately (start to the world's
