@@ -15,11 +15,17 @@ const GESTURES: Readonly<Record<string, string>> = {
 };
 /** Moves drawn as the old renderer's hand hold (`human.handHold`) with the member they reach, not as a pose. */
 const HOLDS: ReadonlySet<string> = new Set(['hold_hand']);
+/** 0.134 T3: looped activities a dance on the beat repeats, one record a cycle, the next on the next whole beat after
+ *  each ends. A cycle is drawn on until the next begins (at most a beat later), so the loop never drops to idle between
+ *  cycles; the last one, when the member leaves, plays on that much past its end. */
+export const LOOPS: ReadonlySet<string> = new Set(['dance']);
+/** How long a looped cycle is drawn past its end: a beat and a little (beats are about half a second), µs. */
+export const LOOP_HOLD = 700_000;
 
 /** A gesture as the take draws it: world time µs, its end (planned or cut, `Infinity`-like for a held move), the old
  *  activity id (null for a hold); the body it is aimed at, if any, and (0.134 B1's aimed moves) where its target stood
  *  when it began, world x and z in mm; whether it holds that body's hand. */
-export type Gesture = { start: number; end: number; activity: string | null; target?: string | null; toward?: [number, number]; hold?: boolean };
+export type Gesture = { start: number; end: number; activity: string | null; target?: string | null; toward?: [number, number]; hold?: boolean; run?: string };
 
 /** The old activity a move plays, or null: `souls:wave`, `wave@2` and `wave` alike. */
 export function gestureOf(move: string): string | null {
@@ -28,11 +34,16 @@ export function gestureOf(move: string): string | null {
 }
 
 /** A move record (start and phase ends, µs) as a gesture, or null when its move is not one. */
-export function gestureFrom(move: { name: string; start: number; ends: readonly number[]; target?: string | null }, toward?: [number, number] | null): Gesture | null {
-  const activity = gestureOf(move.name), end = move.ends[move.ends.length - 1];
+export function gestureFrom(move: { name: string; start: number; ends: readonly number[]; target?: string | null; run?: string }, toward?: [number, number] | null): Gesture | null {
+  const activity = gestureOf(move.name), last = move.ends[move.ends.length - 1];
   const hold = HOLDS.has(move.name.slice(move.name.indexOf(':') + 1).split('@')[0]);
-  if (!(activity || hold) || !(end > move.start)) return null;
-  return { start: move.start, end, activity: hold ? null : activity, ...(move.target ? { target: move.target } : {}), ...(toward ? { toward } : {}), ...(hold ? { hold } : {}) };
+  if (!(activity || hold) || !(last > move.start)) return null;
+  const end = activity && LOOPS.has(activity) ? last + LOOP_HOLD : last;
+  return { start: move.start, end, activity: hold ? null : activity, ...(move.target ? { target: move.target } : {}), ...(toward ? { toward } : {}), ...(hold ? { hold } : {}), ...(move.run ? { run: move.run } : {}) };
+}
+/** Ends the gesture of the move that started at `start` at `at` (a held move let go, 0.134 T2). */
+export function endGesture(gestures: Gesture[], start: number, at: number): void {
+  for (const g of gestures) if (g.start === start && at < g.end) g.end = Math.max(g.start, at);
 }
 
 /** Ends a body's gesture running at `at` (its run ended early); one that has not begun or is over stays as it is. */

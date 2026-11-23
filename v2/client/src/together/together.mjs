@@ -1,19 +1,21 @@
-// Touch by offer and accept (0.134 T1): a handshake, a hug or a high five, offered to one Soul. When the other accepts,
+// Touch by offer and accept (0.134 T1, T2): a handshake, a hug, a high five or holding hands, offered to one Soul. When the other accepts,
 // the activity starts and the world aims each one's move at the other (`content/kinds/together/`, each role naming
 // its move). Each command is the intents it sends, built here with no daemon and no world, so it is read and tested
 // on its own.
 //
-//   together offer <handshake|hug|high-five|fist-bump|harvest> <body id>   offers that body the touch (`activity:offer` of its kind,
+//   together offer <handshake|hug|high-five|hold-hands|fist-bump|harvest> <body id>   offers that body the touch (`activity:offer` of its kind,
 //                                                        this Soul in the first role)
 //   together accept|decline <offer id>                   accepts, and both touch; or declines, and nobody moves
 //
 // The offer's id: the other's `wait` shows `{"kind":"together","what":"offered","touch":..,"offer":..,"from":..}`.
-// When the touch is done, either one leaves it with `converse leave <id>`'s intent, `activity:leave`.
+// When the touch is done, either one leaves it with `converse leave <id>`'s intent, `activity:leave`. Holding hands
+// lasts until one of them leaves or walks; then both hands come free.
 
 /** Each touch's activity kind, as the world pins it from its entry (`serve::activity_kinds`), and the offerer's role. */
 export const KINDS = Object.freeze({
   handshake: 'eden:handshake_activity@1220b6204784ae7087cc16cd7d3b0b22bc7f851c2de8c2af7ae6b677d0a59b381682',
   'high-five': 'eden:high_five_activity@1220fd403508fcecb98fb4aff58e9b5450e67696a75b6fef0c7307b130be85453111',
+  'hold-hands': 'eden:hold_hands_activity@1220117af957e071c2126cdc18220b7ec1220944908b29afadb24f89e9a5ef6531f5',
   hug: 'eden:hug_activity@1220fe29f4c50afff5fc6ec78e7fd295cf2e4bde5b6a888d7dbfb4252e779446abd1',
   // 0.135 E1: a fist bump, and harvesting into one basket (each member then picks with the activity's own form).
   'fist-bump': 'eden:fist_bump_activity@12205c839cc6ba88bb9358e77b2d81fae60e8a750317deab8f736f6c28fb97b8fdab',
