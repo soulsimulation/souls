@@ -148,6 +148,9 @@ struct Sent {
     /// the longest time it acted with only refusals back (its Soul moves nowhere); ms. Its last answer's age at the
     /// end of the schedule, ms.
     stall_ms: u64,
+    /// S11: the act outstanding at the longest stall: its verb, whether the world had accepted it (its end still to
+    /// come) and how long since it was sent, ms.
+    stall_act: String,
     refused_only_ms: u64,
     last_answer_age_ms: u64,
     /// #4154's accuracy check: the sequences the world took (accepted or receipted) and those it said were done.
@@ -381,6 +384,18 @@ fn stuck_report(agents: &[Sent]) -> serde_like::Obj {
             ages.last().copied().unwrap_or(0) as f64,
         )
         .raw("stuckAgents", format!("[{}]", stuck.join(", ")))
+        .raw(
+            "stuckActs",
+            format!(
+                "[{}]",
+                agents
+                    .iter()
+                    .filter(|a| a.stall_ms >= STUCK_MS)
+                    .map(|a| format!("\"{}\"", a.stall_act))
+                    .collect::<Vec<_>>()
+                    .join(", ")
+            ),
+        )
         .raw("refusedOnlyAgents", format!("[{}]", refused.join(", ")))
 }
 
@@ -796,11 +811,26 @@ async fn agent(
         // #4154's stuck measure, at every step: acts outstanding with no answer since the later of the last answer and
         // the oldest outstanding send; acts sent with only refusals since the last receipt.
         let now = Instant::now();
-        if let Some(oldest) = pending.values().map(|p| p.0).min() {
+        if let Some((&seq, oldest)) = pending
+            .iter()
+            .map(|(s, p)| (s, p.0))
+            .min_by_key(|(_, t)| *t)
+        {
             let since = last_answer.map_or(oldest, |l| l.max(oldest));
-            out.stall_ms = out
-                .stall_ms
-                .max(now.duration_since(since).as_millis() as u64);
+            let stall = now.duration_since(since).as_millis() as u64;
+            if stall > out.stall_ms {
+                out.stall_ms = stall;
+                out.stall_act = format!(
+                    "{} {} {}ms",
+                    verb_of.get(&seq).map_or("?", |v| v.as_str()),
+                    if accepted.contains(&seq) {
+                        "accepted"
+                    } else {
+                        "unanswered"
+                    },
+                    now.duration_since(oldest).as_millis()
+                );
+            }
         }
         if let (Some(sent), Some(first)) = (last_sent, start) {
             let since = last_ok.unwrap_or(first);
