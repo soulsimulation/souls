@@ -1,0 +1,3554 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "All25 literal whole choices with generic receipt apply replay, both trios/recovery/clear/reuse and refusal no partial reset.",
+  "cases": [
+    {
+      "name": "first_1_whole_effect_and_apply_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 1,
+              "second": 2,
+              "third": 5
+            }
+          },
+          "other": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 0,
+              "second": 0,
+              "third": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              700
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "first_1"
+          },
+          "receipt": "first_1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "first",
+                "n": 28,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "second",
+                "n": 29,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 1,
+            "second": 0,
+            "third": 0
+          }
+        },
+        "other": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 0,
+            "second": 0,
+            "third": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "first_2_whole_effect_and_apply_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 1,
+              "second": 2,
+              "third": 5
+            }
+          },
+          "other": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 0,
+              "second": 0,
+              "third": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              700
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "first_2"
+          },
+          "receipt": "first_2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "first",
+                "n": 28,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "second",
+                "n": 29,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 2,
+            "second": 0,
+            "third": 0
+          }
+        },
+        "other": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 0,
+            "second": 0,
+            "third": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "first_3_whole_effect_and_apply_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 1,
+              "second": 2,
+              "third": 5
+            }
+          },
+          "other": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 0,
+              "second": 0,
+              "third": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              700
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "first_3"
+          },
+          "receipt": "first_3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "first",
+                "n": 28,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "second",
+                "n": 29,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 3,
+            "second": 0,
+            "third": 0
+          }
+        },
+        "other": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 0,
+            "second": 0,
+            "third": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "first_4_whole_effect_and_apply_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 1,
+              "second": 2,
+              "third": 5
+            }
+          },
+          "other": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 0,
+              "second": 0,
+              "third": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              700
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "first_4"
+          },
+          "receipt": "first_4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "first",
+                "n": 28,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "second",
+                "n": 29,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 4,
+            "second": 0,
+            "third": 0
+          }
+        },
+        "other": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 0,
+            "second": 0,
+            "third": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "first_5_whole_effect_and_apply_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 1,
+              "second": 2,
+              "third": 5
+            }
+          },
+          "other": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 0,
+              "second": 0,
+              "third": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              700
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "first_5"
+          },
+          "receipt": "first_5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "first",
+                "n": 28,
+                "to": 5
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "second",
+                "n": 29,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 5,
+            "second": 0,
+            "third": 0
+          }
+        },
+        "other": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 0,
+            "second": 0,
+            "third": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "first_6_whole_effect_and_apply_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 1,
+              "second": 2,
+              "third": 5
+            }
+          },
+          "other": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 0,
+              "second": 0,
+              "third": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              700
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "first_6"
+          },
+          "receipt": "first_6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "first",
+                "n": 28,
+                "to": 6
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "second",
+                "n": 29,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 6,
+            "second": 0,
+            "third": 0
+          }
+        },
+        "other": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 0,
+            "second": 0,
+            "third": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "second_1_whole_effect_and_apply_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 3,
+              "second": 4,
+              "third": 6
+            }
+          },
+          "other": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 0,
+              "second": 0,
+              "third": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              700
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "second_1"
+          },
+          "receipt": "second_1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "second",
+                "n": 29,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 3,
+            "second": 1,
+            "third": 0
+          }
+        },
+        "other": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 0,
+            "second": 0,
+            "third": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "second_2_whole_effect_and_apply_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 1,
+              "second": 2,
+              "third": 5
+            }
+          },
+          "other": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 0,
+              "second": 0,
+              "third": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              700
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "second_2"
+          },
+          "receipt": "second_2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "second",
+                "n": 29,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 1,
+            "second": 2,
+            "third": 0
+          }
+        },
+        "other": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 0,
+            "second": 0,
+            "third": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "second_3_whole_effect_and_apply_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 1,
+              "second": 2,
+              "third": 5
+            }
+          },
+          "other": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 0,
+              "second": 0,
+              "third": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              700
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "second_3"
+          },
+          "receipt": "second_3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "second",
+                "n": 29,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 1,
+            "second": 3,
+            "third": 0
+          }
+        },
+        "other": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 0,
+            "second": 0,
+            "third": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "second_4_whole_effect_and_apply_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 1,
+              "second": 2,
+              "third": 5
+            }
+          },
+          "other": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 0,
+              "second": 0,
+              "third": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              700
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "second_4"
+          },
+          "receipt": "second_4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "second",
+                "n": 29,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 1,
+            "second": 4,
+            "third": 0
+          }
+        },
+        "other": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 0,
+            "second": 0,
+            "third": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "second_5_whole_effect_and_apply_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 1,
+              "second": 2,
+              "third": 5
+            }
+          },
+          "other": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 0,
+              "second": 0,
+              "third": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              700
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "second_5"
+          },
+          "receipt": "second_5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "second",
+                "n": 29,
+                "to": 5
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 1,
+            "second": 5,
+            "third": 0
+          }
+        },
+        "other": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 0,
+            "second": 0,
+            "third": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "second_6_whole_effect_and_apply_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 1,
+              "second": 2,
+              "third": 5
+            }
+          },
+          "other": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 0,
+              "second": 0,
+              "third": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              700
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "second_6"
+          },
+          "receipt": "second_6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "second",
+                "n": 29,
+                "to": 6
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 1,
+            "second": 6,
+            "third": 0
+          }
+        },
+        "other": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 0,
+            "second": 0,
+            "third": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "complete_5_after_1_2_whole_effect_and_apply_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 1,
+              "second": 2,
+              "third": 0
+            }
+          },
+          "other": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 0,
+              "second": 0,
+              "third": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              700
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "complete_5_after_1_2"
+          },
+          "receipt": "complete_5_after_1_2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 5
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 1,
+            "second": 2,
+            "third": 5
+          }
+        },
+        "other": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 0,
+            "second": 0,
+            "third": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "complete_2_after_1_5_whole_effect_and_apply_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 1,
+              "second": 5,
+              "third": 0
+            }
+          },
+          "other": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 0,
+              "second": 0,
+              "third": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              700
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "complete_2_after_1_5"
+          },
+          "receipt": "complete_2_after_1_5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 1,
+            "second": 5,
+            "third": 2
+          }
+        },
+        "other": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 0,
+            "second": 0,
+            "third": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "complete_5_after_2_1_whole_effect_and_apply_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 2,
+              "second": 1,
+              "third": 0
+            }
+          },
+          "other": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 0,
+              "second": 0,
+              "third": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              700
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "complete_5_after_2_1"
+          },
+          "receipt": "complete_5_after_2_1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 5
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 2,
+            "second": 1,
+            "third": 5
+          }
+        },
+        "other": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 0,
+            "second": 0,
+            "third": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "complete_1_after_2_5_whole_effect_and_apply_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 2,
+              "second": 5,
+              "third": 0
+            }
+          },
+          "other": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 0,
+              "second": 0,
+              "third": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              700
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "complete_1_after_2_5"
+          },
+          "receipt": "complete_1_after_2_5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 2,
+            "second": 5,
+            "third": 1
+          }
+        },
+        "other": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 0,
+            "second": 0,
+            "third": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "complete_2_after_5_1_whole_effect_and_apply_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 5,
+              "second": 1,
+              "third": 0
+            }
+          },
+          "other": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 0,
+              "second": 0,
+              "third": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              700
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "complete_2_after_5_1"
+          },
+          "receipt": "complete_2_after_5_1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 5,
+            "second": 1,
+            "third": 2
+          }
+        },
+        "other": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 0,
+            "second": 0,
+            "third": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "complete_1_after_5_2_whole_effect_and_apply_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 5,
+              "second": 2,
+              "third": 0
+            }
+          },
+          "other": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 0,
+              "second": 0,
+              "third": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              700
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "complete_1_after_5_2"
+          },
+          "receipt": "complete_1_after_5_2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 5,
+            "second": 2,
+            "third": 1
+          }
+        },
+        "other": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 0,
+            "second": 0,
+            "third": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "complete_6_after_3_4_whole_effect_and_apply_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 3,
+              "second": 4,
+              "third": 0
+            }
+          },
+          "other": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 0,
+              "second": 0,
+              "third": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              700
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "complete_6_after_3_4"
+          },
+          "receipt": "complete_6_after_3_4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 6
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 3,
+            "second": 4,
+            "third": 6
+          }
+        },
+        "other": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 0,
+            "second": 0,
+            "third": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "complete_4_after_3_6_whole_effect_and_apply_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 3,
+              "second": 6,
+              "third": 0
+            }
+          },
+          "other": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 0,
+              "second": 0,
+              "third": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              700
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "complete_4_after_3_6"
+          },
+          "receipt": "complete_4_after_3_6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 4
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 3,
+            "second": 6,
+            "third": 4
+          }
+        },
+        "other": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 0,
+            "second": 0,
+            "third": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "complete_6_after_4_3_whole_effect_and_apply_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 4,
+              "second": 3,
+              "third": 0
+            }
+          },
+          "other": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 0,
+              "second": 0,
+              "third": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              700
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "complete_6_after_4_3"
+          },
+          "receipt": "complete_6_after_4_3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 6
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 4,
+            "second": 3,
+            "third": 6
+          }
+        },
+        "other": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 0,
+            "second": 0,
+            "third": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "complete_3_after_4_6_whole_effect_and_apply_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 4,
+              "second": 6,
+              "third": 0
+            }
+          },
+          "other": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 0,
+              "second": 0,
+              "third": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              700
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "complete_3_after_4_6"
+          },
+          "receipt": "complete_3_after_4_6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 4,
+            "second": 6,
+            "third": 3
+          }
+        },
+        "other": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 0,
+            "second": 0,
+            "third": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "complete_4_after_6_3_whole_effect_and_apply_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 6,
+              "second": 3,
+              "third": 0
+            }
+          },
+          "other": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 0,
+              "second": 0,
+              "third": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              700
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "complete_4_after_6_3"
+          },
+          "receipt": "complete_4_after_6_3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 4
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 6,
+            "second": 3,
+            "third": 4
+          }
+        },
+        "other": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 0,
+            "second": 0,
+            "third": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "complete_3_after_6_4_whole_effect_and_apply_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 6,
+              "second": 4,
+              "third": 0
+            }
+          },
+          "other": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 0,
+              "second": 0,
+              "third": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              700
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "complete_3_after_6_4"
+          },
+          "receipt": "complete_3_after_6_4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 6,
+            "second": 4,
+            "third": 3
+          }
+        },
+        "other": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 0,
+            "second": 0,
+            "third": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "clear_choices_whole_effect_and_apply_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 3,
+              "second": 4,
+              "third": 6
+            }
+          },
+          "other": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 0,
+              "second": 0,
+              "third": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              700
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_choices"
+          },
+          "receipt": "clear_choices",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "first",
+                "n": 28,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "second",
+                "n": 29,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 0,
+            "second": 0,
+            "third": 0
+          }
+        },
+        "other": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 0,
+            "second": 0,
+            "third": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "both_trios_backtrack_edit_clear_and_reuse",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 0,
+              "second": 0,
+              "third": 0
+            }
+          },
+          "other": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 0,
+              "second": 0,
+              "third": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              700
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "first_1"
+          },
+          "receipt": "story_0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "first",
+                "n": 28,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "second",
+                "n": 29,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "second_3"
+          },
+          "receipt": "story_1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "second",
+                "n": 29,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "second_2"
+          },
+          "receipt": "story_2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "second",
+                "n": 29,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "complete_5_after_1_2"
+          },
+          "receipt": "story_3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 5
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "first_3"
+          },
+          "receipt": "story_4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "first",
+                "n": 28,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "second",
+                "n": 29,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "second_4"
+          },
+          "receipt": "story_5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "second",
+                "n": 29,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "complete_6_after_3_4"
+          },
+          "receipt": "story_6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 6
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "second_1"
+          },
+          "receipt": "story_7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "second",
+                "n": 29,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "second_4"
+          },
+          "receipt": "story_8",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "second",
+                "n": 29,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "complete_6_after_3_4"
+          },
+          "receipt": "story_9",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 6
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_choices"
+          },
+          "receipt": "story_10",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "first",
+                "n": 28,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "second",
+                "n": 29,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "first_1"
+          },
+          "receipt": "story_11",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "first",
+                "n": 28,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "second",
+                "n": 29,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "second_2"
+          },
+          "receipt": "story_12",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "second",
+                "n": 29,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "complete_5_after_1_2"
+          },
+          "receipt": "story_13",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 5
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_choices"
+          },
+          "receipt": "story_14",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "first",
+                "n": 28,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "second",
+                "n": 29,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "third",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:choices_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 0,
+            "second": 0,
+            "third": 0
+          }
+        },
+        "other": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 0,
+            "second": 0,
+            "third": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "real_completion_wrong_pair_refused_no_partial_change",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 1,
+              "second": 2,
+              "third": 0
+            }
+          },
+          "other": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 0,
+              "second": 0,
+              "third": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              700
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "complete_6_after_3_4"
+          },
+          "receipt": "wrong_pair",
+          "expect": {
+            "verdict": "no",
+            "need": 0,
+            "reason": "field_differs"
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 1,
+            "second": 2,
+            "third": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "first_choice_hands_refusal_preserves_whole_trio",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 1,
+              "second": 2,
+              "third": 5
+            }
+          },
+          "other": {
+            "kind": "eden:feature_trio",
+            "fields": {
+              "first": 0,
+              "second": 0,
+              "third": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": "held"
+            },
+            "effector_mm": [
+              0,
+              850,
+              700
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "first_3"
+          },
+          "receipt": "held",
+          "expect": {
+            "verdict": "no",
+            "need": 0,
+            "reason": "hand_not_empty"
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:feature_trio",
+          "fields": {
+            "first": 1,
+            "second": 2,
+            "third": 5
+          }
+        }
+      }
+    }
+  ]
+}

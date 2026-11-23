@@ -1,0 +1,3079 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:feature_trio",
+  "owner": "thing",
+  "state": {
+    "first": {
+      "n": 28,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 6,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "second": {
+      "n": 29,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 6,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "third": {
+      "n": 30,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 6,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        1150
+      ],
+      "yaw_mdeg": 180000
+    },
+    "board": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        850,
+        700
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1500,
+      900,
+      1600
+    ]
+  },
+  "forms": {
+    "first_1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "first",
+          "to": 1,
+          "event": "choices_updated"
+        },
+        {
+          "change": "set",
+          "field": "second",
+          "to": 0,
+          "event": "choices_updated"
+        },
+        {
+          "change": "set",
+          "field": "third",
+          "to": 0,
+          "event": "choices_updated"
+        }
+      ]
+    },
+    "first_2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "first",
+          "to": 2,
+          "event": "choices_updated"
+        },
+        {
+          "change": "set",
+          "field": "second",
+          "to": 0,
+          "event": "choices_updated"
+        },
+        {
+          "change": "set",
+          "field": "third",
+          "to": 0,
+          "event": "choices_updated"
+        }
+      ]
+    },
+    "first_3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "first",
+          "to": 3,
+          "event": "choices_updated"
+        },
+        {
+          "change": "set",
+          "field": "second",
+          "to": 0,
+          "event": "choices_updated"
+        },
+        {
+          "change": "set",
+          "field": "third",
+          "to": 0,
+          "event": "choices_updated"
+        }
+      ]
+    },
+    "first_4": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "first",
+          "to": 4,
+          "event": "choices_updated"
+        },
+        {
+          "change": "set",
+          "field": "second",
+          "to": 0,
+          "event": "choices_updated"
+        },
+        {
+          "change": "set",
+          "field": "third",
+          "to": 0,
+          "event": "choices_updated"
+        }
+      ]
+    },
+    "first_5": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "first",
+          "to": 5,
+          "event": "choices_updated"
+        },
+        {
+          "change": "set",
+          "field": "second",
+          "to": 0,
+          "event": "choices_updated"
+        },
+        {
+          "change": "set",
+          "field": "third",
+          "to": 0,
+          "event": "choices_updated"
+        }
+      ]
+    },
+    "first_6": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "first",
+          "to": 6,
+          "event": "choices_updated"
+        },
+        {
+          "change": "set",
+          "field": "second",
+          "to": 0,
+          "event": "choices_updated"
+        },
+        {
+          "change": "set",
+          "field": "third",
+          "to": 0,
+          "event": "choices_updated"
+        }
+      ]
+    },
+    "second_1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "first",
+          "not": 0,
+          "says": "read_choices"
+        },
+        {
+          "need": "state",
+          "field": "first",
+          "not": 1,
+          "says": "read_choices"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "second",
+          "to": 1,
+          "event": "choices_updated"
+        },
+        {
+          "change": "set",
+          "field": "third",
+          "to": 0,
+          "event": "choices_updated"
+        }
+      ]
+    },
+    "second_2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "first",
+          "not": 0,
+          "says": "read_choices"
+        },
+        {
+          "need": "state",
+          "field": "first",
+          "not": 2,
+          "says": "read_choices"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "second",
+          "to": 2,
+          "event": "choices_updated"
+        },
+        {
+          "change": "set",
+          "field": "third",
+          "to": 0,
+          "event": "choices_updated"
+        }
+      ]
+    },
+    "second_3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "first",
+          "not": 0,
+          "says": "read_choices"
+        },
+        {
+          "need": "state",
+          "field": "first",
+          "not": 3,
+          "says": "read_choices"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "second",
+          "to": 3,
+          "event": "choices_updated"
+        },
+        {
+          "change": "set",
+          "field": "third",
+          "to": 0,
+          "event": "choices_updated"
+        }
+      ]
+    },
+    "second_4": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "first",
+          "not": 0,
+          "says": "read_choices"
+        },
+        {
+          "need": "state",
+          "field": "first",
+          "not": 4,
+          "says": "read_choices"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "second",
+          "to": 4,
+          "event": "choices_updated"
+        },
+        {
+          "change": "set",
+          "field": "third",
+          "to": 0,
+          "event": "choices_updated"
+        }
+      ]
+    },
+    "second_5": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "first",
+          "not": 0,
+          "says": "read_choices"
+        },
+        {
+          "need": "state",
+          "field": "first",
+          "not": 5,
+          "says": "read_choices"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "second",
+          "to": 5,
+          "event": "choices_updated"
+        },
+        {
+          "change": "set",
+          "field": "third",
+          "to": 0,
+          "event": "choices_updated"
+        }
+      ]
+    },
+    "second_6": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "first",
+          "not": 0,
+          "says": "read_choices"
+        },
+        {
+          "need": "state",
+          "field": "first",
+          "not": 6,
+          "says": "read_choices"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "second",
+          "to": 6,
+          "event": "choices_updated"
+        },
+        {
+          "change": "set",
+          "field": "third",
+          "to": 0,
+          "event": "choices_updated"
+        }
+      ]
+    },
+    "complete_5_after_1_2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "first",
+          "is": 1,
+          "says": "read_choices"
+        },
+        {
+          "need": "state",
+          "field": "second",
+          "is": 2,
+          "says": "read_choices"
+        },
+        {
+          "need": "state",
+          "field": "third",
+          "is": 0,
+          "says": "read_choices"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "third",
+          "to": 5,
+          "event": "choices_updated"
+        }
+      ]
+    },
+    "complete_2_after_1_5": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "first",
+          "is": 1,
+          "says": "read_choices"
+        },
+        {
+          "need": "state",
+          "field": "second",
+          "is": 5,
+          "says": "read_choices"
+        },
+        {
+          "need": "state",
+          "field": "third",
+          "is": 0,
+          "says": "read_choices"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "third",
+          "to": 2,
+          "event": "choices_updated"
+        }
+      ]
+    },
+    "complete_5_after_2_1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "first",
+          "is": 2,
+          "says": "read_choices"
+        },
+        {
+          "need": "state",
+          "field": "second",
+          "is": 1,
+          "says": "read_choices"
+        },
+        {
+          "need": "state",
+          "field": "third",
+          "is": 0,
+          "says": "read_choices"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "third",
+          "to": 5,
+          "event": "choices_updated"
+        }
+      ]
+    },
+    "complete_1_after_2_5": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "first",
+          "is": 2,
+          "says": "read_choices"
+        },
+        {
+          "need": "state",
+          "field": "second",
+          "is": 5,
+          "says": "read_choices"
+        },
+        {
+          "need": "state",
+          "field": "third",
+          "is": 0,
+          "says": "read_choices"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "third",
+          "to": 1,
+          "event": "choices_updated"
+        }
+      ]
+    },
+    "complete_2_after_5_1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "first",
+          "is": 5,
+          "says": "read_choices"
+        },
+        {
+          "need": "state",
+          "field": "second",
+          "is": 1,
+          "says": "read_choices"
+        },
+        {
+          "need": "state",
+          "field": "third",
+          "is": 0,
+          "says": "read_choices"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "third",
+          "to": 2,
+          "event": "choices_updated"
+        }
+      ]
+    },
+    "complete_1_after_5_2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "first",
+          "is": 5,
+          "says": "read_choices"
+        },
+        {
+          "need": "state",
+          "field": "second",
+          "is": 2,
+          "says": "read_choices"
+        },
+        {
+          "need": "state",
+          "field": "third",
+          "is": 0,
+          "says": "read_choices"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "third",
+          "to": 1,
+          "event": "choices_updated"
+        }
+      ]
+    },
+    "complete_6_after_3_4": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "first",
+          "is": 3,
+          "says": "read_choices"
+        },
+        {
+          "need": "state",
+          "field": "second",
+          "is": 4,
+          "says": "read_choices"
+        },
+        {
+          "need": "state",
+          "field": "third",
+          "is": 0,
+          "says": "read_choices"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "third",
+          "to": 6,
+          "event": "choices_updated"
+        }
+      ]
+    },
+    "complete_4_after_3_6": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "first",
+          "is": 3,
+          "says": "read_choices"
+        },
+        {
+          "need": "state",
+          "field": "second",
+          "is": 6,
+          "says": "read_choices"
+        },
+        {
+          "need": "state",
+          "field": "third",
+          "is": 0,
+          "says": "read_choices"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "third",
+          "to": 4,
+          "event": "choices_updated"
+        }
+      ]
+    },
+    "complete_6_after_4_3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "first",
+          "is": 4,
+          "says": "read_choices"
+        },
+        {
+          "need": "state",
+          "field": "second",
+          "is": 3,
+          "says": "read_choices"
+        },
+        {
+          "need": "state",
+          "field": "third",
+          "is": 0,
+          "says": "read_choices"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "third",
+          "to": 6,
+          "event": "choices_updated"
+        }
+      ]
+    },
+    "complete_3_after_4_6": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "first",
+          "is": 4,
+          "says": "read_choices"
+        },
+        {
+          "need": "state",
+          "field": "second",
+          "is": 6,
+          "says": "read_choices"
+        },
+        {
+          "need": "state",
+          "field": "third",
+          "is": 0,
+          "says": "read_choices"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "third",
+          "to": 3,
+          "event": "choices_updated"
+        }
+      ]
+    },
+    "complete_4_after_6_3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "first",
+          "is": 6,
+          "says": "read_choices"
+        },
+        {
+          "need": "state",
+          "field": "second",
+          "is": 3,
+          "says": "read_choices"
+        },
+        {
+          "need": "state",
+          "field": "third",
+          "is": 0,
+          "says": "read_choices"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "third",
+          "to": 4,
+          "event": "choices_updated"
+        }
+      ]
+    },
+    "complete_3_after_6_4": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "first",
+          "is": 6,
+          "says": "read_choices"
+        },
+        {
+          "need": "state",
+          "field": "second",
+          "is": 4,
+          "says": "read_choices"
+        },
+        {
+          "need": "state",
+          "field": "third",
+          "is": 0,
+          "says": "read_choices"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "third",
+          "to": 3,
+          "event": "choices_updated"
+        }
+      ]
+    },
+    "clear_choices": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "first",
+          "to": 0,
+          "event": "choices_updated"
+        },
+        {
+          "change": "set",
+          "field": "second",
+          "to": 0,
+          "event": "choices_updated"
+        },
+        {
+          "change": "set",
+          "field": "third",
+          "to": 0,
+          "event": "choices_updated"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:feature_trio",
+    "table": [
+      {
+        "part": "choice_1_card_1",
+        "field": "first",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 1,
+          "2": 0,
+          "3": 0,
+          "4": 0,
+          "5": 0,
+          "6": 0
+        }
+      },
+      {
+        "part": "choice_1_card_2",
+        "field": "first",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 1,
+          "3": 0,
+          "4": 0,
+          "5": 0,
+          "6": 0
+        }
+      },
+      {
+        "part": "choice_1_card_3",
+        "field": "first",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 1,
+          "4": 0,
+          "5": 0,
+          "6": 0
+        }
+      },
+      {
+        "part": "choice_1_card_4",
+        "field": "first",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": 1,
+          "5": 0,
+          "6": 0
+        }
+      },
+      {
+        "part": "choice_1_card_5",
+        "field": "first",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": 0,
+          "5": 1,
+          "6": 0
+        }
+      },
+      {
+        "part": "choice_1_card_6",
+        "field": "first",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": 0,
+          "5": 0,
+          "6": 1
+        }
+      },
+      {
+        "part": "choice_2_card_1",
+        "field": "second",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 1,
+          "2": 0,
+          "3": 0,
+          "4": 0,
+          "5": 0,
+          "6": 0
+        }
+      },
+      {
+        "part": "choice_2_card_2",
+        "field": "second",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 1,
+          "3": 0,
+          "4": 0,
+          "5": 0,
+          "6": 0
+        }
+      },
+      {
+        "part": "choice_2_card_3",
+        "field": "second",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 1,
+          "4": 0,
+          "5": 0,
+          "6": 0
+        }
+      },
+      {
+        "part": "choice_2_card_4",
+        "field": "second",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": 1,
+          "5": 0,
+          "6": 0
+        }
+      },
+      {
+        "part": "choice_2_card_5",
+        "field": "second",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": 0,
+          "5": 1,
+          "6": 0
+        }
+      },
+      {
+        "part": "choice_2_card_6",
+        "field": "second",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": 0,
+          "5": 0,
+          "6": 1
+        }
+      },
+      {
+        "part": "choice_3_card_1",
+        "field": "third",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 1,
+          "2": 0,
+          "3": 0,
+          "4": 0,
+          "5": 0,
+          "6": 0
+        }
+      },
+      {
+        "part": "choice_3_card_2",
+        "field": "third",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 1,
+          "3": 0,
+          "4": 0,
+          "5": 0,
+          "6": 0
+        }
+      },
+      {
+        "part": "choice_3_card_3",
+        "field": "third",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 1,
+          "4": 0,
+          "5": 0,
+          "6": 0
+        }
+      },
+      {
+        "part": "choice_3_card_4",
+        "field": "third",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": 1,
+          "5": 0,
+          "6": 0
+        }
+      },
+      {
+        "part": "choice_3_card_5",
+        "field": "third",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": 0,
+          "5": 1,
+          "6": 0
+        }
+      },
+      {
+        "part": "choice_3_card_6",
+        "field": "third",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": 0,
+          "5": 0,
+          "6": 1
+        }
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            790,
+            0
+          ],
+          "size": [
+            1500,
+            40,
+            1600
+          ],
+          "tint": "#9a6b43"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -680,
+            385,
+            -730
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "#9a6b43"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -680,
+            385,
+            730
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "#9a6b43"
+        },
+        {
+          "kind": "box",
+          "at": [
+            680,
+            385,
+            -730
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "#9a6b43"
+        },
+        {
+          "kind": "box",
+          "at": [
+            680,
+            385,
+            730
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "#9a6b43"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            817,
+            0
+          ],
+          "size": [
+            1450,
+            14,
+            1550
+          ],
+          "tint": "#ece6d5"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -430,
+            828,
+            -270
+          ],
+          "size": [
+            370,
+            8,
+            440
+          ],
+          "tint": "#faf5e6"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -410,
+            835,
+            -461
+          ],
+          "size": [
+            12,
+            6,
+            44
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -410,
+            835,
+            -429
+          ],
+          "size": [
+            12,
+            6,
+            44
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "tint": "#2363ad",
+          "kind": "box",
+          "at": [
+            -430,
+            836,
+            -360
+          ],
+          "size": [
+            70,
+            8,
+            70
+          ]
+        },
+        {
+          "tint": "#2363ad",
+          "kind": "box",
+          "at": [
+            -430,
+            836,
+            -270
+          ],
+          "size": [
+            70,
+            8,
+            70
+          ]
+        },
+        {
+          "tint": "#2363ad",
+          "kind": "box",
+          "at": [
+            -430,
+            836,
+            -180
+          ],
+          "size": [
+            70,
+            8,
+            70
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -535,
+            836,
+            -95
+          ],
+          "size": [
+            60,
+            8,
+            40
+          ],
+          "tint": "#192d48",
+          "role": "choice_1_card_1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -430,
+            836,
+            -95
+          ],
+          "size": [
+            60,
+            8,
+            40
+          ],
+          "tint": "#192d48",
+          "role": "choice_2_card_1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -325,
+            836,
+            -95
+          ],
+          "size": [
+            60,
+            8,
+            40
+          ],
+          "tint": "#192d48",
+          "role": "choice_3_card_1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            828,
+            -270
+          ],
+          "size": [
+            370,
+            8,
+            440
+          ],
+          "tint": "#faf5e6"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            835,
+            -477
+          ],
+          "size": [
+            52,
+            6,
+            12
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            20,
+            835,
+            -461
+          ],
+          "size": [
+            12,
+            6,
+            44
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            835,
+            -445
+          ],
+          "size": [
+            52,
+            6,
+            12
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -20,
+            835,
+            -429
+          ],
+          "size": [
+            12,
+            6,
+            44
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            835,
+            -413
+          ],
+          "size": [
+            52,
+            6,
+            12
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "tint": "#c87d11",
+          "kind": "box",
+          "at": [
+            0,
+            836,
+            -315
+          ],
+          "size": [
+            70,
+            8,
+            70
+          ]
+        },
+        {
+          "tint": "#c87d11",
+          "kind": "box",
+          "at": [
+            0,
+            836,
+            -225
+          ],
+          "size": [
+            70,
+            8,
+            70
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -105,
+            836,
+            -95
+          ],
+          "size": [
+            60,
+            8,
+            40
+          ],
+          "tint": "#192d48",
+          "role": "choice_1_card_2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            836,
+            -95
+          ],
+          "size": [
+            60,
+            8,
+            40
+          ],
+          "tint": "#192d48",
+          "role": "choice_2_card_2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            105,
+            836,
+            -95
+          ],
+          "size": [
+            60,
+            8,
+            40
+          ],
+          "tint": "#192d48",
+          "role": "choice_3_card_2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            430,
+            828,
+            -270
+          ],
+          "size": [
+            370,
+            8,
+            440
+          ],
+          "tint": "#faf5e6"
+        },
+        {
+          "kind": "box",
+          "at": [
+            430,
+            835,
+            -477
+          ],
+          "size": [
+            52,
+            6,
+            12
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            450,
+            835,
+            -461
+          ],
+          "size": [
+            12,
+            6,
+            44
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            430,
+            835,
+            -445
+          ],
+          "size": [
+            52,
+            6,
+            12
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            450,
+            835,
+            -429
+          ],
+          "size": [
+            12,
+            6,
+            44
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            430,
+            835,
+            -413
+          ],
+          "size": [
+            52,
+            6,
+            12
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "tint": "#783f93",
+          "kind": "cyl",
+          "at": [
+            430,
+            836,
+            -315
+          ],
+          "r": 35,
+          "h": 8,
+          "segments": 16
+        },
+        {
+          "tint": "#783f93",
+          "kind": "cyl",
+          "at": [
+            430,
+            836,
+            -225
+          ],
+          "r": 35,
+          "h": 8,
+          "segments": 16
+        },
+        {
+          "kind": "box",
+          "at": [
+            325,
+            836,
+            -95
+          ],
+          "size": [
+            60,
+            8,
+            40
+          ],
+          "tint": "#192d48",
+          "role": "choice_1_card_3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            430,
+            836,
+            -95
+          ],
+          "size": [
+            60,
+            8,
+            40
+          ],
+          "tint": "#192d48",
+          "role": "choice_2_card_3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            535,
+            836,
+            -95
+          ],
+          "size": [
+            60,
+            8,
+            40
+          ],
+          "tint": "#192d48",
+          "role": "choice_3_card_3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -430,
+            828,
+            270
+          ],
+          "size": [
+            370,
+            8,
+            440
+          ],
+          "tint": "#faf5e6"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -450,
+            835,
+            79
+          ],
+          "size": [
+            12,
+            6,
+            44
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -430,
+            835,
+            95
+          ],
+          "size": [
+            52,
+            6,
+            12
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -410,
+            835,
+            79
+          ],
+          "size": [
+            12,
+            6,
+            44
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -410,
+            835,
+            111
+          ],
+          "size": [
+            12,
+            6,
+            44
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "tint": "#783f93",
+          "kind": "extrude",
+          "at": [
+            -430,
+            832,
+            270
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              -35,
+              30
+            ],
+            [
+              35,
+              30
+            ],
+            [
+              0,
+              -40
+            ]
+          ],
+          "round": 0
+        },
+        {
+          "kind": "box",
+          "at": [
+            -535,
+            836,
+            445
+          ],
+          "size": [
+            60,
+            8,
+            40
+          ],
+          "tint": "#192d48",
+          "role": "choice_1_card_4"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -430,
+            836,
+            445
+          ],
+          "size": [
+            60,
+            8,
+            40
+          ],
+          "tint": "#192d48",
+          "role": "choice_2_card_4"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -325,
+            836,
+            445
+          ],
+          "size": [
+            60,
+            8,
+            40
+          ],
+          "tint": "#192d48",
+          "role": "choice_3_card_4"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            828,
+            270
+          ],
+          "size": [
+            370,
+            8,
+            440
+          ],
+          "tint": "#faf5e6"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            835,
+            63
+          ],
+          "size": [
+            52,
+            6,
+            12
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -20,
+            835,
+            79
+          ],
+          "size": [
+            12,
+            6,
+            44
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            835,
+            95
+          ],
+          "size": [
+            52,
+            6,
+            12
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            20,
+            835,
+            111
+          ],
+          "size": [
+            12,
+            6,
+            44
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            835,
+            127
+          ],
+          "size": [
+            52,
+            6,
+            12
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "tint": "#783f93",
+          "kind": "box",
+          "at": [
+            0,
+            836,
+            270
+          ],
+          "size": [
+            70,
+            8,
+            70
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -105,
+            836,
+            445
+          ],
+          "size": [
+            60,
+            8,
+            40
+          ],
+          "tint": "#192d48",
+          "role": "choice_1_card_5"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            836,
+            445
+          ],
+          "size": [
+            60,
+            8,
+            40
+          ],
+          "tint": "#192d48",
+          "role": "choice_2_card_5"
+        },
+        {
+          "kind": "box",
+          "at": [
+            105,
+            836,
+            445
+          ],
+          "size": [
+            60,
+            8,
+            40
+          ],
+          "tint": "#192d48",
+          "role": "choice_3_card_5"
+        },
+        {
+          "kind": "box",
+          "at": [
+            430,
+            828,
+            270
+          ],
+          "size": [
+            370,
+            8,
+            440
+          ],
+          "tint": "#faf5e6"
+        },
+        {
+          "kind": "box",
+          "at": [
+            430,
+            835,
+            63
+          ],
+          "size": [
+            52,
+            6,
+            12
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            410,
+            835,
+            79
+          ],
+          "size": [
+            12,
+            6,
+            44
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            430,
+            835,
+            95
+          ],
+          "size": [
+            52,
+            6,
+            12
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            410,
+            835,
+            111
+          ],
+          "size": [
+            12,
+            6,
+            44
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            450,
+            835,
+            111
+          ],
+          "size": [
+            12,
+            6,
+            44
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            430,
+            835,
+            127
+          ],
+          "size": [
+            52,
+            6,
+            12
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "tint": "#783f93",
+          "kind": "box",
+          "at": [
+            430,
+            836,
+            180
+          ],
+          "size": [
+            70,
+            8,
+            70
+          ]
+        },
+        {
+          "tint": "#783f93",
+          "kind": "box",
+          "at": [
+            430,
+            836,
+            270
+          ],
+          "size": [
+            70,
+            8,
+            70
+          ]
+        },
+        {
+          "tint": "#783f93",
+          "kind": "box",
+          "at": [
+            430,
+            836,
+            360
+          ],
+          "size": [
+            70,
+            8,
+            70
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            325,
+            836,
+            445
+          ],
+          "size": [
+            60,
+            8,
+            40
+          ],
+          "tint": "#192d48",
+          "role": "choice_1_card_6"
+        },
+        {
+          "kind": "box",
+          "at": [
+            430,
+            836,
+            445
+          ],
+          "size": [
+            60,
+            8,
+            40
+          ],
+          "tint": "#192d48",
+          "role": "choice_2_card_6"
+        },
+        {
+          "kind": "box",
+          "at": [
+            535,
+            836,
+            445
+          ],
+          "size": [
+            60,
+            8,
+            40
+          ],
+          "tint": "#192d48",
+          "role": "choice_3_card_6"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            828,
+            650
+          ],
+          "size": [
+            370,
+            8,
+            170
+          ],
+          "tint": "#faf5e6"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -105,
+            836,
+            610
+          ],
+          "size": [
+            60,
+            8,
+            40
+          ],
+          "tint": "#192d48"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -85,
+            835,
+            664
+          ],
+          "size": [
+            12,
+            6,
+            44
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -85,
+            835,
+            696
+          ],
+          "size": [
+            12,
+            6,
+            44
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            836,
+            610
+          ],
+          "size": [
+            60,
+            8,
+            40
+          ],
+          "tint": "#192d48"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            835,
+            648
+          ],
+          "size": [
+            52,
+            6,
+            12
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            20,
+            835,
+            664
+          ],
+          "size": [
+            12,
+            6,
+            44
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            835,
+            680
+          ],
+          "size": [
+            52,
+            6,
+            12
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -20,
+            835,
+            696
+          ],
+          "size": [
+            12,
+            6,
+            44
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            835,
+            712
+          ],
+          "size": [
+            52,
+            6,
+            12
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            105,
+            836,
+            610
+          ],
+          "size": [
+            60,
+            8,
+            40
+          ],
+          "tint": "#192d48"
+        },
+        {
+          "kind": "box",
+          "at": [
+            105,
+            835,
+            648
+          ],
+          "size": [
+            52,
+            6,
+            12
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            125,
+            835,
+            664
+          ],
+          "size": [
+            12,
+            6,
+            44
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            105,
+            835,
+            680
+          ],
+          "size": [
+            52,
+            6,
+            12
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            125,
+            835,
+            696
+          ],
+          "size": [
+            12,
+            6,
+            44
+          ],
+          "tint": "#222c36"
+        },
+        {
+          "kind": "box",
+          "at": [
+            105,
+            835,
+            712
+          ],
+          "size": [
+            52,
+            6,
+            12
+          ],
+          "tint": "#222c36"
+        }
+      ],
+      "tags": [
+        "game",
+        "trio",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "game": "game",
+    "trio": "feature trio",
+    "matching": "feature matching",
+    "card": "Choose a trio whose color, shape and count are each all equal or all different.",
+    "read_choices": "Read first, second and third and choose a form for the current pair. An incomplete pair can be changed or cleared.",
+    "empty_hands": "Put down what you hold before using the feature-trio board.",
+    "rules": "Each feature is checked separately: the three colors must be all equal or all different, and the same is required of shapes and symbol counts. Two equal and one different fails that feature. Choose distinct fixed card IDs for first and second, then an offered completion. A completion not offered for that pair is unavailable, not a generic validator result.",
+    "bank": "Fixed bank: 1 blue three squares; 2 orange two squares; 3 purple two discs; 4 purple one triangle; 5 purple one square; 6 purple three squares. Cards 1 to 3 are the far row, 4 to 6 the near row.",
+    "display": "Card IDs stay fixed above their feature symbols. A dark lower-left tab means first choice, lower-middle second, lower-right third; the shared 1/2/3 tab-position legend is near the front. Inspect first, second and third for exact IDs; 0 means unselected. The cards and tabs are integral mounted indicators.",
+    "first_trio": "Choose first 1, second 2, then complete with 5: colors differ, all shapes are square, and counts differ. Changing first clears second and third; changing second clears third. Clear choices restores no tabs and leaves every card fixed.",
+    "second_trio": "Choose first 3, second 4, then complete with 6: all colors are purple, shapes differ and counts differ. Both valid count patterns are all-different; this fixed bank has no all-same-count trio.",
+    "backtrack": "First 1 and second 3 have no legal completion. Change second to 2 and complete with 5, or choose a new first or clear. The only valid unordered triples in this bank are 1/2/5 and 3/4/6; all ordered choices of each are available.",
+    "source": "The equal-or-distinct feature rule follows the publisher SET rules, whose Easy Start removes shading. This original six-card mounted practice variation uses circles, triangles and squares instead of copied source artwork.",
+    "limits": "This is a fixed-bank feature relation trainer, not the full dealt game. No shading, score, turn, winner, random dealing, history, solver, card custody or portable output. Legal completion follows the stored choices; the board does not validate arbitrary cards or free text."
+  },
+  "card": {
+    "text": "card",
+    "category": "game",
+    "synonyms": [
+      "trio",
+      "matching"
+    ]
+  },
+  "howtos": {
+    "rules": {
+      "text": "rules",
+      "steps": [
+        {
+          "form": "first_1"
+        },
+        {
+          "form": "second_2"
+        },
+        {
+          "form": "complete_5_after_1_2"
+        },
+        {
+          "form": "clear_choices"
+        }
+      ]
+    },
+    "fixed_bank": {
+      "text": "bank",
+      "steps": [
+        {
+          "form": "first_1"
+        },
+        {
+          "form": "second_2"
+        },
+        {
+          "form": "complete_5_after_1_2"
+        },
+        {
+          "form": "clear_choices"
+        }
+      ]
+    },
+    "read_tabs": {
+      "text": "display",
+      "steps": [
+        {
+          "form": "first_1"
+        },
+        {
+          "form": "second_2"
+        },
+        {
+          "form": "complete_5_after_1_2"
+        },
+        {
+          "form": "clear_choices"
+        }
+      ]
+    },
+    "first_trio": {
+      "text": "first_trio",
+      "steps": [
+        {
+          "form": "first_1"
+        },
+        {
+          "form": "second_2"
+        },
+        {
+          "form": "complete_5_after_1_2"
+        },
+        {
+          "form": "clear_choices"
+        }
+      ]
+    },
+    "second_trio": {
+      "text": "second_trio",
+      "steps": [
+        {
+          "form": "first_3"
+        },
+        {
+          "form": "second_4"
+        },
+        {
+          "form": "complete_6_after_3_4"
+        },
+        {
+          "form": "clear_choices"
+        }
+      ]
+    },
+    "backtrack": {
+      "text": "backtrack",
+      "steps": [
+        {
+          "form": "first_1"
+        },
+        {
+          "form": "second_3"
+        },
+        {
+          "form": "second_2"
+        },
+        {
+          "form": "complete_5_after_1_2"
+        },
+        {
+          "form": "clear_choices"
+        }
+      ]
+    },
+    "primary_rules": {
+      "text": "source",
+      "steps": [
+        {
+          "form": "first_1"
+        },
+        {
+          "form": "second_2"
+        },
+        {
+          "form": "complete_5_after_1_2"
+        },
+        {
+          "form": "clear_choices"
+        }
+      ]
+    },
+    "mounted_practice": {
+      "text": "limits",
+      "steps": [
+        {
+          "form": "first_1"
+        },
+        {
+          "form": "second_2"
+        },
+        {
+          "form": "complete_5_after_1_2"
+        },
+        {
+          "form": "clear_choices"
+        }
+      ]
+    }
+  }
+}
