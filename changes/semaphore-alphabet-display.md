@@ -1,4 +1,4 @@
 ---
 type: feature
 ---
-Souls can select Rest and all twenty-six letter positions on a marked receiver-facing semaphore alphabet display.
+Add a receiver-facing semaphore alphabet display with one letter selector and supported conditional kit shapes for its poses.
