@@ -132,6 +132,10 @@ test('D1: act --wait returns the final phase, the refusal, or after its window a
   assert.deepEqual([done.ok, done.phase, done.sequence, done.at, done.changed], [true, 'done', 7, 'v9', { n: 1 }], 'what changed comes with the last answer');
   const refused = await actEnd(daemon(() => [{ answer: 'refused', reason: 'seat.taken' }]), sent, { sleep: async () => {} });
   assert.deepEqual([refused.ok, refused.phase, refused.code, refused.reason], [false, 'refused', 'seat.taken', 'seat.taken']);
+  // A walk the world's ladder ended (N1's goal-unreachable, named like walk.blocked): what it waited for, from the receipt.
+  const why = '12.4 m from its leg\'s end';
+  const stuck = await actEnd(async (r) => ({ ok: true, receipt: { sequence: 7, answers: [{ answer: 'refused', reason: 'goal-unreachable' }], ...(r.quiet ? {} : { why }) } }), sent, { sleep: async () => {} });
+  assert.deepEqual([stuck.ok, stuck.phase, stuck.code, stuck.why, stuck.try], [false, 'refused', 'goal-unreachable', why, undefined]);
   let t = 0;
   const still = await actEnd(daemon(() => [{ answer: 'accepted' }]), sent, { ms: 60_000, now: () => t, sleep: async (ms) => { t += ms; } });
   assert.deepEqual([still.ok, still.stillRunning, still.phase], [true, true, 'running']);

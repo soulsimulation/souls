@@ -1921,6 +1921,256 @@ async fn a_move_far_off_the_ground_is_answered_and_so_is_the_next_edit() {
     assert_eq!(next.kind, 1, "the next edit commits: {next:?}");
 }
 
+// --- B20 (#3356, 0.135 A1): a running world enforces joined-part building -------------------------------------------
+
+/// N2's test world with a rack bay at its build site, its slots numbered as the bay's entry numbers them (the facts
+/// give a kind its slots by the things that have them), and the folder of entries: the four construction kinds, the
+/// body, and on the bay a form that stands an upright in its first upright slot, a Soul's act that would leave a part
+/// hanging. Returns the facts and the bay's slot number for `upright_a`.
+fn yard_world(d: &Path) -> (String, u64) {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
+    let entries = d.join("entries");
+    std::fs::create_dir_all(&entries).unwrap();
+    let mut texts = Vec::new();
+    for f in std::fs::read_dir(root.join("construction")).unwrap() {
+        let p = f.unwrap().path();
+        let mut text = std::fs::read_to_string(&p).unwrap();
+        if p.ends_with("rack_bay.json") {
+            let mut e = json::parse(&text).unwrap();
+            let form = json::parse(
+                r#"{"stand_upright": {"who": "anyone", "steps": [],
+                    "effects": [{"change": "create", "kind": "mars:rack_upright", "into": "upright_a",
+                                 "event": "stood"}]}}"#,
+            )
+            .unwrap();
+            if let json::Value::Obj(o) = &mut e {
+                o.push(("forms".into(), form));
+            }
+            text = e.to_json();
+        }
+        std::fs::write(entries.join(p.file_name().unwrap()), &text).unwrap();
+        texts.push((p.file_name().unwrap().to_string_lossy().into_owned(), text));
+    }
+    std::fs::copy(
+        root.join("body/humanoid.json"),
+        entries.join("humanoid.json"),
+    )
+    .unwrap();
+    // The bay's slots as its entry numbers them.
+    let mut bay =
+        json::parse(&texts.iter().find(|(n, _)| n == "rack_bay.json").unwrap().1).unwrap();
+    if let json::Value::Obj(o) = &mut bay {
+        o.retain(|(k, _)| k != "forms");
+    }
+    let kind = replica::kinds::entry::entry_to_kind(&bay.to_json()).unwrap();
+    let mut kinds = replica::kinds::Kinds::default();
+    kinds.load(&[("rack_bay", kind.as_str())]);
+    let def = kinds
+        .admits()
+        .into_keys()
+        .find_map(|k| {
+            kinds
+                .get(&k)
+                .filter(|d| d.name.as_str().starts_with("mars:rack_bay@"))
+        })
+        .expect("the bay's kind");
+    let slots: Vec<(u64, String, [i64; 3])> = def
+        .slots
+        .iter()
+        .map(|(n, s)| {
+            (
+                *n,
+                s.name.as_ref().unwrap().as_str().to_owned(),
+                s.at_mm.unwrap_or([0, 0, 0]),
+            )
+        })
+        .collect();
+    let upright_a = slots.iter().find(|s| s.1 == "upright_a").unwrap().0;
+    let mut f = json::parse(&testworld::generate(1, 0).unwrap().text).unwrap();
+    let json::Value::Obj(top) = &mut f else {
+        panic!("facts")
+    };
+    let num = |v: i64| json::Value::Int(i128::from(v));
+    for (k, v) in top.iter_mut() {
+        match (k.as_str(), v) {
+            ("kinds", json::Value::Arr(a)) => a.push(
+                json::parse(&format!(
+                    r#"{{"ref": "testworld-rack-bay@1", "hash": "{}", "name": "mars:rack_bay", "form": "point"}}"#,
+                    replica::encode::to_hex(&replica::ids::sha256(b"souls/testworld/testworld-rack-bay@1"))
+                ))
+                .unwrap(),
+            ),
+            ("things", json::Value::Arr(a)) => {
+                let slots = slots
+                    .iter()
+                    .map(|(n, id, at)| {
+                        json::Value::Obj(vec![
+                            ("n".into(), num(*n as i64)),
+                            ("id".into(), json::Value::s(id)),
+                            ("kind".into(), json::Value::s("bay")),
+                            ("at".into(), json::Value::Arr(at.iter().map(|&v| num(v)).collect())),
+                            ("yaw".into(), num(0)),
+                            ("capacity".into(), num(1)),
+                        ])
+                    })
+                    .collect();
+                a.push(json::Value::Obj(vec![
+                    ("id".into(), json::Value::s("site-bay")),
+                    ("def".into(), json::Value::s("testworld-rack-bay@1")),
+                    ("ref".into(), json::Value::s("testworld-rack-bay@1")),
+                    ("parent".into(), json::Value::Null),
+                    (
+                        "pose".into(),
+                        json::Value::Arr([65_000, 0, -24_000, 0].iter().map(|&v| num(v)).collect()),
+                    ),
+                    ("scale_ppm".into(), num(1_000_000)),
+                    ("name".into(), json::Value::s("the site's rack bay")),
+                    ("slots".into(), json::Value::Arr(slots)),
+                ]));
+            }
+            _ => {}
+        }
+    }
+    (f.to_json(), upright_a)
+}
+
+/// An upright, as a creator places it: into the bay's slot `slot`, or on the open ground at (x, z) µm.
+fn upright(
+    w: &Seeded,
+    kinds: &replica::tree::Rules,
+    into: Option<(Id, u64)>,
+    x: i64,
+    z: i64,
+) -> Op {
+    let kind = kinds
+        .kinds
+        .keys()
+        .find(|k| k.starts_with("mars:rack_upright@"))
+        .expect("the upright's kind")
+        .clone();
+    let (parent, at) = match into {
+        Some((bay, slot)) => (
+            bay,
+            Spot {
+                slot: Some(slot),
+                position: Vec3::new(0, 0, 0),
+                orientation: Quat::IDENTITY,
+                support: Support::Slot,
+            },
+        ),
+        None => (
+            w.ground,
+            Spot {
+                slot: None,
+                position: Vec3::new(x, 0, z),
+                orientation: Quat::IDENTITY,
+                support: Support::Surface {
+                    surface: w.ground,
+                    height: 0,
+                },
+            },
+        ),
+    };
+    Op::Place {
+        name: 1,
+        kind: Name::new(&kind).unwrap(),
+        parent: Ref::Node(parent),
+        at,
+        audience: Audience::Everyone,
+        fields: BTreeMap::new(),
+    }
+}
+
+/// A Soul's act of form `verb` on `target`, on the world's socket.
+fn act(s: &mut UnixStream, w: &Seeded, body: Id, sequence: u64, verb: &str, target: Id) {
+    let i = Intent {
+        actor: Actor::Soul(body),
+        verb: Name::new(verb).unwrap(),
+        target: Some(Target::Node(target)),
+        parameters: BTreeMap::new(),
+        sequence,
+        basis: basis(w.root.scope(), 0),
+        expiry: answers::now() + 120_000_000,
+        resources: Vec::new(),
+        fallbacks: Vec::new(),
+        replaces: None,
+        body: None,
+        reflex: false,
+    };
+    let bytes = encode(&i.to_value()).unwrap();
+    s.write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+        .unwrap();
+    s.write_all(&bytes).unwrap();
+}
+
+/// B20 A1 and A2 (#3356): a world served from N2's test world with its yard and a bay at the site reads the
+/// construction kinds' joined-part rule as it starts (it prints the bays, standing parts and bearing parts it read),
+/// and refuses, `support.none`, both a creator's edit that stands an upright alone in the bay and a Soul's act that
+/// does the same; the same upright placed on the open ground commits.
+#[tokio::test(flavor = "multi_thread")]
+async fn b20_a_running_world_refuses_a_part_left_hanging() {
+    let d = scratch("b20");
+    let (facts, slot) = yard_world(&d);
+    let w = seed_entries(&d, &facts, 1, (62, -24), Some(&d.join("entries")));
+    let bucket = d.join("bucket");
+    let (c, creator) = creator(0xc0);
+    record(&bucket, &w, c);
+    let socket = d.join("s");
+    let s = serve(&w, &socket, &bucket);
+    let joined = s.line("joined parts: ", 120);
+    println!("{joined}");
+    assert_eq!(
+        joined,
+        "joined parts: bays [mars:rack_bay], standing [mars:rack_upright], bearing [mars:rack_beam]"
+    );
+    s.line("listening ", 120);
+    let (_, rules) = served_copy(&w);
+    let im = import_eden::load(&facts).unwrap();
+    let bay = im.nodes["site-bay"];
+    let (url, tokens) = gateway(&socket, &[creator]).await;
+    let mut ws = sign_in(&url, &tokens[0]).await;
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(
+            &w,
+            creator,
+            1,
+            0,
+            upright(&w, &rules, Some((bay, slot)), 0, 0),
+        ),
+    )
+    .await;
+    println!("a creator stands an upright alone in the bay: {got:?}");
+    assert_eq!((got.kind, got.reason.as_str()), (2, "support.none"));
+    let (got, _) = send(
+        &mut ws,
+        edit_intent(
+            &w,
+            creator,
+            2,
+            got.version,
+            upright(&w, &rules, None, 60 * M, -20 * M),
+        ),
+    )
+    .await;
+    assert_eq!(
+        got.kind, 1,
+        "an upright on the open ground commits: {got:?}"
+    );
+    // No Soul stands until it acts (C3): its walk births it near the site, then its act on the bay.
+    let mut souls = connect_socket(&socket);
+    souls
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    walk(&mut souls, &w, w.souls[0], 1, 63 * M, -24 * M);
+    let got = socket_end(&mut souls);
+    assert_eq!(got.kind, 1, "the Soul's walk ends: {got:?}");
+    act(&mut souls, &w, w.souls[0], 2, "mars:stand_upright", bay);
+    let got = socket_end(&mut souls);
+    println!("a Soul's act stands an upright alone in the bay: {got:?}");
+    assert_eq!((got.kind, got.reason.as_str()), (2, "support.none"));
+}
+
 /// #3956: a batch whose fields would outgrow what one log record holds is refused by name (`edit.too-large`) before
 /// it reaches the world, and the world keeps answering: the edit after it commits. The field is set to 7 MB (under
 /// the bulk limit, sent on the world's socket as the gateway hands on a bulk edit); each rows operation writes the
@@ -1979,4 +2229,105 @@ fn an_oversize_rows_edit_is_refused_by_name_and_the_world_keeps_answering() {
     );
     let got = edit(vec![wall(&w, -30 * M, 30 * M)]);
     assert_eq!(got.kind, 1, "the world still answers and edits: {got:?}");
+}
+
+/// The 0.132 release check's gesture (#1960): a Soul's wave on its own body in a served world, three times. Its run
+/// starts in the act's tick, its move (`souls:form-move`, the record the page draws the gesture from) starts in the same
+/// tick, and its `done` receipt comes when the move ends, 1.2 s on (`wave`: 0.3 s to the contact, 0.9 s after): the
+/// receipt never goes out before the move plays. World times from the log; the answers' wall times are printed.
+#[test]
+fn a_gestures_move_starts_in_its_acts_tick_and_its_receipt_comes_when_it_ends() {
+    let d = scratch("gesture");
+    let entries = d.join("entries");
+    std::fs::create_dir_all(&entries).unwrap();
+    let root =
+        Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds/body/humanoid.json");
+    std::fs::copy(root, entries.join("humanoid.json")).unwrap();
+    let w = seed_entries(
+        &d,
+        &testworld::generate(1, 0).unwrap().text,
+        1,
+        (-40, 30),
+        Some(&entries),
+    );
+    let socket = d.join("s");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 60);
+    let mut souls = connect_socket(&socket);
+    souls
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    walk(&mut souls, &w, w.souls[0], 1, -37 * M, 30 * M);
+    let got = socket_end(&mut souls);
+    assert_eq!(got.kind, 1, "the Soul's walk births it: {got:?}");
+    let (copy, _) = served_copy(&w);
+    let t = copy.tree();
+    let body = t
+        .links_at(w.souls[0])
+        .iter()
+        .filter(|e| t.ty(e).as_str() == "souls:body-of")
+        .find_map(|e| Some(t.link(e.link)?.1[0]))
+        .expect("the Soul's body");
+    for round in 0..3u64 {
+        let i = Intent {
+            actor: Actor::Soul(w.souls[0]),
+            verb: Name::new("eden:wave").unwrap(),
+            target: Some(Target::Node(body)),
+            parameters: BTreeMap::new(),
+            sequence: 2 + round,
+            basis: basis(w.root.scope(), 0),
+            expiry: answers::now() + 120_000_000,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+            reflex: false,
+        };
+        let bytes = encode(&i.to_value()).unwrap();
+        let (sent, from) = (Instant::now(), answers::now());
+        souls
+            .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+            .unwrap();
+        souls.write_all(&bytes).unwrap();
+        let mut kinds = Vec::new();
+        loop {
+            let got = socket_answer(&mut souls);
+            kinds.push((got.kind, sent.elapsed().as_millis()));
+            if got.kind != 3 {
+                break;
+            }
+        }
+        // The run's entries, in world time.
+        let log = std::fs::read(w.dir.join("log")).unwrap();
+        let mut at = BTreeMap::new();
+        for rec in sim::log::recover(&log).unwrap().records {
+            if sim::recorder::is_input(&rec) {
+                continue;
+            }
+            for e in replica::effects::Part::read(&rec).unwrap().effects {
+                for v in e.events.iter().flatten().filter(|_| e.envelope.at >= from) {
+                    at.entry(v.name.as_str().to_owned())
+                        .or_insert(e.envelope.at);
+                }
+            }
+        }
+        let (started, moved, ended) = (
+            at["souls:form-started"],
+            at["souls:form-move"],
+            at["souls:form-ended"],
+        );
+        println!(
+            "wave {round}: answers (kind, ms after the send) {kinds:?}; run started +{} ms, move +{} ms, ended +{} ms",
+            (started - from) / 1000,
+            (moved - from) / 1000,
+            (ended - from) / 1000
+        );
+        assert_eq!(kinds.first().map(|k| k.0), Some(3), "accepted first");
+        assert_eq!(kinds.last().map(|k| k.0), Some(1), "then done");
+        assert!(
+            moved - started <= 100_000,
+            "the move starts within two ticks of the run"
+        );
+        assert_eq!(ended - moved, 1_200_000, "done when the move ends");
+    }
 }
