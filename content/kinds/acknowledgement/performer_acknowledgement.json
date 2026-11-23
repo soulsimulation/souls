@@ -227,7 +227,8 @@
     "acknowledgement": "acknowledgement",
     "performer_acknowledgement": "performer acknowledgement",
     "bow_applause": "bow and applause",
-    "rules": "One performer and up to seven audience members repeat existing bow and clap gestures while participating. Nearby standing members on the same floor are asked to walk to separated places through ordinary movement admission. The performer faces the audience; audience places face the performer position in the activity frame. Each person may leave. This has no automatic finale, enforced sequence, floor ownership, speech, sound or shared animation phase."
+    "rules": "One performer and up to seven audience members repeat existing bow and clap gestures while participating. Nearby standing members on the same floor are asked to walk to separated places through ordinary movement admission. The performer faces the audience; audience places face the performer position in the activity frame. Each person may leave. This has no automatic finale, enforced sequence, floor ownership, speech, sound or shared animation phase.",
+    "activity": "activity"
   },
   "card": {
     "text": "card",
