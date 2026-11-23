@@ -82,6 +82,7 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   if (f.has(DESCRIPTION)) rec.description = refOf(f.get(DESCRIPTION));
   if (f.has(COURSE)) rec.course = encode(f.get(COURSE)); // #3603: re-encoded canonically, as the record holds it
   if (f.has(32)) rec.body = hex(f.get(32) as Uint8Array);
+  if (f.get(33) instanceof Uint8Array) (rec as NodeRec & { look?: string }).look = new TextDecoder().decode(f.get(33) as Uint8Array); // V3: a Soul's own look's params (G2)
   const placeName = f.get(PLACE_NAME);
   if (placeName instanceof Uint8Array && placeName.length === 32) rec.placeName = nameKey(placeName);
   const fields = fieldsOf(f); // #3871: its kind's state, by field number
