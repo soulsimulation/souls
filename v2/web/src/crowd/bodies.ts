@@ -7,6 +7,7 @@ import { bakeBytes, decodeBaked, loadModel } from './bake.ts';
 import type { BodyMotion } from './creature/motion.ts';
 import { Crowd } from './crowd.ts';
 import { ArrivalLights } from './arrival.ts';
+import type { SaidRec } from '../source/source.ts';
 
 /** The body files of today's people (character-wire.ts's names) and the clips baked for each. */
 export const BODIES: [string, string, string][] = [
@@ -95,6 +96,9 @@ export class CrowdBodies {
   private dt = 0;
   private defaults: number;
   private requested: (string | undefined)[] = [];
+  /** The ordinary idle phase continues underneath a public talking interval. */
+  private idlePhase: (number | undefined)[] = [];
+  private speaking?: ReadonlyMap<string, SaidRec>;
   /** N-V19 (#3677): a Soul that joins while the page watches comes down in a light. */
   readonly arrivals = new ArrivalLights();
 
@@ -104,9 +108,10 @@ export class CrowdBodies {
   }
 
   /** Starts a frame at world time `t` (µs). */
-  begin(t: number): void {
+  begin(t: number, speaking?: ReadonlyMap<string, SaidRec>): void {
     this.dt = this.last === null ? 0 : Math.max(0, (t - this.last) / 1e6);
     this.last = t;
+    this.speaking = speaking;
     this.seen.fill(false);
     this.arrivals.begin(t);
   }
@@ -125,6 +130,12 @@ export class CrowdBodies {
       this.select(i, c.model[i]);
       c.phaseA[i] = c.phaseB[i] = (hash(id) % 1000) / 1000;
 
+    }
+    // Undo only last frame's idle-side presentation before selecting or loading a model.
+    if (this.idlePhase[i] !== undefined) {
+      this.idle(i);
+      c.phaseA[i] = this.idlePhase[i]!;
+      this.idlePhase[i] = undefined;
     }
     this.seen[i] = true;
     if (this.requested[i] !== body) {
@@ -151,13 +162,29 @@ export class CrowdBodies {
     c.blend[i] = Math.min(1, this.speed[i] / FULL_WALK);
     const model = c.models[c.model[i]];
     c.rateB[i] = model.fixedWalk ? 1 / model.clips[c.clipB[i]].seconds : model.walkSpeed ? this.speed[i] / model.walkSpeed / model.clips[c.clipB[i]].seconds : Math.max(0.3, this.speed[i] / WALK_STRIDE);
+    const said = this.speaking?.get(id), t = this.last!;
+    const talk = said && said.words !== null && said.private === undefined && said.at <= t && t < said.at + said.length
+      ? c.clip(c.model[i], 'Idle_Talking_Loop') : -1;
+    if (said && talk >= 0) {
+      this.idlePhase[i] = c.phaseA[i];
+      c.clipA[i] = talk;
+      // This phase already names the drawn world time; Crowd.step must not advance it again.
+      c.phaseA[i] = ((t - said.at) / 1e6 / model.clips[talk].seconds) % 1;
+      c.rateA[i] = 0;
+    }
+  }
+
+  private idle(i: number): void {
+    const c = this.crowd, idle = c.clip(c.model[i], 'Idle');
+    c.clipA[i] = idle < 0 ? 0 : idle;
+    c.rateA[i] = 1 / c.models[c.model[i]].clips[c.clipA[i]].seconds;
   }
 
   private select(i: number, model: number): void {
     const c = this.crowd; c.model[i] = model; c.liveRow[i] = -1;
-    const idle = c.clip(model, 'Idle'), walk = c.clip(model, 'Walk');
-    c.clipA[i] = idle < 0 ? 0 : idle; c.clipB[i] = walk < 0 ? c.clipA[i] : walk;
-    c.rateA[i] = 1 / c.models[model].clips[c.clipA[i]].seconds;
+    this.idle(i);
+    const walk = c.clip(model, 'Walk');
+    c.clipB[i] = walk < 0 ? c.clipA[i] : walk;
   }
 
   /** Ends the frame: bodies not placed leave the crowd; phases advance by the world time passed; the draws fill. */
@@ -171,11 +198,18 @@ export class CrowdBodies {
         this.ids[i] = this.ids[moved];
         this.speed[i] = this.speed[moved];
         this.requested[i] = this.requested[moved];
+        this.idlePhase[i] = this.idlePhase[moved];
         this.seen[i] = this.seen[moved];
         this.index.set(this.ids[i], i);
       }
     }
-    this.ids.length = this.speed.length = this.seen.length = this.requested.length = c.count;
+    this.ids.length = this.speed.length = this.seen.length = this.requested.length = this.idlePhase.length = c.count;
+    for (let i = 0; i < c.count; i++) {
+      if (this.idlePhase[i] === undefined) continue;
+      const idle = c.clip(c.model[i], 'Idle');
+      const seconds = c.models[c.model[i]].clips[idle < 0 ? 0 : idle].seconds;
+      this.idlePhase[i] = (this.idlePhase[i]! + this.dt / seconds) % 1;
+    }
     c.step(this.dt);
     c.draw(camera);
     this.arrivals.draw();

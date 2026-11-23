@@ -2,7 +2,8 @@ import test from 'node:test';
 import assert from 'node:assert/strict';
 import * as THREE from 'three';
 import { WorldView } from './world.ts';
-import type { NodeRec } from '../source/source.ts';
+import { SoulsCopy } from '../souls/souls.ts';
+import type { NodeRec, SaidRec } from '../source/source.ts';
 import type { CrowdBodies } from '../crowd/bodies.ts';
 const node = (o: Partial<NodeRec> & { id: string; kind: string }): NodeRec => ({ parent: null, slot: null, pos: [0, 0, 0], rot: [1 << 30, 0, 0, 0], at: null, ...o });
 
@@ -28,4 +29,29 @@ test('a static Soul draws at its authoritative parent-frame pose until actual sa
   assert.equal(w.draw(250, camera), 0);
   assert.equal(w.tracks.has('b'), false);
   assert.equal(w.nodes.has('thing'), true);
+});
+
+
+test('the drawn world time forwards the public speaking interval without changing body placement', () => {
+  const w = new WorldView(), copy = new SoulsCopy(), camera = new THREE.PerspectiveCamera();
+  const body = node({ id: 'speaker', kind: 'souls:body@pin', parent: 'room', pos: [2_000_000, 0, 0] });
+  const first: SaidRec = { speaker: body.id, at: 100, length: 200, words: 'hello', reach: 5000, ref: 'one' };
+  const latest: SaidRec = { ...first, at: 150, length: 100, ref: 'two' };
+  w.apply([node({ id: 'room', kind: 'souls:place', pos: [10_000_000, 0, 0] }), body], []);
+  copy.apply({ nodes: [body], removed: [], said: [first, latest, { ...first, speaker: 'private', words: null }], to: 200 });
+  const frames: [number, ReadonlyMap<string, SaidRec> | undefined][] = [], placements: unknown[][] = [];
+  w.attach({ crowd: { group: new THREE.Group() }, begin(t: number, speaking?: ReadonlyMap<string, SaidRec>) { frames.push([t, speaking]); },
+    place(...args: unknown[]) { placements.push(args); }, end() {} } as unknown as CrowdBodies);
+  for (const t of [99, 100, 175, 250, 300]) {
+    const speaking = copy.speaking(t);
+    w.draw(t, camera, speaking);
+    assert.deepEqual(frames.at(-1), [t, speaking]);
+    assert.deepEqual(placements.at(-1), ['speaker', 12, 0, 0, undefined]);
+    assert.ok(!speaking.has('private'));
+  }
+  assert.equal(frames[0][1]!.size, 0);
+  assert.equal(frames[1][1]!.get(body.id), first);
+  assert.equal(frames[2][1]!.get(body.id), latest, 'latest overlapping public utterance wins');
+  assert.equal(frames[3][1]!.get(body.id), first, 'the older interval remains active after the newer expires');
+  assert.equal(frames[4][1]!.size, 0, 'end is exclusive');
 });

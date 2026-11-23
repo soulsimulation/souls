@@ -196,3 +196,63 @@ test('a wider live bone texture preserves rows and rebinds every color and depth
   }
   crowd.addModel(model('smaller')); assert.equal(crowd.live, texture); assert.equal(disposed, 1);
 });
+
+const talkModel = (name: string, seconds = 4): BakedModel => {
+  const m = model(name);
+  m.clips = [{ name: 'Idle_Talking_Loop', start: 4, frames: 2, seconds }, ...m.clips].reverse();
+  return m;
+};
+const speaking = (at = 1_000_000, extra: Partial<import('../source/source.ts').SaidRec> = {}) =>
+  new Map([['speaker', { speaker: 'speaker', at, length: 4_000_000, words: 'hello', reach: 5000, ref: 'speech', ...extra }]]);
+const camera = () => {
+  const c = new THREE.PerspectiveCamera(60, 1, 0.1, 1000);
+  c.position.set(0, 10, 30); c.lookAt(0, 0, 0); c.updateMatrixWorld(); return c;
+};
+
+test('public talking follows utterance world time, holds when paused and preserves the complete walk side', () => {
+  const crowd = new Crowd([talkModel('speaker')], 1), control = new Crowd([talkModel('speaker')], 1);
+  const bodies = new CrowdBodies(crowd), normal = new CrowdBodies(control), view = camera();
+  const frame = (t: number, z: number, speech = speaking()) => {
+    bodies.begin(t, speech); normal.begin(t);
+    bodies.place('speaker', 2, 3, z); normal.place('speaker', 2, 3, z);
+    bodies.end(view); normal.end(view);
+    for (const field of ['x', 'y', 'z', 'yaw', 'clipB', 'phaseB', 'rateB', 'blend', 'ready'] as const)
+      assert.equal(crowd[field][0], control[field][0], `${field} is unchanged by speech`);
+  };
+  frame(0, 0); assert.equal(crowd.clipA[0], 1);
+  frame(1_000_000, 0); assert.equal(crowd.clipA[0], 2); assert.equal(crowd.phaseA[0], 0);
+  frame(2_000_000, 0.1); assert.equal(crowd.phaseA[0], 0.25, 'Crowd.step does not double-advance the absolute phase');
+  frame(2_000_000, 0.1); assert.equal(crowd.phaseA[0], 0.25, 'a held world clock holds the gesture');
+  frame(3_000_000, 0.2, speaking(2_500_000)); assert.equal(crowd.phaseA[0], 0.125, 'latest selected utterance supplies its own origin');
+  frame(5_000_000, 0.2); assert.equal(crowd.clipA[0], 1, 'the own-model idle returns at the exclusive end');
+  assert.equal(crowd.phaseA[0], control.phaseA[0], 'ordinary idle phase continued underneath speech');
+});
+
+test('private, unavailable and absent talking clips retain the model own idle', () => {
+  const crowd = new Crowd([talkModel('stock')], 1), bodies = new CrowdBodies(crowd), view = camera();
+  for (const extra of [{ words: null }, { private: { conversation: 'private', members: ['speaker'] } }]) {
+    bodies.begin(2_000_000, speaking(1_000_000, extra)); bodies.place('speaker', 0, 0, 0); bodies.end(view);
+    assert.equal(crowd.clipA[0], 1);
+  }
+});
+
+test('talking respects asynchronous model changes, unknown readiness and body compaction', async () => {
+  const crowd = new Crowd([talkModel('stock')], 1), bodies = new CrowdBodies(crowd), view = camera();
+  crowd.worn = async (hash) => { if (hash === 'unknown') throw Error('body.unknown-hash'); return hash === 'quiet' ? model(hash) : talkModel(hash, 2); };
+  const frame = (t: number, ids: string[], body?: string) => {
+    bodies.begin(t, speaking()); for (const id of ids) bodies.place(id, id === 'speaker' ? 1 : 0, 0, 0, id === 'speaker' ? body : undefined); bodies.end(view);
+  };
+  frame(1_000_000, ['removed', 'speaker'], 'talker'); assert.equal(crowd.ready[1], 0);
+  await Promise.resolve();
+  frame(2_000_000, ['speaker'], 'talker');
+  assert.equal(crowd.count, 1); assert.equal(crowd.x[0], 1, 'the speaking last row compacted into the removed first row');
+  assert.equal(crowd.models[crowd.model[0]].name, 'talker'); assert.equal(crowd.clipA[0], 2); assert.equal(crowd.phaseA[0], 0.5);
+  frame(3_000_000, ['speaker'], 'quiet'); assert.equal(crowd.ready[0], 0);
+  await Promise.resolve(); frame(3_000_000, ['speaker'], 'quiet');
+  assert.equal(crowd.models[crowd.model[0]].name, 'quiet'); assert.equal(crowd.clipA[0], 0, 'a new model without talking uses its own Idle');
+  frame(4_000_000, ['speaker'], 'unknown'); await Promise.resolve();
+  frame(4_000_000, ['speaker'], 'unknown'); assert.equal(crowd.ready[0], 0, 'speech cannot make an unavailable body ready');
+  frame(5_000_000, ['speaker']); assert.equal(crowd.ready[0], 1); assert.equal(crowd.models[crowd.model[0]].name, 'stock'); assert.equal(crowd.clipA[0], 1);
+  frame(6_000_000, ['new']);
+  assert.equal(crowd.clipA[0], 1, 'a replacement body does not inherit the removed speaker state');
+});

@@ -244,7 +244,7 @@ renderer.setAnimationLoop((now) => {
   if (history?.live) (clock.t = t), (status.textContent = ''), (history = null);
   let drawn = 0;
   if (t !== null) {
-    drawn = world.draw(t, cam.camera);
+    drawn = world.draw(t, cam.camera, souls.copy.speaking(t));
     things.follow(); // #3603: what rides a course, where it is now
     things.drawKinds(t); // #3871: things drawn from their kinds, in their state now
     hover.update(now, t);

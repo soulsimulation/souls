@@ -2,7 +2,7 @@
 // small box when it has none), each body as a capsule placed between its recorded samples, in the frame they were
 // recorded in (T4), and never past the newest. Rooms, floors, windows and places are structure, not drawn.
 import * as THREE from 'three';
-import type { NodeRec, SampleRec } from '../source/source.ts';
+import type { NodeRec, SampleRec, SaidRec } from '../source/source.ts';
 import { Track } from '../clock/samples.ts';
 import { mergeGeometries } from 'three/examples/jsm/utils/BufferGeometryUtils.js';
 import type { CrowdBodies } from '../crowd/bodies.ts';
@@ -503,7 +503,7 @@ export class WorldView {
   }
 
   /** Places every body at world time `t` and returns how many were drawn. */
-  draw(t: number, camera?: THREE.Camera): number {
+  draw(t: number, camera?: THREE.Camera, speaking?: ReadonlyMap<string, SaidRec>): number {
     this.at(t);
     if (this.drapesDirty && this.ground) this.rebuildDrapes();
     if (this.thingsDirty && this.drawThings) this.rebuildThings();
@@ -520,7 +520,7 @@ export class WorldView {
     }
     const m = new THREE.Matrix4(), v = new THREE.Vector3();
     const crowd = camera ? this.crowdBodies : null;
-    crowd?.begin(t);
+    crowd?.begin(t, speaking);
     let k = 0;
     for (const id of this.bodyIds) {
       const tr = this.tracks.get(id)!;
