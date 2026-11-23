@@ -59,7 +59,8 @@
     "applause": "applause",
     "round_of_applause": "round of applause",
     "applaud": "applaud",
-    "rules": "Two to eight people clap on the world\u2019s beat. Offer the round to others; it starts when one accepts. Later acceptors join the same round. Each may leave at any time; no object is required."
+    "rules": "Two to eight people clap on the world\u2019s beat. Offer the round to others; it starts when one accepts. Later acceptors join the same round. Each may leave at any time; no object is required.",
+    "activity": "activity"
   },
   "card": {
     "text": "card",
