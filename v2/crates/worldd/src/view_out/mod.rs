@@ -92,6 +92,8 @@ use sim::text::Store;
 /// thread, summed and printed to stderr every 10 s with the thread's own processor time. A measurement only: it never
 /// changes a byte written, and off (the default) it reads no clock.
 mod prof {
+    // A profile is wall time on the writer's thread, off unless asked for (K7 allows it, as in `measures`).
+    #![allow(clippy::disallowed_methods)]
     use std::cell::RefCell;
     use std::time::Instant;
     pub const NAMES: [&str; 13] = [
