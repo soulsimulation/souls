@@ -319,8 +319,8 @@ fn form_answers_reject_old_generation_map_and_cancelled_order() {
 
 /// S8: a form's walk question ("where to stand near this thing", C7's 95 % of the planner at 750 agents) is queued
 /// by its form every tick until answered, and sent to the planner once while that request is out: counted over ten
-/// ticks with the batches not taken, once more after its batch was taken without the answer, and at once for a new
-/// generation.
+/// ticks with the batches not taken, once more after its batch was taken without the answer; a new generation (the
+/// body nudged while it waits) waits for the one out, then goes.
 #[test]
 fn s8_a_form_walk_question_is_sent_once_while_it_is_out() {
     let generated = testworld::generate(1, 0).unwrap();
@@ -371,11 +371,16 @@ fn s8_a_form_walk_question_is_sent_once_while_it_is_out() {
         "its batch taken without the answer: sent again"
     );
     assert_eq!(tick(&mut planning, 0, 1, 11), 0);
+    // Nudged while batch 10 is out: a new generation every tick, none sent until batch 10 is taken; then the
+    // current one goes, once.
+    let sent: usize = (12..17).map(|k| tick(&mut planning, k as i64, 1, k)).sum();
+    assert_eq!(sent, 0, "a new generation waits for the question out");
     assert_eq!(
-        tick(&mut planning, 5, 1, 12),
+        tick(&mut planning, 17, 11, 17),
         1,
-        "a new question (a new generation) is sent at once"
+        "then the current generation goes"
     );
+    assert_eq!(tick(&mut planning, 18, 11, 18), 0);
 }
 
 /// C34 (#3599) A1: a walk to a building's named area is planned on the building's own room and floor: the area

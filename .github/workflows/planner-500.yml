@@ -22,7 +22,7 @@ permissions:
 concurrency: { group: planner-500, cancel-in-progress: false }
 jobs:
   measure:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')
     runs-on: [self-hosted, souls-timed]
     timeout-minutes: 240
     env:

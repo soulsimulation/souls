@@ -1723,8 +1723,11 @@ fn refusal(name: &'static str, node: Id) -> Refusal {
     }
 }
 
-/// The form questions to send in batch `next` (S8): a cursor's question of a generation still out at the planner (sent
-/// in a batch at or after `taken`) is not sent again; once that batch has been taken without its answer, it is.
+/// The form questions to send in batch `next` (S8): one question per cursor out at the planner at a time. While one
+/// is out (sent in a batch at or after `taken`), the cursor's question is not sent, whatever its generation: a body
+/// nudged while it waits asks a new generation every tick, and each would be a full search. Once that batch has been
+/// taken, the cursor's current question goes (its form queues it each tick until answered); a stale generation's
+/// answer is refused where it is read (`Planning::receive`).
 pub(crate) fn fresh_forms(
     out: &mut BTreeMap<FormKey, (u64, u64)>,
     questions: BTreeMap<FormKey, FormQuestion>,
@@ -1735,7 +1738,7 @@ pub(crate) fn fresh_forms(
     questions
         .into_values()
         .filter(|q| {
-            if out.get(&q.key).is_some_and(|(g, _)| *g == q.generation) {
+            if out.contains_key(&q.key) {
                 return false;
             }
             out.insert(q.key, (q.generation, next));
