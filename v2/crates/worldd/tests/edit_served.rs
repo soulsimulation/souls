@@ -2478,6 +2478,21 @@ fn body_of(w: &Seeded, soul: Id) -> Id {
         .expect("a body")
 }
 
+/// Where body `body` last stood, as the log's body rows have it (bodies are not written to the tree as they walk).
+fn body_at(w: &Seeded, body: Id) -> Vec3 {
+    let mut at = None;
+    for p in logged(w) {
+        if let Some(Value::Array(rows)) = p.rest.get(&answers::BODIES) {
+            for (b, pose, _) in rows.iter().filter_map(worldd::bodies::read_row) {
+                if b == body {
+                    at = Some(pose.position);
+                }
+            }
+        }
+    }
+    at.expect("a body row")
+}
+
 fn v3(x: i64, y: i64, z: i64) -> Vec3 {
     Vec3::new(x, y, z)
 }
@@ -2549,13 +2564,7 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
         made
     };
     let crew = |hands: &mut [Hand], ab: (usize, usize), place: Id| {
-        offer(
-            hands,
-            ab,
-            "mars:rack_upright_activity",
-            "mars:crew-front",
-            place,
-        )
+        offer(hands, ab, "mars:carry_activity", "mars:front", place)
     };
     let leave =
         |hands: &mut [Hand], k: usize, c: Id| hands[k].act("activity:leave", c, BTreeMap::new());
@@ -2574,20 +2583,28 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     };
     let across = |at: Vec3, dz: i64| (v3(at.x + H, 0, at.z + dz), v3(at.x - H, 0, at.z + dz));
     let along = |at: Vec3| (v3(at.x, 0, at.z + 2_200_000), v3(at.x, 0, at.z - 2_200_000));
+    // A frame's carriers stand 2.2 m either side of it along z, clear of the stand, the beams and the other frame, so
+    // they walk east side by side and keep their span (a carry whose carriers drift apart breaks off, C3).
+    let ends = |at: Vec3, dx: i64| {
+        (
+            v3(at.x + dx, 0, at.z - 2_200_000),
+            v3(at.x + dx, 0, at.z + 2_200_000),
+        )
+    };
     let refused = |got: &Got, name: &str, what: &str| {
         println!("{what}: {got:?}");
         assert_eq!((got.kind, got.reason.as_str()), (2, name), "{what}");
     };
 
     // Crews A (Souls 1, 2) and B (Souls 3, 4) each take a frame off the stand and carry it to the bay.
-    let (p, q) = across(where_is(&w, fa).2, 0);
+    let (p, q) = ends(where_is(&w, fa).2, 0);
     both(&mut hands, (0, 1), p, q, "crew A to frame A");
     let crew_a = crew(&mut hands, (0, 1), g);
     let got = hands[0].act("part:take", crew_a, part(fa));
     println!("crew A takes frame A off the stand: {got:?}");
     assert_eq!(got.kind, 1, "taken");
     assert_eq!(where_is(&w, fa).0, Some(crew_a), "frame A rides its crew");
-    let (p, q) = across(where_is(&w, fb).2, 0);
+    let (p, q) = ends(where_is(&w, fb).2, 0);
     both(&mut hands, (2, 3), p, q, "crew B to frame B");
     let crew_b = crew(&mut hands, (2, 3), g);
     assert_eq!(
@@ -2596,9 +2613,9 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
         "frame B taken"
     );
     let (ua, ub) = (slot_at("upright_a"), slot_at("upright_b"));
-    let (p, q) = across(ua, 0);
+    let (p, q) = ends(ua, 0);
     both(&mut hands, (0, 1), p, q, "frame A to the bay");
-    let (p, q) = across(ua, 2_000_000);
+    let (p, q) = ends(ua, -2_000_000);
     both(
         &mut hands,
         (2, 3),
@@ -2611,8 +2628,6 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     hands[2].send("part:put", crew_b, into("upright_a"));
     let got = socket_end(&mut hands[0].s);
     println!("crew A puts frame A in upright_a: {got:?}");
-    for p in logged(&w) { for e in &p.effects { let t = format!("{:?}", e); if t.contains("apart") || t.contains("partner-left") || t.contains("restarted") { println!("DEBUG {}", &t[t.len().saturating_sub(700)..]); } } }
-    for l in s.lines.try_iter() { println!("DEBUG {l}"); }
     assert_eq!(got.kind, 1, "frame A in");
     let got = socket_end(&mut hands[2].s);
     refused(
@@ -2631,7 +2646,7 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     let column = v3(ua.x + 572_000, 0, ua.z);
     hands[1].walk_to(g, column);
     let got = socket_end(&mut hands[1].s);
-    let at = where_is(&w, body_of(&w, w.souls[1])).2;
+    let at = body_at(&w, body_of(&w, w.souls[1]));
     let off = (i128::from(at.x - column.x).pow(2) + i128::from(at.z - column.z).pow(2)).isqrt();
     println!(
         "Soul 2 walks to frame A's column: {got:?}, ends {} mm from it",
@@ -2648,7 +2663,9 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     joined.insert(4, Value::Array(vec![fa.to_value()]));
     let got = hands[2].act("part:put", crew_b, joined);
     refused(&got, "connectors-do-not-mate", "frame B joined to frame A");
-    let (p, q) = across(ub, 0);
+    let (p, q) = ends(ub, -2_000_000);
+    both(&mut hands, (2, 3), p, q, "crew B along z");
+    let (p, q) = ends(ub, 0);
     both(&mut hands, (2, 3), p, q, "crew B on to upright_b");
     let got = hands[2].act("part:put", crew_b, into("upright_b"));
     println!("crew B, its carry going on, puts frame B in upright_b: {got:?}");
@@ -2702,7 +2719,7 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
         let got = hands[3].act("mars:take", b3, BTreeMap::new());
         println!("Soul 4 takes beam 3 in its hand: {got:?}");
         assert_eq!(got.kind, 1, "a beam in a hand");
-        let at = where_is(&w, body_of(&w, w.souls[3])).2;
+        let at = body_at(&w, body_of(&w, w.souls[3]));
         let (p, q) = (v3(at.x, 0, at.z + 900_000), v3(at.x, 0, at.z - 900_000));
         both(&mut hands, (0, 2), p, q, "crew C to Soul 4");
         let got = hands[0].act("part:take", crew_c, part(b3));
