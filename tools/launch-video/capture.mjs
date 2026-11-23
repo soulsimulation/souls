@@ -4,12 +4,12 @@
 //
 //   node tools/launch-video/capture.mjs --url <local world url> --out <file.mp4> [--seconds 10] [--size 1080x1350]
 //        [--fps 60] [--mbps 30] [--hour HH:MM] [--settle 6] [--music on|off] [--headed]
-//        [--shot <shot.json>] [--follow <soul id>]
+//        [--shot <shot.json> [--speed 1|2|4|8]] [--follow <soul id>]
 //
 // --shot:   a planned camera (`souls-shot/1`, apps/web/src/WorldShotTrack.ts). A range over the world's history
 //           (fromTick..toTick, take ticks as `#t=` names them) is cued paused on its first frame and played at the
 //           world's own speed, and the take lasts exactly the range. A live track (`live: true`, `seconds`) starts its
-//           clock with the take.
+//           clock with the take. --speed plays a range faster (the page's own ×2, ×4, ×8), and the take is that much shorter.
 // --follow: the camera follows that Soul (its id as the page's Souls have it, the new client's `s_…-n`), as a
 //           person's Follow does.
 // --hour:   the picture's light (`?hour=`); a world on the new engine keeps its own clock.
@@ -43,10 +43,11 @@ export function takeUrl(url, { hour = null, shot = false } = {}) {
 export const takeSeconds = (shot, seconds) => (shot && !shot.live ? (shot.toTick - shot.fromTick) * shot.dt : shot?.live ? shot.seconds : seconds);
 
 /** Records one take. `onPlay()` is called as the recording starts (a staged scene's beats run from then). → the sidecar */
-export async function capture({ url, out, seconds = 10, size = '1080x1350', fps = 60, mbps = 30, hour = null, settle = 6, music = false, headed = false, shot = null, follow = null, onPlay = null, log = () => {} }) {
+export async function capture({ url, out, seconds = 10, size = '1080x1350', fps = 60, mbps = 30, hour = null, settle = 6, music = false, headed = false, shot = null, follow = null, speed = 1, onPlay = null, log = () => {} }) {
+  if (![1, 2, 4, 8].includes(speed) || (speed > 1 && (!shot || shot.live))) throw Error('--speed: 1, 2, 4 or 8, for a range of history');
   if (!url || !/^https?:\/\/(127\.0\.0\.1|localhost)[:/]/.test(url)) throw Error('--url must be a local world URL');
   out = resolve(out);
-  seconds = takeSeconds(shot, seconds);
+  seconds = takeSeconds(shot, seconds) / speed;
   const [width, height] = size.split('x').map(Number);
   mkdirSync(dirname(out), { recursive: true });
   const chromium = createRequire(resolve(root, 'mars/viewer/package.json'))('@playwright/test').chromium;
@@ -81,6 +82,8 @@ export async function capture({ url, out, seconds = 10, size = '1080x1350', fps 
         await page.waitForFunction(() => !!window.__soulsShot, null, { timeout: 30_000 });
         if (!(await page.evaluate(() => window.__soulsShot.cue()))) throw Error('the shot\'s range is not in the world\'s history');
         if (!shot.live) await sleep(2500); // the first frame of the range, people drawn, camera on its first pose
+        // faster than the world's own speed: the page's own button (K3: ×1, ×2, ×4, ×8), pressed as a viewer presses it
+        for (let i = 0; speed > 1 && i < 4 && (await page.locator('button[title="Play faster"]').textContent().catch(() => null)) !== `×${speed}`; i++) await page.locator('button[title="Play faster"]').click();
       }
       gpu = await page.evaluate(() => { const c = document.createElement('canvas').getContext('webgl2'), x = c?.getExtension('WEBGL_debug_renderer_info'); return x ? c.getParameter(x.UNMASKED_RENDERER_WEBGL) : null; });
       onPlay?.();
@@ -109,7 +112,7 @@ export async function capture({ url, out, seconds = 10, size = '1080x1350', fps 
   const ff = spawnSync('ffmpeg', ['-y', '-loglevel', 'error', '-i', raw, '-r', String(fps), '-c:v', 'libx264', '-crf', '14', '-preset', 'slow', '-pix_fmt', 'yuv420p', '-c:a', 'aac', '-b:a', '256k', '-movflags', '+faststart', out], { encoding: 'utf8' });
   const probe = spawnSync('ffprobe', ['-v', 'error', '-show_entries', 'stream=codec_type,width,height,nb_frames,avg_frame_rate,duration', '-of', 'json', out], { encoding: 'utf8' });
   const vol = spawnSync('ffmpeg', ['-i', out, '-af', 'volumedetect', '-vn', '-f', 'null', '-'], { encoding: 'utf8' }).stderr.match(/(mean|max)_volume: [-\d.]+ dB/g) ?? [];
-  const sidecar = { size: [width, height], seconds, shot: shot ? { move: shot.move, live: !!shot.live, fromTick: shot.fromTick ?? null, toTick: shot.toTick ?? null } : null, follow, fps, hour, music, gpu, pacing, volume: vol, streams: JSON.parse(probe.stdout || '{}').streams ?? [], pageErrors: errors, ffmpeg: ff.status === 0 ? 'ok' : ff.stderr.slice(0, 400) };
+  const sidecar = { size: [width, height], seconds, speed, shot: shot ? { move: shot.move, live: !!shot.live, fromTick: shot.fromTick ?? null, toTick: shot.toTick ?? null } : null, follow, fps, hour, music, gpu, pacing, volume: vol, streams: JSON.parse(probe.stdout || '{}').streams ?? [], pageErrors: errors, ffmpeg: ff.status === 0 ? 'ok' : ff.stderr.slice(0, 400) };
   writeFileSync(`${out}.json`, JSON.stringify(sidecar, null, 1));
   if (ff.status !== 0) throw Error(`ffmpeg: ${ff.stderr.slice(0, 300)}`);
   return sidecar;
@@ -120,6 +123,6 @@ if (isMain(import.meta.url)) {
   const flag = (k) => process.argv.includes(`--${k}`);
   const sidecar = await capture({ url: arg('url'), out: arg('out', '.local/launch-video/take.mp4'), seconds: Number(arg('seconds', 10)), size: arg('size', '1080x1350'),
     fps: Number(arg('fps', 60)), mbps: Number(arg('mbps', 30)), hour: arg('hour', null), settle: Number(arg('settle', 6)), music: arg('music', 'off') === 'on', headed: flag('headed'),
-    shot: arg('shot') ? JSON.parse(readFileSync(resolve(arg('shot')), 'utf8')) : null, follow: arg('follow', null) });
+    shot: arg('shot') ? JSON.parse(readFileSync(resolve(arg('shot')), 'utf8')) : null, follow: arg('follow', null), speed: Number(arg('speed', 1)) });
   console.log(JSON.stringify(sidecar, null, 1));
 }

@@ -3,6 +3,14 @@
 // (#1963; 0.135 P3). Gene: tests, proofs, promotional clips and a Soul's highlights all rest on this.
 //
 //   node tools/launch-video/scene.mjs <scene.json> [--out .local/launch-video] [--keep] [--size 1280x720] [--headed]
+//   node tools/launch-video/scene.mjs --span --page <a world's old page> --from <moment> (--to <moment> | --seconds n)
+//        --camera '<camera json>' | <file> [--speed 1|2|4|8] [--world-dir <its folder>] [--out <file.mp4>] [--size 1280x720]
+//
+// --span (0.135 P4) records a past span of a world's history instead: on its old page, from the first tick of the span
+// at ×1 or faster (the page's own ×2, ×4, ×8), uncut. A moment is world µs, a moment link (`…#t=<µs>`, the page's "Link
+// to this moment"), an ISO time, or `first` (the first moment the world ran). The camera is fixed or a path (`at`
+// seconds from the span's start), for any world the page reaches; or `{"follow": "<body id>"}` or `{"plan": {…}}`,
+// planned around the world's solids from its folder (--world-dir: `facts.json` and `history/`, a local world's).
 //
 // 1. The world: tools/playtest/arena/new-engine/old-page.mjs brings up the old page (apps/web) on a new-engine world of
 //    the scene's genesis (a committed template, or the scene's own file), with `world.add`'s things placed in it before
@@ -35,14 +43,14 @@
 //
 // Written to <out>/<name>/: the clip (<name>.mp4) and its sidecar, run.json (the scene, each Soul's body, every command
 // and its answer), the world's folder and logs. Never commit them.
-import { mkdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
 import { isMain } from '../lib/is-main.mjs';
 import { REPO_ROOT } from '../lib/paths.mjs';
 import { startOldPage } from '../playtest/arena/new-engine/old-page.mjs';
 import { pairSeat } from '../playtest/arena/new-engine/seat.mjs';
 import { capture } from './capture.mjs';
-import { shoot } from './shoot.mjs';
+import { shoot, TICK_US } from './shoot.mjs';
 
 const sleep = (s) => new Promise((ok) => setTimeout(ok, s * 1000));
 
@@ -149,6 +157,64 @@ export async function stage(scene, { out, keep = false, size = null, headed = fa
     for (const s of Object.values(seats)) await s.stop();
     if (!keep) await world.stop();
   }
+}
+
+// ---- A past span of a world (0.135 P4) ----------------------------------------------------------------------------
+
+/** A moment as the page names it: world µs, a moment link (`…#t=<µs>`), an ISO time, or `first` (the first moment the
+ *  world ran, from its folder's history: the earliest bundle after the seeded record at 0). → µs */
+export function momentOf(s, { worldDir = null } = {}) {
+  const t = String(s ?? '');
+  if (/^\d+$/.test(t)) return Number(t);
+  const link = /[#&]t=(\d+)/.exec(t);
+  if (link) return Number(link[1]);
+  if (t === 'first') {
+    if (!worldDir) throw Error('--from first needs --world-dir (the world\'s folder, for its history)');
+    const days = readdirSync(join(worldDir, 'history/bundles')).filter((d) => /^\d+$/.test(d) && Number(d) > 0).sort();
+    const starts = days.length ? readdirSync(join(worldDir, 'history/bundles', days[0])).map((f) => /^(\d+)-/.exec(f)?.[1]).filter(Boolean).map(Number) : [];
+    if (!starts.length) throw Error(`no history in ${worldDir}`);
+    return Math.min(...starts);
+  }
+  const ms = Date.parse(t);
+  if (Number.isFinite(ms)) return ms * 1000;
+  throw Error(`not a moment: ${t} (µs, a #t= link, an ISO time or first)`);
+}
+
+/** A fixed pose or a path (its `at` seconds from the span's start) as a range of take ticks the page replays. */
+export function rangeShot(camera, { fromUs, toUs, aspect }) {
+  const live = cameraShot(camera, (toUs - fromUs) / 1e6, aspect), { live: _l, seconds: _s, ...rest } = live;
+  return { ...rest, fromTick: Math.round(fromUs / TICK_US), toTick: Math.round(toUs / TICK_US), dt: TICK_US / 1e6 };
+}
+
+/** Records [fromUs, toUs] of a world's history on its old page (`page`), from the camera's choice: fixed or a path (any
+ *  world the page reaches), or planned around its solids, `plan` or `follow` (a body id; the planner's tracking move),
+ *  which reads the world's folder (`worldDir`). At ×speed; the take is uncut. */
+export async function recordSpan({ page, fromUs, toUs, camera = null, speed = 1, worldDir = null, out, size = '1280x720', hour = null, log = () => {} }) {
+  if (!(toUs > fromUs)) throw Error('the span ends before it starts');
+  const [w, h] = size.split('x').map(Number), seconds = (toUs - fromUs) / 1e6;
+  let shot;
+  camera ??= worldDir ? { plan: {} } : null;
+  if (!camera) throw Error('a span needs a camera (--camera: fixed, path, follow or plan), or --world-dir for a planned one');
+  if (camera.plan || camera.follow) {
+    if (!worldDir) throw Error('a planned or follow camera reads the world\'s folder: --world-dir');
+    // a body by its client id (`<scope>-<n>`) or the page's (`<scope>.<n>`)
+    const p = camera.plan ?? { subjects: [String(camera.follow).replace(/-(\d+)$/, '.$1')], moves: ['track', 'lead'] };
+    shot = (await shoot({ world: worldDir, fromUs, from: 0, seconds, aspect: w / h, subjects: p.subjects ?? null, moves: p.moves, framings: p.framings, log })).shot;
+  } else shot = rangeShot(camera, { fromUs, toUs, aspect: w / h });
+  mkdirSync(resolve(out, '..'), { recursive: true });
+  writeFileSync(`${out.replace(/\.mp4$/, '')}.shot.json`, JSON.stringify(shot));
+  return capture({ url: page, out, shot, speed, size, hour, log });
+}
+
+if (isMain(import.meta.url) && process.argv.includes('--span')) {
+  const arg = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i >= 0 ? process.argv[i + 1] : d; };
+  const worldDir = arg('world-dir', null), cam = arg('camera', null);
+  const camera = cam ? JSON.parse(/^\s*\{/.test(cam) ? cam : readFileSync(resolve(cam), 'utf8')) : null;
+  const fromUs = momentOf(arg('from'), { worldDir }), toUs = arg('to') ? momentOf(arg('to'), { worldDir }) : fromUs + Number(arg('seconds', 10)) * 1e6;
+  const out = resolve(arg('out', join(REPO_ROOT, '.local/launch-video/span.mp4')));
+  const r = await recordSpan({ page: arg('page'), fromUs, toUs, camera, speed: Number(arg('speed', 1)), worldDir, out, size: arg('size', '1280x720'), log: (s) => console.error(`span: ${s}`) });
+  console.log(JSON.stringify({ clip: out, fromUs, toUs, speed: r.speed, seconds: r.seconds, move: r.shot?.move, shotTick: r.pacing?.shotTick, toTick: r.shot?.toTick, fps: r.pacing?.fps, gpu: r.gpu }));
+  process.exit(0);
 }
 
 if (isMain(import.meta.url)) {

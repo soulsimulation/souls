@@ -84,6 +84,16 @@ world's own folder (its solids from `facts.json`, its people from its history), 
 camera (`tools/launch-video/scenes/hamlet-planned.json`). `shoot.mjs --recording <scene dir> --describe` shows who moves
 when, for choosing a shot by hand.
 
+The same command records a past span of a world's history on its old page, at ×1 to ×8, from a fixed or path camera
+(any world the page reaches) or a follow or planned one (a local world's folder):
+
+```sh
+node tools/launch-video/scene.mjs --span --page <old page url> --from '<old page url>#t=<µs>' --to '<…#t=<µs>>' \
+  --camera '{"follow":"<body id>"}' --speed 2 --world-dir <the world's folder>
+```
+
+`--from first` starts at the first moment the world ran.
+
 Everything prints JSON on stdout and logs to stderr. `--server-root` is the Souls checkout whose server the dev worlds
 run from (it needs a built `apps/web/dist`). Pass it explicitly, and pass `--out` or `--runs-root` for where runs go.
 
