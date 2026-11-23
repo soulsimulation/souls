@@ -5,10 +5,14 @@
 // of them (the reader worker's node records: a thing's kind state fields, the world node's sky fields) and, when the
 // layer draws something else, makes the one `world-diff` that brings it to v2's state. Nothing here draws; the layer
 // does, as it draws any diff. The world's clock (calendar fields 60, 61) already rides the chunks (bridge.ts datetime).
+// A thing a Soul sets down elsewhere (B2-2: its node's parent or place changed since the stream first showed it) is
+// moved to where v2 has it: an upsert at its world pose, which the layer eases there as it eases any moved thing. A
+// thing in a body's hand is not (the bodies' adapter draws what is held).
 import { TICK_US } from './takes.ts';
 
 /** The reader's node record, the fields read here (v2/web/src/source/source.ts NodeRec). */
-type NodeLike = { id: string; kind: string; parent: string | null; origin?: string; sky?: Record<number, unknown>; fields?: Record<number, unknown> };
+type NodeLike = { id: string; kind: string; parent: string | null; origin?: string; sky?: Record<number, unknown>; fields?: Record<number, unknown>;
+  slot?: number | null; pos?: [number, number, number]; rot?: [number, number, number, number]; soul?: string | null; slots?: number[][] };
 type Msg = { t: 'part'; p: { nodes: NodeLike[]; removed: string[] } } | { t: 'snapshot'; s: { nodes: NodeLike[]; removed: string[] } } | { t: string };
 
 /** Doors and lamps: a kind's state fields (`content/kinds`, by `n`) and the entity state key the old page draws them by
@@ -57,11 +61,51 @@ export function weatherOf(sky: Record<number, unknown> | undefined | null): OldW
   return w;
 }
 
+/** Where a moved thing is now, in the old page's world frame (the same as v2's: metres, yaw about +y). */
+export type Placed = { p: [number, number, number]; yaw: number };
+type Q4 = [number, number, number, number];
+const Q = 2 ** 30;
+const rotate = (q: Q4, v: [number, number, number]): [number, number, number] => {
+  const [w, x, y, z] = q, [vx, vy, vz] = v;
+  const tx = 2 * (y * vz - z * vy), ty = 2 * (z * vx - x * vz), tz = 2 * (x * vy - y * vx);
+  return [vx + w * tx + (y * tz - z * ty), vy + w * ty + (z * tx - x * tz), vz + w * tz + (x * ty - y * tx)];
+};
+const mul = (a: Q4, b: Q4): Q4 => [a[0] * b[0] - a[1] * b[1] - a[2] * b[2] - a[3] * b[3], a[0] * b[1] + a[1] * b[0] + a[2] * b[3] - a[3] * b[2],
+  a[0] * b[2] - a[1] * b[3] + a[2] * b[0] + a[3] * b[1], a[0] * b[3] + a[1] * b[2] - a[2] * b[1] + a[3] * b[0]];
+/** A body (bridge.ts isBody): a node with a public Soul, or one of a body kind. */
+const isBody = (n: NodeLike) => !!n.soul || /:(humanoid|body)$/.test(n.kind.split('@')[0]);
+const placeOf = (n: NodeLike) => JSON.stringify([n.parent, n.slot ?? null, n.pos, n.rot]);
+
+/** A node's world pose from its chain of frames (positions µm, a slot adds its point, as bridge.ts V2Bridge.world), or
+ *  null when a frame is not in the copy or one is a body (a thing in a hand). */
+export function placedOf(nodes: ReadonlyMap<string, NodeLike>, id: string): Placed | null {
+  let p: [number, number, number] = [0, 0, 0], q: Q4 = [1, 0, 0, 0];
+  for (let n = nodes.get(id), depth = 0; ; depth++) {
+    if (!n || !n.pos || !n.rot || depth > 32 || isBody(n)) return null;
+    // this frame's pose in its parent's, then the parent's slot point, composed from the inside out
+    const nq: Q4 = [n.rot[0] / Q, n.rot[1] / Q, n.rot[2] / Q, n.rot[3] / Q], r0 = rotate(nq, p);
+    p = [n.pos[0] + r0[0], n.pos[1] + r0[1], n.pos[2] + r0[2]]; q = mul(nq, q);
+    if (n.parent === null) break;
+    const up = nodes.get(n.parent), slot = n.slot, s = slot != null ? up?.slots?.find((x) => x[0] === slot) : undefined;
+    if (s) p = [p[0] + s[1] * 1000, p[1] + s[2] * 1000, p[2] + s[3] * 1000];
+    n = up;
+  }
+  return { p: [p[0] / 1e6, p[1] / 1e6, p[2] / 1e6], yaw: 2 * Math.atan2(q[2], q[0]) };
+}
+
 /** The entity layer, the parts read here (WorldEntityLayer's model and diff sequence, private there, read as world-env.ts
  *  reads them). */
-export type LayerLike = { seq?: unknown; model?: { entities: Map<string, { id: string; state?: Record<string, unknown> }>; state?: { weather?: unknown } } | null };
+type EntityLike = { id: string; state?: Record<string, unknown>; in?: { parent: string; slot?: string }; p?: number[]; r?: number | number[]; s?: number };
+export type LayerLike = { seq?: unknown; model?: { entities: Map<string, EntityLike>; state?: { weather?: unknown };
+  worldPose?(e: EntityLike): { x: number; y: number; z: number; yaw: number; s: number } } | null };
 export type WorldDiff = { type: 'edge'; kind: 'world-diff'; seq: number; at: number; by: 'engine'; tick?: number;
   diff: { upserts: unknown[]; removes: string[]; defs: unknown[]; tiles: string[]; world?: { weather: OldWeather } } };
+
+/** Whether the layer draws a thing at a place already: at the world's root there, to the millimetre and the milliradian. */
+const placedAt = (e: EntityLike, to: Placed) => {
+  const p = e.p, yaw = Array.isArray(e.r) ? e.r[0] : e.r ?? 0, turn = Math.abs(((yaw - to.yaw) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI);
+  return e.in?.parent === 'world' && p?.length === 3 && p.every((v, k) => Math.abs(v - to.p[k]) < 1e-3) && turn < 1e-3;
+};
 
 const sameWeather = (a: unknown, b: OldWeather) => {
   const o = a as Partial<OldWeather> | null | undefined;
@@ -73,15 +117,23 @@ const sameWeather = (a: unknown, b: OldWeather) => {
  *  under '', the weather) was read at; the diff carries the latest, so the layer draws a door's or lamp's change when the
  *  page's picture reaches it (light-diff-clock.ts), not seconds before the bodies around it. */
 export function worldDiff(layer: LayerLike | null | undefined, things: ReadonlyMap<string, Record<string, boolean | number>>, weather: OldWeather | null, at: number,
-  ticks: ReadonlyMap<string, number> = new Map()): WorldDiff | null {
+  ticks: ReadonlyMap<string, number> = new Map(), moved: ReadonlyMap<string, Placed> = new Map()): WorldDiff | null {
   const m = layer?.model, seq = layer?.seq;
   if (!m || typeof seq !== 'number') return null;
   const upserts: unknown[] = [];
   let tick = 0;
-  for (const [id, want] of things) {
-    const e = m.entities.get(id);
-    if (!e || Object.entries(want).every(([k, v]) => e.state?.[k] === v)) continue;
-    upserts.push({ ...e, state: { ...e.state, ...want } });
+  for (const id of new Set([...things.keys(), ...moved.keys()])) {
+    const e = m.entities.get(id), want = things.get(id), to = moved.get(id);
+    if (!e) continue;
+    let next: EntityLike = e;
+    if (want && !Object.entries(want).every(([k, v]) => e.state?.[k] === v)) next = { ...next, state: { ...e.state, ...want } };
+    if (to && !placedAt(e, to)) {
+      // at the root of the world, where v2 has it: the layer's world pose of a root thing is its own (WorldModel.worldPose)
+      const tilt = Array.isArray(e.r) ? e.r.slice(1) : [], s = e.in?.parent !== 'world' && m.worldPose ? m.worldPose(e).s : e.s;
+      next = { ...next, in: { parent: 'world' }, p: [...to.p], r: tilt.length ? [to.yaw, ...tilt] : to.yaw, ...(s !== undefined ? { s } : {}) };
+    }
+    if (next === e) continue;
+    upserts.push(next);
     tick = Math.max(tick, ticks.get(id) ?? 0);
   }
   const world = weather && !sameWeather(m.state?.weather, weather) ? { weather } : undefined;
@@ -95,6 +147,12 @@ export class WorldState {
   /** Old entity id (a node's `origin`) → its door or lamp state. */
   readonly things = new Map<string, Record<string, boolean | number>>();
   private readonly origins = new Map<string, string>();
+  /** Every node the stream holds (the frames a moved thing's world pose is composed through). */
+  private readonly nodes = new Map<string, NodeLike>();
+  /** Each thing's place (parent, slot, position, turn) when the stream first showed it: the captured world's. */
+  private readonly first = new Map<string, string>();
+  /** Old entity id → where v2 has a thing that has moved since, while it is not in a hand. */
+  readonly moved = new Map<string, Placed>();
   /** The take tick each state was read at (a part's end; 0 from a snapshot); '' is the weather's. */
   private readonly ticks = new Map<string, number>();
   /** The sequence number of the last diff handed to the page: each is sent once (the layer applies the first of a seq). */
@@ -112,17 +170,35 @@ export class WorldState {
     if (!c) return;
     // a node record does not say when in its part it changed: its end, so a change is never drawn before it happened
     const tick = 'to' in c && typeof c.to === 'number' ? Math.ceil(c.to / TICK_US) : 0;
-    for (const id of c.removed) { const o = this.origins.get(id); if (o) { this.things.delete(o); this.ticks.delete(o); this.origins.delete(id); } }
+    for (const id of c.removed) {
+      this.nodes.delete(id);
+      const o = this.origins.get(id); if (o) { this.things.delete(o); this.moved.delete(o); this.ticks.delete(o); this.origins.delete(id); }
+    }
+    let moves = false;
     for (const n of c.nodes) {
+      this.nodes.set(n.id, n);
       if (n.parent === null && n.sky) { const w = weatherOf(n.sky); if (w) { this.weather = w; this.ticks.set('', tick); } }
       if (!n.origin) continue;
       const s = thingState(n);
       if (s) { this.things.set(n.origin, s); this.ticks.set(n.origin, tick); this.origins.set(n.id, n.origin); }
+      // a thing of the captured world (an old entity id, not a building's room or floor) whose place has changed
+      if (!n.pos || n.origin.includes('/')) continue;
+      const at = placeOf(n), was = this.first.get(n.id);
+      if (was === undefined) this.first.set(n.id, at);
+      else if (was !== at || this.moved.has(n.origin)) { this.origins.set(n.id, n.origin); this.ticks.set(n.origin, tick); moves = true; }
+    }
+    // a moved thing's world pose, again with every part that moves one (its frame may be what moved); while it is in a
+    // hand it is left where it was last at rest
+    if (moves) for (const [id, o] of this.origins) {
+      const n = this.nodes.get(id);
+      if (!n?.pos || (!this.moved.has(o) && this.first.get(id) === placeOf(n))) continue;
+      const w = placedOf(this.nodes, id);
+      if (w) this.moved.set(o, w);
     }
   }
 
   /** The diff for the page's entity layer now, or null (see worldDiff). */
-  diff(layer: LayerLike | null | undefined, at: number): WorldDiff | null { return worldDiff(layer, this.things, this.weather, at, this.ticks); }
+  diff(layer: LayerLike | null | undefined, at: number): WorldDiff | null { return worldDiff(layer, this.things, this.weather, at, this.ticks, this.moved); }
 
   /** The diff to append to the page's edge log now, or null: once per sequence number (while the layer has not applied
    *  it, the same seq is not sent again; whatever is still unlike v2 after it goes in the next). */

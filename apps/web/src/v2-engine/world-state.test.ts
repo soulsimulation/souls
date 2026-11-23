@@ -119,3 +119,65 @@ test('each diff is appended to the page\'s edge log once, beside the messages al
   assert.deepEqual(log, [{ type: 'edge', kind: 'said', at: 1 }, d, d2], 'other edge messages are kept');
   assert.equal(appendEdge(Array.from({ length: 300 }, (_, i) => i), 300).length, 300, 'the last 300, as the socket keeps them');
 });
+
+// B2-2 (0.132 #4239): a thing a Soul takes from one table and puts on another.
+const R = 2 ** 30, ID: [number, number, number, number] = [R, 0, 0, 0];
+const yawQ = (yaw: number): [number, number, number, number] => [Math.round(Math.cos(yaw / 2) * R), 0, Math.round(Math.sin(yaw / 2) * R), 0];
+const at = (id: string, kind: string, parent: string | null, pos: [number, number, number], extra: Record<string, unknown> = {}) =>
+  ({ id, kind, parent, slot: null, pos, rot: ID, ...extra });
+const ROOM = [
+  at('w.1', 'souls:world', null, [0, 0, 0]),
+  at('g.1', 'souls:ground', 'w.1', [0, 0, 0]),
+  at('t.1', 'eden:table', 'g.1', [1_000_000, 0, 2_000_000], { origin: 'e_tablea', slots: [[1, 0, 750, 0, 0, 2]] }),
+  at('t.2', 'eden:table', 'g.1', [5_000_000, 0, 2_000_000], { origin: 'e_tableb', rot: yawQ(Math.PI / 2) }),
+  at('b.1', 'souls:humanoid', 'g.1', [3_000_000, 0, 2_000_000], { soul: 'soul-a-1', slots: [[4, 300, 1_000, 0, 0, 1]] }),
+];
+const CUP = { id: 'c.1', kind: 'eden:cup', origin: 'e_cup' };
+const near = (a: number[], b: number[]) => a.length === b.length && a.every((v, k) => Math.abs(v - b[k]) < 1e-6);
+
+test('a cup taken from one table and put on another is drawn on the second, where v2 has it', () => {
+  const ws = new WorldState();
+  const { l, apply } = layer([{ id: 'e_cup', in: { parent: 'e_tablea', slot: 'top' }, p: [0, 0], r: 0.25, state: { tea: 1 } } as never]);
+  ws.receive({ t: 'snapshot', s: { nodes: [...ROOM, { ...CUP, parent: 't.1', slot: 1, pos: [0, 0, 0], rot: ID }], removed: [] } });
+  assert.equal(ws.diff(l, 0), null, 'as captured: the layer draws it where it is');
+  // taken: in the Soul's hand (the bodies' adapter draws what is held), so the layer is left as it is
+  ws.receive(part([{ ...CUP, parent: 'b.1', slot: 4, pos: [0, 0, 0], rot: ID }]));
+  assert.equal(ws.diff(l, 0), null, 'a thing in a hand is not moved here');
+  // put down on the other table, half a metre along its top and turned a quarter more
+  ws.receive(part([{ ...CUP, parent: 't.2', slot: null, pos: [500_000, 760_000, 0], rot: yawQ(Math.PI / 2) }]));
+  const d = ws.diff(l, 0)!;
+  assert.equal(d.diff.upserts.length, 1);
+  const e = d.diff.upserts[0] as { id: string; in: { parent: string }; p: number[]; r: number; state: unknown };
+  assert.equal(e.id, 'e_cup');
+  assert.deepEqual(e.in, { parent: 'world' }, 'at the world\'s root, so its pose is its own');
+  // table B at (5, 0, 2) turned a quarter: its +x is the world's -z
+  assert.ok(near(e.p, [5, 0.76, 1.5]), `at the second table's top: ${e.p}`);
+  assert.ok(Math.abs(e.r - Math.PI) < 1e-6, 'the table\'s turn and its own');
+  assert.deepEqual(e.state, { tea: 1 }, 'the rest of the record as the layer had it');
+  assert.equal(d.tick, 500_000 / TICK_US, 'drawn when the picture reaches the part that puts it down');
+  apply(d);
+  assert.equal(ws.diff(l, 0), null, 'once drawn there, no diff again');
+  // taken again and put back on the first table's slot
+  ws.receive(part([{ ...CUP, parent: 'b.1', slot: 4, pos: [0, 0, 0], rot: ID }]));
+  assert.equal(ws.diff(l, 0), null, 'in the hand again: left where it was last at rest');
+  ws.receive(part([{ ...CUP, parent: 't.1', slot: 1, pos: [0, 0, 0], rot: ID }]));
+  apply(ws.diff(l, 0));
+  const back = l.model.entities.get('e_cup') as unknown as { p: number[]; r: number };
+  assert.ok(near(back.p, [1, 0.75, 2]) && Math.abs(back.r) < 1e-6, `back on the first table's slot: ${back.p}`);
+});
+
+test('a moved thing keeps its tilt and its door or lamp state goes in the same upsert; things that never moved make no diff', () => {
+  const ws = new WorldState();
+  const { l } = layer([{ id: 'e_lamp', in: { parent: 'world' }, p: [1, 0, 2], r: [0, 0.1, 0], state: { on: false } }, { id: 'e_tablea', in: { parent: 'world' }, p: [1, 0, 2] }] as never);
+  const lamp = { id: 'l.1', kind: 'eden:desk_lamp', origin: 'e_lamp', fields: { 28: 0 } };
+  ws.receive({ t: 'snapshot', s: { nodes: [...ROOM, { ...lamp, parent: 'g.1', slot: null, pos: [1_000_000, 0, 2_000_000], rot: ID }], removed: [] } });
+  assert.equal(ws.diff(l, 0), null, 'nothing has moved or changed: the tables and the lamp as captured');
+  ws.receive(part([{ ...lamp, fields: { 28: 1 }, parent: 'g.1', slot: null, pos: [2_000_000, 0, 2_000_000], rot: ID }]));
+  const up = ws.diff(l, 0)!.diff.upserts as { id: string; p: number[]; r: number[]; state: unknown }[];
+  assert.equal(up.length, 1);
+  assert.ok(near(up[0].p, [2, 0, 2]));
+  assert.deepEqual(up[0].r, [0, 0.1, 0], 'its yaw from v2, its tilt as the layer had it');
+  assert.deepEqual(up[0].state, { on: true });
+  ws.receive(part([], ['l.1']));
+  assert.equal(ws.moved.has('e_lamp'), false, 'a removed node is no longer v2\'s word');
+});
