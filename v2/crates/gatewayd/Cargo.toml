@@ -7,6 +7,8 @@ description = "Agents' sockets (Engine v2, #2635): held apart from the world, so
 
 [dependencies]
 replica = { path = "../replica" }
+# A creator's uploads: G6's check in a child process, the hold point and the store (#3697).
+assets = { path = "../assets" }
 # WebSocket through axum's upgrade, one task per socket (I1's design).
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws"] }
 tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util", "signal"] }

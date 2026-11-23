@@ -6,6 +6,7 @@ mod fork;
 mod gateway_link;
 mod serve;
 mod sleep;
+mod stopped;
 mod watchdog;
 
 fn main() {
