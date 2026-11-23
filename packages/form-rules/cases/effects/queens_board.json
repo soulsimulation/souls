@@ -1,0 +1,4290 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "All32 single declared-Boolean effects, both solutions, dead-end backtracking and clear/reuse. Generic apply tests replay successful receipts; saved fixtures do not prove native restart or interruption.",
+  "cases": [
+    {
+      "name": "place_r1c1_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r1c1"
+          },
+          "receipt": "place_r1c1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c1",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_set",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": 1,
+            "r1c2": false,
+            "r1c3": false,
+            "r1c4": false,
+            "r2c1": false,
+            "r2c2": false,
+            "r2c3": false,
+            "r2c4": false,
+            "r3c1": false,
+            "r3c2": false,
+            "r3c3": false,
+            "r3c4": false,
+            "r4c1": false,
+            "r4c2": false,
+            "r4c3": false,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_r1c1_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": true,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_r1c1"
+          },
+          "receipt": "remove_r1c1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c1",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": 0,
+            "r1c2": false,
+            "r1c3": false,
+            "r1c4": false,
+            "r2c1": false,
+            "r2c2": false,
+            "r2c3": false,
+            "r2c4": false,
+            "r3c1": false,
+            "r3c2": false,
+            "r3c3": false,
+            "r3c4": false,
+            "r4c1": false,
+            "r4c2": false,
+            "r4c3": false,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r1c2_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r1c2"
+          },
+          "receipt": "place_r1c2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c2",
+                "n": 29,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_set",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": false,
+            "r1c2": 1,
+            "r1c3": false,
+            "r1c4": false,
+            "r2c1": false,
+            "r2c2": false,
+            "r2c3": false,
+            "r2c4": false,
+            "r3c1": false,
+            "r3c2": false,
+            "r3c3": false,
+            "r3c4": false,
+            "r4c1": false,
+            "r4c2": false,
+            "r4c3": false,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_r1c2_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": true,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_r1c2"
+          },
+          "receipt": "remove_r1c2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c2",
+                "n": 29,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": false,
+            "r1c2": 0,
+            "r1c3": false,
+            "r1c4": false,
+            "r2c1": false,
+            "r2c2": false,
+            "r2c3": false,
+            "r2c4": false,
+            "r3c1": false,
+            "r3c2": false,
+            "r3c3": false,
+            "r3c4": false,
+            "r4c1": false,
+            "r4c2": false,
+            "r4c3": false,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r1c3_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r1c3"
+          },
+          "receipt": "place_r1c3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c3",
+                "n": 30,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_set",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": false,
+            "r1c2": false,
+            "r1c3": 1,
+            "r1c4": false,
+            "r2c1": false,
+            "r2c2": false,
+            "r2c3": false,
+            "r2c4": false,
+            "r3c1": false,
+            "r3c2": false,
+            "r3c3": false,
+            "r3c4": false,
+            "r4c1": false,
+            "r4c2": false,
+            "r4c3": false,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_r1c3_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": true,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_r1c3"
+          },
+          "receipt": "remove_r1c3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c3",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": false,
+            "r1c2": false,
+            "r1c3": 0,
+            "r1c4": false,
+            "r2c1": false,
+            "r2c2": false,
+            "r2c3": false,
+            "r2c4": false,
+            "r3c1": false,
+            "r3c2": false,
+            "r3c3": false,
+            "r3c4": false,
+            "r4c1": false,
+            "r4c2": false,
+            "r4c3": false,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r1c4_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r1c4"
+          },
+          "receipt": "place_r1c4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c4",
+                "n": 31,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_set",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": false,
+            "r1c2": false,
+            "r1c3": false,
+            "r1c4": 1,
+            "r2c1": false,
+            "r2c2": false,
+            "r2c3": false,
+            "r2c4": false,
+            "r3c1": false,
+            "r3c2": false,
+            "r3c3": false,
+            "r3c4": false,
+            "r4c1": false,
+            "r4c2": false,
+            "r4c3": false,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_r1c4_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": true,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_r1c4"
+          },
+          "receipt": "remove_r1c4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c4",
+                "n": 31,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": false,
+            "r1c2": false,
+            "r1c3": false,
+            "r1c4": 0,
+            "r2c1": false,
+            "r2c2": false,
+            "r2c3": false,
+            "r2c4": false,
+            "r3c1": false,
+            "r3c2": false,
+            "r3c3": false,
+            "r3c4": false,
+            "r4c1": false,
+            "r4c2": false,
+            "r4c3": false,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r2c1_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r2c1"
+          },
+          "receipt": "place_r2c1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c1",
+                "n": 32,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_set",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": false,
+            "r1c2": false,
+            "r1c3": false,
+            "r1c4": false,
+            "r2c1": 1,
+            "r2c2": false,
+            "r2c3": false,
+            "r2c4": false,
+            "r3c1": false,
+            "r3c2": false,
+            "r3c3": false,
+            "r3c4": false,
+            "r4c1": false,
+            "r4c2": false,
+            "r4c3": false,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_r2c1_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": true,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_r2c1"
+          },
+          "receipt": "remove_r2c1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c1",
+                "n": 32,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": false,
+            "r1c2": false,
+            "r1c3": false,
+            "r1c4": false,
+            "r2c1": 0,
+            "r2c2": false,
+            "r2c3": false,
+            "r2c4": false,
+            "r3c1": false,
+            "r3c2": false,
+            "r3c3": false,
+            "r3c4": false,
+            "r4c1": false,
+            "r4c2": false,
+            "r4c3": false,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r2c2_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r2c2"
+          },
+          "receipt": "place_r2c2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c2",
+                "n": 33,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_set",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": false,
+            "r1c2": false,
+            "r1c3": false,
+            "r1c4": false,
+            "r2c1": false,
+            "r2c2": 1,
+            "r2c3": false,
+            "r2c4": false,
+            "r3c1": false,
+            "r3c2": false,
+            "r3c3": false,
+            "r3c4": false,
+            "r4c1": false,
+            "r4c2": false,
+            "r4c3": false,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_r2c2_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": true,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_r2c2"
+          },
+          "receipt": "remove_r2c2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c2",
+                "n": 33,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": false,
+            "r1c2": false,
+            "r1c3": false,
+            "r1c4": false,
+            "r2c1": false,
+            "r2c2": 0,
+            "r2c3": false,
+            "r2c4": false,
+            "r3c1": false,
+            "r3c2": false,
+            "r3c3": false,
+            "r3c4": false,
+            "r4c1": false,
+            "r4c2": false,
+            "r4c3": false,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r2c3_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r2c3"
+          },
+          "receipt": "place_r2c3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c3",
+                "n": 34,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_set",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": false,
+            "r1c2": false,
+            "r1c3": false,
+            "r1c4": false,
+            "r2c1": false,
+            "r2c2": false,
+            "r2c3": 1,
+            "r2c4": false,
+            "r3c1": false,
+            "r3c2": false,
+            "r3c3": false,
+            "r3c4": false,
+            "r4c1": false,
+            "r4c2": false,
+            "r4c3": false,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_r2c3_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": true,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_r2c3"
+          },
+          "receipt": "remove_r2c3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c3",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": false,
+            "r1c2": false,
+            "r1c3": false,
+            "r1c4": false,
+            "r2c1": false,
+            "r2c2": false,
+            "r2c3": 0,
+            "r2c4": false,
+            "r3c1": false,
+            "r3c2": false,
+            "r3c3": false,
+            "r3c4": false,
+            "r4c1": false,
+            "r4c2": false,
+            "r4c3": false,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r2c4_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r2c4"
+          },
+          "receipt": "place_r2c4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c4",
+                "n": 35,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_set",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": false,
+            "r1c2": false,
+            "r1c3": false,
+            "r1c4": false,
+            "r2c1": false,
+            "r2c2": false,
+            "r2c3": false,
+            "r2c4": 1,
+            "r3c1": false,
+            "r3c2": false,
+            "r3c3": false,
+            "r3c4": false,
+            "r4c1": false,
+            "r4c2": false,
+            "r4c3": false,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_r2c4_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": true,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_r2c4"
+          },
+          "receipt": "remove_r2c4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c4",
+                "n": 35,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": false,
+            "r1c2": false,
+            "r1c3": false,
+            "r1c4": false,
+            "r2c1": false,
+            "r2c2": false,
+            "r2c3": false,
+            "r2c4": 0,
+            "r3c1": false,
+            "r3c2": false,
+            "r3c3": false,
+            "r3c4": false,
+            "r4c1": false,
+            "r4c2": false,
+            "r4c3": false,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r3c1_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r3c1"
+          },
+          "receipt": "place_r3c1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c1",
+                "n": 36,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_set",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": false,
+            "r1c2": false,
+            "r1c3": false,
+            "r1c4": false,
+            "r2c1": false,
+            "r2c2": false,
+            "r2c3": false,
+            "r2c4": false,
+            "r3c1": 1,
+            "r3c2": false,
+            "r3c3": false,
+            "r3c4": false,
+            "r4c1": false,
+            "r4c2": false,
+            "r4c3": false,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_r3c1_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": true,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_r3c1"
+          },
+          "receipt": "remove_r3c1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c1",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": false,
+            "r1c2": false,
+            "r1c3": false,
+            "r1c4": false,
+            "r2c1": false,
+            "r2c2": false,
+            "r2c3": false,
+            "r2c4": false,
+            "r3c1": 0,
+            "r3c2": false,
+            "r3c3": false,
+            "r3c4": false,
+            "r4c1": false,
+            "r4c2": false,
+            "r4c3": false,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r3c2_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r3c2"
+          },
+          "receipt": "place_r3c2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c2",
+                "n": 37,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_set",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": false,
+            "r1c2": false,
+            "r1c3": false,
+            "r1c4": false,
+            "r2c1": false,
+            "r2c2": false,
+            "r2c3": false,
+            "r2c4": false,
+            "r3c1": false,
+            "r3c2": 1,
+            "r3c3": false,
+            "r3c4": false,
+            "r4c1": false,
+            "r4c2": false,
+            "r4c3": false,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_r3c2_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": true,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_r3c2"
+          },
+          "receipt": "remove_r3c2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c2",
+                "n": 37,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": false,
+            "r1c2": false,
+            "r1c3": false,
+            "r1c4": false,
+            "r2c1": false,
+            "r2c2": false,
+            "r2c3": false,
+            "r2c4": false,
+            "r3c1": false,
+            "r3c2": 0,
+            "r3c3": false,
+            "r3c4": false,
+            "r4c1": false,
+            "r4c2": false,
+            "r4c3": false,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r3c3_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r3c3"
+          },
+          "receipt": "place_r3c3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c3",
+                "n": 38,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_set",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": false,
+            "r1c2": false,
+            "r1c3": false,
+            "r1c4": false,
+            "r2c1": false,
+            "r2c2": false,
+            "r2c3": false,
+            "r2c4": false,
+            "r3c1": false,
+            "r3c2": false,
+            "r3c3": 1,
+            "r3c4": false,
+            "r4c1": false,
+            "r4c2": false,
+            "r4c3": false,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_r3c3_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": true,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_r3c3"
+          },
+          "receipt": "remove_r3c3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c3",
+                "n": 38,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": false,
+            "r1c2": false,
+            "r1c3": false,
+            "r1c4": false,
+            "r2c1": false,
+            "r2c2": false,
+            "r2c3": false,
+            "r2c4": false,
+            "r3c1": false,
+            "r3c2": false,
+            "r3c3": 0,
+            "r3c4": false,
+            "r4c1": false,
+            "r4c2": false,
+            "r4c3": false,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r3c4_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r3c4"
+          },
+          "receipt": "place_r3c4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c4",
+                "n": 39,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_set",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": false,
+            "r1c2": false,
+            "r1c3": false,
+            "r1c4": false,
+            "r2c1": false,
+            "r2c2": false,
+            "r2c3": false,
+            "r2c4": false,
+            "r3c1": false,
+            "r3c2": false,
+            "r3c3": false,
+            "r3c4": 1,
+            "r4c1": false,
+            "r4c2": false,
+            "r4c3": false,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_r3c4_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": true,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_r3c4"
+          },
+          "receipt": "remove_r3c4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c4",
+                "n": 39,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": false,
+            "r1c2": false,
+            "r1c3": false,
+            "r1c4": false,
+            "r2c1": false,
+            "r2c2": false,
+            "r2c3": false,
+            "r2c4": false,
+            "r3c1": false,
+            "r3c2": false,
+            "r3c3": false,
+            "r3c4": 0,
+            "r4c1": false,
+            "r4c2": false,
+            "r4c3": false,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r4c1_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r4c1"
+          },
+          "receipt": "place_r4c1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r4c1",
+                "n": 40,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_set",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": false,
+            "r1c2": false,
+            "r1c3": false,
+            "r1c4": false,
+            "r2c1": false,
+            "r2c2": false,
+            "r2c3": false,
+            "r2c4": false,
+            "r3c1": false,
+            "r3c2": false,
+            "r3c3": false,
+            "r3c4": false,
+            "r4c1": 1,
+            "r4c2": false,
+            "r4c3": false,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_r4c1_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": true,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_r4c1"
+          },
+          "receipt": "remove_r4c1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r4c1",
+                "n": 40,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": false,
+            "r1c2": false,
+            "r1c3": false,
+            "r1c4": false,
+            "r2c1": false,
+            "r2c2": false,
+            "r2c3": false,
+            "r2c4": false,
+            "r3c1": false,
+            "r3c2": false,
+            "r3c3": false,
+            "r3c4": false,
+            "r4c1": 0,
+            "r4c2": false,
+            "r4c3": false,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r4c2_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r4c2"
+          },
+          "receipt": "place_r4c2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r4c2",
+                "n": 41,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_set",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": false,
+            "r1c2": false,
+            "r1c3": false,
+            "r1c4": false,
+            "r2c1": false,
+            "r2c2": false,
+            "r2c3": false,
+            "r2c4": false,
+            "r3c1": false,
+            "r3c2": false,
+            "r3c3": false,
+            "r3c4": false,
+            "r4c1": false,
+            "r4c2": 1,
+            "r4c3": false,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_r4c2_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": true,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_r4c2"
+          },
+          "receipt": "remove_r4c2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r4c2",
+                "n": 41,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": false,
+            "r1c2": false,
+            "r1c3": false,
+            "r1c4": false,
+            "r2c1": false,
+            "r2c2": false,
+            "r2c3": false,
+            "r2c4": false,
+            "r3c1": false,
+            "r3c2": false,
+            "r3c3": false,
+            "r3c4": false,
+            "r4c1": false,
+            "r4c2": 0,
+            "r4c3": false,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r4c3_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r4c3"
+          },
+          "receipt": "place_r4c3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r4c3",
+                "n": 42,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_set",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": false,
+            "r1c2": false,
+            "r1c3": false,
+            "r1c4": false,
+            "r2c1": false,
+            "r2c2": false,
+            "r2c3": false,
+            "r2c4": false,
+            "r3c1": false,
+            "r3c2": false,
+            "r3c3": false,
+            "r3c4": false,
+            "r4c1": false,
+            "r4c2": false,
+            "r4c3": 1,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_r4c3_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": true,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_r4c3"
+          },
+          "receipt": "remove_r4c3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r4c3",
+                "n": 42,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": false,
+            "r1c2": false,
+            "r1c3": false,
+            "r1c4": false,
+            "r2c1": false,
+            "r2c2": false,
+            "r2c3": false,
+            "r2c4": false,
+            "r3c1": false,
+            "r3c2": false,
+            "r3c3": false,
+            "r3c4": false,
+            "r4c1": false,
+            "r4c2": false,
+            "r4c3": 0,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r4c4_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r4c4"
+          },
+          "receipt": "place_r4c4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r4c4",
+                "n": 43,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_set",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": false,
+            "r1c2": false,
+            "r1c3": false,
+            "r1c4": false,
+            "r2c1": false,
+            "r2c2": false,
+            "r2c3": false,
+            "r2c4": false,
+            "r3c1": false,
+            "r3c2": false,
+            "r3c3": false,
+            "r3c4": false,
+            "r4c1": false,
+            "r4c2": false,
+            "r4c3": false,
+            "r4c4": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_r4c4_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_r4c4"
+          },
+          "receipt": "remove_r4c4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r4c4",
+                "n": 43,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": false,
+            "r1c2": false,
+            "r1c3": false,
+            "r1c4": false,
+            "r2c1": false,
+            "r2c2": false,
+            "r2c3": false,
+            "r2c4": false,
+            "r3c1": false,
+            "r3c2": false,
+            "r3c3": false,
+            "r3c4": false,
+            "r4c1": false,
+            "r4c2": false,
+            "r4c3": false,
+            "r4c4": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "first_solution_clear_reuse",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r1c3"
+          },
+          "receipt": "first_solution_clear_reuse0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c3",
+                "n": 30,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_set",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r2c1"
+          },
+          "receipt": "first_solution_clear_reuse1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c1",
+                "n": 32,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_set",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r3c4"
+          },
+          "receipt": "first_solution_clear_reuse2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c4",
+                "n": 39,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_set",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r4c2"
+          },
+          "receipt": "first_solution_clear_reuse3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r4c2",
+                "n": 41,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_set",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_r4c2"
+          },
+          "receipt": "first_solution_clear_reuse4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r4c2",
+                "n": 41,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_r3c4"
+          },
+          "receipt": "first_solution_clear_reuse5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c4",
+                "n": 39,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_r2c1"
+          },
+          "receipt": "first_solution_clear_reuse6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c1",
+                "n": 32,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_r1c3"
+          },
+          "receipt": "first_solution_clear_reuse7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c3",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r1c1"
+          },
+          "receipt": "first_solution_clear_reuse8",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c1",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_set",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_r1c1"
+          },
+          "receipt": "first_solution_clear_reuse9",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c1",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": 0,
+            "r1c2": false,
+            "r1c3": 0,
+            "r1c4": false,
+            "r2c1": 0,
+            "r2c2": false,
+            "r2c3": false,
+            "r2c4": false,
+            "r3c1": false,
+            "r3c2": false,
+            "r3c3": false,
+            "r3c4": 0,
+            "r4c1": false,
+            "r4c2": 0,
+            "r4c3": false,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "second_solution_clear",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r1c2"
+          },
+          "receipt": "second_solution_clear0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c2",
+                "n": 29,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_set",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r2c4"
+          },
+          "receipt": "second_solution_clear1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c4",
+                "n": 35,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_set",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r3c1"
+          },
+          "receipt": "second_solution_clear2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c1",
+                "n": 36,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_set",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r4c3"
+          },
+          "receipt": "second_solution_clear3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r4c3",
+                "n": 42,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_set",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_r4c3"
+          },
+          "receipt": "second_solution_clear4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r4c3",
+                "n": 42,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_r3c1"
+          },
+          "receipt": "second_solution_clear5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c1",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_r2c4"
+          },
+          "receipt": "second_solution_clear6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c4",
+                "n": 35,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_r1c2"
+          },
+          "receipt": "second_solution_clear7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c2",
+                "n": 29,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": false,
+            "r1c2": 0,
+            "r1c3": false,
+            "r1c4": false,
+            "r2c1": false,
+            "r2c2": false,
+            "r2c3": false,
+            "r2c4": 0,
+            "r3c1": 0,
+            "r3c2": false,
+            "r3c3": false,
+            "r3c4": false,
+            "r4c1": false,
+            "r4c2": false,
+            "r4c3": 0,
+            "r4c4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "dead_end_backtrack",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:queens_board",
+            "fields": {
+              "r1c1": false,
+              "r1c2": false,
+              "r1c3": false,
+              "r1c4": false,
+              "r2c1": false,
+              "r2c2": false,
+              "r2c3": false,
+              "r2c4": false,
+              "r3c1": false,
+              "r3c2": false,
+              "r3c3": false,
+              "r3c4": false,
+              "r4c1": false,
+              "r4c2": false,
+              "r4c3": false,
+              "r4c4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              570
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r1c1"
+          },
+          "receipt": "dead_end_backtrack0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c1",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_set",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r2c4"
+          },
+          "receipt": "dead_end_backtrack1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c4",
+                "n": 35,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_set",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r3c2"
+          },
+          "receipt": "dead_end_backtrack2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c2",
+                "n": 37,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_set",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_r3c2"
+          },
+          "receipt": "dead_end_backtrack3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c2",
+                "n": 37,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_r2c4"
+          },
+          "receipt": "dead_end_backtrack4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c4",
+                "n": 35,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_r1c1"
+          },
+          "receipt": "dead_end_backtrack5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c1",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:queen_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:queens_board",
+          "fields": {
+            "r1c1": 0,
+            "r1c2": false,
+            "r1c3": false,
+            "r1c4": false,
+            "r2c1": false,
+            "r2c2": false,
+            "r2c3": false,
+            "r2c4": 0,
+            "r3c1": false,
+            "r3c2": 0,
+            "r3c3": false,
+            "r3c4": false,
+            "r4c1": false,
+            "r4c2": false,
+            "r4c3": false,
+            "r4c4": false
+          }
+        }
+      }
+    }
+  ]
+}

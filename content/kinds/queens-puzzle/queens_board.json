@@ -1,0 +1,4410 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:queens_board",
+  "owner": "thing",
+  "state": {
+    "r1c1": {
+      "n": 28,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "r1c2": {
+      "n": 29,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "r1c3": {
+      "n": 30,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "r1c4": {
+      "n": 31,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "r2c1": {
+      "n": 32,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "r2c2": {
+      "n": 33,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "r2c3": {
+      "n": 34,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "r2c4": {
+      "n": 35,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "r3c1": {
+      "n": 36,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "r3c2": {
+      "n": 37,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "r3c3": {
+      "n": 38,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "r3c4": {
+      "n": 39,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "r4c1": {
+      "n": 40,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "r4c2": {
+      "n": 41,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "r4c3": {
+      "n": 42,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "r4c4": {
+      "n": 43,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        1050
+      ],
+      "yaw_mdeg": 180000
+    },
+    "board": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        850,
+        570
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1420,
+      900,
+      1320
+    ]
+  },
+  "forms": {
+    "place_r1c1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r1c1",
+          "is": false,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r1c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r1c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r1c1",
+          "to": true,
+          "event": "queen_set"
+        }
+      ]
+    },
+    "remove_r1c1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r1c1",
+          "is": true,
+          "says": "already_empty"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r1c1",
+          "to": false,
+          "event": "queen_cleared"
+        }
+      ]
+    },
+    "place_r1c2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r1c2",
+          "is": false,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r1c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r1c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r1c2",
+          "to": true,
+          "event": "queen_set"
+        }
+      ]
+    },
+    "remove_r1c2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r1c2",
+          "is": true,
+          "says": "already_empty"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r1c2",
+          "to": false,
+          "event": "queen_cleared"
+        }
+      ]
+    },
+    "place_r1c3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r1c3",
+          "is": false,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r1c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r1c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r1c3",
+          "to": true,
+          "event": "queen_set"
+        }
+      ]
+    },
+    "remove_r1c3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r1c3",
+          "is": true,
+          "says": "already_empty"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r1c3",
+          "to": false,
+          "event": "queen_cleared"
+        }
+      ]
+    },
+    "place_r1c4": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r1c4",
+          "is": false,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r1c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r1c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r1c4",
+          "to": true,
+          "event": "queen_set"
+        }
+      ]
+    },
+    "remove_r1c4": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r1c4",
+          "is": true,
+          "says": "already_empty"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r1c4",
+          "to": false,
+          "event": "queen_cleared"
+        }
+      ]
+    },
+    "place_r2c1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r2c1",
+          "is": false,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r1c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r2c1",
+          "to": true,
+          "event": "queen_set"
+        }
+      ]
+    },
+    "remove_r2c1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r2c1",
+          "is": true,
+          "says": "already_empty"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r2c1",
+          "to": false,
+          "event": "queen_cleared"
+        }
+      ]
+    },
+    "place_r2c2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r2c2",
+          "is": false,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r1c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r1c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r2c2",
+          "to": true,
+          "event": "queen_set"
+        }
+      ]
+    },
+    "remove_r2c2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r2c2",
+          "is": true,
+          "says": "already_empty"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r2c2",
+          "to": false,
+          "event": "queen_cleared"
+        }
+      ]
+    },
+    "place_r2c3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r2c3",
+          "is": false,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r1c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r1c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r2c3",
+          "to": true,
+          "event": "queen_set"
+        }
+      ]
+    },
+    "remove_r2c3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r2c3",
+          "is": true,
+          "says": "already_empty"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r2c3",
+          "to": false,
+          "event": "queen_cleared"
+        }
+      ]
+    },
+    "place_r2c4": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r2c4",
+          "is": false,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r1c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r2c4",
+          "to": true,
+          "event": "queen_set"
+        }
+      ]
+    },
+    "remove_r2c4": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r2c4",
+          "is": true,
+          "says": "already_empty"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r2c4",
+          "to": false,
+          "event": "queen_cleared"
+        }
+      ]
+    },
+    "place_r3c1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r3c1",
+          "is": false,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r1c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r3c1",
+          "to": true,
+          "event": "queen_set"
+        }
+      ]
+    },
+    "remove_r3c1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r3c1",
+          "is": true,
+          "says": "already_empty"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r3c1",
+          "to": false,
+          "event": "queen_cleared"
+        }
+      ]
+    },
+    "place_r3c2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r3c2",
+          "is": false,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r1c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r3c2",
+          "to": true,
+          "event": "queen_set"
+        }
+      ]
+    },
+    "remove_r3c2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r3c2",
+          "is": true,
+          "says": "already_empty"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r3c2",
+          "to": false,
+          "event": "queen_cleared"
+        }
+      ]
+    },
+    "place_r3c3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r3c3",
+          "is": false,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r1c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r3c3",
+          "to": true,
+          "event": "queen_set"
+        }
+      ]
+    },
+    "remove_r3c3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r3c3",
+          "is": true,
+          "says": "already_empty"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r3c3",
+          "to": false,
+          "event": "queen_cleared"
+        }
+      ]
+    },
+    "place_r3c4": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r3c4",
+          "is": false,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r1c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r3c4",
+          "to": true,
+          "event": "queen_set"
+        }
+      ]
+    },
+    "remove_r3c4": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r3c4",
+          "is": true,
+          "says": "already_empty"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r3c4",
+          "to": false,
+          "event": "queen_cleared"
+        }
+      ]
+    },
+    "place_r4c1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r4c1",
+          "is": false,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r1c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r4c1",
+          "to": true,
+          "event": "queen_set"
+        }
+      ]
+    },
+    "remove_r4c1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r4c1",
+          "is": true,
+          "says": "already_empty"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r4c1",
+          "to": false,
+          "event": "queen_cleared"
+        }
+      ]
+    },
+    "place_r4c2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r4c2",
+          "is": false,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r4c2",
+          "to": true,
+          "event": "queen_set"
+        }
+      ]
+    },
+    "remove_r4c2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r4c2",
+          "is": true,
+          "says": "already_empty"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r4c2",
+          "to": false,
+          "event": "queen_cleared"
+        }
+      ]
+    },
+    "place_r4c3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r4c3",
+          "is": false,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r4c3",
+          "to": true,
+          "event": "queen_set"
+        }
+      ]
+    },
+    "remove_r4c3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r4c3",
+          "is": true,
+          "says": "already_empty"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r4c3",
+          "to": false,
+          "event": "queen_cleared"
+        }
+      ]
+    },
+    "place_r4c4": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r4c4",
+          "is": false,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r1c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r2c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r3c4",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c1",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c2",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "state",
+          "field": "r4c3",
+          "is": false,
+          "says": "attacked"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r4c4",
+          "to": true,
+          "event": "queen_set"
+        }
+      ]
+    },
+    "remove_r4c4": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r4c4",
+          "is": true,
+          "says": "already_empty"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r4c4",
+          "to": false,
+          "event": "queen_cleared"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:queens_board",
+    "table": [
+      {
+        "part": "r1c1",
+        "field": "r1c1",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      },
+      {
+        "part": "r1c2",
+        "field": "r1c2",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      },
+      {
+        "part": "r1c3",
+        "field": "r1c3",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      },
+      {
+        "part": "r1c4",
+        "field": "r1c4",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      },
+      {
+        "part": "r2c1",
+        "field": "r2c1",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      },
+      {
+        "part": "r2c2",
+        "field": "r2c2",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      },
+      {
+        "part": "r2c3",
+        "field": "r2c3",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      },
+      {
+        "part": "r2c4",
+        "field": "r2c4",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      },
+      {
+        "part": "r3c1",
+        "field": "r3c1",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      },
+      {
+        "part": "r3c2",
+        "field": "r3c2",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      },
+      {
+        "part": "r3c3",
+        "field": "r3c3",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      },
+      {
+        "part": "r3c4",
+        "field": "r3c4",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      },
+      {
+        "part": "r4c1",
+        "field": "r4c1",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      },
+      {
+        "part": "r4c2",
+        "field": "r4c2",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      },
+      {
+        "part": "r4c3",
+        "field": "r4c3",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      },
+      {
+        "part": "r4c4",
+        "field": "r4c4",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      }
+    ],
+    "shape": {
+      "round": 2,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            790,
+            0
+          ],
+          "size": [
+            1400,
+            40,
+            1300
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -630,
+            385,
+            -580
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -630,
+            385,
+            580
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            630,
+            385,
+            -580
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            630,
+            385,
+            580
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            817,
+            0
+          ],
+          "size": [
+            1350,
+            14,
+            1250
+          ],
+          "tint": "paper"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -330,
+            827,
+            -330
+          ],
+          "size": [
+            200,
+            6,
+            200
+          ],
+          "tint": "light"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -110,
+            827,
+            -330
+          ],
+          "size": [
+            200,
+            6,
+            200
+          ],
+          "tint": "dark"
+        },
+        {
+          "kind": "box",
+          "at": [
+            110,
+            827,
+            -330
+          ],
+          "size": [
+            200,
+            6,
+            200
+          ],
+          "tint": "light"
+        },
+        {
+          "kind": "box",
+          "at": [
+            330,
+            827,
+            -330
+          ],
+          "size": [
+            200,
+            6,
+            200
+          ],
+          "tint": "dark"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -330,
+            827,
+            -110
+          ],
+          "size": [
+            200,
+            6,
+            200
+          ],
+          "tint": "dark"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -110,
+            827,
+            -110
+          ],
+          "size": [
+            200,
+            6,
+            200
+          ],
+          "tint": "light"
+        },
+        {
+          "kind": "box",
+          "at": [
+            110,
+            827,
+            -110
+          ],
+          "size": [
+            200,
+            6,
+            200
+          ],
+          "tint": "dark"
+        },
+        {
+          "kind": "box",
+          "at": [
+            330,
+            827,
+            -110
+          ],
+          "size": [
+            200,
+            6,
+            200
+          ],
+          "tint": "light"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -330,
+            827,
+            110
+          ],
+          "size": [
+            200,
+            6,
+            200
+          ],
+          "tint": "light"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -110,
+            827,
+            110
+          ],
+          "size": [
+            200,
+            6,
+            200
+          ],
+          "tint": "dark"
+        },
+        {
+          "kind": "box",
+          "at": [
+            110,
+            827,
+            110
+          ],
+          "size": [
+            200,
+            6,
+            200
+          ],
+          "tint": "light"
+        },
+        {
+          "kind": "box",
+          "at": [
+            330,
+            827,
+            110
+          ],
+          "size": [
+            200,
+            6,
+            200
+          ],
+          "tint": "dark"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -330,
+            827,
+            330
+          ],
+          "size": [
+            200,
+            6,
+            200
+          ],
+          "tint": "dark"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -110,
+            827,
+            330
+          ],
+          "size": [
+            200,
+            6,
+            200
+          ],
+          "tint": "light"
+        },
+        {
+          "kind": "box",
+          "at": [
+            110,
+            827,
+            330
+          ],
+          "size": [
+            200,
+            6,
+            200
+          ],
+          "tint": "dark"
+        },
+        {
+          "kind": "box",
+          "at": [
+            330,
+            827,
+            330
+          ],
+          "size": [
+            200,
+            6,
+            200
+          ],
+          "tint": "light"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -560,
+            827,
+            -330
+          ],
+          "size": [
+            8,
+            6,
+            50
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -330,
+            827,
+            -545
+          ],
+          "size": [
+            8,
+            6,
+            50
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -560,
+            827,
+            -135
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -540,
+            827,
+            -122
+          ],
+          "size": [
+            8,
+            6,
+            25
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -560,
+            827,
+            -110
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": -90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -580,
+            827,
+            -98
+          ],
+          "size": [
+            8,
+            6,
+            25
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -560,
+            827,
+            -85
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -110,
+            827,
+            -570
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -90,
+            827,
+            -558
+          ],
+          "size": [
+            8,
+            6,
+            25
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -110,
+            827,
+            -545
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": -90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -130,
+            827,
+            -532
+          ],
+          "size": [
+            8,
+            6,
+            25
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -110,
+            827,
+            -520
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -560,
+            827,
+            85
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -540,
+            827,
+            110
+          ],
+          "size": [
+            8,
+            6,
+            50
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -560,
+            827,
+            110
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -560,
+            827,
+            135
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            110,
+            827,
+            -570
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            130,
+            827,
+            -545
+          ],
+          "size": [
+            8,
+            6,
+            50
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            110,
+            827,
+            -545
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            110,
+            827,
+            -520
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -580,
+            827,
+            318
+          ],
+          "size": [
+            8,
+            6,
+            25
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -560,
+            827,
+            330
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -540,
+            827,
+            330
+          ],
+          "size": [
+            8,
+            6,
+            50
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            310,
+            827,
+            -558
+          ],
+          "size": [
+            8,
+            6,
+            25
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            330,
+            827,
+            -545
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            350,
+            827,
+            -545
+          ],
+          "size": [
+            8,
+            6,
+            50
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -560,
+            827,
+            -573
+          ],
+          "size": [
+            8,
+            6,
+            50
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -535,
+            827,
+            -545
+          ],
+          "size": [
+            8,
+            6,
+            56
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -560,
+            827,
+            -517
+          ],
+          "size": [
+            8,
+            6,
+            50
+          ],
+          "tint": "ink",
+          "yaw": -90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -585,
+            827,
+            -545
+          ],
+          "size": [
+            8,
+            6,
+            56
+          ],
+          "tint": "ink",
+          "yaw": 180000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -540,
+            827,
+            -521
+          ],
+          "size": [
+            8,
+            6,
+            34
+          ],
+          "tint": "ink",
+          "yaw": 45000
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -330,
+            838,
+            -330
+          ],
+          "r": 60,
+          "h": 16,
+          "segments": 16,
+          "tint": "base",
+          "role": "r1c1"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            -330,
+            846,
+            -330
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              -40,
+              25
+            ],
+            [
+              -45,
+              -25
+            ],
+            [
+              -20,
+              -5
+            ],
+            [
+              0,
+              -38
+            ],
+            [
+              20,
+              -5
+            ],
+            [
+              45,
+              -25
+            ],
+            [
+              40,
+              25
+            ]
+          ],
+          "tint": "crown",
+          "role": "r1c1"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -110,
+            838,
+            -330
+          ],
+          "r": 60,
+          "h": 16,
+          "segments": 16,
+          "tint": "base",
+          "role": "r1c2"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            -110,
+            846,
+            -330
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              -40,
+              25
+            ],
+            [
+              -45,
+              -25
+            ],
+            [
+              -20,
+              -5
+            ],
+            [
+              0,
+              -38
+            ],
+            [
+              20,
+              -5
+            ],
+            [
+              45,
+              -25
+            ],
+            [
+              40,
+              25
+            ]
+          ],
+          "tint": "crown",
+          "role": "r1c2"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            110,
+            838,
+            -330
+          ],
+          "r": 60,
+          "h": 16,
+          "segments": 16,
+          "tint": "base",
+          "role": "r1c3"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            110,
+            846,
+            -330
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              -40,
+              25
+            ],
+            [
+              -45,
+              -25
+            ],
+            [
+              -20,
+              -5
+            ],
+            [
+              0,
+              -38
+            ],
+            [
+              20,
+              -5
+            ],
+            [
+              45,
+              -25
+            ],
+            [
+              40,
+              25
+            ]
+          ],
+          "tint": "crown",
+          "role": "r1c3"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            330,
+            838,
+            -330
+          ],
+          "r": 60,
+          "h": 16,
+          "segments": 16,
+          "tint": "base",
+          "role": "r1c4"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            330,
+            846,
+            -330
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              -40,
+              25
+            ],
+            [
+              -45,
+              -25
+            ],
+            [
+              -20,
+              -5
+            ],
+            [
+              0,
+              -38
+            ],
+            [
+              20,
+              -5
+            ],
+            [
+              45,
+              -25
+            ],
+            [
+              40,
+              25
+            ]
+          ],
+          "tint": "crown",
+          "role": "r1c4"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -330,
+            838,
+            -110
+          ],
+          "r": 60,
+          "h": 16,
+          "segments": 16,
+          "tint": "base",
+          "role": "r2c1"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            -330,
+            846,
+            -110
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              -40,
+              25
+            ],
+            [
+              -45,
+              -25
+            ],
+            [
+              -20,
+              -5
+            ],
+            [
+              0,
+              -38
+            ],
+            [
+              20,
+              -5
+            ],
+            [
+              45,
+              -25
+            ],
+            [
+              40,
+              25
+            ]
+          ],
+          "tint": "crown",
+          "role": "r2c1"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -110,
+            838,
+            -110
+          ],
+          "r": 60,
+          "h": 16,
+          "segments": 16,
+          "tint": "base",
+          "role": "r2c2"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            -110,
+            846,
+            -110
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              -40,
+              25
+            ],
+            [
+              -45,
+              -25
+            ],
+            [
+              -20,
+              -5
+            ],
+            [
+              0,
+              -38
+            ],
+            [
+              20,
+              -5
+            ],
+            [
+              45,
+              -25
+            ],
+            [
+              40,
+              25
+            ]
+          ],
+          "tint": "crown",
+          "role": "r2c2"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            110,
+            838,
+            -110
+          ],
+          "r": 60,
+          "h": 16,
+          "segments": 16,
+          "tint": "base",
+          "role": "r2c3"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            110,
+            846,
+            -110
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              -40,
+              25
+            ],
+            [
+              -45,
+              -25
+            ],
+            [
+              -20,
+              -5
+            ],
+            [
+              0,
+              -38
+            ],
+            [
+              20,
+              -5
+            ],
+            [
+              45,
+              -25
+            ],
+            [
+              40,
+              25
+            ]
+          ],
+          "tint": "crown",
+          "role": "r2c3"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            330,
+            838,
+            -110
+          ],
+          "r": 60,
+          "h": 16,
+          "segments": 16,
+          "tint": "base",
+          "role": "r2c4"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            330,
+            846,
+            -110
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              -40,
+              25
+            ],
+            [
+              -45,
+              -25
+            ],
+            [
+              -20,
+              -5
+            ],
+            [
+              0,
+              -38
+            ],
+            [
+              20,
+              -5
+            ],
+            [
+              45,
+              -25
+            ],
+            [
+              40,
+              25
+            ]
+          ],
+          "tint": "crown",
+          "role": "r2c4"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -330,
+            838,
+            110
+          ],
+          "r": 60,
+          "h": 16,
+          "segments": 16,
+          "tint": "base",
+          "role": "r3c1"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            -330,
+            846,
+            110
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              -40,
+              25
+            ],
+            [
+              -45,
+              -25
+            ],
+            [
+              -20,
+              -5
+            ],
+            [
+              0,
+              -38
+            ],
+            [
+              20,
+              -5
+            ],
+            [
+              45,
+              -25
+            ],
+            [
+              40,
+              25
+            ]
+          ],
+          "tint": "crown",
+          "role": "r3c1"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -110,
+            838,
+            110
+          ],
+          "r": 60,
+          "h": 16,
+          "segments": 16,
+          "tint": "base",
+          "role": "r3c2"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            -110,
+            846,
+            110
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              -40,
+              25
+            ],
+            [
+              -45,
+              -25
+            ],
+            [
+              -20,
+              -5
+            ],
+            [
+              0,
+              -38
+            ],
+            [
+              20,
+              -5
+            ],
+            [
+              45,
+              -25
+            ],
+            [
+              40,
+              25
+            ]
+          ],
+          "tint": "crown",
+          "role": "r3c2"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            110,
+            838,
+            110
+          ],
+          "r": 60,
+          "h": 16,
+          "segments": 16,
+          "tint": "base",
+          "role": "r3c3"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            110,
+            846,
+            110
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              -40,
+              25
+            ],
+            [
+              -45,
+              -25
+            ],
+            [
+              -20,
+              -5
+            ],
+            [
+              0,
+              -38
+            ],
+            [
+              20,
+              -5
+            ],
+            [
+              45,
+              -25
+            ],
+            [
+              40,
+              25
+            ]
+          ],
+          "tint": "crown",
+          "role": "r3c3"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            330,
+            838,
+            110
+          ],
+          "r": 60,
+          "h": 16,
+          "segments": 16,
+          "tint": "base",
+          "role": "r3c4"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            330,
+            846,
+            110
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              -40,
+              25
+            ],
+            [
+              -45,
+              -25
+            ],
+            [
+              -20,
+              -5
+            ],
+            [
+              0,
+              -38
+            ],
+            [
+              20,
+              -5
+            ],
+            [
+              45,
+              -25
+            ],
+            [
+              40,
+              25
+            ]
+          ],
+          "tint": "crown",
+          "role": "r3c4"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -330,
+            838,
+            330
+          ],
+          "r": 60,
+          "h": 16,
+          "segments": 16,
+          "tint": "base",
+          "role": "r4c1"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            -330,
+            846,
+            330
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              -40,
+              25
+            ],
+            [
+              -45,
+              -25
+            ],
+            [
+              -20,
+              -5
+            ],
+            [
+              0,
+              -38
+            ],
+            [
+              20,
+              -5
+            ],
+            [
+              45,
+              -25
+            ],
+            [
+              40,
+              25
+            ]
+          ],
+          "tint": "crown",
+          "role": "r4c1"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -110,
+            838,
+            330
+          ],
+          "r": 60,
+          "h": 16,
+          "segments": 16,
+          "tint": "base",
+          "role": "r4c2"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            -110,
+            846,
+            330
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              -40,
+              25
+            ],
+            [
+              -45,
+              -25
+            ],
+            [
+              -20,
+              -5
+            ],
+            [
+              0,
+              -38
+            ],
+            [
+              20,
+              -5
+            ],
+            [
+              45,
+              -25
+            ],
+            [
+              40,
+              25
+            ]
+          ],
+          "tint": "crown",
+          "role": "r4c2"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            110,
+            838,
+            330
+          ],
+          "r": 60,
+          "h": 16,
+          "segments": 16,
+          "tint": "base",
+          "role": "r4c3"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            110,
+            846,
+            330
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              -40,
+              25
+            ],
+            [
+              -45,
+              -25
+            ],
+            [
+              -20,
+              -5
+            ],
+            [
+              0,
+              -38
+            ],
+            [
+              20,
+              -5
+            ],
+            [
+              45,
+              -25
+            ],
+            [
+              40,
+              25
+            ]
+          ],
+          "tint": "crown",
+          "role": "r4c3"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            330,
+            838,
+            330
+          ],
+          "r": 60,
+          "h": 16,
+          "segments": 16,
+          "tint": "base",
+          "role": "r4c4"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            330,
+            846,
+            330
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              -40,
+              25
+            ],
+            [
+              -45,
+              -25
+            ],
+            [
+              -20,
+              -5
+            ],
+            [
+              0,
+              -38
+            ],
+            [
+              20,
+              -5
+            ],
+            [
+              45,
+              -25
+            ],
+            [
+              40,
+              25
+            ]
+          ],
+          "tint": "crown",
+          "role": "r4c4"
+        }
+      ],
+      "palette": {
+        "wood": "#75543b",
+        "paper": "#eee2c3",
+        "ink": "#142833",
+        "light": "#d6d0b8",
+        "dark": "#7d929d",
+        "base": "#234b73",
+        "crown": "#f4cb69"
+      },
+      "tags": [
+        "puzzle",
+        "queens",
+        "constraint",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "puzzle": "puzzle",
+    "card": "Set and clear fixed queens without row, column or diagonal attacks.",
+    "queens": "four-queens constraint board",
+    "constraint": "nonattacking placement and backtracking",
+    "hands_empty": "Put down what you hold before changing a queen indicator.",
+    "occupied": "That fixed cell indicator is already occupied. Remove it or choose another unthreatened cell.",
+    "attacked": "A queen already attacks this row, column or diagonal. Remove an indicator to backtrack, or choose a cell not attacked.",
+    "already_empty": "That fixed cell indicator is already empty. Place a legal queen or remove an occupied cell.",
+    "coordinates": "This is a four-by-four nonattacking-queens diagram. Seen from the front contact side, rows1 through4 run from the far/top edge toward you, with row numbers on the left. Columns1 through4 run left to right, numbered across the far edge. Each cell has its own original fixed base-and-crown indicator. A place form shows that indicator only if the cell and every other cell in its row, column and both diagonals are empty. A remove form hides only an occupied indicator.",
+    "worked_first": "One complete solution has row1 column3, row2 column1, row3 column4 and row4 column2. Set these four indicators in order; no two share a row, column or diagonal. To clear the board, remove each occupied indicator. There is no reset, automatic solver, score, hatch, winner or claim state.",
+    "worked_second": "The other complete solution has row1 column2, row2 column4, row3 column1 and row4 column3. Both solutions are listed as ordinary actions, not automatically selected. You may remove any occupied indicator at any time to backtrack.",
+    "backtrack": "A legal but nonextendable three-queen partial position is row1 column1, row2 column4, row3 column2. No fourth queen can be added. Remove those occupied indicators to return to empty, then try a different first placement. Mistakes are expected puzzle work; a refused conflicting placement leaves the board unchanged.",
+    "limits": "This is an indexed fixed-indicator constraint diagram with sixteen original per-cell assemblies. Occupied means that cell indicator is shown; empty hides it without creating or destroying pieces. No loose-piece custody, physical queen movement, precise individual-cell finger contact, turn enforcement, alternating multiplayer chess, captures or check rules are claimed."
+  },
+  "card": {
+    "text": "card",
+    "category": "puzzle",
+    "synonyms": [
+      "queens",
+      "constraint"
+    ]
+  },
+  "howtos": {
+    "coordinates": {
+      "text": "coordinates",
+      "steps": [
+        {
+          "form": "place_r1c1"
+        },
+        {
+          "form": "remove_r1c1"
+        }
+      ]
+    },
+    "first_solution": {
+      "text": "worked_first",
+      "steps": [
+        {
+          "form": "place_r1c3"
+        },
+        {
+          "form": "place_r2c1"
+        },
+        {
+          "form": "place_r3c4"
+        },
+        {
+          "form": "place_r4c2"
+        },
+        {
+          "form": "remove_r4c2"
+        },
+        {
+          "form": "remove_r3c4"
+        },
+        {
+          "form": "remove_r2c1"
+        },
+        {
+          "form": "remove_r1c3"
+        }
+      ]
+    },
+    "second_solution": {
+      "text": "worked_second",
+      "steps": [
+        {
+          "form": "place_r1c2"
+        },
+        {
+          "form": "place_r2c4"
+        },
+        {
+          "form": "place_r3c1"
+        },
+        {
+          "form": "place_r4c3"
+        },
+        {
+          "form": "remove_r4c3"
+        },
+        {
+          "form": "remove_r3c1"
+        },
+        {
+          "form": "remove_r2c4"
+        },
+        {
+          "form": "remove_r1c2"
+        }
+      ]
+    },
+    "dead_end_and_backtrack": {
+      "text": "backtrack",
+      "steps": [
+        {
+          "form": "place_r1c1"
+        },
+        {
+          "form": "place_r2c4"
+        },
+        {
+          "form": "place_r3c2"
+        },
+        {
+          "form": "remove_r3c2"
+        },
+        {
+          "form": "remove_r2c4"
+        },
+        {
+          "form": "remove_r1c1"
+        }
+      ]
+    },
+    "fixed_indicators": {
+      "text": "limits",
+      "steps": [
+        {
+          "form": "place_r1c1"
+        },
+        {
+          "form": "remove_r1c1"
+        }
+      ]
+    }
+  }
+}
