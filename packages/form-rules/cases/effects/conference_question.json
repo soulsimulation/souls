@@ -1,0 +1,170 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Standalone forms and the meaningful post-to-withdraw cycle; linked-start and later-link run-gate gaps remain explicit.",
+  "cases": [
+    {
+      "name": "post_one_question",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:conference_question"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "post_question",
+            "args": {
+              "words": "w_next_steps"
+            }
+          },
+          "receipt": "r0",
+          "expect": {
+            "verdict": "yes"
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:conference_question",
+          "fields": {
+            "words": {
+              "text": "w_next_steps"
+            },
+            "pending": 1
+          },
+          "links": {
+            "asker": [
+              "b1"
+            ]
+          }
+        }
+      }
+    },
+    {
+      "name": "author_withdraws_question",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "t1": {
+            "kind": "eden:conference_question",
+            "fields": {
+              "words": {
+                "text": "w_next_steps"
+              },
+              "pending": 1
+            },
+            "links": {
+              "asker": [
+                "b1"
+              ]
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "withdraw_question"
+          },
+          "receipt": "r1",
+          "expect": {
+            "verdict": "yes"
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:conference_question",
+          "links": {
+            "asker": []
+          },
+          "fields": {
+            "pending": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "post_then_withdraw_question",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:conference_question"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "t1",
+            "form": "post_question",
+            "args": {
+              "words": "w_next_steps"
+            }
+          },
+          "receipt": "r0",
+          "expect": {
+            "verdict": "yes"
+          }
+        },
+        {
+          "act": {
+            "this": "t1",
+            "form": "withdraw_question"
+          },
+          "receipt": "r1",
+          "expect": {
+            "verdict": "yes"
+          }
+        }
+      ],
+      "after": {
+        "t1": {
+          "kind": "eden:conference_question",
+          "links": {
+            "asker": []
+          },
+          "fields": {
+            "pending": 0
+          }
+        }
+      }
+    }
+  ]
+}

@@ -1,0 +1,285 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:conference_question",
+  "owner": "thing",
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        900
+      ],
+      "yaw_mdeg": 180000
+    },
+    "face": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        920,
+        60
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      600,
+      1100,
+      600
+    ]
+  },
+  "forms": {
+    "post_question": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "unlinked",
+          "link": "asker",
+          "says": "question_pending"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "face"
+        }
+      ],
+      "effects": [
+        {
+          "change": "link",
+          "link": "asker",
+          "from": "actor",
+          "event": "question_requested"
+        },
+        {
+          "change": "set",
+          "field": "words",
+          "to": {
+            "arg": "words"
+          },
+          "event": "question_posted"
+        },
+        {
+          "change": "set",
+          "field": "pending",
+          "to": true,
+          "event": "request_shown"
+        }
+      ],
+      "takes": {
+        "words": {
+          "type": "text"
+        }
+      }
+    },
+    "withdraw_question": {
+      "who": {
+        "link": "asker"
+      },
+      "starts": "act",
+      "needs": [
+        {
+          "need": "linked",
+          "link": "asker",
+          "says": "no_question"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "face"
+        }
+      ],
+      "effects": [
+        {
+          "change": "unlink",
+          "link": "asker",
+          "from": "actor",
+          "event": "question_withdrawn"
+        },
+        {
+          "change": "set",
+          "field": "words",
+          "to": null,
+          "event": "question_cleared"
+        },
+        {
+          "change": "set",
+          "field": "pending",
+          "to": false,
+          "event": "request_hidden"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "two_souls"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:conference_question",
+    "shape": {
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            30,
+            0
+          ],
+          "size": [
+            600,
+            60,
+            600
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            450,
+            -35
+          ],
+          "size": [
+            80,
+            840,
+            80
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            920,
+            0
+          ],
+          "size": [
+            600,
+            360,
+            100
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            920,
+            55
+          ],
+          "size": [
+            520,
+            280,
+            10
+          ],
+          "tint": "paper"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            810,
+            65
+          ],
+          "size": [
+            180,
+            60,
+            20
+          ],
+          "tint": "blue",
+          "role": "light"
+        }
+      ],
+      "palette": {
+        "frame": "#43505a",
+        "paper": "#f5ead1",
+        "amber": "#e5ac3e",
+        "blue": "#5b91c4",
+        "green": "#76ad73",
+        "red": "#bc5955"
+      },
+      "tags": [
+        "furniture",
+        "conference"
+      ]
+    },
+    "table": [
+      {
+        "part": "light",
+        "field": "pending",
+        "do": "tint",
+        "at": {
+          "false": "#5b91c4",
+          "true": "#e5ac3e"
+        }
+      }
+    ]
+  },
+  "text": {
+    "card": "One pending conference question: post it, then withdraw your request.",
+    "conference": "conference",
+    "howto_question": "Post one question request while the stand is free. Amber marks a pending request. Only its author may withdraw it. Speak using ordinary public speech; this stand neither gives a speech turn nor retains a conversation.",
+    "question_pending": "A question is pending. Its author must use withdraw_question before the next request.",
+    "no_question": "No question is pending. Use post_question to request one."
+  },
+  "card": {
+    "text": "card",
+    "category": "conference"
+  },
+  "state": {
+    "words": {
+      "n": 28,
+      "type": "text",
+      "default": null,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "pending": {
+      "n": 29,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "links": {
+    "asker": {
+      "n": 1,
+      "from": "body",
+      "most": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "howtos": {
+    "question": {
+      "text": "howto_question",
+      "steps": [
+        {
+          "form": "post_question"
+        },
+        {
+          "form": "withdraw_question"
+        }
+      ]
+    }
+  }
+}

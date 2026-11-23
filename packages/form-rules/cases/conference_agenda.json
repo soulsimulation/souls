@@ -1,0 +1,246 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "Conference controls: each form and refusal once.",
+  "cases": [
+    {
+      "name": "post_topic_allowed",
+      "act": {
+        "this": "t1",
+        "form": "post_topic",
+        "args": {
+          "words": "w_next_steps"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:conference_agenda"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "post_topic_refused",
+      "act": {
+        "this": "t1",
+        "form": "post_topic",
+        "args": {
+          "words": "w_next_steps"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:conference_agenda",
+            "fields": {
+              "words": "Existing topic"
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "clear_topic_allowed",
+      "act": {
+        "this": "t1",
+        "form": "clear_topic"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:conference_agenda",
+            "fields": {
+              "words": "Existing topic"
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "clear_topic_refused",
+      "act": {
+        "this": "t1",
+        "form": "clear_topic"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:conference_agenda"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "mark_stage_new",
+      "act": {
+        "this": "t1",
+        "form": "mark_stage",
+        "args": {
+          "stage": "questions"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:conference_agenda",
+            "fields": {
+              "stage": "talks"
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "mark_stage_already_selected",
+      "act": {
+        "this": "t1",
+        "form": "mark_stage",
+        "args": {
+          "stage": "questions"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "t1": {
+            "kind": "eden:conference_agenda",
+            "fields": {
+              "stage": "questions"
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          },
+          "b2": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    }
+  ]
+}
