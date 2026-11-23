@@ -141,7 +141,7 @@ const probe = (page, soul) => page.evaluate((soul) => {
   const s = v.souls.get(soul), chunk = v.takes.chunks.at(-1);
   const e = s && chunk ? chunk.take.finalState.entities[s.entityId] : null;
   const acts = new Set(); for (const c of v.takes.chunks.slice(-3)) for (const ch of c.take.changes ?? []) if (s && ch[1] === s.entityId && ch[2] === 'activity') acts.add(ch[3]);
-  return { doing: s?.doing ?? null, activity: e?.human?.activity ?? null, acts: [...acts], prop: e?.human?.prop ?? null, said: v.speech.filter((x) => x.soulId === soul || x.from === soul).length, p: e?.pose?.p ?? null };
+  return { doing: s?.doing ?? null, activity: e?.human?.activity ?? null, acts: [...acts], prop: e?.human?.prop ?? null, said: v.speech.filter((x) => x.from?.soulId === soul).length, p: e?.pose?.p ?? null };
 }, soul);
 
 // ---- 2: a freshly paired agent ----
@@ -149,11 +149,11 @@ if (ONLY.has('2')) {
   // The agent's own home, named with SOULS_HOME: an empty .souls is not a home, and the client would walk up from here
   // to the nearest real one (a person's own Souls, when the checkout sits in their folder).
   const home = join(OUT, 'agent'); mkdirSync(join(home, '.souls'), { recursive: true });
-  const cli = (...a) => { try { return JSON.parse(execFileSync(process.execPath, [join(repo, 'v2/client/src/cli/souls.mjs'), ...a], { cwd: home, encoding: 'utf8', env: { ...process.env, SOULS_HOME: join(home, '.souls'), SOULS_REPLICA_PKG: PKG }, timeout: 30_000 }).trim().split('\n').at(-1)); } catch (e) { return { ok: false, detail: String(e.stdout ?? e.message).slice(0, 300) }; } };
+  const cli = (...a) => { try { return JSON.parse(execFileSync(process.execPath, [join(repo, 'v2/client/src/cli/souls.mjs'), ...a], { cwd: home, encoding: 'utf8', env: { ...process.env, SOULS_HOME: join(home, '.souls'), SOULS_REPLICA_PKG: PKG }, timeout: 30_000 }).trim().split('\n').at(-1)); } catch (e) { const out = String(e.stdout ?? '').trim().split('\n').at(-1); try { return JSON.parse(out); } catch { return { ok: false, detail: String(out || e.message).slice(0, 300) }; } } };
   const { ctx, page } = await worldPage(true);
   const before = new Set(await page.evaluate(() => [...(window.__soulsV2?.souls.keys() ?? [])]));
   const pair = cli('pair', `${BASE}/${SLUG}?gateway=${BASE.replace(/^http/, 'ws')}/w/${SLUG}/v2/ws`);
-  let soul = null;
+  let connected = false;
   if (pair.link) {
     const card = await (await browser.newContext()).newPage();
     await card.goto(pair.link.replace(/^https?:\/\/[^/]+/, BASE));
@@ -161,62 +161,99 @@ if (ONLY.has('2')) {
     if (await card.locator('#who').isVisible().catch(() => false)) { await card.fill('#person', 'Ada'); await card.locator('#who button').click(); }
     await card.check('#match', { timeout: 15_000 }).catch(() => {});
     await card.click('#approve', { timeout: 15_000 }).catch(() => {});
-    for (let i = 0; i < 30; i++) { const st = cli('status'); if (st.connected === true) break; if (st.ok === false && st.code !== 'not-connected') { log(`status: ${JSON.stringify(st).slice(0, 200)}`); break; } await sleep(1000); }
-    for (let i = 0; i < 60 && !soul; i++) { soul = (await page.evaluate(() => [...(window.__soulsV2?.souls.keys() ?? [])])).find((s) => !before.has(s)) ?? null; if (!soul) await sleep(500); }
+    // the pairing finishes in the background (the client's own pair process): until then no Soul lives in the home
+    for (let i = 0; i < 60 && !connected; i++) { connected = cli('status').connected === true; if (!connected) await sleep(1000); }
   }
-  row(2, 'pair and join', !!soul, soul ? 'paired at /pair, approved in the card, its body on the page' : `pairing: ${JSON.stringify(pair).slice(0, 200)}`);
-  report.lines[2] = { paired: !!soul, steps: [] };
-  if (soul) {
-    // each step: the served client's command, then what the page must show within 2 s
-    const first = (words) => { const f = cli('find', words); const r = (f.results ?? f.rows ?? f.found ?? []).find((x) => x.act); return r?.act ?? null; };
-    const steps = [
-      ['walk', () => first('bench') ?? first('tree'), (s) => s.doing === 'walking' || s.acts.includes('walk')],
-      ['sit', () => first('chair') ?? first('bench'), (s) => s.activity === 'sit' || s.acts.includes('sit')],
-      ['lie', () => first('bed'), (s) => s.activity === 'lie' || s.acts.includes('lie')],
-      ['take', () => first('cup') ?? first('book'), (s) => !!s.prop],
-      ['carry', () => first('table'), (s) => !!s.prop && (s.doing === 'walking' || s.acts.includes('walk'))],
-      ['put down', () => 'hands:set-down', (s) => !s.prop],
-      ['say', () => null, (s, b) => s.said > b.said],
-      ['gesture', () => 'wave', (s) => s.acts.some((a) => /wave|gesture/.test(a))],
-    ];
-    for (const [name, target, shown] of steps) {
-      const b = await probe(page, soul), act = target();
-      const t0 = Date.now();
-      const sent = name === 'say' ? cli('say', 'Hello from the check') : act ? cli('act', act) : { ok: false, detail: 'no target found with find' };
-      let seenMs = null;
-      while (Date.now() - t0 < 6000) { const s = await probe(page, soul); if (s && shown(s, b)) { seenMs = Date.now() - t0; break; } await sleep(100); }
-      const pass = sent.ok !== false && seenMs !== null && seenMs <= 2000;
-      report.lines[2].steps.push({ name, act, answer: sent.ok === false ? sent : { ok: true }, seenMs });
-      row(2, name, pass, `${act ?? ''} -> ${sent.ok === false ? `refused: ${JSON.stringify(sent).slice(0, 160)}` : 'sent'}; on the page ${seenMs === null ? 'not within 6 s' : `after ${seenMs} ms`}`);
-      await sleep(4000); // the action plays out before the next
+  row(2, 'pair', connected, connected ? 'paired at /pair, approved in the card by the page\'s local sign-in, the client connected' : `pairing: ${JSON.stringify(pair).slice(0, 200)}`);
+  report.lines[2] = { paired: connected, steps: [] };
+  /** The first thing `find <word>` gives whose own offers include `<verb>:` (inspect), for each word in turn. */
+  const offering = (verb, ...words) => {
+    // outdoors first (on the ground: reachable from where a new Soul arrives), then the rest
+    for (const w of words) for (const f of [...(cli('find', w).found ?? [])].sort((a, b) => /^ground/.test(b.in ?? '') - /^ground/.test(a.in ?? ''))) { const offers = JSON.stringify(cli('inspect', f.id)); if (offers.includes(`${verb}:${f.id}`) || offers.includes(`"${verb}:`)) return f.id; }
+    return null;
+  };
+  /** Waits for act `seq` to end (its receipt, or a refusal), at most `ms`. */
+  const ended = async (seq, ms = 120_000) => { for (const t0 = Date.now(); Date.now() - t0 < ms; await sleep(1000)) { const r = cli('receipt', String(seq)).receipt; if (r && r.going === false) return r; } return null; };
+  /** One timed step: the act sent, then the page polled until `shown` holds (at most 6 s); passes within 2 s. */
+  let soul = null;
+  const step = async (name, send, shown) => {
+    const b = soul ? await probe(page, soul) : null, t0 = Date.now(), sent = send();
+    let seenMs = null;
+    while (Date.now() - t0 < 6000) {
+      soul ??= (await page.evaluate(() => [...(window.__soulsV2?.souls.keys() ?? [])])).find((s) => !before.has(s)) ?? null;
+      const s = soul ? await probe(page, soul) : null;
+      if (s && shown(s, b ?? s)) { seenMs = Date.now() - t0; break; }
+      await sleep(100);
     }
+    const pass = sent?.ok !== false && seenMs !== null && seenMs <= 2000;
+    // what the world answered so far (its receipt's phases or refusal, by name) and what the page showed last
+    const answers = sent?.sequence ? (cli('receipt', String(sent.sequence)).receipt?.answers ?? []).map((a) => a.reason ?? a.answer).join(' > ') : '';
+    const last = soul ? await probe(page, soul) : null;
+    report.lines[2].steps.push({ name, answer: sent?.ok === false ? sent : { ok: true, sequence: sent?.sequence }, answers, seenMs, page: last });
+    row(2, name, pass, `${sent?.ok === false ? `refused: ${JSON.stringify(sent).slice(0, 160)}` : `world: ${answers || 'no answer yet'}`}; on the page ${seenMs === null ? `not within 6 s (it shows ${last ? `${last.doing ?? '?'}, ${last.activity ?? '?'}${last.prop ? `, holding ${last.prop}` : ''}` : 'no such Soul'})` : `after ${seenMs} ms`}`);
+    return sent;
+  };
+  const walking = (s) => s.doing === 'walking' || s.acts.includes('walk') || s.activity === 'walk';
+  if (connected) {
+    const bench = offering('sit', 'bench', 'chair'), bed = offering('lie', 'bed', 'hammock'), cup = offering('take', 'cup', 'book', 'apple', 'mug');
+    report.lines[2].targets = { bench, bed, cup };
+    // walk (the first act also brings the new Soul into the world: no join is taught or needed)
+    let r = await step('walk', () => bench ? cli('act', bench) : { ok: false, detail: 'no seat found' }, walking);
+    if (r?.sequence) await ended(r.sequence);
+    r = await step('sit', () => bench ? cli('act', `sit:${bench}`) : { ok: false, detail: 'no seat found' }, (s) => s.activity === 'sit' || s.acts.includes('sit') || s.doing === 'seated');
+    if (r?.sequence) await ended(r.sequence, 15_000);
+    if (bed) { const w = cli('act', bed); if (w.sequence) await ended(w.sequence); }
+    r = await step('lie', () => bed ? cli('act', `lie:${bed}`) : { ok: false, detail: 'no bed found' }, (s) => s.activity === 'lie' || s.acts.includes('lie'));
+    if (r?.sequence) await ended(r.sequence, 15_000);
+    if (cup) { const w = cli('act', cup); if (w.sequence) await ended(w.sequence); }
+    r = await step('take', () => cup ? cli('act', `take:${cup}`) : { ok: false, detail: 'no thing to take found' }, (s) => !!s.prop);
+    if (r?.sequence) await ended(r.sequence, 15_000);
+    r = await step('carry', () => bench ? cli('act', bench) : { ok: false, detail: 'no place to carry it to' }, (s) => !!s.prop && walking(s));
+    if (r?.sequence) await ended(r.sequence);
+    const down = cup ? (JSON.stringify(cli('inspect', cup)).match(/"([a-z_-]+:(?:set-down|put-down|put|drop)(?::[^"]*)?)"/)?.[1] ?? 'hands:set-down') : null;
+    r = await step('put down', () => down ? cli('act', down) : { ok: false, detail: 'nothing held' }, (s, b) => !!b.prop && !s.prop);
+    if (r?.sequence) await ended(r.sequence, 15_000);
+    await step('say', () => cli('say', 'Hello from the release check'), (s, b) => s.said > b.said);
+    const body = cli('status').body ?? (soul ? (await page.evaluate((id) => window.__soulsV2.souls.get(id)?.entityId, soul))?.match(/^v2_([0-9a-f]{32})_(\d+)/)?.slice(1).join('-') : null);
+    report.lines[2].body = body;
+    await step('gesture', () => body ? cli('act', `wave:${body}`, `clap:${body}`) : { ok: false, detail: 'own body not known' }, (s) => s.acts.some((a) => /wave|clap|gesture/.test(a)) || /wave|clap/.test(s.activity ?? ''));
+    await sleep(3000);
   }
+  cli('quit'); // the agent's daemon is this run's: stopped by its own command
   await ctx.close(); // the clip is written on close
   report.clip = join(OUT, 'clip');
 }
-
 // ---- 4: a browser smoke of home, sign-in, sound, music, the camera ----
 if (ONLY.has('4')) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 } }), page = await ctx.newPage();
   page.on('dialog', (d) => void d.accept('Ada'));
   const home = await page.goto(`${BASE}/`); await page.waitForTimeout(3000);
   row(4, 'home', home.status() === 200 && /Eden/.test(await page.locator('body').innerText()), `/ ${home.status()}, lists Eden: ${/Eden/.test(await page.locator('body').innerText())}`);
-  await page.goto(`${BASE}/w/${SLUG}/`); await page.waitForTimeout(8000);
+  await page.goto(`${BASE}/w/${SLUG}/`);
+  await page.getByRole('button', { name: 'Audio' }).waitFor({ timeout: 60_000 }).catch(() => {});
   await page.getByRole('button', { name: 'Sign in' }).first().click().catch(() => {}); await page.waitForTimeout(2000);
   const signedIn = !(await page.getByRole('button', { name: 'Sign in' }).count());
   row(4, 'sign-in', signedIn, signedIn ? 'the page\'s own sign-in (dev name on loopback)' : 'still signed out');
-  const audio = page.getByRole('button', { name: /^Audio/ }).first();
-  await audio.click().catch(() => {}); await page.waitForTimeout(1000);
-  const menu = (await page.locator('body').innerText()).replace(/\s+/g, ' ');
-  const sound = await page.evaluate(() => [...document.querySelectorAll('audio')].some((a) => !a.paused) || !!(window).__soulsAudio).catch(() => false);
-  row(4, 'sound', /sound|volume|mute/i.test(menu) || sound, `audio menu ${/sound|volume|mute/i.test(menu) ? 'opens' : 'shows no sound control'}`);
-  row(4, 'music', /music|radio|track/i.test(menu), `music ${/music|radio|track/i.test(menu) ? 'offered' : 'not offered'} in the audio menu`);
+  for (let i = 0; i < 3; i++) { await page.keyboard.press('Escape'); await page.waitForTimeout(300); } // the god panel opens for the world's creator
+  await page.getByRole('button', { name: 'Audio', exact: true }).click().catch(() => {}); await page.waitForTimeout(4000);
+  const menu = await page.locator('[aria-label="Audio"]').evaluateAll((els) => els.map((e) => e.innerText).join(' ').replace(/\s+/g, ' ')).catch(() => '');
+  row(4, 'sound', /Sound effects On/i.test(menu), `the audio menu: ${menu.slice(0, 60) || 'not opened'}`);
+  const track = menu.match(/Music (.*?) (?:Random track|Radio station)/)?.[1] ?? null;
+  const next = page.getByRole('button', { name: 'Next track' });
+  if (await next.count()) { await next.click().catch(() => {}); await page.waitForTimeout(3000); }
+  const after = await page.locator('[aria-label="Audio"]').evaluateAll((els) => els.map((e) => e.innerText).join(' ').replace(/\s+/g, ' ')).catch(() => '');
+  const track2 = after.match(/Music (.*?) (?:Random track|Radio station)/)?.[1] ?? null;
+  row(4, 'music', !!track && !/off/i.test(track) && !!(await next.count()), `music: ${track ?? 'none'}, after Next track: ${track2 ?? 'none'}`);
   await page.keyboard.press('Escape');
-  const cam = page.getByRole('button', { name: /Switch to Free camera/ }).first();
-  const camBefore = await cam.getAttribute('aria-label').catch(() => null);
-  await cam.click().catch(() => {}); await page.waitForTimeout(1000);
-  const camAfter = await page.getByRole('button', { name: /camera/i }).first().getAttribute('aria-label').catch(() => null);
-  row(4, 'camera', !!camBefore && camAfter !== camBefore, `${camBefore ?? 'no camera button'} -> ${camAfter ?? '?'}`);
+  const label = () => page.getByRole('button').evaluateAll((bs) => bs.map((b) => b.getAttribute('aria-label') ?? '').find((l) => /: Switch to/.test(l)) ?? null).catch(() => null);
+  const camBefore = await label();
+  if (camBefore) await page.getByRole('button', { name: camBefore, exact: true }).click().catch(() => {}); await page.waitForTimeout(1500);
+  const camAfter = await label();
+  await page.getByRole('button', { name: /^Explore/ }).click().catch(() => {}); await page.waitForTimeout(1500);
+  const someone = page.locator('text=/^Soul \\d+$/').filter({ visible: true }).first();
+  let following = null;
+  if (await someone.count()) { await someone.click().catch(() => {}); await page.waitForTimeout(2500); following = await page.getByRole('button', { name: /Following|Follow/ }).first().innerText().catch(() => null); }
+  row(4, 'camera', !!camBefore && !!camAfter && camAfter !== camBefore, `${camBefore ?? 'no camera button'} -> ${camAfter ?? '?'}; a Soul's card: ${following ?? 'no Soul to follow'}`);
   await ctx.close();
 }
 
