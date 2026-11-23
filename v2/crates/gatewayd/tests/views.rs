@@ -2,7 +2,7 @@
 //! view tier (`worldd::views::served`), fed committed parts. Each `aN_` test is one acceptance box; A1's world side
 //! (the answers thread feeding the tier) is `worldd`'s `views::served` test.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 use std::path::PathBuf;
 use std::sync::Arc;
 use std::time::Duration;
@@ -17,11 +17,13 @@ use replica::encode::{Name, Value, decode, encode, to_hex};
 use replica::ids::{Hash, Id, Purpose, Scope};
 use replica::intents::{Hello, PROTOCOL};
 use replica::pose::{Frame, HandOff, Owner, Pose, Quat, Support, Vec3};
-use replica::world_model::Audience;
+use replica::speech::{Said, heard};
+use replica::world_model::{Audience, End};
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use worldd::views::served::{self, Feed};
+use worldd::views::subscription::Hub;
 
 type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -146,8 +148,13 @@ struct Running {
 
 /// A world's view tier on a local socket, a gateway linked to it, and a token for souls 1 to 3.
 async fn start(name: &str, receipts: Receipts) -> Running {
+    start_with(name, receipts, Hub::new()).await
+}
+
+/// As [`start`], with the world's view tier running `hub` (one that reads utterances' words, C6).
+async fn start_with(name: &str, receipts: Receipts, hub: Hub) -> Running {
     let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("v-{name}.views"));
-    let feed = served::start().unwrap();
+    let feed = served::start_with(hub).unwrap();
     served::listen(feed.clone(), &path).unwrap();
     let mut tokens = Tokens::default();
     let issued: Vec<Token> = (1..=3)
@@ -636,5 +643,98 @@ async fn x10_f1_a_view_socket_that_falls_behind_is_let_go_and_rejoins() {
     println!(
         "#4078: the slow socket let go {let_go:?} after it subscribed (bound {bound:?}); the fast one read {count} items, \
          its longest gap {gap:?}; the slow one rejoined"
+    );
+}
+
+/// 0.133 R3b: a private turn's words reach the view socket of a member's owner (the page's view token, its grants the
+/// Souls it owns), and no one else's: a signed-in viewer whose Soul is not a member gets neither the turn nor its words,
+/// though it follows the speaker, and a viewer with no token of the directory's is refused `token.refused` by name.
+#[tokio::test]
+async fn r3b_a_members_view_reads_a_private_turn_and_no_one_else_does() {
+    let (hall, b1, b2, b3, act) = (node(1), node(10), node(11), node(12), node(50));
+    let store = Arc::new(worldd::words::in_memory(Scope([9; 16])).unwrap());
+    let words = store
+        .write(b"meet me by the pond", Audience::Of(act), b1)
+        .unwrap();
+    let r = start_with("r3b", Receipts::off(), Hub::with_words(store)).await;
+    let _ = r.gw.view_key.set(ViewKey::new(KEY));
+    let mut w = W { seq: 0, at: 0 };
+    let mut e = vec![
+        w.body(b1, hall, 0),
+        w.body(b2, hall, 500_000),
+        w.body(b3, hall, 900_000),
+    ];
+    // Soul n owns body n (`souls:body-of`, as a join writes it); bodies 1 and 2 are the conversation's members.
+    let link = |w: &mut W, n: u64, ty: &str, ends: [Id; 2], owner: End| {
+        let c = Change::Link {
+            link: node(100 + n),
+            ty: Name::new(ty).unwrap(),
+            ends,
+            owner,
+            audience: Audience::Everyone,
+        };
+        w.entry(ends[0], Audience::Everyone, c)
+    };
+    for (n, b) in [(1, b1), (2, b2), (3, b3)] {
+        e.push(link(
+            &mut w,
+            n,
+            "souls:body-of",
+            [b, soul_id(n)],
+            End::First,
+        ));
+    }
+    e.push(link(&mut w, 4, "souls:member", [b1, act], End::Second));
+    e.push(link(&mut w, 5, "souls:member", [b2, act], End::Second));
+    r.feed.record(w.record(&e));
+    let later = gatewayd::unix_now() + 60;
+
+    // Anonymous: no token the directory signed.
+    let (_, anonymous) = sign_in_as(&r.url, "view.0.none").await;
+    assert_eq!(anonymous, "token.refused", "an anonymous viewer, by name");
+    // The member's owner and a signed-in viewer who is not a member, both following the speaker's body.
+    let mut views = Vec::new();
+    for n in [1, 3] {
+        let (mut ws, outcome) =
+            sign_in_as(&r.url, &view_token(&ViewKey::new(KEY), &[soul(n)], later)).await;
+        assert_eq!(outcome, socket::VIEW_STARTED);
+        put(&mut ws, subscribe(b1, 4, 8_000)).await;
+        first_item(&mut ws, &mut w, &r.feed, b1, hall).await;
+        views.push(ws);
+    }
+    // Body 1's turn into the conversation, as the world writes it: its audience, its members' bodies the hearers.
+    let said = Said {
+        words,
+        reach_mm: 5_000,
+        audience: Audience::Of(act),
+        hearers: BTreeSet::from([b1, b2]),
+        length: 1_000_000,
+    };
+    let mut turn = w.entry(b1, Audience::Of(act), Change::Unlink { link: node(999) });
+    turn.body = Body::Changes(Vec::new());
+    turn.events = Some(vec![said.event()]);
+    r.feed.record(w.record(&[turn]));
+    let mut got = Vec::new();
+    for ws in &mut views {
+        let turns: Vec<Option<String>> = items(ws, Duration::from_millis(400))
+            .await
+            .iter()
+            .filter_map(|i| heard(i).unwrap())
+            .map(|h| h.words.map(|w| String::from_utf8(w).unwrap()))
+            .collect();
+        got.push(turns);
+    }
+    println!(
+        "R3b: the member's view heard {:?}; the non-member's {:?}; the anonymous viewer was refused {anonymous}",
+        got[0], got[1]
+    );
+    assert_eq!(
+        got[0],
+        vec![Some("meet me by the pond".to_string())],
+        "the member's owner reads the words"
+    );
+    assert!(
+        got[1].is_empty(),
+        "a viewer who is not a member gets nothing"
     );
 }
