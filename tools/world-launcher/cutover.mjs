@@ -1,5 +1,5 @@
 // The operator binds the old registry identity to one canonical v2 route. The canonical flag is the only switch.
-import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { isAbsolute, join } from 'node:path';
 import { worldIdOf } from './registry.mjs';
@@ -60,19 +60,47 @@ const SERVED = new Map(Object.entries(STATIC).filter(([name]) => name !== 'confi
 const unavailable = () => Object.assign(Error('cutover.activation-unavailable'), { code: 'cutover.activation-unavailable' });
 export const bindingId = ({ oldWorldId, canonicalSlug, routesFile, clientDir }) => createHash('sha256').update(JSON.stringify([oldWorldId, canonicalSlug, routesFile, clientDir])).digest('hex');
 
-export function cutoverFence({ binding, file = process.env.SOULS_CUTOVER_BINDING || '/etc/souls/cutover-binding.json' } = {}) {
-  if (binding === undefined) {
-    // Only an absent initial configuration means an ordinary, unconfigured old launcher.
-    if (!existsSync(file)) {
-      if (process.env.SOULS_CUTOVER_BINDING || file !== '/etc/souls/cutover-binding.json') throw Error('cutover.binding-unavailable');
-      return null;
-    }
-    try { binding = JSON.parse(readFileSync(file, 'utf8')); } catch { throw Error('cutover.binding-invalid'); }
-  }
+// B3-1: the body catalogue's files a routed page may read from the binding's `bodiesDir` (v2/web/body-assets.ts's names)
+const BODY_FILE = /^(?:[a-z][a-z0-9_]*\.(?:json|diag)|[a-z0-9-]+\.mesh\.glb|clips-[a-z0-9-]+\.glb|models\/[a-f0-9]{64}\.(?:glb|json|mesh)|decoder\/draco_[a-z_]+\.(?:js|wasm))$/;
+const bodyType = (name) => ({ json: 'application/json', glb: 'model/gltf-binary', wasm: 'application/wasm', js: 'text/javascript; charset=utf-8' })[name.split('.').pop()] ?? 'application/octet-stream';
+
+/** The launcher's fence. Given `binding`, that binding; otherwise the binding file (`SOULS_CUTOVER_BINDING`, else
+ *  /etc/souls/cutover-binding.json), read again when it changes (looked at once a second), so the switch command
+ *  (v2-switch.mjs) takes effect without a restart. No file: an ordinary old launcher until one is written. An invalid
+ *  file refuses startup; written invalid later, the last valid binding stays and `log` says so. */
+export function cutoverFence({ binding, file = process.env.SOULS_CUTOVER_BINDING || '/etc/souls/cutover-binding.json', log = () => {}, now = () => Date.now() } = {}) {
+  if (binding !== undefined) return fenceOf(binding);
+  let seen, current = null, checked = -Infinity;
+  const load = (first = false) => {
+    if (!first && now() - checked < 1000) return current;
+    checked = now();
+    let st = null; try { st = statSync(file); } catch { /* no binding (yet) */ }
+    const key = st ? `${st.ino}:${st.size}:${st.mtimeMs}` : null;
+    if (key === seen) return current;
+    seen = key;
+    if (!st) return (current = null);
+    try { current = fenceOf(JSON.parse(readFileSync(file, 'utf8'))); }
+    catch { if (first) throw Error('cutover.binding-invalid'); log(`cutover: ${file} is not a valid binding; the last valid one stays`); }
+    return current;
+  };
+  load(true);
+  return {
+    inspect: (registry) => load()?.inspect(registry),
+    v2Stream: (w) => load()?.v2Stream(w) ?? null,
+    v2Bodies: (w) => load()?.v2Bodies(w) ?? null,
+    publish: (w, read) => load()?.publish(w, read) ?? Promise.resolve(null),
+    handle: (req, res, w, url) => load()?.handle(req, res, w, url) ?? false,
+  };
+}
+
+function fenceOf(binding) {
   if (!binding || typeof binding.oldWorldId !== 'string' || !binding.oldWorldId.length || binding.oldWorldId.length > 256 || /[\x00-\x1f\x7f]/.test(binding.oldWorldId) || !/^[a-z0-9][a-z0-9-]{0,62}$/.test(binding.canonicalSlug)
-      || !isAbsolute(binding.routesFile ?? '') || !isAbsolute(binding.clientDir ?? '') || (binding.staticDir !== undefined && !isAbsolute(binding.staticDir)) || (binding.v2Bodies !== undefined && !sameOriginDir(binding.v2Bodies))) throw Error('cutover.binding-invalid');
-  // v2Bodies: the same-origin directory serving the v2 body catalogue (bodies.json and its models), as the operator places it
-  const { oldWorldId, canonicalSlug, routesFile, clientDir, staticDir, v2Bodies = null } = binding;
+      || !isAbsolute(binding.routesFile ?? '') || !isAbsolute(binding.clientDir ?? '') || (binding.staticDir !== undefined && !isAbsolute(binding.staticDir)) || (binding.v2Bodies !== undefined && !sameOriginDir(binding.v2Bodies)) || (binding.bodiesDir !== undefined && !isAbsolute(binding.bodiesDir))) throw Error('cutover.binding-invalid');
+  // v2Bodies: the same-origin directory serving the v2 body catalogue (bodies.json and its models), as the operator places it.
+  // bodiesDir (B3-1): a built body-assets folder (V2_BODY_ASSETS) this launcher serves at the world's `v2/bodies/` while
+  // routed; v2Bodies then defaults to that path.
+  const { oldWorldId, canonicalSlug, routesFile, clientDir, staticDir, bodiesDir } = binding;
+  const v2Bodies = binding.v2Bodies ?? (bodiesDir ? `/w/${canonicalSlug}/v2/bodies/` : null);
   let publishing = null, published = null; // the flight, and the stream the files in staticDir were published for
   // The manifest goes first: without it nothing here is served, so a reader never mixes one routing's files with another's
   // while they are removed or rewritten. Then the six files (and any `.tmp` a stopped publish left).
@@ -150,7 +178,8 @@ export function cutoverFence({ binding, file = process.env.SOULS_CUTOVER_BINDING
       const path = url.pathname.replace(/^.*\/(?:w|__sim\/worlds)\/[^/]+/, '') || '/';
       const read = req.method === 'GET' || req.method === 'HEAD';
       const mutating = !read || (path === '/v1/edge/view' && url.searchParams.has('gaze'));
-      if (!mutating && !files.has(path) && !SERVED.has(path)) return false;
+      const body = bodiesDir && !mutating && path.startsWith('/v2/bodies/') ? path.slice('/v2/bodies/'.length) : null;
+      if (!mutating && !files.has(path) && !SERVED.has(path) && body === null) return false;
       let on;
       try { on = active(); } catch {
         res.writeHead(503, { 'content-type': 'application/json', 'cache-control': 'no-store' });
@@ -160,6 +189,14 @@ export function cutoverFence({ binding, file = process.env.SOULS_CUTOVER_BINDING
       if (!on) {
         if (read && path === '/v1/config') res.setHeader('x-souls-engine', 'old');
         return false;
+      }
+      if (body !== null) {
+        // B3-1: the routed page's body catalogue, from the binding's bodiesDir; a name outside the catalogue's is not here
+        let bytes = null;
+        try { if (BODY_FILE.test(body) && !url.search) bytes = readBounded(join(bodiesDir, body), 64 * 1024 * 1024); } catch { bytes = null; }
+        if (!bytes) { res.writeHead(404, { 'content-type': 'application/json', 'cache-control': 'no-store' }).end(req.method === 'HEAD' ? undefined : JSON.stringify({ ok: false, code: 'not-found' })); return true; }
+        res.writeHead(200, { 'content-type': bodyType(body), 'content-length': bytes.length, 'cache-control': 'no-cache' }).end(req.method === 'HEAD' ? undefined : bytes);
+        return true;
       }
       if (SERVED.has(path)) {
         // #4177: published for this stream: the page reads the file; not yet (or none): the old world's live view answers.

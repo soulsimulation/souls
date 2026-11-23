@@ -16,12 +16,28 @@ const activate = (file) => {
   writeFileSync(file, JSON.stringify(data));
 };
 
-test('configured binding damage refuses startup; absent initial configuration is disabled', () => {
-  assert.equal(cutoverFence({ file: '/etc/souls/cutover-binding.json' }), null);
+test('configured binding damage refuses startup; an absent binding is disabled until one is written', () => {
+  const none = cutoverFence({ file: '/etc/souls/cutover-binding.json' });
+  assert.equal(none.v2Stream({ slug: 'eden' }), null); assert.equal(none.handle(), false); assert.equal(none.inspect(), undefined);
   assert.throws(() => cutoverFence({ binding: {} }), /cutover.binding-invalid/);
   const valid = { oldWorldId: 'w', canonicalSlug: 'eden', routesFile: '/synthetic/routes.json', clientDir: '/synthetic/client' };
   for (const bad of [{ staticDir: 'relative' }, { v2Bodies: '//elsewhere/' }, { v2Bodies: '/a/../b/' }, { v2Bodies: 'https://cdn.example/b/' }]) assert.throws(() => cutoverFence({ binding: { ...valid, ...bad } }), /cutover.binding-invalid/, JSON.stringify(bad));
-  assert.throws(() => cutoverFence({ file: new URL('missing-o19c-binding', scratch).pathname }), /cutover.binding-unavailable/);
+  // B3-1: the binding file is read again when it changes (once a second), so the switch command needs no restart
+  const file = new URL(`b3-binding-${process.pid}.json`, scratch).pathname, logged = [];
+  let clock = 0;
+  rmSync(file, { force: true });
+  const live = cutoverFence({ file, log: (s) => logged.push(s), now: () => clock });
+  assert.equal(live.inspect(), undefined, 'no file yet: an ordinary launcher');
+  writeFileSync(file, JSON.stringify({ oldWorldId: 'w', canonicalSlug: 'eden', routesFile: '/synthetic/routes.json', clientDir: '/synthetic/client' }));
+  assert.equal(live.inspect(), undefined, 'not looked at again within the second');
+  clock = 1000;
+  assert.throws(() => live.inspect({ worlds: [] }), /cutover.binding-world-missing/, 'written: the binding is in force');
+  writeFileSync(file, '{damaged'); clock = 2000;
+  assert.throws(() => live.inspect({ worlds: [] }), /cutover.binding-world-missing/, 'damaged later: the last valid binding stays');
+  assert.equal(logged.length, 1);
+  assert.throws(() => cutoverFence({ file }), /cutover.binding-invalid/, 'damaged at startup: refused');
+  rmSync(file); clock = 3000;
+  assert.equal(live.inspect(), undefined, 'removed: an ordinary launcher again');
   const binding = { oldWorldId: '7:stable-world', canonicalSlug: 'eden', routesFile: '/synthetic/routes.json', clientDir: '/synthetic/client' };
   assert.doesNotThrow(() => cutoverFence({ binding }), 'stable identity is not constrained to a public slug');
   for (const patch of [{ oldWorldId: 'changed-world' }, { clientDir: '/synthetic/other-client' }]) assert.notEqual(bindingId({ ...binding, ...patch }), bindingId(binding), 'a different authoritative binding cannot pass launcher confirmation');

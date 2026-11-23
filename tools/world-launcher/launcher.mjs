@@ -324,7 +324,7 @@ export async function openLauncher(cfg = {}) {
   if (oldRoot && !authEnvFile) throw new Error('launcher: --old-worlds-root needs --auth-env (the original worlds sign in with Clerk)');
   const redirects = oldRoot ? redirectSwitch(join(dataDir, 'redirects.json'), log) : null;
   const registry = new Registry(dataDir);
-  const cutover = cutoverFence({ binding: cfg.cutoverBinding, ...(cfg.cutoverBindingFile ? { file: cfg.cutoverBindingFile } : {}) });
+  const cutover = cutoverFence({ binding: cfg.cutoverBinding, log, ...(cfg.cutoverBindingFile ? { file: cfg.cutoverBindingFile } : {}) });
   const accountPolicy = creationPolicy(cfg);
   /** Handover state (keeper.mjs): 'active' → 'preparing' → 'retired' (or back to 'active' when the next one fails). */
   let phase = 'active', retiredTo = null, gate = null, retiredPidFile = null, handBack = null;
@@ -1036,7 +1036,9 @@ export async function openLauncher(cfg = {}) {
       if (keep) keep(r);   // #2515: the world page, kept for the next arrivals
       if (pageStream && r.statusCode === 200 && /^text\/html\b/.test(headers['content-type'] ?? '') && !headers['content-encoding']) {
         const chunks = []; r.on('data', (c) => chunks.push(c)); r.on('error', () => res.destroy());
-        r.on('end', () => { const body = Buffer.from(withV2Stream(Buffer.concat(chunks).toString('utf8'), pageStream, pageBodies)); res.writeHead(200, robotsOf(slug, { ...headers, 'content-length': String(body.length) })).end(body); });
+        // B3-1: the whole page is sent with its length, so a chunked answer's transfer-encoding goes (both is an invalid response)
+        const { 'transfer-encoding': _te, ...whole } = headers;
+        r.on('end', () => { const body = Buffer.from(withV2Stream(Buffer.concat(chunks).toString('utf8'), pageStream, pageBodies)); res.writeHead(200, robotsOf(slug, { ...whole, 'content-length': String(body.length) })).end(body); });
         return;
       }
       res.writeHead(r.statusCode ?? 502, noindex ? { ...headers, 'x-robots-tag': NOINDEX } : robotsOf(slug, headers));
