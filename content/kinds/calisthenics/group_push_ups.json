@@ -1,0 +1,238 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:group_push_ups",
+  "owner": "thing",
+  "links": {
+    "starter": {
+      "n": 1,
+      "from": "body",
+      "most": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "participant": {
+      "n": 2,
+      "from": "body",
+      "most": 7,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "by_lead": {
+      "role": "stand",
+      "at_mm": [
+        -2400,
+        0,
+        1200
+      ],
+      "yaw_mdeg": 270000
+    },
+    "by_s1": {
+      "role": "stand",
+      "at_mm": [
+        -800,
+        0,
+        1200
+      ],
+      "yaw_mdeg": 270000
+    },
+    "by_s2": {
+      "role": "stand",
+      "at_mm": [
+        800,
+        0,
+        1200
+      ],
+      "yaw_mdeg": 270000
+    },
+    "by_s3": {
+      "role": "stand",
+      "at_mm": [
+        2400,
+        0,
+        1200
+      ],
+      "yaw_mdeg": 270000
+    },
+    "by_s4": {
+      "role": "stand",
+      "at_mm": [
+        -2400,
+        0,
+        -1200
+      ],
+      "yaw_mdeg": 270000
+    },
+    "by_s5": {
+      "role": "stand",
+      "at_mm": [
+        -800,
+        0,
+        -1200
+      ],
+      "yaw_mdeg": 270000
+    },
+    "by_s6": {
+      "role": "stand",
+      "at_mm": [
+        800,
+        0,
+        -1200
+      ],
+      "yaw_mdeg": 270000
+    },
+    "by_s7": {
+      "role": "stand",
+      "at_mm": [
+        2400,
+        0,
+        -1200
+      ],
+      "yaw_mdeg": 270000
+    }
+  },
+  "slots": {
+    "lead": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        -2400,
+        0,
+        1200
+      ],
+      "stand": "by_lead"
+    },
+    "s1": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        -800,
+        0,
+        1200
+      ],
+      "stand": "by_s1"
+    },
+    "s2": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        800,
+        0,
+        1200
+      ],
+      "stand": "by_s2"
+    },
+    "s3": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        2400,
+        0,
+        1200
+      ],
+      "stand": "by_s3"
+    },
+    "s4": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        -2400,
+        0,
+        -1200
+      ],
+      "stand": "by_s4"
+    },
+    "s5": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        -800,
+        0,
+        -1200
+      ],
+      "stand": "by_s5"
+    },
+    "s6": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        800,
+        0,
+        -1200
+      ],
+      "stand": "by_s6"
+    },
+    "s7": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        2400,
+        0,
+        -1200
+      ],
+      "stand": "by_s7"
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      5800,
+      100,
+      3600
+    ]
+  },
+  "forms": {},
+  "roles": {
+    "starter": {
+      "need": "required",
+      "places": {
+        "in": "here",
+        "slots": [
+          "lead"
+        ],
+        "within_mm": 3000
+      },
+      "move": "push_ups",
+      "on_beat": true
+    },
+    "participant": {
+      "need": "required",
+      "places": {
+        "in": "here",
+        "slots": [
+          "s1",
+          "s2",
+          "s3",
+          "s4",
+          "s5",
+          "s6",
+          "s7"
+        ],
+        "within_mm": 3000
+      },
+      "move": "push_ups",
+      "on_beat": true
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "text": {
+    "card": "Group push-ups for two to eight Souls; join or leave independently.",
+    "exercise": "exercise",
+    "group_push_ups": "push-ups",
+    "rules": "Two to eight accepted members repeat the existing push-ups move. Nearby standing Souls on the same floor are asked to walk to separate ground-level places in two rows through ordinary movement admission. The starter exercises too. Members may leave independently. This is one routine, not an automatic exercise sequence, health advice or a fitness measurement. It guarantees neither rendered facing nor a common visual phase."
+  },
+  "card": {
+    "text": "card",
+    "category": "exercise",
+    "synonyms": [
+      "group_push_ups"
+    ]
+  }
+}
