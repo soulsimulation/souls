@@ -20,6 +20,7 @@
 // guessed. A text, list or schedule field changes no part, so it is neither a frame nor a state of the drawn def. A state value the entry holds as a whole number reaches the picture as the number
 // the viewer draws with (permille / 1000); the viewer, not the entry, uses fractions, and nothing here decides anything
 // from them. A kind whose shape is missing is reported, not drawn. SA-D1a owns the rest of the looks table.
+import { isMain } from '../lib/is-main.mjs';
 import {createHash} from 'node:crypto';
 import {mkdirSync, readFileSync, rmSync, statSync, writeFileSync} from 'node:fs';
 import {spawnSync} from 'node:child_process';
@@ -405,7 +406,7 @@ export function lookBody(target, {root: rootDir = 'content/kinds', out, kind, fo
   return {out: outDir, results};
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+if (isMain(import.meta.url)) {
   const argv = process.argv.slice(2), flag = k => { const i = argv.indexOf(`--${k}`); return i >= 0 ? argv[i + 1] : undefined; };
   const target = argv.find((a, i) => !a.startsWith('--') && !(i > 0 && argv[i - 1].startsWith('--') && argv[i - 1] !== '--plan'));
   if (!target) { console.error('usage: node tools/entry/look.mjs <family|folder|file> [--root content/kinds] [--out <dir>] [--kind <name>] [--plan] [--body <form> [--on <mm>] [--shift <point>=<dx>,<dy>,<dz>]]'); process.exit(2); }

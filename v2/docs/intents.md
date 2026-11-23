@@ -66,14 +66,18 @@ B7) and plans and schedules (the client's: I9, R15) are not here.
    now, 6: [node, ...], 7: operation}`, naming what changed since its basis (6 left out when empty) and, for an
    edit, the operation that failed by its place in the batch (7 left out when none). Bytes refused before an actor and a sequence are read get `{3: 5, 4: reason}`. How an act
    ends later (done, failed, timed out) is I4's. A form's act is due by its run's start plus its steps' own time (its
-   walk, moves and pauses, C20); one still running at the deadline it got on arrival is answered in progress then,
-   `{.., 3: 3, 4: intent id, 5: µs left}`, and its receipt or refusal follows by its own deadline.
+   walk, moves and pauses, C20), and a walk's by its planned route's time from when it is planned (C29). Either is
+   answered in progress in the tick its run starts or its route is planned, `{.., 3: 3, 4: intent id, 5: µs left}`
+   (W11, #4087: not at the deadline it got on arrival), and its receipt or refusal follows by its own deadline.
 9. **A move inside a joint activity is accepted, then resolved:** `{.., 3: 3, 4: intent id}`, then `{.., 3: 4, 4:
    outcome}`; a miss is an outcome, not a refusal. Its parameter may name one of the activity's next beats, at most
    about two seconds ahead (B8): a parameter of a move already accepted, not an order waiting on the world.
 10. **A cancel ends and a replace supersedes the actor's own earlier intent,** named by its sequence in field 10. A
     cancel without it is refused (`cancel-without-replaces`), and so is one that carries anything else
-    (`cancel-not-bare`).
+    (`cancel-not-bare`). A Soul's new act needs neither: sent while its own form run is open, it leaves that run as a
+    cancel does (the old act ends `left`) and starts at once, or right after a seat taken or left or a ground
+    posture in progress ends (never half seated), and a walk replaces it (`claim-taken`); `form-running`
+    is left only for a run of another actor (#4187).
     An answer's frame `{1: version, 2: answer}` may carry one optional field, 3: where the act's time went, in µs
     between stamps of one machine's steady clock (O4, #2694; `replica::intents::ANSWER_TIMES`). It is added as the
     answer leaves, so the logged answer never holds it.

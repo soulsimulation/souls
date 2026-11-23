@@ -1,7 +1,8 @@
 // Explicit offline correction sidecar. Raw evidence, scenarios and original reports are never overwritten.
+import { isMain } from '../../lib/is-main.mjs';
 import {readFileSync,writeFileSync,mkdirSync,existsSync,copyFileSync} from 'node:fs';
 import {resolve,join,dirname} from 'node:path';
-import {fileURLToPath,pathToFileURL} from 'node:url';
+import { fileURLToPath } from 'node:url';
 import {execFileSync} from 'node:child_process';
 import {sha256} from '../lib/hash.mjs';
 import {assertFrozenGenesis} from '../lib/physical-fixture.mjs';
@@ -35,4 +36,4 @@ export function rescoreQualified({runDir,scenarioPath,out}){
  writeFileSync(join(out,'metrics.json'),JSON.stringify(computeMetrics(run,{ledger:readLedger(join(runDir,'ledger.tsv')),oracles:rows}),null,2)+'\n');writeFileSync(join(out,'annotation.json'),JSON.stringify(annotation,null,2)+'\n');
  return{out,changes};
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){const f={};for(let i=2;i<process.argv.length;i+=2)f[process.argv[i].replace(/^--/,'')]=process.argv[i+1];console.log(JSON.stringify(rescoreQualified({runDir:f.run,scenarioPath:f.scenario,out:f.out}),null,2));}
+if(isMain(import.meta.url)){const f={};for(let i=2;i<process.argv.length;i+=2)f[process.argv[i].replace(/^--/,'')]=process.argv[i+1];console.log(JSON.stringify(rescoreQualified({runDir:f.run,scenarioPath:f.scenario,out:f.out}),null,2));}

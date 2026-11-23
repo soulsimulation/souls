@@ -11,6 +11,7 @@ use crate::encode::{Name, Value, encode};
 use crate::ids::{Hash, Id, Purpose};
 use crate::pose::{Frame, Pose, Quat, Support, Vec3};
 use crate::world_model::{Audience, Draft, End, Kind, Link, Node, plain, takes, within};
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// What a commit is checked against: the kinds by full name (what each admits), the Souls the world knows, and each
@@ -23,10 +24,14 @@ pub struct Rules {
 }
 
 impl Rules {
-    fn kind(&self, node: Id, kind: &str) -> R<&Kind> {
-        self.kinds.get(kind).map_or_else(
+    /// A kind by full name: the world's boot kinds, else one a creator defined in `tree` (#3697), by the one loader.
+    fn kind(&self, tree: &Tree, node: Id, kind: &str) -> R<Cow<'_, Kind>> {
+        if let Some(k) = self.kinds.get(kind) {
+            return Ok(Cow::Borrowed(k));
+        }
+        crate::kinds::defined::kind_named(tree, kind).map_or_else(
             || refuse("kind-unknown", format!("{}'s kind {kind}", show(node))),
-            Ok,
+            |k| Ok(Cow::Owned(k)),
         )
     }
 
@@ -43,14 +48,26 @@ impl Rules {
     /// The parent's kind admits the child's, in `slot` or as a child; by plain name or by category (rule 5).
     fn admits(
         &self,
+        tree: &Tree,
         child: Id,
         kind: &str,
         parent: Id,
         parent_kind: &str,
         slot: Option<u64>,
     ) -> R<()> {
-        let own = self.kind(child, kind)?;
-        let pk = self.kind(parent, parent_kind)?;
+        // A creator's definition sits at the zone's root, and only there (#3697).
+        if crate::kinds::defined::is_definition(kind) {
+            let root = tree.nodes[tree.root as usize].id;
+            if parent == root && slot.is_none() {
+                return Ok(());
+            }
+            return refuse(
+                "child-not-admitted",
+                format!("a definition sits at the root, not under {}", show(parent)),
+            );
+        }
+        let own = self.kind(tree, child, kind)?;
+        let pk = self.kind(tree, parent, parent_kind)?;
         let list = match slot {
             Some(s) => pk.slots.get(&s),
             None => Some(&pk.children),
@@ -83,6 +100,7 @@ impl Rules {
         self.audience(audience)?;
         let p = &tree.nodes[parent as usize];
         self.admits(
+            tree,
             node,
             kind.as_str(),
             p.id,
@@ -95,6 +113,7 @@ impl Rules {
     pub(super) fn place(&self, tree: &Tree, node: u32, parent: u32, slot: Option<u64>) -> R<()> {
         let (n, p) = (&tree.nodes[node as usize], &tree.nodes[parent as usize]);
         self.admits(
+            tree,
             n.id,
             tree.names[n.kind as usize].as_str(),
             p.id,

@@ -525,6 +525,22 @@ fn connect(socket: &Path, within: Duration) -> Option<UnixStream> {
     }
 }
 
+/// How long a world has to serve when its limits name no bound: worldd@.service's `TimeoutStartSec`.
+pub const START_WITHIN: Duration = Duration::from_secs(30);
+
+/// The start bound in a world's limits drop-in (`worldd@<world>.service.d/limits.conf`, written from
+/// `world-limits.json` by `v2/tools/ops/world-limits.mjs`): its `Environment=WORLD_START_WITHIN_S=<s>` line, else
+/// [`START_WITHIN`]. A world that loads longer than 30 s (Eden) is given its own bound; one that hangs still fails.
+pub fn start_within(limits: Option<&str>) -> Duration {
+    limits
+        .into_iter()
+        .flat_map(str::lines)
+        .filter_map(|l| l.trim().strip_prefix("Environment=WORLD_START_WITHIN_S="))
+        .filter_map(|s| s.trim().parse::<u64>().ok())
+        .find(|s| (1..=3600).contains(s))
+        .map_or(START_WITHIN, Duration::from_secs)
+}
+
 /// The canary's declared health.
 #[derive(Clone, Copy, Debug)]
 pub struct Canary {
@@ -1036,5 +1052,52 @@ mod tests {
         // Nothing written by the new build: nothing the old one must read.
         assert_eq!(rollback_check(&old, &new, false), Ok(()));
         assert_eq!(rollback_check(&new, &old, true), Ok(()));
+    }
+
+    #[test]
+    fn a2_the_start_bound_is_the_worlds_own_else_the_units_30_s() {
+        // What world-limits.mjs writes for Eden (world-limits.test.mjs checks the same text).
+        let eden = "# Written by world-limits.mjs from world-limits.json (world eden); edit that file, not this one.\n\
+                    [Service]\nMemoryMax=8G\nEnvironment=WORLD_START_WITHIN_S=600\n";
+        assert_eq!(start_within(Some(eden)), Duration::from_secs(600));
+        assert_eq!(start_within(None), START_WITHIN);
+        assert_eq!(START_WITHIN, Duration::from_secs(30));
+        assert_eq!(
+            start_within(Some("[Service]\nMemoryMax=8G\n")),
+            START_WITHIN
+        );
+        // Out of range or not a number: the unit's bound, never an unbounded wait.
+        for bad in ["0", "3601", "ten", ""] {
+            let t = format!("[Service]\nEnvironment=WORLD_START_WITHIN_S={bad}\n");
+            assert_eq!(start_within(Some(&t)), START_WITHIN, "{bad}");
+        }
+    }
+
+    #[test]
+    fn a2_the_wait_serves_a_late_world_within_its_bound_and_fails_a_hung_one_at_it() {
+        let dir = std::env::temp_dir().join(format!("4013-wait-{}", std::process::id()));
+        std::fs::create_dir_all(&dir).unwrap();
+        let sock = dir.join("w.sock");
+        let _ = std::fs::remove_file(&sock);
+        // A world that serves after 1.5 s: reached under a 3 s bound, where a 1 s bound would have failed it.
+        let late = sock.clone();
+        let t = std::thread::spawn(move || {
+            std::thread::sleep(Duration::from_millis(1500));
+            std::os::unix::net::UnixListener::bind(&late).unwrap()
+        });
+        assert!(connect(&sock, Duration::from_secs(1)).is_none());
+        assert!(connect(&sock, Duration::from_secs(3)).is_some());
+        let listener = t.join().unwrap();
+        // A world that never serves fails at its bound, not before and not much after.
+        drop(listener);
+        std::fs::remove_file(&sock).unwrap();
+        let t0 = Instant::now();
+        assert!(connect(&sock, Duration::from_millis(800)).is_none());
+        let took = t0.elapsed();
+        assert!(
+            took >= Duration::from_millis(800) && took < Duration::from_millis(1500),
+            "{took:?}"
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 }

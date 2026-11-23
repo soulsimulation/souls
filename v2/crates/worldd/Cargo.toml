@@ -8,6 +8,8 @@ description = "The world process (Engine v2, #2635): its clock and watchdog (K7,
 [dependencies]
 replica = { path = "../replica" }
 rustix = { version = "1", default-features = false, features = ["time", "std"] }
+# D6: a SIGTERM or SIGINT says so before the world ends (src/stopped.rs).
+libc = "0.2"
 sim = { path = "../sim" }
 # O3 (#2732): the object store and the directory's claim and mark, which the shipper writes through.
 directoryd = { path = "../directoryd" }
@@ -21,6 +23,10 @@ skills = { path = "../skills" }
 # #2688); `worldd serve` reads a world's facts file with N1's loader (C1, #3365).
 import-eden = { path = "../../tools/import-eden" }
 testworld = { path = "../../tools/testworld" }
+
+[features]
+# A test's long load, `$WORLDD_HOLD_LOAD_S` seconds of progress before `serve` loads (#4013, x5-start-progress.sh).
+hold-load = []
 
 [dev-dependencies]
 # O20b (#3523): a served world's shipped stores read back by O20's restore, as O12's restore runs it.

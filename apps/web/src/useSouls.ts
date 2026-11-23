@@ -6,6 +6,7 @@ import { apiPath, worldPath } from './world-path.ts';
 import { takeBootSocket } from './snapshot-prefetch.ts';
 import { arrivalMark } from './arrival-marks.ts';
 import { watchSocket } from './client-errors.ts';
+import { useV2Souls, v2Stream } from './v2-engine/use-v2-souls.ts';
 import { useEffect, useRef, useState } from 'react';
 import { Connection, releaseWhenHidden } from '@souls/client';
 import {createStationConnection,type StationConnection} from './score/station-connection.mjs';
@@ -16,6 +17,8 @@ import type { StationLiveContract, BrainCall, CameraLine, KernelView, LogEvent, 
 declare const __BUILD__: string;
 
 export type Souls = {
+  /** The v2 stream cannot be read or has stalled: the page says so instead of loading (v2-engine/stream-health.ts). Unset on the old socket. */
+  streamNotice?: string | null;
   takes: { serverTick: number; chunks: {fromTick: number; toTick: number; take: unknown}[]; receivedAt: number };
   privateAuthorityGeneration?:number;conn: Connection; station:StationConnection|null;me: Me | null; log: LogEvent[]; brain: BrainCall[]; camera: CameraLine | null; ticker: TickerLine[];
   narratives: Record<string, NarrativeView>; stats: ServerStats | null; bytesPerSec: number;
@@ -39,6 +42,13 @@ export function staleBundle(build: string, incompatible: boolean): boolean {
 
 /** One connection for the page. Re-renders about 5 times a second while the world runs. */
 export function useSouls(getToken: () => Promise<string | null>, authed: boolean,identity:string|null=null,worldId?:string,stationCapabilities?:{stationContracts?:StationLiveContract[]}): Souls {
+  // #4153: a world the new engine runs is read from its v2 stream instead of this socket (fixed for the page's life)
+  if (V2_STREAM) return useV2Souls(V2_STREAM, worldId);
+  return useOldSouls(getToken, authed, identity, worldId, stationCapabilities);
+}
+const V2_STREAM = v2Stream();
+
+function useOldSouls(getToken: () => Promise<string | null>, authed: boolean,identity:string|null=null,worldId?:string,stationCapabilities?:{stationContracts?:StationLiveContract[]}): Souls {
   const tokenRef = useRef(getToken); tokenRef.current = getToken;
   const identityRef=useRef(identity);identityRef.current=identity;
   const authedRef=useRef(authed);authedRef.current=authed;
