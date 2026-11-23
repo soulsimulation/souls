@@ -80,6 +80,11 @@ Every kind of thing states both. `motion.how` is one closed list, shared with En
 `pushed_by_one` (a sofa) and `wheeled` (a wheelbarrow, a bicycle) are pushed by one Soul, `two_souls` (a bed, a long table)
 by two (Engine v2 B9), `fixed` does not move. `moveBy(entry, {act, souls})` answers carry and push: a refusal names how the kind
 moves (`moves_by`: "eden:sofa is pushed_by_one: it moves that way, not carried") or how many Souls it takes (`souls`).
+Carried together (Engine v2 B9, 0.135 C2), a load is what its entry states: its longest side is carried lengthways, its
+width is the larger of its other two sides, its two outermost `grip` points along its length are where its two carriers
+hold it (each stands 0.35 m beyond its grip), and `state.hold_crew`'s default is how many must carry it. Before the
+lift, a crew too small, a carrier more than 0.7 m from its grip, and (when the lift names where the front goes) a way
+too narrow for the load are refused by name (`carry-crew-too-small`, `carry-grip-out-of-reach`, `carry-board-clips`).
 `loose` is how long a loose thing lasts once nobody holds or owns it, Engine v2 F10
 ([#2773](https://github.com/soulsimulation/souls/issues/2773)): `{"ever": true}` or `{"us": <whole microseconds above zero>}`;
 owned, or in a slot, a thing lasts. Both are meaning, so covered by the hash; a body's family says neither.
@@ -591,7 +596,7 @@ under the rule they break; the rest are checked on top (`tools/entry/check.mjs`,
 | `makes` | a `create` that pays for nothing in its own form (a stock's take is paid by its count, lowered by the engine) | where it appears (`into`) |
 | `engine-names` | a name using a word of today's engine | closed lists of steps, needs, changes |
 | `no-waiting` | a timer form that arms itself, a time of day in a name | `wait` is stated microseconds |
-| `bounded` | a link without `most`; state, links, forms or parts over the budget (`BUDGET`) | slots and lists carry `most` |
+| `bounded` | a link without `most`; state, links, forms or parts over the budget (`BUDGET`: 32 forms, 48 for a body's family, which cannot be split) | slots and lists carry `most` |
 | `way-out` | a form no sequence of forms can reach (a chain of needs with no start) | no |
 | `moves` | a thing says neither how it moves nor how long it lasts loose | no |
 | `card` | no card, or a card whose purpose text is over 80 characters | no (a card that is given must name a text entry) |

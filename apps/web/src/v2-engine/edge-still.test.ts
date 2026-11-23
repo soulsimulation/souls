@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { sampleTake } from '../../../../mars/viewer/engine/take/replay.ts';
 import type { Take } from '../../../../mars/viewer/engine/take/types.ts';
-import { V2Bridge } from './bridge.ts';
+import { BEHIND_US, CHUNK, V2Bridge } from './bridge.ts';
 import { TICK_US, TICKS } from './takes.ts';
 import { defaultLookOf, entityWithLook } from './take-bodies.ts';
 import { EdgeLog, WorldState, type LayerLike } from './world-state.ts';
@@ -38,9 +38,9 @@ test('a world already still when the page opens is drawn from its first quiet ti
   // no part is played (the world has written none since), only the quiet time, every half second
   const q = T0 + 10_250_000;
   b.receive(pointer(q));
-  const end = Math.floor((q - 2_000_000) / TICK_US / TICKS) * TICKS;
+  const end = Math.floor((q - BEHIND_US) / TICK_US / CHUNK) * CHUNK; // B3-4's lag and half-second chunks
   assert.equal(b.view.takes.serverTick, end, 'the current chunk is made at once');
-  assert.deepEqual(b.view.takes.chunks.map((c) => [c.fromTick, c.toTick]), [[end - TICKS, end]], 'one chunk, once');
+  assert.deepEqual(b.view.takes.chunks.map((c) => [c.fromTick, c.toTick]), [[end - CHUNK, end]], 'one chunk, once');
   const take = b.view.takes.chunks[0].take as unknown as Take;
   assert.deepEqual(sampleTake(take, 0).entities[E].p.map((x) => +x.toFixed(3)), [3, 0, 4], 'standing where its record has it');
   assert.deepEqual([...b.view.souls.keys()], ['s_abc-7']);

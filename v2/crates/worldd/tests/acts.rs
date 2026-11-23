@@ -280,7 +280,12 @@ fn entries() -> Json {
         "stock": { "who": "anyone", "steps": [],
           "effects": [{ "change": "create", "kind": "PLANK", "into": "rest", "event": "stocked" }] },
         "overstock": { "who": "anyone", "steps": [],
-          "effects": [{ "change": "create", "kind": "GHOST", "into": "rest", "event": "haunted" }] } } }"#
+          "effects": [{ "change": "create", "kind": "GHOST", "into": "rest", "event": "haunted" }] },
+        "haunt": { "who": "anyone", "steps": [],
+          "effects": [{ "change": "timer", "form": "haunt_again", "after_us": 1, "event": "haunting" }] },
+        "haunt_again": { "who": "anyone", "steps": [],
+          "effects": [{ "change": "create", "kind": "GHOST", "into": "rest", "event": "haunted" },
+            { "change": "timer", "form": "haunt_again", "after_us": 1, "event": "again" }] } } }"#
             .replace("PLANK", &fullname(PLANK))
             .replace("GHOST", &full("test:ghost", 0xff)),
     )
@@ -446,7 +451,7 @@ fn answer_in(frame: &[u8]) -> (u64, Result<Vec<u64>, String>) {
 }
 
 /// A scripted client on the world's socket, one per Soul.
-struct Client(UnixStream, Id, u64);
+struct Client(UnixStream, Id, u64, Vec<u8>);
 
 impl Client {
     fn send(&mut self, verb: &str, target: Option<Id>, parameters: BTreeMap<u64, Value>) {
@@ -472,10 +477,16 @@ impl Client {
             reflex: false,
         };
         let bytes = encode(&i.to_value()).unwrap();
+        self.raw(&bytes);
+        self.3 = bytes;
+    }
+
+    /// Sends `bytes` as they are: an intent sent again, as the gateway sends the unanswered ones on a reconnect.
+    fn raw(&mut self, bytes: &[u8]) {
         self.0
             .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
             .unwrap();
-        self.0.write_all(&bytes).unwrap();
+        self.0.write_all(bytes).unwrap();
     }
 
     /// The next answer: a receipt's entries, or a refusal's reason. A progress answer (C20, sent as a run starts) is
@@ -527,7 +538,11 @@ struct Run {
 }
 
 fn serve(tag: &str) -> (Run, Client, Client) {
-    let store = Mem::with(Vec::new());
+    serve_on(tag, Mem::with(Vec::new()))
+}
+
+/// [`serve`] on the log `store` holds: a world started again after a stop reads it back.
+fn serve_on(tag: &str, store: Mem) -> (Run, Client, Client) {
     let mut cfg = Config::new(LINEAGE, 1);
     cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
     cfg.engine = Some((
@@ -555,7 +570,7 @@ fn serve(tag: &str) -> (Run, Client, Client) {
     let client = |soul| {
         let s = UnixStream::connect(&path).unwrap();
         s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
-        Client(s, soul, 0)
+        Client(s, soul, 0, Vec::new())
     };
     let (a, b) = (client(w1()), client(w2()));
     (Run { world, store, path }, a, b)
@@ -1019,11 +1034,11 @@ fn point(v: Vec3) -> BTreeMap<u64, Value> {
 }
 
 /// #4187, the trace: a Soul's take is running (its run open, its press under way) when its own controller sends a
-/// walk. The walk is a move, which the bodies take, not the form runner. Today the walk replaces the run: its claim on
-/// the body ends the take's press, the take is refused `claim-taken` with nothing taken, and the walk is done where it
-/// was sent. In lockstep, the walk arriving at a fixed tick: the take starts at tick 1 and is in its approach at ticks 2
-/// and 3, which the walk's claim on the legs ends. From tick 4 the take is in its press, a hand move a walk does not
-/// end: the take is done and the body walks. On a served clock a slow machine let the walk arrive then (#4206's flake).
+/// walk. The walk is a move, which the bodies take, not the form runner. The walk replaces the run: in the take's
+/// approach its claim on the legs ends the run, the take is refused `claim-taken` with nothing taken, and the walk is
+/// done where it was sent. In lockstep, the walk arriving at a fixed tick: the take starts at tick 1 and is in its approach at ticks 2
+/// and 3, which the walk's claim on the legs ends. From tick 4 the take is in its press, a hand move, which the walk
+/// leaves at its next phase end ([`i4_a_walk_leaves_a_run_in_its_hand_move_at_the_next_phase_end`]).
 #[test]
 fn i4187_a_walk_sent_during_an_open_form_run() {
     let run = lockstep();
@@ -1094,10 +1109,15 @@ const WALK_AT: i64 = 2;
 
 /// The test world in lockstep (no socket): intents arrive at the ticks they name, and nothing waits on a clock.
 fn lockstep() -> Run {
+    lockstep_with(bodies)
+}
+
+/// [`lockstep`], its bodies made by `make`.
+fn lockstep_with(make: fn() -> Result<Bodies, replica::effects::Refusal>) -> Run {
     let store = Mem::with(Vec::new());
     let mut cfg = Config::new(LINEAGE, 1);
     cfg.lockstep = true;
-    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
+    cfg.bodies = Some(Box::new(move |_: &worldd::bodies::Placed| make()));
     cfg.engine = Some((
         tree_rules(),
         vec![
@@ -1180,6 +1200,500 @@ fn i4187_a_form_act_sent_during_an_open_form_run() {
         parent(&r, near_can()).0,
         Some(w1()),
         "the can in the body's hand"
+    );
+    run.stop();
+}
+
+/// The take's answer and the walk's (their sequence, and the receipt's entries or the refusal's reason), where the
+/// vessel is and where the walker stands.
+type TakeThenWalk = (
+    (u64, Result<Vec<u64>, String>),
+    (u64, Result<Vec<u64>, String>),
+    (Option<Id>, Option<u64>),
+    Vec3,
+);
+
+/// #4187's take, its Soul's walk arriving at tick `walk_at`, in lockstep.
+fn take_then_walk(walk_at: i64) -> TakeThenWalk {
+    let run = lockstep();
+    let (take, walk) = (std::sync::mpsc::channel(), std::sync::mpsc::channel());
+    let arrive = |tick, sequence, verb: &str, target, parameters, reply| {
+        let bytes = intent_bytes(w1(), sequence, verb, target, parameters);
+        run.world
+            .events
+            .send(answers::Event::ArrivalAt { tick, bytes, reply })
+            .unwrap();
+    };
+    arrive(1, 1, "test:take", Some(vessel()), BTreeMap::new(), take.0);
+    arrive(
+        walk_at,
+        2,
+        "test:walk",
+        Some(ground()),
+        point(south(3_000_000)),
+        walk.0,
+    );
+    let (done, ran) = std::sync::mpsc::channel();
+    run.world
+        .events
+        .send(answers::Event::RunTo { tick: 400, done })
+        .unwrap();
+    ran.recv().unwrap();
+    let final_of = |rx: &std::sync::mpsc::Receiver<Vec<u8>>| {
+        let ends: Vec<_> = rx
+            .try_iter()
+            .filter(|f| answers::progress_of(f).is_none())
+            .collect();
+        assert_eq!(ends.len(), 1, "one final answer");
+        answer_in(&ends[0])
+    };
+    let (first, second) = (final_of(&take.1), final_of(&walk.1));
+    let r = run.replay();
+    let out = (first, second, parent(&r, vessel()), at(&r, w1()));
+    run.world.stop();
+    out
+}
+
+/// 0.134 I4, intents rule 10 in a hand move: the take's press starts at tick 4 and makes contact at about tick 9. The
+/// Soul's walk arriving before the contact leaves the run there (`left`, nothing taken); arriving after it, at the
+/// press's end (`left`, the vessel taken at the contact stays in the hand). Either way the walk goes on and is done,
+/// and no intent waits to its deadline.
+#[test]
+fn i4_a_walk_leaves_a_run_in_its_hand_move_at_the_next_phase_end() {
+    let hand = (Some(w1()), Some(1));
+    for (walk_at, taken) in [(5, false), (12, true)] {
+        let (first, second, vessel_at, walker) = take_then_walk(walk_at);
+        println!(
+            "I4 walk at tick {walk_at}: take {first:?}, walk {second:?}, vessel {vessel_at:?}"
+        );
+        assert_eq!(first, (1, Err("left".to_owned())), "the run is left");
+        assert!(matches!(second, (2, Ok(_))), "the walk is done: {second:?}");
+        assert_eq!(walker, south(3_000_000), "walked to where it was sent");
+        if taken {
+            assert_eq!(vessel_at, hand, "the effect landed at the contact stays");
+        } else {
+            assert_eq!(
+                vessel_at,
+                (Some(ground()), None),
+                "left before the contact: nothing taken"
+            );
+        }
+    }
+}
+
+// --- 0.133 N1: the never-stuck ladder in a served world ---------------------------------------------------------------
+
+/// Where the first walker is sent: 5 m east, the only way out of its ring (below).
+fn east() -> Vec3 {
+    Vec3::new(at1().x + 5_000_000, 0, at1().z)
+}
+
+/// Where the second body stands in the ring's gap: 0.6 m east of the first.
+fn in_the_gap() -> Vec3 {
+    Vec3::new(at1().x + 600_000, 0, at1().z)
+}
+
+/// The first walker ringed 0.6 m round by bodies staying by their own orders (E3), every way but east; east, when
+/// `gap`, the second body stands still in the ring's gap (staying too when `staying`); else the ring is closed.
+fn ringed(gap: bool, staying: bool) -> Result<Bodies, replica::effects::Refusal> {
+    let (town, ground) = town();
+    let frame = Frame {
+        node: ground,
+        slot: None,
+    };
+    let p1 = town.surfaces[&ground].place(w1(), frame, at1(), Quat::IDENTITY)?;
+    let p2 = town.surfaces[&ground].place(
+        w2(),
+        frame,
+        if gap { in_the_gap() } else { at2() },
+        Quat::IDENTITY,
+    )?;
+    let mut ring = vec![
+        (424_264, 424_264),
+        (0, 600_000),
+        (-424_264, 424_264),
+        (-600_000, 0),
+        (-424_264, -424_264),
+        (0, -600_000),
+        (424_264, -424_264),
+    ];
+    if !gap {
+        ring.push((600_000, 0));
+    }
+    let mut places = Vec::new();
+    for (k, (dx, dz)) in ring.into_iter().enumerate() {
+        let who = id(40 + k as u64);
+        let at = Vec3::new(at1().x + dx, 0, at1().z + dz);
+        places.push((
+            who,
+            town.surfaces[&ground].place(who, frame, at, Quat::IDENTITY)?,
+        ));
+    }
+    let mut b = Bodies::new(town, 50_000)?;
+    b.add_body(humanoid(), p1)?;
+    b.add_body(humanoid(), p2)?;
+    for (who, placed) in places {
+        b.add_body(humanoid(), placed)?;
+        b.runner.staying.insert(who);
+    }
+    if staying {
+        b.runner.staying.insert(w2());
+    }
+    Ok(b)
+}
+
+fn ring_with_a_still_body() -> Result<Bodies, replica::effects::Refusal> {
+    ringed(true, false)
+}
+fn ring_with_a_staying_body() -> Result<Bodies, replica::effects::Refusal> {
+    ringed(true, true)
+}
+fn ring_closed() -> Result<Bodies, replica::effects::Refusal> {
+    ringed(false, false)
+}
+
+/// One walk of the first walker to `to`, sent at tick 1, run to tick `ticks` in lockstep: its final answer, and the
+/// world's ladder entries in order (world time, event name, node, fields).
+/// An answer: its sequence and its receipt's entries, or its refusal's reason.
+type Answered = (u64, Result<Vec<u64>, String>);
+
+fn walk_in(run: &Run, to: Vec3, ticks: i64) -> (Answered, Vec<Rungs>) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let bytes = intent_bytes(w1(), 1, "test:walk", Some(ground()), point(to));
+    run.world
+        .events
+        .send(answers::Event::ArrivalAt {
+            tick: 1,
+            bytes,
+            reply: tx,
+        })
+        .unwrap();
+    let (done, ran) = std::sync::mpsc::channel();
+    run.world
+        .events
+        .send(answers::Event::RunTo { tick: ticks, done })
+        .unwrap();
+    ran.recv().unwrap();
+    let ends: Vec<_> = rx
+        .try_iter()
+        .filter(|f| answers::progress_of(f).is_none())
+        .collect();
+    assert_eq!(ends.len(), 1, "one final answer");
+    let log = run.store.0.lock().unwrap().bytes.clone();
+    let mut rungs = Vec::new();
+    for rec in recover(&log).unwrap().records {
+        if sim::recorder::is_input(&rec) {
+            continue;
+        }
+        for e in Part::read(&rec).unwrap().effects {
+            for v in e.events.iter().flatten() {
+                if v.name.as_str().starts_with("souls:")
+                    && [
+                        "reroute",
+                        "make-way",
+                        "step-aside",
+                        "shoulder-turn",
+                        "order-ended",
+                        "walk-out",
+                        "walked-out",
+                    ]
+                    .contains(&&v.name.as_str()["souls:".len()..])
+                {
+                    assert_eq!(e.envelope.actor, Actor::World, "the world's own entry");
+                    rungs.push((
+                        e.envelope.at,
+                        v.name.as_str().to_owned(),
+                        e.envelope.node,
+                        v.fields.clone(),
+                    ));
+                }
+            }
+        }
+    }
+    (answer_in(&ends[0]), rungs)
+}
+
+/// A ladder entry: world time, event name, node, fields.
+type Rungs = (i64, String, Id, BTreeMap<u64, Value>);
+
+fn names(rungs: &[Rungs]) -> Vec<(i64, &str)> {
+    rungs
+        .iter()
+        .map(|r| (r.0 / 100_000, r.1.as_str()))
+        .collect()
+}
+
+/// 0.133 N1 with A2-3's rule, end to end: the first walker's only way out of its ring is through the second body,
+/// which stands still with no order to stay. It is routed again at 3 s, the world steps the second body aside at 5 s
+/// (its entry the world's, on the body moved), and the walk arrives.
+#[test]
+fn n1_a_still_body_in_the_only_way_is_stepped_aside_and_the_walker_arrives() {
+    let run = lockstep_with(ring_with_a_still_body);
+    let (answer, rungs) = walk_in(&run, east(), 400);
+    let r = run.replay();
+    println!(
+        "N1 make-way: {answer:?}; rungs {:?}; w2 at {:?}",
+        names(&rungs),
+        at(&r, w2())
+    );
+    let when = |n: &str| rungs.iter().find(|r| r.1 == n);
+    let reroute = when("souls:reroute").expect("routed again").0;
+    assert!(reroute >= 3_000_000, "routed again at 3 s: {reroute}");
+    let aside = when("souls:step-aside").expect("a step aside");
+    assert!(
+        aside.0 >= 5_000_000,
+        "after 5 s without progress: {}",
+        aside.0
+    );
+    assert_eq!(
+        (aside.2, &aside.3[&3]),
+        (w2(), &w2().to_value()),
+        "on the body moved"
+    );
+    assert_eq!(
+        aside.3[&4],
+        ladder_point(in_the_gap()),
+        "from where it stood"
+    );
+    assert_eq!(
+        ladder_point(at(&r, w2())),
+        aside.3[&5],
+        "where the world put it"
+    );
+    assert!(matches!(answer, (1, Ok(_))), "the walk arrives: {answer:?}");
+    // Arrived: within the walk's reach of its spot (`skills::route::AT_SPOT`); where in it depends on its last steps.
+    let (p, e) = (at(&r, w1()), east());
+    let off = (i128::from(p.x - e.x).pow(2) + i128::from(p.z - e.z).pow(2)).isqrt();
+    assert!(
+        off <= i128::from(skills::route::AT_SPOT),
+        "the walker arrived: {off} µm off"
+    );
+    run.world.stop();
+}
+
+/// 0.133 N1: the same ring, the second body staying by its own order. Nothing makes way: routed again at 3 s, then a
+/// shoulder turn at 9 s; the staying body is never moved.
+#[test]
+fn n1_a_staying_body_is_never_moved_and_the_walker_turns_its_shoulder_at_9_s() {
+    let run = lockstep_with(ring_with_a_staying_body);
+    let (answer, rungs) = walk_in(&run, east(), 500);
+    let r = run.replay();
+    println!("N1 shoulder: {answer:?}; rungs {:?}", names(&rungs));
+    let when = |n: &str| rungs.iter().find(|r| r.1 == n).map(|r| r.0);
+    let reroute = when("souls:reroute").expect("routed again");
+    let shoulder = when("souls:shoulder-turn").expect("a shoulder turn");
+    assert!(reroute >= 3_000_000, "routed again at 3 s: {reroute}");
+    assert!(shoulder >= 9_000_000, "a shoulder turn at 9 s: {shoulder}");
+    assert!(
+        when("souls:step-aside").is_none(),
+        "a staying body is never moved"
+    );
+    assert_eq!(at(&r, w2()), in_the_gap(), "never moved");
+    run.world.stop();
+}
+
+/// 0.133 N1: a walker in a closed ring of bodies staying by their own orders gets nowhere: routed again at 3 s, a
+/// shoulder turn at 9 s, and at 15 s its order ends by name, `goal-unreachable`, the entry naming how far it is from
+/// its leg's end; the walk's receipt is that refusal.
+#[test]
+fn n1_a_walker_that_gets_nowhere_ends_goal_unreachable_at_15_s() {
+    let run = lockstep_with(ring_closed);
+    let (answer, rungs) = walk_in(&run, east(), 500);
+    println!("N1 unreachable: {answer:?}; rungs {:?}", names(&rungs));
+    assert_eq!(answer, (1, Err("goal-unreachable".to_owned())));
+    let when = |n: &str| rungs.iter().find(|r| r.1 == n);
+    assert!(when("souls:reroute").expect("routed again").0 >= 3_000_000);
+    assert!(when("souls:shoulder-turn").expect("a shoulder turn").0 >= 9_000_000);
+    let ended = when("souls:order-ended").expect("its order ended");
+    assert!(ended.0 >= 15_000_000, "at 15 s: {}", ended.0);
+    assert_eq!(ended.3[&3], Value::Bytes(b"goal-unreachable".to_vec()));
+    let Value::Bytes(why) = &ended.3[&4] else {
+        panic!("what it waited for")
+    };
+    let why = String::from_utf8_lossy(why);
+    println!("N1 unreachable: {why}");
+    assert!(why.contains("no progress for"), "{why}");
+    run.world.stop();
+}
+
+/// A point as the ladder's entries write it: `[x, y, z]` µm.
+fn ladder_point(p: Vec3) -> Value {
+    let i =
+        |n: i64| u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint);
+    Value::Array(vec![i(p.x), i(p.y), i(p.z)])
+}
+
+/// 0.133 N1, the last rung, on the bodies of a served world: the ground under a body on the building's ground floor
+/// changes (a box set down over it, an edit the builder let through), the runner finds it off the ground, and it
+/// walks out to the nearest point it may stand on, at walking speed, no tick further than a walking step; the world's
+/// entries name the walk-out and where it stands again.
+#[test]
+fn n1_a_body_found_off_the_ground_walks_out() {
+    use sim::ground::{HUMAN_RADIUS, Scene as GroundScene, Solid, Turn as GroundTurn, cut_floor};
+    use sim::mover::Surface;
+    let w = testworld::generate(1, 0).expect("the test world");
+    let floor = import_eden::load(&w.text)
+        .expect("the test world loads")
+        .nodes["building/floor-0"];
+    let (town, _) = town();
+    let from = Vec3::new(0, 0, -3_000_000);
+    let frame = Frame {
+        node: floor,
+        slot: None,
+    };
+    let placed = town.surfaces[&floor]
+        .place(w2(), frame, from, Quat::IDENTITY)
+        .expect("on the floor");
+    let mut b = Bodies::new(town, 50_000).expect("the bodies");
+    b.add_body(humanoid(), placed).expect("the body");
+    let tick = b.runner.tick;
+    let mut now = 0;
+    for _ in 0..4 {
+        now += tick;
+        b.step(now);
+    }
+    let mut scene = GroundScene::of(&b.town.tree, floor).expect("the floor's scene");
+    scene.solids.push(Solid {
+        ring: [
+            [-600_000, -3_600_000],
+            [600_000, -3_600_000],
+            [600_000, -2_400_000],
+            [-600_000, -2_400_000],
+        ],
+        y0: 0,
+        y1: 2_000_000,
+    });
+    let patch = cut_floor(&scene, HUMAN_RADIUS, GroundTurn::NONE).expect("the new ground");
+    b.town
+        .surfaces
+        .insert(floor, Surface::new(floor, patch.pieces.clone()));
+    b.town.versions.bump([&floor]);
+    let (mut was, mut largest) = (from, 0);
+    let mut entries = Vec::new();
+    for _ in 0..200 {
+        now += tick;
+        b.step(now);
+        entries.extend(std::mem::take(&mut b.wind_log));
+        let p = b
+            .runner
+            .controller
+            .body(w2())
+            .expect("the body")
+            .pose
+            .position;
+        let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+        largest = largest.max((d(p.x, was.x) + d(p.z, was.z)).isqrt() as i64);
+        was = p;
+        if entries.iter().any(|e| named(e, "souls:walked-out")) {
+            break;
+        }
+    }
+    let to = b
+        .runner
+        .controller
+        .body(w2())
+        .expect("the body")
+        .pose
+        .position;
+    println!("N1 walk-out: from {from:?} to {to:?}, largest step {largest} um");
+    let out = entries
+        .iter()
+        .find(|e| named(e, "souls:walk-out"))
+        .expect("a walk-out");
+    assert_eq!(
+        (out.envelope.actor, out.envelope.node),
+        (Actor::World, w2())
+    );
+    assert!(
+        entries.iter().any(|e| named(e, "souls:walked-out")),
+        "walked out"
+    );
+    assert!(
+        b.town.surfaces[&floor]
+            .place(w2(), frame, to, Quat::IDENTITY)
+            .is_ok(),
+        "on ground it may stand on"
+    );
+    assert!(
+        largest <= worldd::bodies::WALK * tick / 1_000_000 + 1,
+        "no jump: {largest} um in a tick"
+    );
+}
+
+fn named(e: &Effect, name: &str) -> bool {
+    e.events.iter().flatten().any(|v| v.name.as_str() == name)
+}
+
+/// The form runs' endings the log holds, by name (`souls:form-ended`'s field 3).
+fn endings(run: &Run) -> Vec<String> {
+    let log = run.store.0.lock().unwrap().bytes.clone();
+    let mut out = Vec::new();
+    for rec in recover(&log).unwrap().records {
+        if sim::recorder::is_input(&rec) {
+            continue;
+        }
+        for e in Part::read(&rec).unwrap().effects {
+            for ev in e.events.iter().flatten() {
+                if ev.name.as_str() == "souls:form-ended"
+                    && let Some(Value::Bytes(how)) = ev.fields.get(&3)
+                {
+                    out.push(String::from_utf8_lossy(how).into_owned());
+                }
+            }
+        }
+    }
+    out
+}
+
+/// N2 (0.133): a world stopped with a form's run open (a take, walking to its thing) and a gateway walk under way,
+/// then started again from its log. The open run is ended `restart` in the log in the first tick; each intent, sent
+/// again as the gateway sends the unanswered ones, starts afresh and ends with its receipt, well before its deadline.
+/// (This harness's bodies start where it built them; a served world stands each where the log last had it.)
+#[test]
+// A real world on the real clock: an answer's time is real time.
+#[allow(clippy::disallowed_methods)]
+fn n2_a_run_open_at_a_restart_ends_by_name_and_its_intent_starts_again() {
+    let store = Mem::with(Vec::new());
+    let (run, mut a, mut b) = serve_on("n2a", store.clone());
+    b.send("test:walk", Some(ground()), point(south(12_000_000)));
+    b.started();
+    std::thread::sleep(Duration::from_millis(1500));
+    a.send("test:take", Some(vessel()), BTreeMap::new());
+    a.started();
+    let (take, walk) = (a.3.clone(), b.3.clone());
+    assert_ne!(at(&run.replay(), w2()), at2(), "the walker was under way");
+    run.world.stop();
+
+    let (run, mut a, mut b) = serve_on("n2b", store);
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        endings(&run),
+        ["souls:restart"],
+        "the take's open run ended by name in the first tick"
+    );
+    PROGRESSED.with(|p| p.borrow_mut().clear());
+    let t0 = std::time::Instant::now();
+    a.raw(&take);
+    b.raw(&walk);
+    assert!(
+        matches!(a.answer_of(), (1, Ok(_))),
+        "the take starts again and lands"
+    );
+    assert!(
+        matches!(b.answer_of(), (1, Ok(_))),
+        "the walk is planned again from where it stood and arrives"
+    );
+    assert!(
+        t0.elapsed() < Duration::from_secs(15),
+        "no intent waits to its deadline: {:?}",
+        t0.elapsed()
+    );
+    let r = run.replay();
+    assert_eq!(parent(&r, vessel()).0, Some(w1()), "the vessel in the hand");
+    let off = (at(&r, w2()).z - south(12_000_000).z).abs();
+    assert!(
+        off <= 100_000,
+        "at the walk's goal, within 10 cm: {off} µm off"
     );
     run.stop();
 }

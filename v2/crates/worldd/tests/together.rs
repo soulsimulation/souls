@@ -7,6 +7,9 @@
 //! - A declined offer, and one left to lapse, move nobody. An accept from 2.6 m away is refused `together.too-far`
 //!   (nothing walks a member to its place yet) and leaves the offer open.
 //!
+//! - 0.134 T2: holding hands (content's `hold_hand`, its last phase held) lasts while both stay. One leaving releases
+//!   both holds, each written again ended `released`; a walk sent by either leaves the activity the same way.
+//!
 //! A third Soul's aim at a member (`target-outside-activity`) has no verb of its own at the gateway; it is
 //! `sim`'s `activity::tests::together`. `cargo test -p worldd --test together -- --nocapture`.
 
@@ -44,6 +47,8 @@ const WALKER: &str = "test:walker";
 /// A handshake offered for a minute, and one that lapses in half a second.
 const HANDSHAKE: &str = "test:handshake";
 const BRIEF: &str = "test:brief_handshake";
+/// Holding hands (0.134 T2): each role names content's `hold_hand`, whose last phase holds until released.
+const HOLD: &str = "test:hold_hands";
 const GIVER: &str = "test:giver";
 const TAKER: &str = "test:taker";
 
@@ -62,6 +67,7 @@ fn kinds() -> Vec<(&'static str, String)> {
         (WALKER, pinned(WALKER, 2)),
         (HANDSHAKE, pinned(HANDSHAKE, 3)),
         (BRIEF, pinned(BRIEF, 4)),
+        (HOLD, pinned(HOLD, 5)),
     ]
 }
 
@@ -72,11 +78,16 @@ fn full(plain: &str) -> String {
 /// A handshake's kind, as `serve::activity_kinds` reads an entry whose roles name the move: each role claims a hand
 /// and names `souls:handshake`; its proposal lasts `lasts`.
 fn handshake(plain: &str, lasts: Micros) -> ActivityKind {
+    touch(plain, lasts, "souls:handshake")
+}
+
+/// A touch's kind whose two roles each claim a hand and name move `mv`.
+fn touch(plain: &str, lasts: Micros, mv: &str) -> ActivityKind {
     let role = |r: &str| Role {
         name: name(r),
         place: name("souls:here"),
         claims: vec![Want::One(Class::Manipulator)],
-        mv: Some(name("souls:handshake")),
+        mv: Some(name(mv)),
     };
     ActivityKind {
         name: name(&full(plain)),
@@ -185,10 +196,11 @@ fn tree_rules() -> TreeRules {
     };
     TreeRules {
         kinds: BTreeMap::from([
-            (full(PLACE), k("place", &["body", HANDSHAKE, BRIEF])),
+            (full(PLACE), k("place", &["body", HANDSHAKE, BRIEF, HOLD])),
             (full(WALKER), k("family", &[])),
             (full(HANDSHAKE), k("activity", &[])),
             (full(BRIEF), k("activity", &[])),
+            (full(HOLD), k("activity", &[])),
         ]),
         souls: [soul(1), soul(2), soul(3)].into(),
         audiences: BTreeMap::new(),
@@ -301,15 +313,21 @@ impl Client {
             .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
             .unwrap();
         self.0.write_all(&bytes).unwrap();
-        let mut len = [0u8; 4];
-        self.0.read_exact(&mut len).expect("an answer");
-        let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
-        self.0.read_exact(&mut frame).unwrap();
-        let Value::Map(m) = decode(&frame).unwrap().value else {
-            panic!("a frame")
-        };
-        let Some(Value::Map(a)) = m.get(&2) else {
-            panic!("an answer")
+        // A walk is answered `started` first (3), then by its receipt.
+        let a = loop {
+            let mut len = [0u8; 4];
+            self.0.read_exact(&mut len).expect("an answer");
+            let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
+            self.0.read_exact(&mut frame).unwrap();
+            let Value::Map(mut m) = decode(&frame).unwrap().value else {
+                panic!("a frame")
+            };
+            let Some(Value::Map(a)) = m.remove(&2) else {
+                panic!("an answer")
+            };
+            if a.get(&3) != Some(&Value::Uint(3)) {
+                break a;
+            }
         };
         match (a.get(&3), a.get(&5)) {
             (Some(Value::Uint(1)), Some(Value::Array(e))) => Ok(e
@@ -354,7 +372,11 @@ fn serve(tag: &str) -> Run {
     cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
     cfg.engine = Some((
         tree_rules(),
-        vec![handshake(HANDSHAKE, 60_000_000), handshake(BRIEF, 500_000)],
+        vec![
+            handshake(HANDSHAKE, 60_000_000),
+            handshake(BRIEF, 500_000),
+            touch(HOLD, 60_000_000, "souls:hold_hand"),
+        ],
     ));
     let rules = Rules {
         kinds: Json::Obj(Vec::new()),
@@ -402,7 +424,9 @@ impl Run {
             if let Body::Changes(cs) = &e.body {
                 for c in cs {
                     if let Change::Create { node, kind, .. } = &c.change
-                        && (kind.as_str() == full(HANDSHAKE) || kind.as_str() == full(BRIEF))
+                        && [HANDSHAKE, BRIEF, HOLD]
+                            .iter()
+                            .any(|k| kind.as_str() == full(k))
                     {
                         return *node;
                     }
@@ -440,6 +464,39 @@ impl Run {
                 )
             })
             .collect()
+    }
+
+    /// Each move written for viewers that has ended, by body: how it ended (`released`).
+    fn ended(&self) -> Vec<(Id, String)> {
+        self.entries()
+            .into_iter()
+            .flat_map(|e| e.events.into_iter().flatten())
+            .filter(|ev| ev.name.as_str() == "souls:form-move")
+            .filter_map(|ev| {
+                let Value::Map(r) = &ev.fields[&3] else {
+                    panic!("a move record")
+                };
+                let Some(Value::Map(e)) = r.get(&9) else {
+                    return None;
+                };
+                let Some(Value::Bytes(how)) = e.get(&2) else {
+                    panic!("how it ended")
+                };
+                Some((
+                    read_id(&ev.fields[&2]).unwrap(),
+                    String::from_utf8(how.clone()).unwrap(),
+                ))
+            })
+            .collect()
+    }
+
+    /// How many `souls:activity-left` events the log holds.
+    fn lefts(&self) -> usize {
+        self.entries()
+            .into_iter()
+            .flat_map(|e| e.events.into_iter().flatten())
+            .filter(|ev| ev.name.as_str() == "souls:activity-left")
+            .count()
     }
 
     fn stop(self) {
@@ -507,6 +564,75 @@ fn t1_a_declined_or_lapsed_handshake_moves_nobody() {
     assert!(run.touches().is_empty(), "nobody moved");
     println!(
         "t1: declined; lapsed (a late accept refused {late:?}); too far ({refused:?}): no move written"
+    );
+    run.stop();
+}
+
+/// 0.134 T2: two Souls hold hands, standing, for as long as both stay. One leaving frees both hands; so does a walk
+/// sent by either, which leaves the activity as `activity:leave` does.
+#[test]
+fn t2_holding_hands_lasts_until_either_leaves_or_walks() {
+    let run = serve("hold");
+    let (mut a, mut b) = (run.client(1), run.client(2));
+    let both = BTreeSet::from([(soul(1), soul(2)), (soul(2), soul(1))]);
+    let released = |run: &Run| -> BTreeSet<Id> {
+        run.ended()
+            .into_iter()
+            .filter(|(_, how)| how == "released")
+            .map(|(b, _)| b)
+            .collect()
+    };
+
+    // Held, then Soul 2 leaves: both hands come free at once.
+    let held = run.created(&a.offer(HOLD, 2).expect("offered"));
+    b.act("activity:accept", Some(held), &[]).expect("accepted");
+    let aimed: BTreeSet<(Id, Id)> = run.touches().iter().map(|t| (t.0, t.2)).collect();
+    assert_eq!(aimed, both, "each member holds the other's hand");
+    assert!(run.touches().iter().all(|t| t.1 == "souls:hold_hand"));
+    // Well past the reach (0.6 s): still held, nothing ended.
+    std::thread::sleep(Duration::from_millis(1_500));
+    assert!(run.ended().is_empty(), "held while both stay");
+    b.act("activity:leave", Some(held), &[])
+        .expect("Soul 2 leaves");
+    assert_eq!(
+        released(&run),
+        BTreeSet::from([soul(1), soul(2)]),
+        "a leave frees both hands"
+    );
+    a.act("activity:leave", Some(held), &[])
+        .expect("Soul 1 leaves too");
+    let after_leave = run.ended().len();
+
+    // Held again, then Soul 1 walks 2 m off: its walk leaves the activity, and both hands come free.
+    let again = run.created(&a.offer(HOLD, 2).expect("offered again"));
+    b.act("activity:accept", Some(again), &[])
+        .expect("accepted again");
+    std::thread::sleep(Duration::from_millis(1_000));
+    let lefts = run.lefts();
+    let to = Value::Array(vec![
+        Value::Nint(39_999_999),
+        Value::Uint(0),
+        Value::Uint(32_000_000),
+    ]);
+    a.act("eden:walk", Some(ground()), &[(1, to)])
+        .expect("Soul 1 walks off");
+    let walked: Vec<(Id, String)> = run.ended().split_off(after_leave);
+    assert_eq!(
+        walked.iter().map(|(b, _)| *b).collect::<BTreeSet<_>>(),
+        BTreeSet::from([soul(1), soul(2)]),
+        "a walk frees both hands: {walked:?}"
+    );
+    assert!(walked.iter().all(|(_, how)| how == "released"));
+    assert_eq!(
+        run.lefts(),
+        lefts + 1,
+        "the walk left the activity as a leave does"
+    );
+    b.act("activity:leave", Some(again), &[])
+        .expect("Soul 2 leaves");
+    println!(
+        "t2: held 1.5 s; a leave freed both hands; held again, a walk freed both ({} released)",
+        walked.len()
     );
     run.stop();
 }

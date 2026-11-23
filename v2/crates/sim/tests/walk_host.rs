@@ -432,3 +432,121 @@ fn a_walker_never_steps_into_a_standing_body() {
         "it goes around and arrives"
     );
 }
+
+impl Walk {
+    /// A body standing at `at` on `node`, with no walk.
+    fn stand(&mut self, who: Id, node: Id, at: Vec3) {
+        let body: Body = self.town.surfaces[&node]
+            .place(who, Frame { node, slot: None }, at, Quat::IDENTITY)
+            .unwrap();
+        self.runner.add_body(common::humanoid(), body).unwrap();
+    }
+}
+
+/// A2-2: five bodies standing in a row across a walker's line on the open square, 0.35 m apart, so no body fits
+/// between them: the walker finds a way round the row, never steps into a body's space, and arrives.
+#[test]
+fn a_walker_goes_round_a_row_of_standing_bodies() {
+    let (t, nodes) = town();
+    let ground = nodes["ground"];
+    let mut w = Walk::new(t);
+    let (west, mid, east) = (
+        Vec3::new(-40_000_000, 0, 30_000_000),
+        Vec3::new(-35_000_000, 0, 30_000_000),
+        Vec3::new(-30_000_000, 0, 30_000_000),
+    );
+    for k in -2..=2i64 {
+        w.stand(
+            id((12 + k) as u64),
+            ground,
+            Vec3::new(mid.x, 0, mid.z + k * 350_000),
+        );
+    }
+    w.add(id(1), ground, west, ground, east);
+    w.run(600);
+    let ended = w.ended();
+    println!("ended: {ended:?}; nearest {} mm", w.nearest / 1000);
+    assert!(
+        w.nearest >= 300_000,
+        "never into a body's space: nearest {} µm",
+        w.nearest
+    );
+    let (at, how) = ended.get(&id(1)).cloned().expect("the walk ends");
+    assert_eq!(how, "Done", "it goes round the row and arrives");
+    assert!(
+        at <= 12_000_000,
+        "within 12 s (10 m at 1.4 m/s is 7 s): {at} µs"
+    );
+}
+
+/// A2-2: bodies standing in a row beside a doorway's mouth, across the line a walker takes to it from the open ground:
+/// the walker goes round them, crosses, never steps into their space, and arrives in the room.
+#[test]
+fn a_walker_goes_round_a_body_standing_beside_a_doorway() {
+    let (t, nodes) = town();
+    let (ground, f0) = (nodes["ground"], nodes["building/floor-0"]);
+    let h = t.tree.handle(nodes["door-building-front"]).unwrap();
+    let door = replica::effects::read_id(
+        t.tree
+            .node(h)
+            .unwrap()
+            .fields()
+            .get(&import_eden::F_DOORWAY)
+            .unwrap(),
+    )
+    .unwrap();
+    let b = t.buildings.iter().find(|b| b.link(door).is_some()).unwrap();
+    let l = b.link(door).unwrap();
+    let (out, inn, lo, li) = match (l.ends[0], l.ends[1]) {
+        (Some(e0), Some(e1)) if e0.floor == t.ground => (e0, e1, l.line[0], l.line[1]),
+        (Some(e0), Some(e1)) => (e1, e0, l.line[1], l.line[0]),
+        _ => panic!("two ends"),
+    };
+    // Outwards on the ground, and inwards on the floor, along the doorway's line.
+    let (wo, wi) = (b.place.point(lo).unwrap(), b.place.point(li).unwrap());
+    let unit = |a: Vec3, b: Vec3| {
+        let l = common::dist(Vec3::new(a.x, 0, a.z), Vec3::new(b.x, 0, b.z));
+        [(b.x - a.x) * 1000 / l, (b.z - a.z) * 1000 / l]
+    };
+    let o = unit(wi, wo);
+    let mouth = out.middle();
+    let from = Vec3::new(mouth.x + o[0] * 4_000, mouth.y, mouth.z + o[1] * 4_000);
+    let i = unit(lo, li);
+    let inside = inn.middle();
+    let goal = Vec3::new(inside.x + i[0] * 3_000, inside.y, inside.z + i[1] * 3_000);
+    // Three standing in a row across the walker's line, 0.6 m out from the mouth, 0.35 m apart, the middle one
+    // 0.15 m to one side of the line.
+    let mut w = Walk::new(t);
+    for k in -1..=1i64 {
+        let side = 150 + k * 350;
+        let at = Vec3::new(
+            mouth.x + o[0] * 600 - o[1] * side,
+            mouth.y,
+            mouth.z + o[1] * 600 + o[0] * side,
+        );
+        w.stand(id((21 + k) as u64), ground, at);
+    }
+    let legs = w.add(id(1), ground, from, f0, goal);
+    assert_eq!(
+        legs[0].link,
+        Some(door),
+        "its first leg crosses the front doorway"
+    );
+    w.run(800);
+    let ended = w.ended();
+    let me = *w.runner.controller.body(id(1)).unwrap();
+    println!(
+        "ended: {ended:?}; nearest {} mm; on {}",
+        w.nearest / 1000,
+        show(node_of(&me))
+    );
+    assert!(
+        w.nearest >= 300_000,
+        "never into a body's space: nearest {} µm",
+        w.nearest
+    );
+    let (at, how) = ended.get(&id(1)).cloned().expect("the walk ends");
+    assert_eq!(how, "Done", "it goes round them, crosses and arrives");
+    assert_eq!(node_of(&me), f0, "in the building");
+    assert!(at <= 15_000_000, "within 15 s: {at} µs");
+}

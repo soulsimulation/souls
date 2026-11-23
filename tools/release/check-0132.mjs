@@ -10,6 +10,8 @@
 //   --pkg    replica's wasm-bindgen package of the same head (target/wasm-load/pkg): the page's and the client's
 //   --card   the new page's build (v2/web/dist): the front door serves the pairing card (/pair) from it
 //   --facts  Eden's facts (v2/tools/import-eden/export/export.ts; exported here when not given)
+//   --world-root  the world's folder's parent (default /dev/shm on Linux, else the out folder)
+//   --gl soft  SwiftShader even where there is a GPU (line 2 is then not reported)
 //   --mars-web  the people's character set the old page draws (default mars/viewer/dist/client, `pnpm build:viewer`)
 //   The old page is this checkout's apps/web/dist (`pnpm --filter web build`); caddy and node on PATH.
 //
@@ -22,11 +24,11 @@
 // 4. A browser smoke: home, sign-in, sound, music, the camera.
 // Prints a pass/fail table and writes report.json (and the clip) to the out folder. Exit 0 when every line passes.
 import { spawn, execFileSync } from 'node:child_process';
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const argv = process.argv.slice(2), opt = (k, d) => { const i = argv.indexOf(`--${k}`); return i >= 0 ? argv[i + 1] : d; };
@@ -72,7 +74,14 @@ const json = async (url, init) => { const r = await fetch(url, init); return { s
 // ---- the stack ----
 const facts = opt('facts') ? resolve(opt('facts')) : join(OUT, 'eden-2026.facts.json');
 if (!opt('facts')) { log('exporting Eden\'s facts'); execFileSync(process.execPath, ['v2/tools/import-eden/export/export.ts'], { cwd: repo, stdio: 'ignore' }); copyFileSync(join(repo, '.local/import-eden/eden-2026.facts.json'), facts); }
-const W = join(OUT, 'world'), E = join(OUT, 'entries');
+// The world's folder on a disk of its own where there is one (/dev/shm on Linux, as v2/tools/bench/stage2a/rung.sh's
+// WORLD_ROOT): on a shared build machine the log's syncs otherwise wait on CI's disk (B3-7: log.sync p99 1.31 s), which
+// is the machine's, not the world's. `--world-root` names another; it and its socket are removed at the end.
+const ROOT = opt('world-root', process.platform === 'linux' && existsSync('/dev/shm') ? '/dev/shm' : OUT);
+const W = join(ROOT, ROOT === OUT ? 'world' : `check-0132-${process.pid}-${randomBytes(4).toString('hex')}`), E = join(OUT, 'entries');
+if (ROOT !== OUT && !KEEP) process.on('exit', () => { for (const f of readdirSync(ROOT)) if (f === basename(W) || f.startsWith(`${basename(W)}.`)) try { rmSync(join(ROOT, f), { recursive: true, force: true }); } catch { /* gone */ } });
+/** The world's own log-sync times (its health.json, O4's `parts`), or null. */
+const logSync = () => { try { return JSON.parse(readFileSync(join(W, 'health.json'), 'utf8')).parts?.['log.sync'] ?? null; } catch { return null; } };
 cpSync(join(repo, 'content/kinds'), E, { recursive: true });
 log(`seeding Eden with ${AGENTS} test Souls`);
 execFileSync(join(BIN, 'worldd'), ['seed', '--facts', facts, '--dir', W, '--entries', E, '--souls', String(AGENTS)], { stdio: ['ignore', 'ignore', 'ignore'] });
@@ -131,12 +140,24 @@ const sw = JSON.parse(execFileSync(process.execPath, [join(repo, 'tools/world-la
 need(sw.page?.v2Stream, `the switch did not take: ${JSON.stringify(sw)}`);
 log(`switched: ${BASE}/w/${SLUG}/ reads ${sw.page.v2Stream}`);
 
-// The machine's GPU where there is one (B3-5): with software GL the page's place previews read pixels back for about
-// 20 s after it opens (WorldPlacePreviews.ts readRenderTargetPixels), holding its main thread and every stream message
-// behind them, which no viewer with a GPU sees. `--gl soft` keeps SwiftShader.
-const GL = opt('gl', process.platform === 'darwin' ? 'metal' : 'soft');
-const browser = await chromium.launch({ args: [...(GL === 'metal' ? ['--use-angle=metal', '--enable-gpu'] : ['--use-gl=angle', '--use-angle=swiftshader']), '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
-const report = { base: '<local front door>', world: SLUG, agents: AGENTS, seconds: SECONDS, lines: {} };
+// The machine's GPU (B3-5, F5-run): with software GL the page's main thread blocks for about 20 s on shader compiles after
+// it opens, holding every stream message behind them, which no viewer with a GPU sees. The proof recorder's flag sets are
+// tried in order (ANGLE Metal on macOS; ANGLE Vulkan, ANGLE GL-EGL, EGL on Linux) and the first whose
+// WEBGL_debug_renderer_info names a hardware renderer is used. With none (or `--gl soft`) lines 3 and 4 still run on
+// SwiftShader, but line 2 is not reported: its 2 s would measure the software renderer, not the page.
+const { GPU_CANDIDATES, softwareGl } = await import(pathToFileURL(join(repo, '.claude/skills/proof/record.mjs')).href);
+const glBase = ['--no-sandbox', '--disable-dev-shm-usage', '--ignore-gpu-blocklist', '--enable-gpu', '--autoplay-policy=no-user-gesture-required'];
+const readGl = async (b) => { const p = await b.newPage(); try { return await p.evaluate(() => { const gl = document.createElement('canvas').getContext('webgl2'); const x = gl?.getExtension('WEBGL_debug_renderer_info'); return gl ? { vendor: gl.getParameter(x ? x.UNMASKED_VENDOR_WEBGL : gl.VENDOR), renderer: gl.getParameter(x ? x.UNMASKED_RENDERER_WEBGL : gl.RENDERER) } : {}; }); } finally { await p.close(); } };
+let browser, gl;
+for (const c of opt('gl') === 'soft' ? [] : GPU_CANDIDATES) {
+  let b; try { b = await chromium.launch({ args: [...glBase, ...c.args], ...(c.channel ? { channel: c.channel } : {}) }); } catch (e) { log(`gl ${c.label}: ${String(e?.message ?? e).split('\n')[0].slice(0, 120)}`); continue; }
+  const g = await readGl(b).catch(() => ({})); log(`gl ${c.label}: ${g.renderer ?? 'no WebGL'}`);
+  if (!softwareGl(g.renderer)) { browser = b; gl = { ...g, flags: c.label, software: false }; break; }
+  await b.close();
+}
+if (!browser) { browser = await chromium.launch({ args: [...glBase, '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] }); gl = { ...(await readGl(browser).catch(() => ({}))), flags: 'swiftshader', software: true }; }
+log(`renderer: ${gl.renderer ?? 'none'} (${gl.software ? 'software' : 'hardware'})`);
+const report = { base: '<local front door>', world: SLUG, agents: AGENTS, seconds: SECONDS, gl: { vendor: gl.vendor ?? null, renderer: gl.renderer ?? null, flags: gl.flags, software: gl.software }, lines: {} };
 const rows = [];
 const row = (line, what, pass, detail) => { rows.push({ line, what, pass, detail }); log(`${pass ? 'PASS' : 'FAIL'} ${line} ${what}: ${detail}`); };
 
@@ -148,11 +169,29 @@ async function worldPage(video) {
   // what the world says happened, by name, as the page's v2 reader hands its parts on (the world's own records, such as
   // an act ended at its deadline): counted from the reader worker's messages, read-only
   await page.addInitScript(() => {
-    const W = window.Worker, seen = (window.__happened = {});
+    const W = window.Worker, seen = (window.__happened = {}), parts = (window.__parts = []), pub = (window.__published = []), clock = [];
+    // B3-7: the world's time at page time `pt` (ms, performance.now), from the stream's own timestamps: each part's end
+    // (it is written only after its end) and each pointer's quiet time plus the writer's 250 ms settle (worldd view_out
+    // rule 11: the world's time when it wrote the pointer). Page time less world time is smallest for the sample that
+    // came soonest after its world time; the least over the last minute maps one to the other, early by that sample's
+    // own lag (tens to a few hundred ms). It never assumes the last part ended "now", which a quiet spell breaks.
+    window.__worldAt = (pt) => { const xs = clock.filter((c) => c.at <= pt && c.at > pt - 60_000); return xs.length ? (pt - Math.min(...xs.map((c) => c.at - c.world / 1000))) * 1000 : null; };
+    // B3-7: when the page's newest whole chunk moved on (its serverTick), by the page's clock
+    const poll = () => { const t = window.__soulsV2?.takes; if (t && t.serverTick !== pub.at(-1)?.tick) { pub.push({ tick: t.serverTick, at: performance.now() }); if (pub.length > 400) pub.shift(); } requestAnimationFrame(poll); };
+    requestAnimationFrame(poll);
     window.Worker = class extends W {
       constructor(...a) {
         super(...a);
-        this.addEventListener('message', (e) => { for (const h of e.data?.p?.happened ?? []) if (h?.name) seen[h.name] = (seen[h.name] ?? 0) + 1; });
+        this.addEventListener('message', (e) => {
+          for (const h of e.data?.p?.happened ?? []) if (h?.name) seen[h.name] = (seen[h.name] ?? 0) + 1;
+          // B3-7: each part's world span and when the page had it, with its moves and the things it moved into a frame
+          const p = e.data?.t === 'part' ? e.data.p : null, now = performance.now();
+          if (p) clock.push({ at: now, world: p.to });
+          else if (e.data?.t === 'pointer' && typeof e.data.p?.quietUntil === 'number') clock.push({ at: now, world: e.data.p.quietUntil + 250_000 });
+          if (clock.length > 600) clock.shift();
+          if (p) parts.push({ from: p.from, to: p.to, at: now, moves: (p.moves ?? []).map((m) => ({ body: m.body, name: m.name, start: m.start, end: m.ends?.at(-1) })),
+            framed: (p.nodes ?? []).filter((n) => n.parent).map((n) => ({ id: n.id, parent: n.parent, at: n.at })) }), parts.length > 400 && parts.shift();
+        });
       }
     };
   });
@@ -161,10 +200,10 @@ async function worldPage(video) {
   return { ctx, page };
 }
 /** What the page's v2 reader shows of one Soul now: its activity and held prop in the newest chunk, and its speech. */
-/** What the page draws of one Soul now: the moment LiveWorld plays (serverTick and the time since it came, less the
+/** What the page draws of one Soul now: the moment LiveWorld plays (`since`: acts begun at or after that tick only) (serverTick and the time since it came, less the
  *  source's play delay, at most the newest chunk's end), not the newest chunk's end. Its activity, held prop and walking
  *  from the chunk changes up to that tick, and its words said by then. */
-const probe = (page, soul) => page.evaluate((soul) => {
+const probe = (page, soul, since = 0) => page.evaluate(({ soul, since }) => {
   const v = window.__soulsV2; if (!v) return null;
   const s = v.souls.get(soul), t = v.takes, chunks = t.chunks; if (!s || !chunks.length) return { doing: s?.doing ?? null, activity: null, acts: [], prop: null, said: 0, p: null };
   const tick = Math.min(chunks.at(-1).toTick, t.serverTick + Math.min(2, (performance.now() - t.receivedAt) / 1000) * 20 - (t.playDelay ?? 30));
@@ -174,16 +213,39 @@ const probe = (page, soul) => page.evaluate((soul) => {
     const e = c.take.finalState.entities[s.entityId];
     if (c.toTick <= tick) { activity = e?.human?.activity ?? activity; prop = e?.human?.prop ?? null; p = e?.pose?.p ?? p; }
     for (const ch of c.take.changes ?? []) if (ch[1] === s.entityId && c.fromTick + ch[0] <= tick) {
-      if (ch[2] === 'activity') { activity = ch[3]; if (c.toTick + 20 > tick) acts.add(ch[3]); }
+      if (ch[2] === 'activity') { activity = ch[3]; if (c.toTick + 20 > tick && c.fromTick + ch[0] >= since) acts.add(ch[3]); }
       if (ch[2] === 'prop') prop = ch[3] ?? null;
     }
     for (const ev of c.take.events ?? []) if (ev.data?.from === soul && c.fromTick + ev.t <= tick) said++;
   }
   return { doing: s.doing, activity, acts: [...acts], prop, said, p, tick };
-}, soul);
+}, { soul, since });
+
+/** B3-7: where the time went for a step sent at page time `pt0` (ms): the world's time then (window.__worldAt, mapped from
+ *  the stream's own timestamps), and for this Soul's first move started and first thing put in its frame after that, the
+ *  world time it happened (ms after the send), when the page had the part saying so, and when the chunk holding it was
+ *  whole on the page (each ms after the send). The page then plays it `playDelay` ticks behind that chunk's end. */
+const timeline = (page, soul, pt0) => page.evaluate(({ soul, pt0 }) => {
+  const v = window.__soulsV2, parts = window.__parts ?? [], pub = window.__published ?? [];
+  const ent = v?.souls.get(soul)?.entityId; if (!ent) return null;
+  const mine = (id) => { const e = `v2_${String(id).replace(/[^0-9a-z]/gi, '_')}`; return ent === e || ent.startsWith(`${e}_`); };
+  const worldAt = window.__worldAt?.(pt0) ?? null, pageAt = (us) => (worldAt === null ? null : pt0 + (us - worldAt) / 1000);
+  const ms = (us) => (worldAt === null ? null : Math.round((us - worldAt) / 1000));
+  const shown = (us) => { const end = Math.ceil(us / 50_000 / 10) * 10; const q = pub.find((x) => x.tick >= end && x.at >= pt0); return q ? Math.round(q.at - pt0) : null; };
+  const after = parts.filter((p) => p.at >= pt0);
+  const of = (pick) => { for (const p of after) { const x = pick(p); if (x !== undefined) return { worldMs: ms(x.at), part: [ms(p.from), ms(p.to)], hadMs: Math.round(p.at - pt0), chunkWholeMs: shown(x.at), what: x.what }; } return null; };
+  return {
+    move: of((p) => { const m = p.moves.find((m) => mine(m.body)); return m ? { at: m.start, what: `${m.name} to ${ms(m.end)}` } : undefined; }),
+    framed: of((p) => { const n = p.framed.find((n) => mine(n.parent)); return n ? { at: p.from, what: `${n.id}, its record at ${n.at === undefined ? '?' : ms(n.at)}` } : undefined; }),
+    playDelayTicks: v.takes.playDelay,
+    // how long after its end each part of the step came, on the same mapping (worldd writes a part 250 ms after its end)
+    partLagMs: worldAt === null ? null : after.slice(0, 12).map((p) => Math.round(p.at - pageAt(p.to))),
+  };
+}, { soul, pt0 });
 
 // ---- 2: a freshly paired agent ----
-if (ONLY.has('2')) {
+if (ONLY.has('2') && gl.software) row(2, 'line 2 needs a hardware GL renderer', false, `not reported: the browser's renderer is ${gl.renderer ?? 'none'} (software); run where WEBGL_debug_renderer_info names a GPU`);
+else if (ONLY.has('2')) {
   // The agent's own home, named with SOULS_HOME: an empty .souls is not a home, and the client would walk up from here
   // to the nearest real one (a person's own Souls, when the checkout sits in their folder).
   const cliIn = (home) => (...a) => { try { return JSON.parse(execFileSync(process.execPath, [join(repo, 'v2/client/src/cli/souls.mjs'), ...a], { cwd: home, encoding: 'utf8', env: { ...process.env, SOULS_HOME: join(home, '.souls'), SOULS_REPLICA_PKG: PKG }, timeout: 30_000 }).trim().split('\n').at(-1)); } catch (e) { const out = String(e.stdout ?? '').trim().split('\n').at(-1); try { return JSON.parse(out); } catch { return { ok: false, detail: String(out || e.message).slice(0, 300) }; } } };
@@ -239,10 +301,19 @@ if (ONLY.has('2')) {
   };
   /** Waits for act `seq` to end (its receipt, or a refusal), at most `ms`. */
   const ended = async (seq, ms = 120_000) => { for (const t0 = Date.now(); Date.now() - t0 < ms; await sleep(1000)) { const r = cli('receipt', String(seq)).receipt; if (r && r.going === false) return r; } return null; };
+  /** Waits for walk `seq` to end. The world ends a walk: done when it arrives, `walk.blocked` when it stalls (C21), so a
+   *  long walk that keeps closing on its goal is waited for (D11: a 233 s walk to a bed was cut at 120 s here, by the
+   *  next act sent while it still walked). The bound only keeps a check from hanging on a world that never answers. */
+  const walked = (seq) => ended(seq, 20 * 60_000);
   /** One timed step: the act sent, then the page polled until `shown` holds (at most 6 s); passes within 2 s. */
   let soul = null, arrivalT0 = null;
   const step = async (name, send, shown) => {
-    const b = soul ? await probe(page, soul) : null, t0 = Date.now(), sent = send();
+    const b = soul ? await probe(page, soul) : null, pt0 = await page.evaluate(() => performance.now()), t0 = Date.now();
+    // The world's tick at the send, as the page maps it (window.__worldAt, from the stream's own timestamps; a little
+    // early by the soonest sample's lag): a step counts as shown only when the page draws a moment at or after it, never a moment
+    // before the act (B3-7: a carry sent while the page still played the take's slide was seen walking at once).
+    const since = await page.evaluate((pt0) => { const w = window.__worldAt?.(pt0); return w ? Math.floor(w / 50_000) : 0; }, pt0);
+    const sent = send();
     let seenMs = null;
     while (Date.now() - t0 < (soul ? 6000 : 30_000)) { // a Soul not on the page yet: wait longer, to say when it came
       if (!soul) {
@@ -251,8 +322,8 @@ if (ONLY.has('2')) {
         // the clip follows it: its card by the page's own link, then Follow
         if (soul) { await page.evaluate((id) => { location.hash = `soul/${id}`; }, soul); await page.getByRole('button', { name: /^Follow$/ }).first().click({ timeout: 3000 }).catch(() => {}); }
       }
-      const s = soul ? await probe(page, soul) : null;
-      if (s && shown(s, b ?? s)) { seenMs = Date.now() - t0; break; }
+      const s = soul ? await probe(page, soul, since) : null;
+      if (s && s.tick >= since && shown(s, b ?? s)) { seenMs = Date.now() - t0; break; }
       if (soul && !s && Date.now() - t0 > 6000) break;
       await sleep(100);
     }
@@ -267,7 +338,9 @@ if (ONLY.has('2')) {
     const afterAnswer = seenMs !== null && shownBy ? seenMs - shownBy.ms : null;
     const pass = sent?.ok !== false && afterAnswer !== null && afterAnswer <= 2000;
     const last = soul ? await probe(page, soul) : null;
-    report.lines[2].steps.push({ name, answer: sent?.ok === false ? sent : { ok: true, sequence: sent?.sequence }, answers, timed, seenMs, afterAnswer, page: last });
+    const trace = soul ? await timeline(page, soul, pt0).catch(() => null) : null;
+    if (trace) log(`timeline ${name}: ${JSON.stringify(trace)}`);
+    report.lines[2].steps.push({ name, answer: sent?.ok === false ? sent : { ok: true, sequence: sent?.sequence }, answers, timed, seenMs, afterAnswer, page: last, trace });
     row(2, name, pass, `${sent?.ok === false ? `refused: ${JSON.stringify(sent).slice(0, 160)}` : `world: ${answers || 'no answer yet'}`}; on the page ${seenMs === null ? `not within 6 s (it shows ${last ? `${last.doing ?? '?'}, ${last.activity ?? '?'}${last.prop ? `, holding ${last.prop}` : ''}` : 'no such Soul'})` : `after ${seenMs} ms, ${afterAnswer ?? '?'} ms after the world's ${shownBy?.name ?? 'answer'}`}`);
     return sent;
   };
@@ -281,21 +354,21 @@ if (ONLY.has('2')) {
     const took = report.lines[2].steps[0]?.timed?.[0]?.ms ?? null, came = report.lines[2].appearedMs ?? null;
     report.lines[2].arrivals.push({ acceptedMs: took, shownMs: came, afterMs: took !== null && came !== null ? came - took : null });
     row(2, `arrival ${ARRIVALS} of ${ARRIVALS}`, took !== null && came !== null && came - took <= 2000, `first act taken at ${took ?? '?'} ms; its body on the page ${came === null ? 'not within 30 s' : `at ${came} ms, ${came - took} ms after`}`);
-    if (r?.sequence) await ended(r.sequence);
-    r = await step('sit', () => bench ? cli('act', `sit:${bench}`) : { ok: false, detail: 'no seat found' }, (s) => s.activity === 'sit');
+    if (r?.sequence) await walked(r.sequence);
+    r = await step('sit', () => bench ? cli('act', `sit:${bench}`) : { ok: false, detail: 'no seat found' }, (s) => s.activity === 'sit' || s.acts.includes('sit'));
     if (r?.sequence) await ended(r.sequence, 15_000);
     // seated, a Soul stands up before it goes anywhere (the skill: `act <ns>:rise`), in the world's namespace or the seat's
     const rise = () => { const ns = [...new Set([bench, bed].filter(Boolean).map((id) => JSON.stringify(cli('inspect', id)).match(/"([a-z0-9_-]+):rise:/)?.[1]).filter(Boolean))]; const w = cli('act', ...(ns.length ? ns : ['eden', SLUG]).map((n) => `${n}:rise`)); return w.sequence ? ended(w.sequence, 15_000) : null; };
     await rise();
-    if (bed) { const w = cli('act', bed); if (w.sequence) await ended(w.sequence); }
-    r = await step('lie', () => bed ? cli('act', `lie:${bed}`) : { ok: false, detail: 'no bed found' }, (s) => s.activity === 'lie');
+    if (bed) { const w = cli('act', bed); if (w.sequence) await walked(w.sequence); }
+    r = await step('lie', () => bed ? cli('act', `lie:${bed}`) : { ok: false, detail: 'no bed found' }, (s) => s.activity === 'lie' || s.acts.includes('lie'));
     if (r?.sequence) await ended(r.sequence, 15_000);
     await rise();
-    if (cup) { const w = cli('act', cup); if (w.sequence) await ended(w.sequence); }
+    if (cup) { const w = cli('act', cup); if (w.sequence) await walked(w.sequence); }
     r = await step('take', () => cup ? cli('act', `take:${cup}`) : { ok: false, detail: 'no thing to take found' }, (s) => !!s.prop);
     if (r?.sequence) await ended(r.sequence, 15_000);
     r = await step('carry', () => bench ? cli('act', bench) : { ok: false, detail: 'no place to carry it to' }, (s) => !!s.prop && walking(s));
-    if (r?.sequence) await ended(r.sequence);
+    if (r?.sequence) await walked(r.sequence);
     // the client's set-down names the held thing itself (a take from a bookcase holds a new book, not the bookcase): the
     // thing `find` places in the Soul's own body, by the body's name
     const me = cli('status').body, myName = me ? cli('inspect', me).name : null, held = (await probe(page, soul))?.prop;
@@ -309,9 +382,10 @@ if (ONLY.has('2')) {
     await step('gesture', () => body ? cli('act', `wave:${body}`, `clap:${body}`) : { ok: false, detail: 'own body not known' }, (s) => s.acts.some((a) => /wave|clap|gesture/.test(a)) || /wave|clap/.test(s.activity ?? ''));
     await sleep(3000);
   }
+  report.lines[2].logSync = logSync();
   cli('quit'); // the agent's daemon is this run's: stopped by its own command
   await ctx.close(); // the clip is written on close
-  report.clip = join(OUT, 'clip');
+  report.clip = 'clip/';
 }
 // ---- 4: a browser smoke of home, sign-in, sound, music, the camera ----
 if (ONLY.has('4')) {
@@ -396,14 +470,16 @@ if (ONLY.has('3')) {
   row(3, 'no two bodies overlap for more than a moment', overlapPairs === 0 && samples > 0, `${overlapPairs} pairs closer than 0.3 m in two chunks running, over ${samples} chunks; worst ${worst.overlapChunks} chunks (${worst.pair ?? 'none'})`);
   row(3, 'no body ignores a new intent', ignored.length === 0 && firsts.size > 0, `${ignored.length} of ${firsts.size + ignored.length} intents never answered${ignored.length ? `; first: agent ${ignored[0].split(' ')[0]}` : ''}`);
   row(3, 'no Soul stuck over 10 s without a receipt saying why', slow.length === 0 && ignored.length === 0 && firsts.size > 0, `${slow.length} acts answered after more than 10 s (worst ${slow[0] ? `${(slow[0][1] / 1000).toFixed(1)} s, agent ${slow[0][0].split(' ')[0]}` : 'none'}), ${ignored.length} never`);
-  report.lines[3] = { happened, overlapPairs, samples, worstOverlap: worst, intents: firsts.size + ignored.length, ignored: ignored.length, answeredAfter10s: slow.length, worstAnswerMs: slow[0]?.[1] ?? null };
+  report.lines[3] = { logSync: logSync(), happened, overlapPairs, samples, worstOverlap: worst, intents: firsts.size + ignored.length, ignored: ignored.length, answeredAfter10s: slow.length, worstAnswerMs: slow[0]?.[1] ?? null };
 }
 
 await browser.close();
 report.rows = rows;
 writeFileSync(join(OUT, 'report.json'), JSON.stringify(report, null, 2));
-console.log('\n| line | check | result | detail |\n|---|---|---|---|');
-for (const r of rows) console.log(`| ${r.line} | ${r.what} | ${r.pass ? 'pass' : 'FAIL'} | ${r.detail.replaceAll('|', '/')} |`);
-console.log(`\nreport: ${join(OUT, 'report.json')}${report.clip ? `; clip: ${report.clip}` : ''}`);
+const table = [`Renderer: ${gl.renderer ?? 'none'} (${gl.software ? 'software' : 'hardware'}, ${gl.flags})`, `World folder: ${ROOT === OUT ? 'the out folder' : ROOT}; its log.sync (health.json, µs): ${JSON.stringify(logSync())}`, '', '| line | check | result | detail |', '|---|---|---|---|',
+  ...rows.map((r) => `| ${r.line} | ${r.what} | ${r.pass ? 'pass' : 'FAIL'} | ${r.detail.replaceAll('|', '/')} |`)].join('\n');
+writeFileSync(join(OUT, 'table.md'), table + '\n');
+console.log(`\n${table}`);
+console.log(`\nreport: ${join(OUT, 'report.json')}${report.clip ? `; clip: ${join(OUT, 'clip')}` : ''}`);
 if (KEEP) { log('kept running (--keep); Ctrl-C stops everything'); await new Promise(() => {}); }
 process.exit(rows.every((r) => r.pass) ? 0 : 1);
