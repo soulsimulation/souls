@@ -11,21 +11,21 @@
     "test:replay": "node --test src/replay.test.ts"
   },
   "dependencies": {
-    "@hono/node-server": "^2.1.6",
+    "@hono/node-server": "^2.1.11",
     "@modelcontextprotocol/sdk": "^1.32.2",
     "@souls/brain": "workspace:*",
     "@souls/engine-contract": "workspace:*",
     "@souls/engine-toy": "workspace:*",
     "@souls/protocol": "workspace:*",
-    "hono": "^4.13.16",
-    "jose": "^6.2.14",
-    "ws": "8.22.0",
+    "hono": "^4.13.19",
+    "jose": "^6.2.18",
+    "ws": "8.23.0",
     "zod": "^4.6.7",
     "@souls/kernel": "workspace:*",
     "@souls/world-compiler": "workspace:*",
     "@souls/ground": "workspace:*",
     "@souls/engine-mars": "workspace:*",
-    "@aws-sdk/client-s3": "^3.1161.0",
+    "@aws-sdk/client-s3": "^3.1173.0",
     "@souls/generators": "workspace:*",
     "@gltf-transform/core": "^4.5.1",
     "@gltf-transform/functions": "^4.5.1",
@@ -33,7 +33,7 @@
     "esbuild": "0.28.2"
   },
   "devDependencies": {
-    "@types/node": "^22.19.19",
+    "@types/node": "^22.20.5",
     "@types/ws": "^8.18.1",
     "@souls/client": "workspace:*"
   }
