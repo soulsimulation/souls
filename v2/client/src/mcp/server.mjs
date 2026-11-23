@@ -11,9 +11,9 @@
 //     [--pkg <replica pkg>] [--origin https://soul.game] [--version <build>] [--max-mb 2048]
 //   worlds.json: { "<slug>": "ws://<gateway>/v2/ws" }. Prints `listening <host:port>` once ready.
 
+import { isMain } from '../../../../tools/lib/is-main.mjs';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG } from '../daemon/client.mjs';
 import { openSessions, SessionRefused } from './sessions.mjs';
 import { listed, mcpServerJson, requestFor, TOOLS } from './tools.mjs';
@@ -107,7 +107,7 @@ export function mcpService({ origin, base = '', version = '0.0.0', log = () => {
   };
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const args = process.argv.slice(2);
   const opt = (n, d) => { const k = args.indexOf(n); return k >= 0 ? args[k + 1] : d; };
   const worlds = JSON.parse(readFileSync(opt('--worlds'), 'utf8'));

@@ -1,5 +1,6 @@
 // playtest compare <runA> <runB>: fidelity, metric and emergence deltas (B − A), and the issues that appeared,
 // persisted or vanished (matched by title similarity). JSON on stdout; --md for a Markdown table.
+import { isMain } from '../../lib/is-main.mjs';
 import { join, basename } from 'node:path';
 import { readJson } from '../lib/jsonl.mjs';
 import { readLedger } from './metrics.mjs';
@@ -27,7 +28,7 @@ export function compareMd(c) {
   return L.join('\n') + '\n';
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const [a, b] = process.argv.slice(2).filter((x) => !x.startsWith('--'));
   if (!a || !b) { process.stderr.write('usage: compare.mjs <runA> <runB> [--md]\n'); process.exit(2); }
   const c = compareRuns(a, b); process.stdout.write(process.argv.includes('--md') ? compareMd(c) : JSON.stringify(c, null, 1) + '\n');

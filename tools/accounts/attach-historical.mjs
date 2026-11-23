@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Operator-only migration. No HTTP endpoint, account allocation, email merging,
 // historical owner rewrites, credential rotation or resident resurrection.
+import { isMain } from '../lib/is-main.mjs';
 import { DatabaseSync } from 'node:sqlite';
 import { createHash } from 'node:crypto';
 import { readFileSync, realpathSync, statSync } from 'node:fs';
@@ -147,6 +148,6 @@ async function main(args) {
   const proof = await verifyClerkIdentity(m,{token:credential(options['--token-file']),backendKey:credential(options['--clerk-key-file'])});
   process.stdout.write(JSON.stringify(attachHistorical(m,{registryPath:options['--registry'],proof,apply}),null,2)+'\n');
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (isMain(import.meta.url)) {
   main(process.argv.slice(2)).catch(() => { console.error('Attachment refused. Check reviewed manifest, exact lineage, provider verification and existing memberships. No credentials are logged.'); process.exitCode=1; });
 }

@@ -38,9 +38,9 @@ Two PRs that both append to one shared file conflict every time. So nothing a PR
 
 ## The merge train
 
-When a PR is ready, label it `merge:ready`. Its heavy CI jobs run only inside the [CI window](../testing.md#ci-window)
-(a ready PR labelled `ci:run` or `merge:ready`), so open the window with `ci:run` and add `merge:ready` once `ci-ok`
-is green. From there the train takes over, one PR at a time, and first picks how
+When a PR is ready, label it `merge:ready`, or enqueue it directly with `gh pr merge <n> --squash`. Every push to a
+ready PR runs its CI with no label ([CI window](../testing.md#ci-window)), and the merge queue does not run it again.
+From there the train takes over, one PR at a time, and first picks how
 the PR lands (`landingMode` in `.github/scripts/merge-train.mjs`). The label event only relays: a `pull_request` job
 dispatches `main`'s copy of `merge-train.yml`, which does the work, so a PR never runs its own train (#1597). A fork PR's token
 can't dispatch, and GitHub runs no `pull_request` workflow for a PR with a merge conflict, so such a label waits for
@@ -49,7 +49,8 @@ the next train run; `gh workflow run merge-train.yml --ref main` starts one.
 **GitHub's merge queue is on.** The `main` ruleset requires it, so the train runs in queue mode (read on every pick;
 see the header of `merge-train.yml`): `merge:ready` enqueues the PR through auto-merge once its required checks are
 green at its head, and the queue re-tests the combination with what is ahead of it (`merge_group` runs) and lands it.
-`proof-ok` is a required check, so T3–T4 still wait for approval. Removing `merge:ready` takes a PR out; a PR the
+`proof-ok` and `fragment` always pass since 0.132 (F1); the train itself still holds T3–T4 for approval, a direct
+`gh pr merge` does not. Removing `merge:ready` takes a PR out; a PR the
 queue drops loses the label, gets `queue:dropped` (removed when it is enqueued again) and one comment giving the
 reason and the failed merge-group run. A PR whose auto-merge is on and checks green but that GitHub has not put in the
 queue after 10 minutes counts as not queued: the train disables its auto-merge and enqueues it again. A PR with any file outside the low-risk paths (`LOW_RISK`
@@ -153,7 +154,8 @@ A green, reviewed PR is never blocked by its description. The required minimum i
 - a one-line summary of the change;
 - the CI run link, which the proof bot adds to its comment from the newest `ci` run at the head.
 
-`proof-ok` (`.github/workflows/proof-check.yml`, `tools/proof/acceptance.mjs`) fails only when the minimum is missing,
+Since 0.132 (F1) the `proof-ok` check always passes; the rest of this section describes `tools/proof/acceptance.mjs`,
+which still gives the same advice locally. It used to fail (`.github/workflows/proof-check.yml`) only when the minimum was missing,
 when it finds device details anywhere it reads (the [publication privacy](publication-privacy.md) scan), or, at
 T3–T4, until the maintainer signs off. Everything else it reads (the Problem, Acceptance and Self-audit sections,
 evidence syntax, clips, `proof.json`) is advisory: its comment lists the advice and the workflow logs a warning.

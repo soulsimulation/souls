@@ -1,14 +1,15 @@
-# Every PR adds a changes/<pr-or-slug>.md fragment (changes/README.md), or carries the `no-changelog` label.
-# Dependabot PRs are exempt: dependency bumps are not user-facing.
+# The `fragment` check. It reports success on every pull request and merge group and never blocks (0.132 rules: a
+# changelog fragment is not required, and style never blocks). A malformed fragment in changes/ is reported as a
+# warning. It stays only because the `main` ruleset requires a check named `fragment`.
 name: changelog
 on:
   pull_request:
-    types: [opened, synchronize, reopened, labeled, unlabeled, ready_for_review]
+    types: [opened, synchronize, reopened, ready_for_review]
   merge_group:
 permissions:
   contents: read
 concurrency:
-  # Label and push events on one PR replace its older run; merge_group runs are never cancelled.
+  # Push events on one PR replace its older run; merge_group runs are never cancelled.
   group: changelog-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name == 'pull_request' }}
 jobs:
@@ -17,22 +18,12 @@ jobs:
     timeout-minutes: 5
     steps:
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with: { fetch-depth: 0 }
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with: { node-version: 22 }
-      - name: Validate fragments
-        run: node tools/changelog/compile.mjs --check
-      - name: Require a fragment or the no-changelog label
         if: github.event_name == 'pull_request'
-        env:
-          NO_CHANGELOG: ${{ contains(github.event.pull_request.labels.*.name, 'no-changelog') || github.event.pull_request.user.login == 'dependabot[bot]' }}
-          BASE: ${{ github.event.pull_request.base.sha }}
-          HEAD_SHA: ${{ github.event.pull_request.head.sha }}
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        if: github.event_name == 'pull_request'
+        with: { node-version: 22 }
+      - name: Validate fragments (advice only)
+        if: github.event_name == 'pull_request'
+        continue-on-error: true
         run: |
-          if [ "$NO_CHANGELOG" = true ]; then echo "no-changelog label set"; exit 0; fi
-          added=$(git diff --name-only --diff-filter=AM "$BASE...$HEAD_SHA" -- 'changes/*.md' ':!changes/README.md' ':!changes/_template.md')
-          if [ -z "$added" ]; then
-            echo "::error::Add a changelog fragment changes/<pr-or-slug>.md (format in changes/README.md), or label the PR no-changelog."
-            exit 1
-          fi
-          echo "fragments: $added"
+          node tools/changelog/compile.mjs --check || echo "::warning::A changelog fragment in changes/ is malformed (changes/README.md). This never blocks."
