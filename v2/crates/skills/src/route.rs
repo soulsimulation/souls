@@ -64,6 +64,9 @@ pub const ROOM: i64 = 150_000;
 pub const SLACK: i64 = 2_000;
 /// A walker whose step the guard cut to under a quarter for this many ticks in a row yields (#4215).
 pub const HOLD: u32 = 10;
+/// A walker held this near its goal, µm, by a body at rest nearer the goal has arrived: the crowd there is as
+/// near as it gets (#4215).
+pub const CROWDED: i64 = 3_000_000;
 /// A yielding walker backs away from the lower id holding it for this many ticks, at half its free speed.
 pub const BACK: u32 = 10;
 
@@ -541,6 +544,23 @@ impl Skill for Route {
                 }
             }
             (self.held, self.window) = (0, None);
+        }
+        // Held near its goal by a body at rest nearer it: as near as the crowd allows, it has arrived.
+        let last = leg.link.is_none() && self.leg + 1 == self.legs.len() && !self.spot;
+        if last && gap <= CROWDED && len(step) * 4 < len(want) {
+            let reach = room + self.speed * self.tick / 1_000_000;
+            let to_goal = |q: Vec3| len([leg.to.x - q.x, leg.to.z - q.z]);
+            let held = near.iter().any(|n| {
+                n.velocity.x == 0
+                    && n.velocity.z == 0
+                    && dist(n) <= reach
+                    && to_goal(n.position) < gap
+                    && mark_of(host, n.id).is_none()
+            });
+            if held {
+                walk(host, [0, 0]);
+                return Progress::Done;
+            }
         }
         self.last = Some((p, step, turn));
         walk(host, step);
