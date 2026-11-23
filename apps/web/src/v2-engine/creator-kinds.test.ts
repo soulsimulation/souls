@@ -63,3 +63,24 @@ test('things of a defined kind become entities at their world pose, once; a remo
   assert.deepEqual(gone.diff.removes, [entityId('aa11.3')]);
   assert.deepEqual(gone.diff.defs, []);
 });
+
+test('V2: a creator\'s thing of a kind the world has is drawn with that kind\'s old def; one of the world\'s own it removes goes', () => {
+  const k = new CreatorKinds();
+  const bench = { id: 'e_bench1', def: 'core/bench@1', in: { parent: 'world' }, p: [1, 0, 1] };
+  const layer = { seq: 3, model: { entities: new Map<string, { id: string }>([['e_bench1', bench]]), defs: new Map<string, unknown>() } };
+  // the world's own bench (its node's origin is its old entity), and a creator's new one beside it
+  k.apply([root, node('aa11.5', 'eden:bench@1220aa', [1_000_000, 0, 1_000_000], { origin: 'e_bench1' }), node('cc22.7', 'eden:bench', [4_000_000, 0, 2_000_000])], []);
+  const d = k.next(layer, 1)!;
+  assert.deepEqual(d.diff.defs, [], 'the world has the def already');
+  assert.deepEqual(d.diff.upserts, [{ id: entityId('cc22.7'), def: 'core/bench@1', in: { parent: 'world' }, p: [4, 0, 2], r: 0 }]);
+  for (const e of d.diff.upserts as { id: string }[]) layer.model.entities.set(e.id, e);
+  // moved by the creator: sent again at its new place
+  k.apply([node('cc22.7', 'eden:bench', [5_000_000, 0, 2_000_000])], []);
+  assert.deepEqual((k.next(layer, 2)!.diff.upserts as { p: number[] }[]).map((e) => e.p), [[5, 0, 2]]);
+  // the world's own bench removed by the creator: it leaves the layer, and the creator's goes when removed too
+  k.apply([], ['aa11.5', 'cc22.7']);
+  const gone = k.next(layer, 3)!;
+  assert.deepEqual(gone.diff.removes.sort(), [entityId('cc22.7'), 'e_bench1'].sort());
+  layer.model.entities.delete('e_bench1'); layer.model.entities.delete(entityId('cc22.7'));
+  assert.equal(k.next(layer, 4), null, 'nothing more once the layer dropped them');
+});
