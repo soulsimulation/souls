@@ -63,8 +63,9 @@ test('0.134 B4: a handshake aimed at another body faces it and names it the part
   assert.equal(at(0.5).v2_a.state.partner, 'v2_b', 'B is the partner the paired pose meets');
   assert.equal(at(0.95).v2_a.state.partner, null, 'no partner once the handshake ends');
   assert.equal(at(0.5).v2_b.activity, 'idle', 'a hold is not a pose');
-  assert.deepEqual(at(0.5).v2_b.state.handHold, { with: 'v2_a', hand: 'right' }, 'B holds A\'s hand');
-  assert.ok(Math.abs(Math.abs(at(0.5).v2_b.yaw) - Math.PI / 2) < 0.01, 'B faces A');
+  // B faces -x and A is on its right: B holds with its right hand, joined from the hold's start.
+  assert.deepEqual(at(0.5).v2_b.state.handHold, { with: 'v2_a', hand: 'right', since: FROM }, 'B holds A\'s hand');
+  assert.ok(Math.abs(Math.abs(at(0.5).v2_b.yaw) - Math.PI) < 0.01, 'holding hands, B keeps facing its way');
 });
 
 test('0.134 B4: a gesture at the body itself (a wave where it stands) names no partner', () => {
@@ -109,6 +110,19 @@ test('0.134 T3: dancers on one beat dance on between cycles, in step (one partne
   }
   assert.equal(at(0.4).v2_c.state.partner ?? null, null, 'another dance is not in step with this one');
   assert.equal(at((1_100_000 + 800_000 + LOOP_HOLD + 100_000) / 1e6).v2_a.activity, 'idle', 'stopped after the last cycle');
+});
+
+test('0.134 T2: holding hands side by side, the left one holds with its right hand; let go, the arms come down', () => {
+  // Both face +x, C at z 0 and D at z 500 (D on C's right): C's right hand, D's left.
+  const hold = (target: string) => gestureFrom({ name: 'eden:hold_hand', start: t0, ends: [t0 + 500_000, Number.MAX_SAFE_INTEGER], target })!;
+  const C: Body = { entity: 'v2_c', node: 'n-c', soul: 's-c', name: 'Cy', heading: 0, samples: [{ at: t0 - 1_000_000, p: [0, 0, 0] }], gestures: [hold('n-d')] };
+  const D: Body = { entity: 'v2_d', node: 'n-d', soul: 's-d', name: 'Di', heading: 0, samples: [{ at: t0 - 1_000_000, p: [0, 0, 500] }], gestures: [hold('n-c')] };
+  for (const b of [C, D]) endGesture(b.gestures!, t0, t0 + 1_000_000);
+  const take = chunkOf([C, D], FROM, frame, 100).take as unknown as Take, at = (s: number) => sampleTake(take, s).entities;
+  assert.deepEqual(at(0.5).v2_c.state.handHold, { with: 'v2_d', hand: 'right', since: FROM });
+  assert.deepEqual(at(0.5).v2_d.state.handHold, { with: 'v2_c', hand: 'left', since: FROM });
+  assert.deepEqual(at(1.5).v2_c.state.handHold, { with: 'v2_d', hand: 'right', since: FROM, release: FROM + 20 }, 'let go at 1 s');
+  assert.equal(at(4).v2_c.state.handHold ?? null, null, 'gone once the arms are down');
 });
 
 test('0.134 T2: a held hand let go (its record again, ended) ends that hold then', () => {

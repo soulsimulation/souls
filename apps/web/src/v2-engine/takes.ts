@@ -87,6 +87,29 @@ function lastHeading(s: readonly WorldSample[], upTo: number, t: number, fallbac
   return fallback;
 }
 
+/** How long a let-go hand hold stays in the take after it ends, µs: the old renderer lowers both arms over it
+ *  (mars/viewer/engine/social/hand-hold.ts RELEASE_SECONDS, HAND_STATE_TAIL). */
+const HOLD_TAIL = 2_600_000;
+
+/**
+ * 0.134 T2 on the old page: body `b`'s hand hold at world time `t`, as the old renderer's `human.handHold` (entry 35),
+ * or null. Its hands join from the held move's start (`since`, an absolute take tick) and part from its end (`release`).
+ * The pair stand side by side facing one way: the one on the left holds with its right hand, the other with its left.
+ */
+export function holdState(b: Body, byNode: ReadonlyMap<string, Body>, t: number): { with: string; hand: 'left' | 'right'; since: number; release?: number } | null {
+  let h: Gesture | undefined;
+  for (const g of b.gestures ?? []) if (g.hold && g.target && g.start <= t && t < g.end + HOLD_TAIL) h = g;
+  const other = h?.target ? byNode.get(h.target) : undefined;
+  if (!h || !other) return null;
+  const p = positionAt(b.samples, h.start), q = positionAt(other.samples, h.start);
+  if (!p || !q) return null;
+  const f = motionAt(b.samples, h.start, b.heading).heading;
+  // The partner to the right of the way the body faces (+z of a body facing +x) is held with the right hand.
+  const right = Math.cos(f) * (q[2] - p[2]) - Math.sin(f) * (q[0] - p[0]) >= 0;
+  const tick = (us: number) => Math.round(us / TICK_US);
+  return { with: other.entity, hand: right ? 'right' : 'left', since: tick(h.start), ...(t >= h.end ? { release: tick(h.end) } : {}) };
+}
+
 /** The last whole chunk's end tick at or before world time `t` µs. */
 export const chunkEnd = (t: number, ticks = TICKS) => Math.floor(t / TICK_US / ticks) * ticks;
 
@@ -125,16 +148,17 @@ export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame,
       // toward where its target stood. The drawing turns; the body in the world does not.
       const g = walking ? null : gestureNow(b.gestures, t), other = g?.target && g.target !== b.node ? byNode.get(g.target) : undefined;
       const op = other ? positionAt(other.samples, t) : null;
-      const aim: [number, number] | null = op ? [op[0], op[2]] : g?.toward && !seatAt(b.samples, t) ? g.toward : null;
+      const aim: [number, number] | null = op && !g?.hold ? [op[0], op[2]] : g?.toward && !seatAt(b.samples, t) ? g.toward : null;
       const drawn = aim && Math.hypot(aim[0] - p[0], aim[1] - p[2]) > 1 ? Math.atan2(aim[1] - p[2], aim[0] - p[0]) : heading;
       // Dancers on one beat move in step: each names the first of them (by entity) its partner, whose phase the old
       // renderer shares between partners; that first one names none.
       const lead = g?.run && g.activity && LOOPS.has(g.activity)
         ? (loops.get(g.run) ?? []).filter((o) => o.entity < b.entity && gestureNow(o.gestures, t)?.run === g.run).map((o) => o.entity).sort()[0] ?? null
         : null;
-      const nextPartner = lead ?? (g && !g.hold && other ? other.entity : null), nextHold = g?.hold && other ? other.entity : null;
+      const nextPartner = lead ?? (g && !g.hold && other ? other.entity : null);
       if (k < ticks && nextPartner !== (partner ?? null)) { changes.push([k, b.entity, 'partner', nextPartner]); partner = nextPartner; }
-      if (k < ticks && nextHold !== (hold ?? null)) { changes.push([k, b.entity, 'handHold', nextHold ? { with: nextHold, hand: 'right' } : null]); hold = nextHold; }
+      const held = holdState(b, byNode, t), nextHold = held ? JSON.stringify(held) : null;
+      if (k < ticks && nextHold !== (hold ?? null)) { changes.push([k, b.entity, 'handHold', held]); hold = nextHold; }
       track.push([k, Math.round(p[0]), Math.round(p[1]), Math.round(p[2]), Math.round(drawn * ANG_Q)]);
       if (k === 0) { changes.push([0, b.entity, 'present', true], [0, b.entity, 'level', 0]); if (b.look) changes.push([0, b.entity, 'body', b.look]); }
       const seat = walking ? null : seatAt(b.samples, t), nextSeat = seat ? seat.height / POS_Q : null, nextProp = heldAt(b.held, t);
