@@ -90,6 +90,7 @@ fn mixed_classes_share_physical_holders_across_different_candidate_keys() {
         node: node(),
         from: Vec3::new(-5_000_000, 0, 0),
         target: target(0),
+        carried: false,
     };
     let asks = vec![
         (ask(1), Size::Giant),
@@ -171,6 +172,7 @@ fn a_walker_sent_to_a_point_in_a_pocket_is_granted_the_nearest_place_beside_it()
         node: node(),
         from: Vec3::new(x, 0, 0),
         target: target(0),
+        carried: false,
     };
     let (a, b) = (ask(1, 5_000_000), ask(2, -5_000_000));
     let mut spots = Spots::new();
@@ -249,6 +251,7 @@ fn a_target_cut_off_from_the_asker_answers_after_a_bounded_number_of_walks() {
             node: node(),
             from,
             target: t,
+            carried: false,
         };
         let mut spots = Spots::new();
         spots.write(&mut g, &[ask], 0).unwrap();
@@ -259,4 +262,38 @@ fn a_target_cut_off_from_the_asker_answers_after_a_bounded_number_of_walks() {
             g.misses
         );
     }
+}
+
+/// #4171: a walk sent while the world carries its body across a link (part way up a stair, on no floor's ground) is
+/// not refused `spot-none-free` with every place free: its ask waits, unanswered, and is granted once the body has
+/// landed. An asker off the ground and not carried is refused as before.
+#[test]
+fn an_ask_from_a_body_mid_crossing_waits_for_its_landing() {
+    let mut g = Block { half: 1_000_000 };
+    let id = |n| Id::new(replica::ids::Scope([0x68; 16]), n).unwrap();
+    let t = target(5_000_000);
+    let mid_stair = Vec3::new(0, 400_000, 0);
+    let ask = |carried, from| Ask {
+        who: id(1),
+        order: id(2),
+        node: node(),
+        from,
+        target: t,
+        carried,
+    };
+    let mut spots = Spots::new();
+    for tick in 0..3 {
+        spots.write(&mut g, &[ask(true, mid_stair)], tick).unwrap();
+        assert_eq!(spots.of(id(1), &t), None, "no answer while carried");
+    }
+    let landed = Vec3::new(2_000_000, 0, 0);
+    spots.write(&mut g, &[ask(false, landed)], 3).unwrap();
+    assert_eq!(
+        spots.of(id(1), &t),
+        Some(Ok(t.point())),
+        "landed, it is granted the point"
+    );
+    let mut spots = Spots::new();
+    spots.write(&mut g, &[ask(false, mid_stair)], 0).unwrap();
+    assert_eq!(spots.of(id(1), &t), Some(Err("spot-none-free")));
 }

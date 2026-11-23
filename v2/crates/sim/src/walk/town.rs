@@ -2092,6 +2092,7 @@ impl World for Town {
                             node: m.node,
                             from: m.at,
                             target,
+                            carried: m.crossing.is_some(),
                         },
                         self.size_of(m.who),
                     )
