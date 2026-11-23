@@ -91,6 +91,8 @@ struct Snap {
     /// Every distance is this far, when set.
     far: bool,
     defer_walk: bool,
+    /// The thing every move aims at, when set (worldd's thing argument).
+    aimed: Option<Id>,
 }
 
 impl Geometry for Snap {
@@ -144,6 +146,9 @@ impl Reach for Snap {
             i128::from(t.z + p.z - b.z),
         ];
         i64::try_from((d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).isqrt()).ok()
+    }
+    fn aimed(&self, _: Id, _: &Name) -> Option<Id> {
+        self.aimed
     }
 }
 
@@ -770,6 +775,113 @@ fn f2_a3_a_resend_across_a_restart_gets_the_first_receipt() {
     let r = b.ask(body, node, &entry, &form, limits, it);
     assert_eq!(r.map_err(|r| r.name), Err("intent-expired"));
     assert_eq!(effect_entries(&log).len(), 1);
+}
+
+/// Whether entry `e` is a run's move record for viewers (#3741).
+fn is_move_record(e: &Effect) -> bool {
+    e.events
+        .iter()
+        .flatten()
+        .any(|v| v.name.as_str() == "souls:form-move")
+}
+
+/// #3741: a run's move writes its B2 record for viewers (the body, and the move's name, start and phase ends), seen
+/// by everyone, changing nothing; and a restart from a log holding it recovers exactly as from the same log without.
+#[test]
+fn a_runs_move_record_is_written_for_viewers_and_a_restart_ignores_it() {
+    let (entry, form) = effecting();
+    let mut b = Bench::new();
+    let (body, node) = b.add(&entry, Vec3::new(0, 0, 3_000_000), Vec3::ZERO);
+    let it = intent(body, 11);
+    assert!(matches!(
+        b.ask(body, node, &entry, &form, Limits::default(), it),
+        Ok(Asked::Started(_))
+    ));
+    let mut log = Vec::new();
+    while !log.iter().any(is_move_record) {
+        assert!(!b.forms.is_empty(), "the run ended without a move record");
+        b.tick();
+        b.flush(&mut log);
+    }
+    let rec = log.iter().find(|e| is_move_record(e)).expect("the record");
+    assert_eq!(
+        rec.envelope.audience,
+        replica::world_model::Audience::Everyone
+    );
+    assert_eq!(rec.envelope.cause, Cause::Intent(it.id));
+    assert!(
+        matches!(&rec.body, Body::Changes(c) if c.is_empty()),
+        "it changes nothing"
+    );
+    let ev = &rec.events.as_ref().expect("events")[0];
+    assert_eq!(ev.fields.get(&2), Some(&body.to_value()));
+    let Some(Value::Map(m)) = ev.fields.get(&3) else {
+        panic!("a move record: {ev:?}")
+    };
+    assert!(
+        matches!(m.get(&2), Some(Value::Bytes(_))),
+        "the move's name"
+    );
+    assert!(
+        matches!(m.get(&8), Some(Value::Array(a)) if !a.is_empty()),
+        "its phase ends"
+    );
+    // A restart mid-run: the same endings, entries and runs with the record as without it.
+    let now = b.now;
+    let without: Vec<Effect> = log.iter().filter(|e| !is_move_record(e)).cloned().collect();
+    let (a, c) = (Forms::recover(&log, now), Forms::recover(&without, now));
+    assert_eq!(a.ended, c.ended);
+    assert_eq!(a.out, c.out);
+    assert_eq!((a.is_empty(), a.len()), (c.is_empty(), c.len()));
+    b.run(now + 60_000_000);
+    b.clean();
+}
+
+/// The record a run's first move writes for viewers: its event's record map (field 3).
+fn first_move_record(
+    b: &mut Bench,
+    entry: &json::Value,
+    form: &str,
+    body: Id,
+    node: Id,
+) -> BTreeMap<u64, Value> {
+    let it = intent(body, 11);
+    assert!(matches!(
+        b.ask(body, node, entry, form, Limits::default(), it),
+        Ok(Asked::Started(_))
+    ));
+    let mut log = Vec::new();
+    while !log.iter().any(is_move_record) {
+        assert!(!b.forms.is_empty(), "the run ended without a move record");
+        b.tick();
+        b.flush(&mut log);
+    }
+    let rec = log.iter().find(|e| is_move_record(e)).expect("the record");
+    let Some(Value::Map(m)) = rec.events.as_ref().expect("events")[0].fields.get(&3) else {
+        panic!("a move record")
+    };
+    m.clone()
+}
+
+/// #4330: the record names the move's target, the form's node; a move aimed at a thing argument (a point toward a
+/// lamp) names that thing, so the page turns the body toward it, not toward itself.
+#[test]
+fn a_move_record_names_the_thing_it_aims_at() {
+    let (entry, form) = effecting();
+    let mut b = Bench::new();
+    let (body, node) = b.add(&entry, Vec3::new(0, 0, 3_000_000), Vec3::ZERO);
+    assert_eq!(
+        first_move_record(&mut b, &entry, &form, body, node).get(&5),
+        Some(&node.to_value())
+    );
+    let mut b = Bench::new();
+    let (body, node) = b.add(&entry, Vec3::new(0, 0, 3_000_000), Vec3::ZERO);
+    let thing = fixture(77);
+    b.snap.aimed = Some(thing);
+    assert_eq!(
+        first_move_record(&mut b, &entry, &form, body, node).get(&5),
+        Some(&thing.to_value())
+    );
 }
 
 fn splitmix(x: &mut u64) -> u64 {
@@ -1428,4 +1540,90 @@ fn i4187_a_late_start_has_its_runs_deadline_behind_a_long_walk() {
         e.at > sent + 10_000_000,
         "it ran past the 10 s an act gets on arrival"
     );
+}
+
+/// 0.132 A1-5: a seat a thing's form takes writes the body's `posture` field (the slot's `sit`, or `lie`), and its
+/// rise writes `stand`, so the body's own `stand` (which needs its posture not `stand`) is run while it sits. A body's
+/// own form writes its posture in its own effects: its rise writes nothing here.
+#[test]
+fn a_seat_taken_or_left_writes_the_bodys_posture() {
+    use replica::world_model::{Audience, Draft, Node, plain};
+    use skills::form_runner::Step;
+    let kinds = parse_kinds(KINDS).expect("kinds");
+    let full = |p: &str| {
+        kinds
+            .keys()
+            .find(|k| plain(k) == p)
+            .expect("a kind")
+            .clone()
+    };
+    let cases = [
+        ("sit", false, false, vec!["sit", "stand"]),
+        ("lie", true, false, vec!["lie", "stand"]),
+        ("own rise", false, true, vec!["sit"]),
+    ];
+    for (case, lie, own_rise, want) in cases {
+        let (mut b, body, chair, slot, _) = seat_bench();
+        let root = b.mint.mint().expect("id");
+        let node = |id, kind, parent| Node {
+            id,
+            kind,
+            parent,
+            slot: None,
+            audience: Audience::Everyone,
+            fields: BTreeMap::new(),
+        };
+        let draft = Draft {
+            kinds: kinds.clone(),
+            souls: Default::default(),
+            audiences: BTreeMap::new(),
+            nodes: vec![
+                node(root, full("souls:place"), None),
+                node(body, full("souls:body"), Some(root)),
+            ],
+            links: Vec::new(),
+        };
+        b.tree = Tree::load(&draft).expect("loads").0;
+        b.forms.postures.insert(full("souls:body"), 28);
+        let sit = Step::Sit {
+            slot,
+            lie,
+            stand: false,
+        };
+        let mut written = Vec::new();
+        let mut run = |b: &mut Bench, node, steps, n| {
+            b.steps(body, node, steps, intent(body, n), Limits::default())
+                .expect("started");
+            while !b.forms.is_empty() && b.now < 30_000_000 {
+                b.tick();
+                for e in b.forms.out.drain(..) {
+                    let Body::Changes(cs) = e.body else { continue };
+                    for c in cs {
+                        if let Change::Set {
+                            node,
+                            field: 28,
+                            to,
+                            ..
+                        } = c.change
+                        {
+                            assert_eq!(node, body, "{case}: on the body");
+                            written.push(to);
+                        }
+                    }
+                }
+            }
+        };
+        if own_rise {
+            run(&mut b, chair, vec![sit], 0);
+            run(&mut b, body, vec![Step::Rise], 1);
+        } else {
+            run(&mut b, chair, vec![sit, Step::Rise], 0);
+        }
+        let want: Vec<_> = want.iter().map(|w| Value::Text(super::name(w))).collect();
+        assert_eq!(written, want, "{case}");
+        assert!(
+            b.slots.as_ref().and_then(|s| s.held_by(body)).is_none(),
+            "{case}: out of the slot"
+        );
+    }
 }

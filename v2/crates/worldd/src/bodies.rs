@@ -227,8 +227,11 @@ pub struct Bodies {
     pub heard: Vec<(Id, Said, Micros)>,
     /// The wind-down (B16, #2751): the one rule by which the world moves a body its agent did not order.
     pub wind: WindDown,
-    /// Its records since the world last took them, cause and actor the world.
+    /// Its records since the world last took them, cause and actor the world; and the never-stuck ladder's (0.133 N1,
+    /// [`crate::unstick`]), which the world writes the same way.
     pub wind_log: Vec<Effect>,
+    /// The never-stuck ladder over the bodies' walks (0.133 N1).
+    pub unstuck: crate::unstick::Unstuck,
     /// The rule's own move going on each body, by its intent id.
     wind_moves: BTreeMap<Id, Id>,
     /// Each body the rule put to sleep on the ground: the driver holding it lying.
@@ -397,6 +400,7 @@ impl Bodies {
                     .unwrap_or(wind_down::KNOBS),
             ),
             wind_log: Vec::new(),
+            unstuck: crate::unstick::Unstuck::default(),
             wind_moves: BTreeMap::new(),
             sleeping: BTreeMap::new(),
         })
@@ -687,6 +691,19 @@ impl Bodies {
     }
 
     /// Where each body is now, a seated one with its stance: what a checkpoint carries (K18c, #3176).
+    /// No body moving for an intent or for the wind-down, and no sit or rise waiting for its reach (O2).
+    pub fn still(&self) -> bool {
+        self.live.is_empty() && self.wind_moves.is_empty() && self.waiting.is_empty()
+    }
+
+    /// The earliest due time of the bodies (O2): a move's phase timers and the wind-down's next step.
+    pub fn next_due(&self) -> Option<Micros> {
+        [self.due.next_due(), self.wind.next()]
+            .into_iter()
+            .flatten()
+            .min()
+    }
+
     pub fn placed(&self) -> Placed {
         self.every()
     }
@@ -1199,7 +1216,11 @@ impl Bodies {
             crate::orders::step(self, at);
             self.wind_step(at);
             let planned = std::mem::take(&mut self.planned);
+            self.unstuck.planned(&self.runner, &planned);
             let (mut wants, _) = self.runner.tick_planned(&mut self.town, &planned);
+            // The never-stuck ladder (0.133 N1): walk-outs, then each walker's rungs; its records are the world's.
+            let rungs = self.unstuck.after(&mut self.runner, &mut self.town);
+            self.wind_log.extend(rungs);
             // Every body in a seat move, with its seat: its reach for the next tick's phase timers.
             let mut seated: Vec<(Id, Id, Id)> = self
                 .live
@@ -1258,6 +1279,73 @@ impl Bodies {
     /// writes each ending in the tick its walk stopped.
     pub fn replaced(&mut self) -> Vec<(Id, Result<(), String>)> {
         std::mem::take(&mut self.ended)
+    }
+
+    /// The only way is blocked (0.132 A2-3, Gene's decision: no Soul is left stuck): walker `walker`'s walk stalled,
+    /// and each still body on its line within [`sim::unstick::NEAR`] of it (no walk, no move, no seat, no order to stay,
+    /// not carried) is stepped aside by the world, by the smallest step that clears the line to the corner it aims at
+    /// (`sim::unstick::aside`), at walking speed in a straight line. Returns each body stepped aside, from where to
+    /// where; none when nothing could be.
+    pub fn make_way(&mut self, walker: Id) -> Vec<(Id, Vec3, Vec3)> {
+        let Some(me) = self.runner.controller.body(walker).copied() else {
+            return Vec::new();
+        };
+        let node = sim::walk::node_of(&me);
+        let Some((_, aim, _)) = self
+            .town
+            .next_corner_toward(walker)
+            .filter(|(n, _, _)| *n == node)
+        else {
+            return Vec::new();
+        };
+        let here = me.pose.position;
+        let line = (here, Vec3::new(aim[0], here.y, aim[1]));
+        let c = &self.runner.controller;
+        let still: Vec<(Id, Vec3)> = c
+            .bodies()
+            .filter(|b| {
+                b.id != walker
+                    && sim::walk::node_of(b) == node
+                    && b.pose.support != Support::Slot
+                    && !self.runner.running(b.id)
+                    && !self.runner.staying.contains(&b.id)
+                    && !c.carried(b.id)
+                    && !self.live.contains_key(&b.id)
+                    && self.slots.held_by(b.id).is_none()
+                    && c.claims(b.id).is_some_and(|k| k.running().is_empty())
+            })
+            .map(|b| (b.id, b.pose.position))
+            .filter(|(_, at)| {
+                let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+                (d(at.x, here.x) + d(at.z, here.z)).isqrt() < i128::from(sim::unstick::NEAR)
+            })
+            .collect();
+        let mut moved: Vec<(Id, Vec3, Vec3)> = Vec::new();
+        for (s, from) in still {
+            let taken: Vec<Vec3> = self
+                .runner
+                .controller
+                .bodies()
+                .filter(|b| b.id != s && sim::walk::node_of(b) == node)
+                .map(|b| b.pose.position)
+                .chain(moved.iter().map(|&(_, _, to)| to))
+                .collect();
+            let Some(to) = sim::unstick::aside(&self.town, node, from, line, &taken) else {
+                continue;
+            };
+            let track = sim::controller::Track {
+                link: None,
+                line: vec![to],
+                speed: WALK,
+                to: node,
+                arrive: None,
+                hold: false,
+            };
+            if self.runner.controller.carry(s, track).is_ok() {
+                moved.push((s, from, to));
+            }
+        }
+        moved
     }
 
     /// Intent `id` ended (its deadline passed): its walk stops where the body is, now ([`Cut::Stopped`]). A sit, a lie
@@ -1571,9 +1659,12 @@ impl Bodies {
         body_of: impl Fn(Id) -> Option<Id>,
         placed: &Placed,
         now: Micros,
+        since: Micros,
+        born: &BTreeMap<Id, Micros>,
     ) {
         let ids: Vec<Id> = self.runner.controller.ids().collect();
-        self.wind.resume(effects, body_of, ids.iter().copied(), now);
+        self.wind
+            .resume_since(effects, body_of, ids.iter().copied(), now, since, born);
         for (body, (pose, stance)) in placed {
             if *stance == Some(Stance::Lie)
                 && matches!(pose.support, Support::Surface { .. })

@@ -2,9 +2,12 @@
 // (v2/web/src/source/worker.ts: the stream's pointer and parts, played on the replica's WASM in a worker), keeps the
 // public nodes and body samples it hands on, and keeps the page's `takes` and Souls list as the old socket would: the
 // last chunks of every Soul's body (takes.ts) and one PublicSoul a body. Nothing here draws or decides; LiveWorld does.
-import { chunkEnd, chunkOf, TICKS, TICK_US, type Body, type Frame, type RecordedChunk, type WorldSample } from './takes.ts';
-import { defaultLookOf, entityWithLook, legacyBodyOf, propOf, seatOf, type CatalogueBody, type Held, type Seat } from './take-bodies.ts';
+import { chunkEnd, chunkOf, TICK_US, type Body, type Frame, type RecordedChunk, type WorldSample } from './takes.ts';
+import { defaultLookOf, entityWithLook, legacyBodyOf, lookBodyOf, propOf, seatOf, type CatalogueBody, type Held, type Seat } from './take-bodies.ts';
 import { isPublic, saidKey, speechOf, talkOf, type Said, type Talk } from './take-speech.ts';
+import { cut as cutGestures, gestureFrom, type Gesture } from './take-gestures.ts';
+import { privateTurnOf, tickerOf, turnKey } from './take-talk.ts';
+import type { Heard } from './member-turns.ts';
 
 /** What the reader's worker posts (v2/web/src/source/source.ts: NodeRec, PartRec, Pointer; only the fields read here). */
 type NodeRec = { id: string; kind: string; parent: string | null; slot: number | null; pos: [number, number, number]; rot: [number, number, number, number];
@@ -12,12 +15,15 @@ type NodeRec = { id: string; kind: string; parent: string | null; slot: number |
   /** Slots `[n, x, y, z, yaw mdeg, capacity]`, mm in its own frame. */
   slots?: number[][];
   /** Exact recorded body-kind hash (field 32); absent is the stated default. */
-  body?: string };
+  body?: string;
+  /** V3: the Soul's own look's params (field 33, G2's `life:look`), JSON. */
+  look?: string };
 type SampleRec = [string, string, number | null, number, number, number, number];
 /** A world record (sound/record.ts Happened); only the fields read here (B3-3). */
 type Happened = { at: number; node: string; name?: string };
-type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; said?: Said[]; happened?: Happened[] };
-type Pointer = { newest: number | null; newestTo: number | null; period: number; anchorWorld: number; anchorWallMs: number; quietUntil: number | null };
+type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; said?: Said[]; happened?: Happened[];
+  moves?: { body: string; name: string; start: number; ends: number[]; target?: string | null }[]; runEnds?: { body: string; at: number }[] };
+type Pointer = { newest: number | null; newestTo: number | null; period: number; anchorWorld: number; anchorWallMs: number; quietUntil: number | null; asleep?: true; stillUntil?: number | null };
 type Msg = { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'snapshot'; s: { nodes: NodeRec[]; removed: string[] } } | { t: 'error'; message: string };
 
 /** The page's view of the world, updated as parts arrive (read by the hook's 200 ms re-render). */
@@ -26,7 +32,8 @@ export type V2View = {
   unplaced: number;
   /** The last frames (node ids) a sample could not be placed in, and the slot it named, newest last: for checks. */
   unplacedFrames: string[];
-  takes: { serverTick: number; chunks: RecordedChunk[]; receivedAt: number };
+  /** `playDelay`: the ticks the page plays behind serverTick (LiveWorld's live delay for this source, B3-4). */
+  takes: { serverTick: number; chunks: RecordedChunk[]; receivedAt: number; playDelay: number };
   souls: Map<string, V2Soul>;
   /** World time (µs) the parts reach. */
   newestTo: number | null;
@@ -35,7 +42,15 @@ export type V2View = {
   /** What the Souls said aloud, as the old socket's edge `speech` messages (the dock and the speech layer read them as
    *  public, with the speaker's name), once each, in order, as their chunks come in (take-speech.ts). */
   speech: ReturnType<typeof speechOf>[];
+  /** R3 (take-talk.ts): private turns as the dock shows them to anyone (members, a `…` line a turn), and the ticker. */
+  conversations: (NonNullable<ReturnType<typeof privateTurnOf>>[number] | TurnLine)[];
+  ticker: { tick: number; text: string }[];
 };
+
+/** R3b: a private turn with its words, for a member's page (an edge `conversation.turn`, dialogue-threads.ts). */
+type Who = { soulId: string; name: string };
+type TurnLine = { type: 'edge'; conversation: string; tick: number; at: number }
+  & ({ kind: 'conversation.start'; private: true; from: Who } | { kind: 'conversation.turn'; turn: { seq: string; from: Who; text: string; at: number; tick: number } });
 
 /** One Soul as the old page's card shows it (B3-3): its public name and description, and what it is doing now. */
 export type V2Soul = { id: string; entityId: string; name: string; description: string; doing: Doing; state: 'awake' | Wound };
@@ -57,8 +72,15 @@ export function doingOf(n: NodeRec | null, samples: readonly { at: number }[], t
 }
 
 const Q = 2 ** 30;
-/** The v2 page's own lag behind the world (v2/web/src/clock/clock.ts BEHIND_US: four 0.5 s parts). */
-const BEHIND_US = 2_000_000;
+/** How far behind the newest part a chunk is made (B3-4): past a walker's next sample, which comes every 0.2 s (p99
+ *  0.25 s at 100 Souls), so a walking body is never held at its last one; was the v2 page's 2 s, which with LiveWorld's
+ *  1.5 s and one-second chunks showed an act about 3.5 s after the world's answer. */
+export const BEHIND_US = 300_000;
+/** Ticks a chunk (B3-4): half a second, one stream part, so a new chunk is in as often as a part comes. */
+export const CHUNK = 10;
+/** Ticks the page plays behind the newest chunk's end (LiveWorld's live delay for this source, B3-4): one chunk and 0.1 s
+ *  for a part that comes late, where the old socket's one-second chunks need 30. */
+export const PLAY_DELAY = 12;
 type Mat = { p: [number, number, number]; q: [number, number, number, number] };
 const rotate = (q: Mat['q'], v: [number, number, number]): [number, number, number] => {
   const [w, x, y, z] = q, [vx, vy, vz] = v;
@@ -71,17 +93,15 @@ const mul = (a: Mat['q'], b: Mat['q']): Mat['q'] => [a[0] * b[0] - a[1] * b[1] -
 /** A body: a node with a public Soul (its body-of link), or one of a body kind. */
 const isBody = (n: NodeRec) => !!n.soul || /:(humanoid|body)$/.test(n.kind.split('@')[0]);
 const samePlace = (a: NodeRec, b: NodeRec) => a.parent === b.parent && a.slot === b.slot && a.pos.every((v, i) => v === b.pos[i]);
-/** Chunks the page keeps, as useSouls keeps the socket's. */
-const KEEP = 12;
-/** Samples kept a body: a minute of world time before the oldest chunk kept. */
-const KEEP_US = (KEEP * TICKS * TICK_US) + 60_000_000;
+/** World time the page keeps in chunks: 12 s, as useSouls keeps the socket's twelve one-second ones. */
+const KEEP_CHUNKS_US = 12_000_000;
 
 export class V2Bridge {
-  readonly view: V2View = { unplaced: 0, unplacedFrames: [], takes: { serverTick: 0, chunks: [], receivedAt: 0 }, souls: new Map(), newestTo: null, error: null, parts: 0, speech: [] };
+  readonly view: V2View = { unplaced: 0, unplacedFrames: [], takes: { serverTick: 0, chunks: [], receivedAt: 0, playDelay: PLAY_DELAY }, souls: new Map(), newestTo: null, error: null, parts: 0, speech: [], conversations: [], ticker: [] };
   private readonly nodes = new Map<string, NodeRec>();
   /** Each body's samples, its last record and, while the public copy cannot draw it (a frame that is not public, or it
    *  left), since when: it is not drawn from then until it is back. */
-  private readonly tracks = new Map<string, { samples: WorldSample[]; node: NodeRec | null; gone: number | null; held: Held[]; said: Talk[] }>();
+  private readonly tracks = new Map<string, { samples: WorldSample[]; node: NodeRec | null; gone: number | null; held: Held[]; said: Talk[]; gestures: Gesture[] }>();
   /** Each held thing's holder (a body node id). */
   private readonly heldBy = new Map<string, string>();
   /** Saids kept (saidKey), and those not yet in a chunk; the talk lines' next id. */
@@ -97,11 +117,28 @@ export class V2Bridge {
   private worker: Worker | null = null;
   /** World time of the first part played live: before it the reader caught up without samples, so no chunk is made. */
   private liveFrom: number | null = null;
+  /** Wall time, ms (tests set it). */
+  wallNow: () => number = () => Date.now();
+
+  /** The world time a pointer says the world is still up to: its quiet time, or, while it sleeps (S4p, #4264), the
+   *  world's time now (one second a second from the pointer's anchors, as the v2 page's main.ts) up to its next due
+   *  change, `stillUntil` (none: no end). Nothing in a sleeping world changes before then, so it plays as still. */
+  private stillTo(p: Pointer): number | null {
+    if (!p.asleep) return p.quietUntil;
+    const now = p.anchorWorld + (this.wallNow() - p.anchorWallMs) * 1000;
+    const t = p.stillUntil == null ? now : Math.min(now, p.stillUntil);
+    return p.quietUntil === null ? t : Math.max(p.quietUntil, t);
+  }
   private readonly frame: Omit<Frame, 'datetime'>;
   private readonly hour: string | undefined;
 
   /** `hour` (HH:MM) shows the picture at that hour of the world's day; the world's clock is not changed. */
-  constructor(frame: Omit<Frame, 'datetime'>, hour?: string) { this.frame = frame; this.hour = hour; }
+  /** Ticks a chunk: the live page's half second (CHUNK); a past window's one second, as the old `/v1/takes` (history.ts). */
+  private readonly chunk: number;
+  private readonly keep: number;
+  constructor(frame: Omit<Frame, 'datetime'>, hour?: string, chunk = CHUNK) {
+    this.frame = frame; this.hour = hour; this.chunk = chunk; this.keep = Math.round(KEEP_CHUNKS_US / (chunk * TICK_US));
+  }
 
   start(stream: string, make: () => Worker): void {
     this.worker = make();
@@ -121,8 +158,14 @@ export class V2Bridge {
     // second). That is the world's time as surely as a part's end (the v2 page's clock.ts caughtUp), so the chunks it
     // completes are made, and a line said just before the world went still is shown, not held until something moves.
     if (m.t === 'pointer') {
-      const q = m.p.quietUntil;
-      if (typeof q === 'number' && this.liveFrom !== null && q > (this.view.newestTo ?? -Infinity)) { this.view.newestTo = q; this.publish(); }
+      const q = this.stillTo(m.p);
+      if (typeof q !== 'number' || q <= (this.view.newestTo ?? -Infinity)) return;
+      // B2-4: a world already still when the page opens plays no part (the reader posts a quiet time only once it has
+      // played every part there is): its first quiet time makes the current chunk from the snapshot, once, so its Souls
+      // and things are drawn where they are, not when something next moves
+      if (this.liveFrom === null) { if (!this.nodes.size) return; this.liveFrom = (chunkEnd(q - BEHIND_US, this.chunk) - this.chunk) * TICK_US; }
+      this.view.newestTo = q;
+      this.publish();
       return;
     }
     if (m.t === 'snapshot') { this.nodesChanged(m.s.nodes, m.s.removed, this.view.newestTo ?? 0); this.publish(); return; }
@@ -130,12 +173,16 @@ export class V2Bridge {
     this.liveFrom ??= p.from;
     this.nodesChanged(p.nodes, p.removed, p.from);
     for (const [id, frame, slot, at, x, y, z] of p.samples) this.sample(id, frame, slot, at, [x, y, z]);
+    // A gesture move plays on its body (take-gestures.ts); a run that ends early ends its gesture then.
+    for (const m of p.moves ?? []) { const g = gestureFrom(m, this.toward(m.target)), t = this.tracks.get(m.body); if (g && t) t.gestures.push(g); }
+    for (const e of p.runEnds ?? []) { const t = this.tracks.get(e.body); if (t) cutGestures(t.gestures, e.at); }
     for (const h of p.happened ?? []) {
       const word = h.name === undefined ? undefined : WOUND.get(h.name);
       if (word && (this.wound.get(h.node)?.at ?? -Infinity) <= h.at) this.wound.set(h.node, { at: h.at, word });
     }
     this.said = [...this.said, ...(p.said ?? []).filter((x) => x.words !== null)].filter((x) => x.at + x.length > p.to - 60_000_000);
     for (const s of p.said ?? []) if (isPublic(s) && !this.saidSeen.has(saidKey(s))) { this.saidSeen.add(saidKey(s)); this.pendingSaid.push(s); }
+    this.talk(p);
     this.view.newestTo = Math.max(this.view.newestTo ?? p.to, p.to);
     this.view.parts++;
     this.publish();
@@ -179,6 +226,13 @@ export class V2Bridge {
 
   /** The world frame of a node: its parents' places and turns composed (positions µm, turns `[w, x, y, z]`); null when
    *  its chain of frames is not all public in the copy (as the v2 page: a missing frame is never the world's). */
+  /** An aimed move's target, where it stands now: world x and z, mm (the takes' units); null when it is none or the copy
+   *  cannot place it. */
+  private toward(target: string | null | undefined): [number, number] | null {
+    const w = target ? this.world(target) : null;
+    return w ? [w.p[0] / 1000, w.p[2] / 1000] : null;
+  }
+
   private world(id: string | null, depth = 0): Mat | null {
     if (id === null) return { p: [0, 0, 0], q: [1, 0, 0, 0] };
     const n = this.nodes.get(id);
@@ -215,7 +269,7 @@ export class V2Bridge {
     const thing = slot !== null ? this.nodes.get(frame) : undefined;
     let seat: Seat | undefined;
     if (thing) { seat = seatOf(thing.kind, thing.slots?.find((x) => x[0] === slot)); p[1] -= seat.height; }
-    const t = this.tracks.get(id) ?? this.tracks.set(id, { samples: [], node: this.nodes.get(id) ?? null, gone: null, held: [], said: [] }).get(id)!;
+    const t = this.tracks.get(id) ?? this.tracks.set(id, { samples: [], node: this.nodes.get(id) ?? null, gone: null, held: [], said: [], gestures: [] }).get(id)!;
     const last = t.samples[t.samples.length - 1];
     if (last && at <= last.at) { if (at === last.at) { last.p = p; last.seat = seat; } return; }
     t.samples.push(seat ? { at, p, seat } : { at, p });
@@ -229,9 +283,11 @@ export class V2Bridge {
       const w = this.nodes.has(id) ? this.world(id) : null;
       // The node's turn about +y as the old take's heading (the old model faces +x: heading = -rotation.y).
       const heading = w ? -2 * Math.atan2(w.q[2], w.q[0]) : 0;
-      // The look the v2 page gives it: its body kind's, else the default person its id picks (on both pages alike).
-      const look = legacyBodyOf(n.body, this.catalogue), entity = n.body ? entityOf(id) : entityWithLook(entityOf(id), defaultLookOf(id));
-      out.push({ node: id, entity, soul: soulIdOf(n.soul ?? id), name: nameOf(id, n), description: n.description ?? '', samples: t.samples, heading, held: t.held, said: t.said,
+      // The look the v2 page gives it: its body kind's, else its own look (field 33, V3) drawn by the old page's look code,
+      // else the default person its id picks (on both pages alike).
+      const own = n.body ? null : lookBodyOf(n.look);
+      const look = legacyBodyOf(n.body, this.catalogue) ?? own, entity = n.body || own ? entityOf(id) : entityWithLook(entityOf(id), defaultLookOf(id));
+      out.push({ node: id, entity, soul: soulIdOf(n.soul ?? id), name: nameOf(id, n), description: n.description ?? '', samples: t.samples, heading, held: t.held, said: t.said, gestures: t.gestures,
         ...(look ? { look } : {}), ...(t.gone !== null ? { until: t.gone } : {}) });
     }
     return out;
@@ -242,9 +298,9 @@ export class V2Bridge {
     const to = this.view.newestTo;
     if (to === null) return;
     // A body's samples come at its turns and steps, not every tick: a chunk is made once the world is BEHIND_US past its
-    // end (the v2 page's own lag), so the sample after it is in and a walking body is not held at its last one.
-    const end = chunkEnd(to - BEHIND_US), bodies = this.bodies();
-    const first = Math.max(end - KEEP * TICKS, Math.ceil((this.liveFrom ?? Infinity) / TICK_US / TICKS) * TICKS);
+    // end, so the sample after it is in and a walking body is not held at its last one.
+    const end = chunkEnd(to - BEHIND_US, this.chunk), bodies = this.bodies();
+    const first = Math.max(end - this.keep * this.chunk, Math.ceil((this.liveFrom ?? Infinity) / TICK_US / this.chunk) * this.chunk);
     // what each is doing at the time the page shows (the world's newest time less the page's lag)
     const shown = to - BEHIND_US;
     const souls = new Map(bodies.map((b) => {
@@ -258,9 +314,10 @@ export class V2Bridge {
     if (end === this.view.takes.serverTick) return;
     this.speak(end);
     const datetime = this.datetime(end * TICK_US);
-    for (let from = first; from < end; from += TICKS) if (from >= 0 && !this.built.has(from)) this.built.set(from, chunkOf(bodies, from, { ...this.frame, datetime }));
+    for (let from = first; from < end; from += this.chunk) if (from >= 0 && !this.built.has(from)) this.built.set(from, chunkOf(bodies, from, { ...this.frame, datetime }, this.chunk));
     for (const from of [...this.built.keys()]) if (from < first) this.built.delete(from);
-    const cut = first * TICK_US - KEEP_US;
+    // samples kept a body: a minute of world time before the oldest chunk kept
+    const cut = first * TICK_US - KEEP_CHUNKS_US - 60_000_000;
     for (const [id, t] of this.tracks) {
       if (t.gone !== null && t.gone < cut) { this.tracks.delete(id); continue; }
       let k = 0;
@@ -270,8 +327,58 @@ export class V2Bridge {
       while (h + 1 < t.held.length && t.held[h + 1].at < cut) h++;
       if (h) t.held.splice(0, h);
       t.said = t.said.filter((l) => l.tick >= first);
+      t.gestures = t.gestures.filter((g) => g.end >= cut);
     }
-    this.view.takes = { serverTick: end, chunks: [...this.built.values()].sort((a, b) => a.fromTick - b.fromTick), receivedAt: performance.now() };
+    this.view.takes = { serverTick: end, chunks: [...this.built.values()].sort((a, b) => a.fromTick - b.fromTick), receivedAt: performance.now(), playDelay: PLAY_DELAY };
+  }
+
+  /** R3: a part's private turns (take-talk.ts) and what its bodies did (the ticker), each once. */
+  private talk(p: PartRec): void {
+    const who = (id: string) => { const n = this.nodes.get(id) ?? this.tracks.get(id)?.node; return n ? { soulId: soulIdOf(n.soul ?? id), name: nameOf(id, n) } : null; };
+    for (const s of p.said ?? []) {
+      if (!s.private || this.saidSeen.has(saidKey(s))) continue;
+      this.saidSeen.add(saidKey(s));
+      const p = s.private as { conversation: string };
+      const turn = privateTurnOf(s, Math.floor(s.at / TICK_US), Date.now(), who)
+        ?.filter((m) => m.kind !== 'conversation.talking' || !this.heardSeen.has(turnKey(p.conversation, s.speaker, s.at))); // R3b: its words are shown
+      if (turn) this.view.conversations = [...this.view.conversations, ...turn].slice(-300);
+    }
+    const did = [...(p.moves ?? []).map((m) => ({ node: m.body, name: m.name, at: m.start })), ...(p.happened ?? []).filter((h) => h.name).map((h) => ({ node: h.node, name: h.name!, at: h.at }))];
+    for (const d of did) {
+      const n = this.nodes.get(d.node), key = `${d.node}|${d.name}|${d.at}`;
+      if (!n || !isBody(n) || this.tickerSeen.has(key)) continue;
+      this.tickerSeen.add(key);
+      const line = tickerOf(Math.floor(d.at / TICK_US), nameOf(d.node, n), d.name);
+      if (line) this.view.ticker = [...this.view.ticker, line].slice(-40);
+    }
+  }
+  private readonly tickerSeen = new Set<string>();
+
+  /** R3b (member-turns.ts): a private turn one of the signed-in person's Souls heard, with its words, as the old page
+   *  showed a member its conversation (a `conversation.turn`); its public record then adds no `…` line. Once each. */
+  heard(h: Heard): void {
+    const k = turnKey(h.conversation, h.speaker, h.at), n = this.nodes.get(h.speaker) ?? this.tracks.get(h.speaker)?.node;
+    if (this.heardSeen.has(k) || !n || this.isSoulAudience(h.conversation)) return;
+    this.heardSeen.add(k);
+    const tick = Math.floor(h.at / TICK_US), from = { soulId: soulIdOf(n.soul ?? h.speaker), name: nameOf(h.speaker, n) };
+    const conversation = `v2:${h.conversation}`, at = Date.now();
+    // its thread is private (as the old page drew a member's sealed conversation), then the line with its words
+    const lines: TurnLine[] = [{ type: 'edge', kind: 'conversation.start', conversation, private: true, from, tick, at },
+      { type: 'edge', kind: 'conversation.turn', conversation, turn: { seq: k, from, text: h.words, at, tick }, tick, at }];
+    this.view.conversations = [...this.view.conversations, ...lines].slice(-300);
+    this.publish();
+  }
+  private readonly heardSeen = new Set<string>();
+  /** Whether audience `id` is a Soul's own or its body's (a whisper to it, B11), not a conversation's. */
+  private isSoulAudience(id: string): boolean {
+    const n = this.nodes.get(id), soul = soulIdOf(`soul-${id.replace('.', '-')}`);
+    return (!!n && isBody(n)) || [...this.nodes.values()].some((x) => !!x.soul && soulIdOf(x.soul) === soul);
+  }
+
+  /** R3b: the bodies the stream says the Souls of `grants` (the view token's) drive, as the page keys them. */
+  bodiesOf(grants: readonly string[]): string[] {
+    const souls = new Set(grants.map(soulIdOf));
+    return [...this.nodes.values()].filter((n) => isBody(n) && n.soul && souls.has(soulIdOf(n.soul))).map((n) => n.id);
   }
 
   /** The saids before chunk tick `end` become talk lines, in world-time order, each once: on its speaker's body (the

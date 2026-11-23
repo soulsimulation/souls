@@ -10,7 +10,8 @@
 //!   contact is the end of the first.
 //! - **Effector.** A `hand` reaches with the hand it holds; a `held_point` with the hand too: the held thing's tip
 //!   lengthens it (B4), and the step's `at` names the point it reaches.
-//! - **Contact** is the step's `at` (the runner sets it); a move read here names `souls:surface` until then.
+//! - **Contact** is the move's own `contact` when it names one (a handshake reaches the other body's `hand_right`, read
+//!   as `souls:hand-right`); else the step's `at` (the runner sets it), and a move read here names `souls:surface`.
 
 use replica::bodies::{Class, Want};
 use replica::effects::{Refusal, fixture_bytes};
@@ -28,7 +29,7 @@ const OWN: [&str; 3] = [
 ];
 
 /// Every file of `content/moves`, by name. A test holds this list to the folder (`tests/content_moves.rs`).
-pub const CONTENT: [(&str, &str); 28] = [
+pub const CONTENT: [(&str, &str); 33] = [
     ("bow", include_str!("../../../../content/moves/bow.json")),
     (
         "cheer",
@@ -48,6 +49,15 @@ pub const CONTENT: [(&str, &str); 28] = [
         include_str!("../../../../content/moves/dance.json"),
     ),
     ("fill", include_str!("../../../../content/moves/fill.json")),
+    (
+        "handshake",
+        include_str!("../../../../content/moves/handshake.json"),
+    ),
+    (
+        "high_five",
+        include_str!("../../../../content/moves/high_five.json"),
+    ),
+    ("hug", include_str!("../../../../content/moves/hug.json")),
     ("jump", include_str!("../../../../content/moves/jump.json")),
     (
         "knock",
@@ -59,6 +69,7 @@ pub const CONTENT: [(&str, &str); 28] = [
         "look_around",
         include_str!("../../../../content/moves/look_around.json"),
     ),
+    ("nod", include_str!("../../../../content/moves/nod.json")),
     (
         "point",
         include_str!("../../../../content/moves/point.json"),
@@ -69,6 +80,10 @@ pub const CONTENT: [(&str, &str); 28] = [
         include_str!("../../../../content/moves/press.json"),
     ),
     ("pump", include_str!("../../../../content/moves/pump.json")),
+    (
+        "shake_head",
+        include_str!("../../../../content/moves/shake_head.json"),
+    ),
     (
         "shrug",
         include_str!("../../../../content/moves/shrug.json"),
@@ -178,6 +193,7 @@ pub fn from_content(text: &str) -> R<Move> {
     }
     let effector = match m.get("effector").and_then(Json::str) {
         Some("hand" | "held_point") => Effector::Held,
+        Some("aim") => Effector::Aim,
         _ => return refuse(format!("{mv}: effector")),
     };
     let reach = match m.get("reach_mm") {
@@ -191,7 +207,7 @@ pub fn from_content(text: &str) -> R<Move> {
             detail: format!("{mv}: start-up, then at least one more, each above zero"),
         });
     }
-    if !(1..=replica::moves::REACH_MOST).contains(&reach) {
+    if !(1..=effector.reach_most()).contains(&reach) {
         return Err(Refusal {
             name: "move-reach-out-of-range",
             detail: format!("{mv}: {reach} µm"),
@@ -206,7 +222,10 @@ pub fn from_content(text: &str) -> R<Move> {
         phases,
         effector,
         reach,
-        contact: name("souls:surface")?,
+        contact: match m.get("contact").and_then(Json::str) {
+            Some(point) => name(&format!("souls:{}", point.replace('_', "-")))?,
+            None => name("souls:surface")?,
+        },
     })
 }
 

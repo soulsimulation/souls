@@ -96,6 +96,9 @@ pub async fn submit(State(gw): State<Arc<Gateway>>, headers: HeaderMap, body: By
     if intent.actor != actor {
         return refuse(&gw, StatusCode::FORBIDDEN, "intent-not-granted");
     }
+    if let Some(reason) = crate::uploads::edit_refusal(&gw, &intent) {
+        return refuse(&gw, StatusCode::UNPROCESSABLE_ENTITY, reason); // I2, as on the socket
+    }
     let left = intent.expiry.saturating_sub(crate::socket::unix_us());
     let size = u64::try_from(body.len()).unwrap_or(u64::MAX);
     match gw.link.submit(

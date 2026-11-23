@@ -33,7 +33,7 @@ use crate::ids::Id;
 use crate::kinds::defined;
 use crate::pose::{Frame, Pose, Quat, Support, Vec3};
 use crate::read::Read;
-use crate::world_model::{Audience, Kind, plain, show, takes};
+use crate::world_model::{Audience, End, Kind, plain, show, takes};
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The most operations a batch may carry.
@@ -111,6 +111,84 @@ pub enum Op {
         closed: Vec<Value>,
         open: Vec<Value>,
     },
+    /// A link of type `ty` between two nodes that are there, owned by its `owner` end, with its row appended to the
+    /// owner's `field` (`[link, ...row]`, as a doorway's or a stair's geometry is kept), and the door standing in it,
+    /// if any, naming it in field 7 (#3728: an imported world's doorways and stairs). Nothing else changes: no wall is
+    /// cut, so the geometry the link stands for is already there.
+    Link {
+        name: u64,
+        ty: Name,
+        ends: [Ref; 2],
+        owner: End,
+        field: u64,
+        row: Vec<Value>,
+        door: Option<Ref>,
+    },
+    /// Rows into a node's array field (#3728: a creator's land edit sends only the terrain tiles it changes): each
+    /// row replaces the row whose first two values are its own, or is added after the rest. The field holds rows
+    /// already (an array of arrays of at least two values each); the result is a set of the whole field.
+    Rows {
+        node: Ref,
+        field: u64,
+        rows: Vec<Value>,
+    },
+}
+
+/// The field `now` with `rows` merged in, as [`Op::Rows`] says; `None` when `now` is not an array of rows or a row has
+/// fewer than two values.
+pub fn merged_rows(now: Option<&Value>, rows: &[Value]) -> Option<Value> {
+    let key = |r: &Value| match r {
+        Value::Array(r) if r.len() >= 2 => {
+            crate::encode::encode(&Value::Array(r[..2].to_vec())).ok()
+        }
+        _ => None,
+    };
+    let Some(Value::Array(now)) = now else {
+        return None;
+    };
+    let mut out = now.clone();
+    let mut at = BTreeMap::new();
+    for (i, r) in out.iter().enumerate() {
+        at.insert(key(r)?, i);
+    }
+    for r in rows {
+        let k = key(r)?;
+        match at.get(&k) {
+            Some(&i) => out[i] = r.clone(),
+            None => {
+                at.insert(k, out.len());
+                out.push(r.clone());
+            }
+        }
+    }
+    Some(Value::Array(out))
+}
+
+/// The most values a link's row carries.
+pub const LINK_ROW_MOST: usize = 16;
+
+/// The most encoded bytes the fields a batch sets may hold, all together (`edit.too-large` above it). Each set and
+/// each rows operation writes its whole field, so a grown field can outgrow what one log record holds (64 MB,
+/// `sim::log::record::MAX_RECORD`); this keeps a batch's part well under it, with room for the rest of its tick.
+pub const WRITTEN_MOST: usize = 16 << 20;
+
+/// `written` and the encoded size of `to` together, or `edit.too-large` over [`WRITTEN_MOST`].
+pub(crate) fn write_size(
+    here: Option<usize>,
+    written: usize,
+    to: &Value,
+) -> Result<usize, Refused> {
+    let total = crate::encode::encode(to)
+        .map_or(usize::MAX, |b| b.len())
+        .saturating_add(written);
+    if total > WRITTEN_MOST {
+        return refuse(
+            here,
+            "edit.too-large",
+            format!("the fields this batch sets come to {total} bytes, over {WRITTEN_MOST}"),
+        );
+    }
+    Ok(total)
 }
 
 /// An edit intent: who sends it, its id (the cause of every effect it commits), the version of the zone it was planned
@@ -261,13 +339,6 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
     }
     // Each new definition's forms create only kinds the world has, into slots that admit them, and fire no ring of
     // timers every tick (`kind.effects`): one record never makes every run fail (#3697 review).
-    for (i, (_, k, _, entry)) in &made {
-        defined::effects_checked(entry, k, &kinds).map_err(|(name, detail)| Refused {
-            op: Some(*i),
-            name,
-            detail,
-        })?;
-    }
     // A thing of a creator's kind stands as its kind's bounds say (#3697): its solids, unless the batch gives its own,
     // so walkers go round it and the safety rule (G2) judges what it would bury, as a boot thing's.
     let mut shapes = defined::solids_in(tree);
@@ -275,6 +346,13 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
         made.values()
             .filter_map(|(full, _, s, _)| Some((full.clone(), s.clone()?))),
     );
+    for (i, (_, k, _, entry)) in &made {
+        defined::effects_checked(entry, k, &kinds, &shapes).map_err(|(name, detail)| Refused {
+            op: Some(*i),
+            name,
+            detail,
+        })?;
+    }
     for op in &mut edit.ops {
         if let Op::Place { kind, fields, .. } = op
             && let Some(s) = shapes.get(kind.as_str())
@@ -298,6 +376,7 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
     let mut geometry = BTreeMap::new();
     let mut fields: BTreeMap<(Ref, u64), Value> = BTreeMap::new();
     let mut owned: BTreeMap<Ref, OwnedDoor> = BTreeMap::new();
+    let mut written = 0usize;
     for (i, op) in edit.ops.iter().enumerate() {
         let here = Some(i);
         // The kind of a node the batch names, and its parent, as the batch has left it so far.
@@ -484,6 +563,7 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
                 if let Err(why) = crate::who_may::check_mark(*field, to) {
                     return refuse(here, "edit.owner-malformed", why);
                 }
+                written = write_size(here, written, to)?;
                 if let Ref::Node(id) = node {
                     reads.push((i, *id));
                 }
@@ -495,6 +575,102 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
                     } else {
                         doorways.remove(node);
                     }
+                }
+            }
+            Op::Rows { node, field, rows } => {
+                if *field == DOOR_GEOMETRY || *field == 7 {
+                    return refuse(
+                        here,
+                        "edit.rows",
+                        "a door's link and owned geometry are not rows",
+                    );
+                }
+                if rows.is_empty() {
+                    return refuse(
+                        here,
+                        "edit.rows",
+                        "a rows operation carries at least one row",
+                    );
+                }
+                named(*node)?;
+                let Some(to) = merged_rows(value(*node, *field).as_ref(), rows) else {
+                    return refuse(
+                        here,
+                        "edit.rows",
+                        "rows go into a field of rows, each at least two values",
+                    );
+                };
+                written = write_size(here, written, &to)?;
+                if let Ref::Node(id) = node {
+                    reads.push((i, *id));
+                }
+                fields.insert((*node, *field), to);
+                changed.insert(*node);
+            }
+            Op::Link {
+                name,
+                ty,
+                ends,
+                owner,
+                field,
+                row,
+                door,
+            } => {
+                if new.contains_key(name) || !links.insert(*name) {
+                    return refuse(here, "edit.name-twice", format!("{name} is placed twice"));
+                }
+                if ty.as_str().starts_with("souls:") {
+                    return refuse(
+                        here,
+                        "edit.link",
+                        "the engine's own links are not made by an edit",
+                    );
+                }
+                if *field == DOOR_GEOMETRY
+                    || *field == 7
+                    || ends[0] == ends[1]
+                    || row.len() > LINK_ROW_MOST
+                {
+                    return refuse(
+                        here,
+                        "edit.link",
+                        format!(
+                            "two distinct ends and a row of at most {LINK_ROW_MOST} values in a field other than 7 or {DOOR_GEOMETRY}"
+                        ),
+                    );
+                }
+                for end in ends {
+                    named(*end)?;
+                    if let Ref::Node(id) = end {
+                        reads.push((i, *id));
+                    }
+                }
+                let at = ends[usize::from(*owner == End::Second)];
+                if !matches!(value(at, *field), None | Some(Value::Array(_))) {
+                    return refuse(here, "edit.link", "the owner's field is not a list of rows");
+                }
+                changed.insert(at);
+                if let Some(door) = door {
+                    named(*door)?;
+                    let linked = match door {
+                        Ref::Node(id) => tree
+                            .handle(*id)
+                            .and_then(|h| tree.node(h))
+                            .and_then(|n| {
+                                n.fields()
+                                    .get(&7)
+                                    .and_then(|v| crate::effects::read_id(v).ok())
+                            })
+                            .is_some_and(|link| tree.link(link).is_some()),
+                        Ref::New(_) => false,
+                    };
+                    if linked || !doorways.insert(*door) {
+                        return refuse(here, "edit.doorway", "the door already has a doorway");
+                    }
+                    if let Ref::Node(id) = door {
+                        reads.push((i, *id));
+                    }
+                    changed.insert(*door);
                 }
             }
             Op::Doorway {
@@ -912,8 +1088,7 @@ pub fn confirm(live: &Replica, c: &Checked) -> Result<(), Refused> {
 /// check, which the read set cannot hold, still refuses that definition's removal. Only a batch that removes a
 /// definition pays for the walk.
 fn in_use_live(live: &Replica, c: &Checked) -> Result<(), Refused> {
-    let tree = live.tree();
-    let removed: Vec<(usize, Id)> = c
+    let removed: Vec<(Option<usize>, Id)> = c
         .edit
         .ops
         .iter()
@@ -921,11 +1096,19 @@ fn in_use_live(live: &Replica, c: &Checked) -> Result<(), Refused> {
         .filter_map(|(i, op)| match op {
             Op::Remove {
                 node: Ref::Node(id),
-            } => Some((i, *id)),
+            } => Some((Some(i), *id)),
             _ => None,
         })
         .collect();
-    let gone: Vec<(usize, String)> = removed
+    in_use_on(live.tree(), &removed)
+}
+
+/// `kind.in-use` for removing `removed` (each with the operation that removes it, if any) from `tree`: a removed
+/// definition whose kind is still the kind of a thing left. An edit's commit and an undo or redo (`sim::edit::undo`,
+/// on the checker's copy and at the tick) both ask it, so no reversal removes a kind a thing still has (#3697
+/// re-review). Only removing a definition pays for the walk.
+pub fn in_use_on(tree: &crate::tree::Tree, removed: &[(Option<usize>, Id)]) -> Result<(), Refused> {
+    let gone: Vec<(Option<usize>, String)> = removed
         .iter()
         .filter_map(|(i, id)| {
             let n = tree.node(tree.handle(*id)?)?;
@@ -938,7 +1121,7 @@ fn in_use_live(live: &Replica, c: &Checked) -> Result<(), Refused> {
     if gone.is_empty() {
         return Ok(());
     }
-    let removed: BTreeSet<Id> = removed.into_iter().map(|(_, id)| id).collect();
+    let removed: BTreeSet<Id> = removed.iter().map(|(_, id)| *id).collect();
     let mut stack = vec![tree.root()];
     while let Some(h) = stack.pop() {
         let Some(n) = tree.node(h) else { continue };
@@ -947,7 +1130,7 @@ fn in_use_live(live: &Replica, c: &Checked) -> Result<(), Refused> {
         }
         if let Some((i, full)) = gone.iter().find(|(_, f)| f == n.kind().as_str()) {
             return refuse(
-                Some(*i),
+                *i,
                 "kind.in-use",
                 format!(
                     "{:?} is still a {}; remove what uses it first",

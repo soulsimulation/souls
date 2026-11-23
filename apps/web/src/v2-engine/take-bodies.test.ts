@@ -7,7 +7,8 @@ import { PEOPLE, templateNameFor } from '../../../../mars/viewer/app/engine-view
 import { readFileSync } from 'node:fs';
 import { entityOf, V2Bridge } from './bridge.ts';
 import { TICK_US } from './takes.ts';
-import { bodiesUrl, catalogueOf, defaultLookOf, entityWithLook, heldAt, legacyBodyOf, LOOKS, postureOf, propOf, seatOf } from './take-bodies.ts';
+import { bodiesUrl, catalogueOf, defaultLookOf, entityWithLook, heldAt, legacyBodyOf, lookBodyOf, LOOKS, postureOf, propOf, seatOf } from './take-bodies.ts';
+import { lookBody } from '../humanoid/look.ts';
 
 const E = entityWithLook('v2_b_7', defaultLookOf('b.7'));
 
@@ -112,6 +113,27 @@ test('a body kind is drawn in the old page\'s record of the same body, from the 
   const take = b.view.takes.chunks[0].take as unknown as Take & { finalState: { entities: Record<string, { body?: unknown }> } };
   assert.deepEqual(take.finalState.entities[entityOf('b.7')].body, pip);
   assert.deepEqual(sampleTake(take, 0.5).entities[entityOf('b.7')].state.body, pip, 'and in its state, which the page reads first');
+});
+
+test('V3: a Soul\'s own look (field 33) is drawn as the old page\'s humanoid look from its params; a worn kind wins', () => {
+  const punk = '{"preset":"punk"}', mine = '{"frame":"fem","hair":"bob","skin":"#a0785a"}';
+  assert.deepEqual(lookBodyOf(punk), lookBody({ preset: 'punk' }));
+  assert.equal((lookBodyOf(mine) as { family?: string }).family, 'humanoid');
+  assert.notDeepEqual(lookBodyOf(mine), lookBodyOf(punk), 'two looks, two bodies');
+  for (const bad of [undefined, '', 'not json', '[1]', '{"hair":"no-such-hair"}']) assert.equal(lookBodyOf(bad), null, String(bad));
+  const b = new V2Bridge({ rulesVersion: 'test/1' });
+  b.receive({ t: 'snapshot', s: { nodes: [world, { ...body, look: mine }], removed: [] } as never });
+  for (let n = 0; n < 10; n++) b.receive(part(n));
+  const take = b.view.takes.chunks[0].take as unknown as Take & { finalState: { entities: Record<string, { body?: unknown }> } };
+  assert.deepEqual(take.finalState.entities[entityOf('b.7')].body, lookBodyOf(mine), 'drawn in its own look');
+  // A body that wears a kind by hash is drawn in that kind (G2 refuses a look on it; a worn hash always wins).
+  const pip = { family: 'floater', type: 'ceramic', model: 'pip' }, h = 'ab'.repeat(32);
+  const w = new V2Bridge({ rulesVersion: 'test/1' });
+  w.looks([{ hash: h, legacy: [pip] }]);
+  w.receive({ t: 'snapshot', s: { nodes: [world, { ...body, body: h, look: mine }], removed: [] } as never });
+  for (let n = 0; n < 10; n++) w.receive(part(n));
+  const worn = w.view.takes.chunks[0].take as unknown as Take & { finalState: { entities: Record<string, { body?: unknown }> } };
+  assert.deepEqual(worn.finalState.entities[entityOf('b.7')].body, pip);
 });
 
 test('the catalogue is read from the v2 body assets the page names, and a body kind takes its look once it is in', () => {

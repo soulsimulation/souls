@@ -1,0 +1,10 @@
+{
+  "format": "souls-move/1",
+  "move": "nod",
+  "claims": ["gaze"],
+  "blocks": ["gaze"],
+  "cancels_on": ["claim_taken"],
+  "effector": "aim",
+  "reach_mm": 20000,
+  "phases": { "start_up_us": 300000, "recovery_us": 1200000 }
+}

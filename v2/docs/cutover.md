@@ -29,12 +29,64 @@ Before starting the old launcher, install its operator-owned `/etc/souls/cutover
 {"oldWorldId":"<stable old registry worldId>","canonicalSlug":"eden","routesFile":"/var/lib/souls/routes/worlds.json","clientDir":"/usr/local/lib/souls/client"}
 ```
 
+While Eden is routed (#4177), the launcher writes `v2Stream` (the route's `stream`) into the world page's inline config,
+and `v2Bodies` when the binding names it: the same-origin directory serving the v2 body catalogue (`bodies.json`). Rollback
+removes both. With an optional absolute `staticDir` (the directory the v2 origin serves as `<stream>static/`), the first
+routed page publishes the old world's read-only views there (`scene.json`, `snapshot.json`, `items.json`,
+`platforms.json`, `config.json`, `kernel.json`, then `manifest.json`), and the page's reads of them are answered from those
+files. `/v1/config` keeps the served client's answer. The page loads the replica (`replica.js`, `replica_bg.wasm`) that
+the launcher serves from `clientDir` for the routed world. Known limit: god edits made on v2 after the switch are not in
+those files until a converter from v2 facts exists. The launcher's user must be able to write `staticDir`.
+
+### One world's old page, on and off (B3-1)
+
+One command switches a world's old page (`apps/web`, as the launcher serves it) to the new engine, and `--back` switches
+it back. It writes the binding above, makes the static folder, names the body-assets folder and sets the world's
+`canonical` flag in the routes file; a running launcher reads the binding again when it changes (once a second), so no
+restart. It never starts or touches a v2 world, the front door or a store.
+
+```sh
+node tools/world-launcher/v2-switch.mjs --slug <world> --stream /s/<stream>/ --routes <abs routes.json> \
+  --client <abs client dir> --static <abs static dir> --bodies <abs body-assets dir> [--old-world <id>] [--port <launcher port>]
+node tools/world-launcher/v2-switch.mjs --back [--slug <world>] [--port <launcher port>]
+```
+
+Several worlds (W1, 0.133): one binding file binds a list, `{"schema":"souls/cutover-binding/2","worlds":[<one world's
+binding>, …]}`. Eden's one-world file above is read as it is, and stays that form while it binds one world. `--slug`
+names the world a run switches: a world not yet bound is added, with the first world's routes, client and bodies folders
+unless given, and its own `--static` folder (two worlds never share one). `--back --slug <world>` turns back that world
+only. With several bound, `--slug` is required. Each switched world's page names its own route's stream and its own
+body path, and publishes into its own static folder. `--stream` is the world's full stream path, from its seed's
+`views/world.json`. The launcher's `/__sim/op/cutover` then answers `{configured, worlds: [one world's answer, …]}`, and
+`cutover.sh`'s check reads its `SLUG`'s entry.
+
+- `--binding` names the binding file (default as the launcher: `SOULS_CUTOVER_BINDING`, else `/etc/souls/cutover-binding.json`).
+- `--old-world` is the world's registry id (default `<slug>-1`, which is what a world without its own id has).
+- `--client` holds at least `replica.js` and `replica_bg.wasm` (v2's `target/wasm-load/pkg`), matching the v2 world's
+  build. Without the release's `soul-client.json`, the routed `/v1/config` answers 503 and the page uses its inline config.
+- `--bodies` is a built body-assets folder (`V2_BODY_ASSETS`, with `bodies.json`). The launcher serves it at
+  `/w/<world>/v2/bodies/` while routed, and that is the page's `v2Bodies` unless the binding names another.
+- `--stream` must reach the v2 origin on the page's origin (the front door's `/s/` route).
+- With `--port`, it reads the world's page afterwards and prints the `v2Stream` and `v2Bodies` the page carries.
+
+While routed the page also names where its owner's box reaches (B3-2b): `v2Gateway`, the world's agent socket path
+(the binding's `v2Gateway`, else `/w/<world>/v2/ws`, which the front door sends to the agents' relay) and
+`v2Directory`, `/` (the front door sends `/v1/account/*` to the directory). The box exchanges the page's own sign-in
+there: Clerk on the stages, the same provider the directory verifies with its `--issuer` and `--parties`.
+
+Run with only `--binding` (or nothing), it switches the bound world on again. `--back` clears only the flag: the next page
+names neither field, the published files are removed, the body folder is no longer served and the old world answers.
+
+Locally (fake minds; never against production): a launcher started with `SOULS_CUTOVER_BINDING=<abs file>`, a v2 world
+from `worldd seed` and `worldd serve`, `v2/tools/origin/origin.mjs` serving its stream, and Caddy on one port sending
+`/s/*` to the origin (`handle_path`) and everything else to the launcher.
+
 The launcher reads `cutover-binding.json` through `/etc/souls`, which the install makes and keeps 751 (it can enter, not list); give the file mode 644 (check: `runuser -u simworlds -- test -r /etc/souls/cutover-binding.json`).
 
 Today's launcher runs as `simworlds`, outside the Souls group, and reads `routesFile` on every Eden write: the install keeps `/var/lib/souls` at 751 and `routes/` at 755 so it can (check: `runuser -u simworlds -- test -r /var/lib/souls/routes/worlds.json`). Unreadable, Eden's writes answer `cutover.activation-unavailable`. Use the resolved old registry identity, including existing aliases, rather than assuming the public slug is the
 database identity. The installed client must be the release's matching served bundle. `SOULS_CUTOVER_BINDING` may
-name a different binding file; an explicitly configured missing file or invalid binding refuses launcher startup.
-An absent default binding leaves ordinary old operation enabled. Once configured, missing or damaged activation
+name a different binding file; an invalid binding refuses launcher startup. An absent binding leaves ordinary old
+operation enabled until one is written (the launcher looks once a second); a binding damaged later keeps the last valid one. Once configured, missing or damaged activation
 metadata refuses bound-world mutations by name; unrelated worlds and read-only sockets continue.
 
 `check` asks the actual launcher over its direct loopback operator endpoint, verifies its binding identifier and
@@ -75,6 +127,53 @@ journal or activation metadata requires operator repair; never clear canonical t
 What they change: the proxy's site files, the front door's map and its timer, the cut-over's log and the news file.
 Nothing else: no DNS record, no world, no store, no unit of either system. Both systems run throughout; the switch
 decides only which of them the public name sends Eden's page to.
+
+## Switching Eden's old page, step by step (0.134 F5-ready)
+
+The switch as it is now (#4210, #4249, #4248, #4250, #4252): the front door already sends streams, a switched world's
+gateway and pairing to the new system, and the launcher keeps serving the old page; the switch is one file the launcher
+reads (the binding) and one flag (the route's `canonical`). Accounts and Souls are not carried over (pre-release, zero
+users): they are saved to one file, then wiped, and owners pair again. Run as root on the production host, in this
+order, with Gene's yes. Set once, from the host:
+
+```sh
+P=/srv/sim-worlds/production                          # the live release
+WORLD=<the new Eden's world name>                     # as place-world.sh placed it (/etc/souls/cutover.env's WORLD)
+STREAM=/s/$(node -e "console.log(JSON.parse(require('fs').readFileSync('/var/lib/souls/worlds/worlds/$WORLD/views/world.json','utf8')).stream.replace(/^\//,''))")
+STATIC=<a folder the launcher's user can write>       # where the launcher publishes old Eden's static views
+LAUNCHER_PORT=<today's launcher port>
+```
+
+| Step | Command | Rehearsed |
+|---|---|---:|
+| 1. Stop the directory (it holds its stores) | `systemctl stop souls-directory` | 0.0 s |
+| 2. Save who owns what to one file | `node $P/v2/tools/ops/cutover/souls-state.mjs save --world /var/lib/souls/worlds/worlds/$WORLD --out /var/lib/souls/saved/eden-owners-$(date -u +%Y%m%dT%H%MZ).tar` | 0.1 s |
+| 3. Wipe them (refused unless step 2's file holds them as they are) | `node $P/v2/tools/ops/cutover/souls-state.mjs wipe --saved /var/lib/souls/saved/eden-owners-<that time>.tar` | 0.1 s |
+| 4. Start the directory on fresh stores | `systemctl start souls-directory` | 0.1 s |
+| 5. Switch Eden's old page | `node $P/tools/world-launcher/v2-switch.mjs --binding /etc/souls/cutover-binding.json --slug eden --stream $STREAM --routes /var/lib/souls/routes/worlds.json --client /usr/local/lib/souls/client --static $STATIC --port $LAUNCHER_PORT` | 1.4 s |
+| 6. Look in a real browser | open `https://soul.game/w/eden/`: the page draws Eden and reads `$STREAM` (the toolbar shows "Link to this moment") | 6.8 s |
+| 7. Switch back, on a stop condition | `node $P/tools/world-launcher/v2-switch.mjs --binding /etc/souls/cutover-binding.json --back --slug eden --port $LAUNCHER_PORT` | 1.5 s |
+| 8. The old page is back | open `https://soul.game/w/eden/` again: no `v2Stream`, the old world answers its reads and draws | 7 s after step 7 |
+
+Then copy the saved file to the private state folder on the release owner's machine (it holds tokens; mode 0600, never
+committed or attached): `scp <production host>:/var/lib/souls/saved/eden-owners-<that time>.tar .local/project/cutover/`.
+
+- **What `save` keeps** (`v2/tools/ops/cutover/souls-state.mjs`): the directory's account and pairing stores, copied whole
+  by SQLite; the gateway's tokens file; the world's `world.json`, `tokens`, `souls.tokens` and `births.json`; and a
+  `manifest.json` with each file's SHA-256 and the counts (accounts, Souls paired, the world's Souls). The paths come
+  from `/etc/souls/directory.args` (`--store`, `--pairing`, `--gateway-tokens`); `--args` names another file.
+- **What `wipe` does:** it checks the saved file holds the stores' rows and the tokens file as they are now, then renames
+  each aside (`<file>.wiped-<time>`) and leaves an empty tokens file; the directory makes fresh stores when it starts
+  and writes the tokens file again from them. Nothing is deleted, and the world is not touched: its Souls' bodies stay.
+  Undoing it is renaming the files back with the directory stopped.
+- **Several worlds** (W1): step 5 with another `--slug`, `--stream` and its own `--static` adds that world to the same
+  binding; step 7's `--back --slug` turns back only that world.
+
+**The rehearsal.** `node v2/tools/ops/cutover/rehearse-switch.mjs --bin <worldd, gatewayd, directoryd> --pkg <replica pkg>
+[--facts <eden facts>]` runs steps 1 to 8 as written on a fresh folder under `.local/`, behind the local front door
+(`soul-game.caddy`, as `tools/release/check-0132.mjs` places it), with fake owners (two accounts and a paired Soul) and
+a real browser, and prints the table above. Its last run: every step passed, and the old page was back 7 s after
+the switch back.
 
 ## One writer
 

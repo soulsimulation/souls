@@ -1,8 +1,8 @@
 // A landform's expansion into one creator's edit (Engine v2 G5, #2762), called by souls-god's `land` verbs (#3695).
 //
 // The batch, in `replica::edit::Op`'s shapes: the landform's place node under the open ground (its outline, its
-// parameters as JSON bytes; for a lake or a pond, the water itself, as N1 imports Eden's waters), the open ground's
-// tiles with the changed ones patched (`v2/tools/terrain`, today's `packages/ground`), and a move for each thing resting
+// parameters as JSON bytes; for a lake or a pond, the water itself, as N1 imports Eden's waters), the changed tiles
+// of the open ground as rows that replace them (#3728), patched (`v2/tools/terrain`, today's `packages/ground`), and a move for each thing resting
 // on the open ground whose origin's ground rises or falls, by exactly that much: a pose change written in the batch,
 // never a silent move. The world refuses the batch whole if a Soul stands where the ground changes, a building stands
 // there, or a resting thing is not moved (`sim::edit::terrain`). Heights under a point are read as the engine reads
@@ -92,7 +92,8 @@ export function expand({ ground, landform, water, things = [], placeKind, outlin
   fields[F.LANDFORM] = hexOf(new TextEncoder().encode(JSON.stringify(landform)));
   const ops = [
     { op: 'place', name: 1, kind: placeKind, in: ground.id, at: [0, 0, 0], fields },
-    { op: 'set', node: ground.id, field: F.TILES, value: tiles.map((t) => [t.tx, t.tz, hexOf(t.heights), hexOf(t.classes)]) },
+    // Only the tiles the landform changes (#3728): `rows` replaces each by its (tx, tz).
+    { op: 'rows', node: ground.id, field: F.TILES, rows: patched.map((t) => [t.tx, t.tz, hexOf(t.heights), hexOf(t.classes)]) },
   ];
   for (const th of things) {
     const [x, y, z] = th.position.map(BigInt);
@@ -102,4 +103,49 @@ export function expand({ ground, landform, water, things = [], placeKind, outlin
     ops.push({ op: 'move', node: th.id, atUm: [Number(x), Number(y + after - before), Number(z)], orientation: th.orientation, support: th.support });
   }
   return { ops, patched: patched.length, tiles };
+}
+
+/** The tiles' range [tx0, tz0, tx1, tz1] (inclusive), grown to cover `bounds` ([x0, z0, x1, z1] m) if given. */
+export function tileRange(tiles, tileMm, bounds) {
+  const txs = tiles.map((t) => t.tx), tzs = tiles.map((t) => t.tz);
+  const r = [Math.min(...txs), Math.min(...tzs), Math.max(...txs), Math.max(...tzs)];
+  if (!bounds) return r;
+  const side = tileMm / 1000, lo = (v) => Math.floor(v / side + 1e-9), hi = (v) => Math.ceil(v / side - 1e-9) - 1;
+  return [Math.min(r[0], lo(bounds[0])), Math.min(r[1], lo(bounds[1])), Math.max(r[2], hi(bounds[2])), Math.max(r[3], hi(bounds[3]))];
+}
+
+/**
+ * The open ground grown to cover `bounds` ([x0, z0, x1, z1] m), as today's `expand` grows a world (#3728): a tile
+ * wherever the bounds reach and there was none, flat outward from the old ground's edge (each sample the height of the
+ * nearest sample on that edge, each cell the class of the nearest cell), so the new ground meets the old with no step.
+ * Only the new tiles; the old are kept as they are.
+ */
+export function grownTiles(tiles, tileMm, bounds) {
+  if (!tiles.length) return [];
+  const n = samplesOf(tiles[0]), w = n + 1;
+  const keys = new Map(tiles.map((t) => [`${t.tx},${t.tz}`, t]));
+  const [a0, b0, a1, b1] = tileRange(tiles);
+  const [x0, z0, x1, z1] = tileRange(tiles, tileMm, bounds);
+  const clamp = (v, l, h) => (v < l ? l : v > h ? h : v);
+  const sample = (gi, gj) => {
+    gi = clamp(gi, a0 * n, (a1 + 1) * n); gj = clamp(gj, b0 * n, (b1 + 1) * n);
+    const tx = Math.min(Math.floor(gi / n), a1), tz = Math.min(Math.floor(gj / n), b1), t = keys.get(`${tx},${tz}`);
+    return t ? t.heights[(gj - tz * n) * w + (gi - tx * n)] : 0;
+  };
+  const cell = (ci, cj) => {
+    ci = clamp(ci, a0 * n, (a1 + 1) * n - 1); cj = clamp(cj, b0 * n, (b1 + 1) * n - 1);
+    const tx = Math.floor(ci / n), tz = Math.floor(cj / n), t = keys.get(`${tx},${tz}`);
+    return t ? t.classes[(cj - tz * n) * n + (ci - tx * n)] : 0;
+  };
+  const out = [];
+  for (let tz = z0; tz <= z1; tz++) {
+    for (let tx = x0; tx <= x1; tx++) {
+      if (keys.has(`${tx},${tz}`)) continue;
+      const heights = new Int32Array(w * w), classes = new Uint8Array(n * n);
+      for (let j = 0; j < w; j++) for (let i = 0; i < w; i++) heights[j * w + i] = sample(tx * n + i, tz * n + j);
+      for (let j = 0; j < n; j++) for (let i = 0; i < n; i++) classes[j * n + i] = cell(tx * n + i, tz * n + j);
+      out.push({ tx, tz, heights, classes });
+    }
+  }
+  return out;
 }

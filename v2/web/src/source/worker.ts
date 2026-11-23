@@ -6,7 +6,7 @@
 // place's name (import-eden's field 4, a SHA-256 of its words) is a `[hash, words]` row of the same files (#3574).
 import init, { StreamPlayer, readPointer } from 'replica';
 import { decode, encode } from 'cborg';
-import { publicSoul, type NodeRec, type PartRec, type Pointer, type SaidRec, type SnapshotRec } from './source.ts';
+import { publicSoul, type MoveRec, type RunEndRec, type NodeRec, type PartRec, type Pointer, type SaidRec, type SnapshotRec } from './source.ts';
 import { happenedInPart } from '../sound/record.ts';
 import { readChanged } from './changed.ts';
 import { skyFields } from '../sky/record.ts';
@@ -34,7 +34,7 @@ async function get(url: URL): Promise<Uint8Array | null> {
 
 function readPtr(bytes: Uint8Array): StreamPointer {
   const p = JSON.parse(readPointer(bytes));
-  return { newest: p.newest, newestTo: p.newestTo ?? null, period: p.period, anchorWorld: p.anchorWorld, anchorWallMs: p.anchorWallMs, quietUntil: p.quietUntil ?? null, header: p.header, ...(p.baseline ? { baseline: p.baseline, generation: p.generation } : {}), ...(p.legacyHash ? { legacyVersion: p.legacyVersion, legacyNext: p.legacyNext, legacyHash: p.legacyHash } : {}), ...(p.handoffFrom ? { handoffFrom: p.handoffFrom } : {}) };
+  return { newest: p.newest, newestTo: p.newestTo ?? null, period: p.period, anchorWorld: p.anchorWorld, anchorWallMs: p.anchorWallMs, quietUntil: p.quietUntil ?? null, header: p.header, ...(p.baseline ? { baseline: p.baseline, generation: p.generation } : {}), ...(p.legacyHash ? { legacyVersion: p.legacyVersion, legacyNext: p.legacyNext, legacyHash: p.legacyHash } : {}), ...(p.handoffFrom ? { handoffFrom: p.handoffFrom } : {}), ...(p.asleep ? { asleep: true, stillUntil: p.stillUntil ?? null } : {}) };
 }
 
 /** The reference in a `{21: id}` value, as the page keys it, or null. */
@@ -47,6 +47,7 @@ const nameKey = (b: Uint8Array) => `n:${hex(b)}`;
 const SAID = 'souls:said';
 const SAID_PRIVATELY = 'souls:said-privately'; // #3775: who spoke in a private conversation, and when; no words
 const PLACE_NAME = 4;
+const MOVED = 'souls:form-move', RUN_ENDED = 'souls:form-ended';
 const NAME = 30;
 const DESCRIPTION = 31;
 const COURSE = 80; // a moving node's course (#3603)
@@ -69,6 +70,7 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   // only in the shape the importer writes it.
   const o = f.get(1);
   if (o instanceof Uint8Array) rec.origin = new TextDecoder().decode(o);
+  else if (typeof o === 'string' && f.get(2) instanceof Uint8Array) (rec.defines = o), (rec.entry = f.get(2) as Uint8Array); // #3697: a creator's kind
   if (Array.isArray(f.get(11))) rec.outline = rows(f.get(11));
   if (Array.isArray(f.get(12))) rec.solids = rows(f.get(12));
   if (Array.isArray(f.get(13))) rec.slots = rows(f.get(13));
@@ -81,6 +83,7 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   if (f.has(DESCRIPTION)) rec.description = refOf(f.get(DESCRIPTION));
   if (f.has(COURSE)) rec.course = encode(f.get(COURSE)); // #3603: re-encoded canonically, as the record holds it
   if (f.has(32)) rec.body = hex(f.get(32) as Uint8Array);
+  if (f.get(33) instanceof Uint8Array) (rec as NodeRec & { look?: string }).look = new TextDecoder().decode(f.get(33) as Uint8Array); // V3: a Soul's own look's params (G2)
   const placeName = f.get(PLACE_NAME);
   if (placeName instanceof Uint8Array && placeName.length === 32) rec.placeName = nameKey(placeName);
   const fields = fieldsOf(f); // #3871: its kind's state, by field number
@@ -88,6 +91,15 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   const sky = skyFields(f); // V19: the world node's day, night and weather
   if (sky) rec.sky = sky;
   return rec;
+}
+
+/** B2's move record (`replica::moves::MoveRecord::to_value`, its texts as bytes): `{1: body, 2: move, 5: target, 7: start,
+ * 8: [phase end, ...]}`. */
+function moveRec(m: Map<number, unknown>): MoveRec {
+  const ends = (m.get(8) as unknown[]).map(num), raw = m.get(2), start = num(m.get(7));
+  const name = raw instanceof Uint8Array ? new TextDecoder().decode(raw) : raw;
+  if (typeof name !== 'string' || !ends.length || !Number.isFinite(start)) throw new Error('not a move record');
+  return { body: key(m.get(1) as IdValue), name, start, ends, target: m.has(5) ? key(m.get(5) as IdValue) : null };
 }
 
 type StreamPointer = Pointer & { header: string; baseline?: string; generation?: string; legacyVersion?: number; legacyNext?: number; legacyHash?: string; handoffFrom?: string };
@@ -226,12 +238,20 @@ async function run(stream: URL) {
     let happened: PartRec['happened'] = [];
     try { happened = happenedInPart(bytes); } catch { /* sound observes only a successfully played part */ }
     const events = decode(player.events(), { useMaps: true }) as Map<number, unknown>[];
-    const said: SaidRec[] = [];
+    const said: SaidRec[] = [], moves: MoveRec[] = [], runEnds: RunEndRec[] = [];
     for (const e of events) {
       if (e.get(1) === SAID_PRIVATELY) {
         const f = e.get(2) as Map<number, unknown>, conv = f.get(1) as IdValue | undefined;
         if (conv) said.push({ speaker: key(e.get(3) as IdValue), at: num(e.get(4)), length: 0, reach: 0, ref: `private:${key(conv)}`, words: null,
           private: { conversation: key(conv), members: ((f.get(3) ?? []) as IdValue[]).map(key) } });
+        continue;
+      }
+      if (e.get(1) === MOVED || e.get(1) === RUN_ENDED) {
+        const f = e.get(2) as Map<number, unknown>;
+        try {
+          if (e.get(1) === RUN_ENDED) runEnds.push({ body: key(f.get(2) as IdValue), at: num(e.get(4)), how: text.decode(f.get(3) as Uint8Array) });
+          else moves.push(moveRec(f.get(3) as Map<number, unknown>));
+        } catch { /* a record the page cannot read is not drawn */ }
         continue;
       }
       if (e.get(1) !== SAID) continue;
@@ -242,7 +262,7 @@ async function run(stream: URL) {
     if (refs.some(r => !words.has(r))) await readText(`${n}.text`, p);
     for (const x of said) if (!x.private) x.words = words.get(x.ref) ?? null;
     resolveWords(nodes);
-    observe(nodes, removed, samples, { number: played.number, from: played.from, to: played.to, hash: played.hash, said, happened });
+    observe(nodes, removed, samples, { number: played.number, from: played.from, to: played.to, hash: played.hash, said, happened, moves, runEnds });
     return true;
   };
   const tell = () => {
