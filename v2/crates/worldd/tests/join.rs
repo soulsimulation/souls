@@ -1116,9 +1116,11 @@ fn motion_history_is_bit_identical_to_its_pinned_hash() {
 /// run writes the previous pin (6a52c87d...), so the birth places are the whole difference. Re-pinned by #4215: a
 /// walker no longer steps into another body's space (the walk skill's guard), so the walks' velocities change tick by
 /// tick (865 records, 2,573 motion samples); with main's walk skill put back the run writes the previous pin
-/// (3d64aca7...), so the walk skill is the whole difference.
+/// (3d64aca7...), so the walk skill is the whole difference. Re-pinned for #4220 and #4291 together: each re-pinned
+/// this alone and both changes are intended (bodies keep apart; a still body is stepped aside), so main with both writes
+/// a third history (867 records, 2,653 motion samples).
 const PINNED_MOTION_HISTORY: &str =
-    "ac11626b59f898cf2d57dd8b9fb8a933e964e39a754d37637a1e007b38e4ed83";
+    "dcf33b7333a2f88eb0062cf9b84174b20b55b0e3c356555a043316c97be16987";
 
 /// R21: private membership is checked against the joined actor's authoritative body, not its principal id.
 #[test]
