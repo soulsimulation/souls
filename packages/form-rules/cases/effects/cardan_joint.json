@@ -1,0 +1,1004 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Both full coupled circuits, wraps and immediate reversal; generic duplicate-receipt replay for every step.",
+  "cases": [
+    {
+      "name": "cardan_cycles_wraps_reversal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:cardan_joint",
+            "fields": {
+              "phase": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              -620
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_00"
+          },
+          "receipt": "cardan0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_01"
+          },
+          "receipt": "cardan1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_02"
+          },
+          "receipt": "cardan2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_03"
+          },
+          "receipt": "cardan3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 4
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_04"
+          },
+          "receipt": "cardan4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 5
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_05"
+          },
+          "receipt": "cardan5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 6
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_06"
+          },
+          "receipt": "cardan6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 7
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_07"
+          },
+          "receipt": "cardan7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 8
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_08"
+          },
+          "receipt": "cardan8",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 9
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_09"
+          },
+          "receipt": "cardan9",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 10
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_10"
+          },
+          "receipt": "cardan10",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 11
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_11"
+          },
+          "receipt": "cardan11",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 12
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_12"
+          },
+          "receipt": "cardan12",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 13
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_13"
+          },
+          "receipt": "cardan13",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 14
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_14"
+          },
+          "receipt": "cardan14",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 15
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_15"
+          },
+          "receipt": "cardan15",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_00"
+          },
+          "receipt": "cardan16",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 15
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_15"
+          },
+          "receipt": "cardan17",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 14
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_14"
+          },
+          "receipt": "cardan18",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 13
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_13"
+          },
+          "receipt": "cardan19",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 12
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_12"
+          },
+          "receipt": "cardan20",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 11
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_11"
+          },
+          "receipt": "cardan21",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 10
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_10"
+          },
+          "receipt": "cardan22",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 9
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_09"
+          },
+          "receipt": "cardan23",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 8
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_08"
+          },
+          "receipt": "cardan24",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 7
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_07"
+          },
+          "receipt": "cardan25",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 6
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_06"
+          },
+          "receipt": "cardan26",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 5
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_05"
+          },
+          "receipt": "cardan27",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 4
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_04"
+          },
+          "receipt": "cardan28",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_03"
+          },
+          "receipt": "cardan29",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_02"
+          },
+          "receipt": "cardan30",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_01"
+          },
+          "receipt": "cardan31",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_00"
+          },
+          "receipt": "cardan32",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_01"
+          },
+          "receipt": "cardan33",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "c1": {
+          "kind": "eden:cardan_joint",
+          "fields": {
+            "phase": 0
+          }
+        }
+      }
+    }
+  ]
+}
