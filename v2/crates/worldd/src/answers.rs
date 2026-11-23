@@ -10,8 +10,9 @@
 //!   (`act.timed-out`), and writes one record: a T6 part of the tick's entries, whose field [`ANSWERED`] lists every
 //!   intent answered in the tick with its answer. Every entry an intent causes names it as its cause, so its receipt
 //!   is found by that index. The logged intent is the intent as received, which holds no free text (below).
-//! - **The answers thread** ([`answer_loop`]) owns the log: it appends each tick's record, waits until the record is
-//!   on the disk, and only then sends that tick's answers. Answers leave in tick order, so a repeat answered from the
+//! - **The answers thread** ([`answer_loop`]) owns the log: it waits until the words the tick kept are on the disk
+//!   (the clock queues them in K16's text store and never waits for its sync, #4134), appends the tick's record,
+//!   waits until the record is on the disk, and only then sends that tick's answers. Answers leave in tick order, so a repeat answered from the
 //!   kept table also waits for the sync of the tick that took it.
 //! - **Checker threads** (`checkers`), as I3 left them.
 //!
@@ -86,8 +87,8 @@
 //! 5. the tick's input record, then its part, go to the log (K4, K12): the part carries the answers ([`ANSWERED`]),
 //!    the bodies that moved ([`BODIES`]), the tick ([`TICK`]) and the zone's state hash after it ([`STATE`]);
 //! 6. the frozen copy is published (K8);
-//! 7. the answers thread appends and syncs the records, then hands the synced tick to the view tier (R3) and sends
-//!    the answers;
+//! 7. the answers thread waits for the tick's words to be on the disk, appends and syncs the records, then hands the
+//!    synced tick to the view tier (R3) and sends the answers;
 //! 8. the auditor checks a slice of the tree (K11).
 //!
 //! A checkpoint is taken by K5's rule (amount of log), between ticks: at the start of a tick, once every record
@@ -607,6 +608,22 @@ pub struct Config {
     pub wear: Option<Wearing>,
     /// The code hatches' modules the world ships (`<world>/hatches/*.wasm`, #3713): its forms' hatches run in them.
     pub hatches: Vec<Vec<u8>>,
+    /// Called once, on the answers thread, with the reason when it ends because the log or the text store failed
+    /// (nothing more can be answered): `worldd serve` ends the process with [`EXIT_DISK_FAILED`] there, so its
+    /// supervisor restarts the world from its log rather than leave it ticking with no answers (#4134).
+    pub halted: Option<Box<dyn FnOnce(String) + Send>>,
+}
+
+/// The exit code of a world process whose log or text store failed ([`Config::halted`]).
+pub const EXIT_DISK_FAILED: i32 = 87;
+
+/// A world process's [`Config::halted`]: says `disk-failed` and the reason, then ends the process with
+/// [`EXIT_DISK_FAILED`], so its supervisor starts the world again from its log.
+pub fn exit_on_halt() -> Box<dyn FnOnce(String) + Send> {
+    Box::new(|why| {
+        eprintln!("worldd: disk-failed: {why}");
+        std::process::exit(EXIT_DISK_FAILED);
+    })
 }
 
 #[derive(Clone)]
@@ -705,6 +722,7 @@ impl Config {
             join: None,
             wear: None,
             hatches: Vec::new(),
+            halted: None,
         }
     }
 }
@@ -845,6 +863,9 @@ struct Tick {
     handed: Option<u64>,
     /// The tick's parts, handed to the sync thread once its records are on the disk (C16).
     parts: Vec<Arc<Part>>,
+    /// The text store's records queued by the end of the tick: on the disk before the tick's records go to the log
+    /// (#4134), so the log never refers to words a crash would lose; 0 for none.
+    words: u64,
     /// Answers sent as they are, with no block: a form act's progress (C20).
     bare: Vec<(Vec<Reply>, Vec<u8>)>,
     /// A lockstep run's report, sent after every tick before it is on the disk and in the sync copy.
@@ -936,6 +957,9 @@ struct Clock {
     measures: Option<Arc<Measures>>,
     /// K16's store, where words are kept (V1b).
     text: Arc<Store>,
+    /// Each Soul the directory told of that waits for the text store's sync: the records queued when it was first put
+    /// off ([`Clock::notices`], #4134).
+    put_off: BTreeMap<Id, u64>,
     /// The world node's day, night and weather (E6, #3369), when the world has them.
     sky: Option<Heavens>,
     /// The tick's length, µs: a tick fires the sky's timers due before the next tick's start (K9).
@@ -2695,7 +2719,12 @@ impl Clock {
     /// The directory's word, at a tick's start after its births (W11b): each Soul told of since the last tick that has
     /// a body here is retired when the directory retired it, or given its saved words when its body's differ, by an
     /// intent of its own taken as any intent is, under [`notice_key`]. A Soul with no body here is left alone.
-    fn notices(&mut self, now: Micros) {
+    ///
+    /// A body's words are compared as the store reads them, which is once they are on the disk (#4134): each Soul
+    /// waits, a tick at a time, until the words queued when it was first put off (its own birth's name among them)
+    /// are on the disk as the tick started, `durable`, rather than be given words it holds. Words queued later never
+    /// hold it up, and a Soul told of later waits for its own.
+    fn notices(&mut self, now: Micros, durable: u64) {
         let told = std::mem::take(&mut self.told);
         let Some((d, reply)) = self.directory.as_ref().map(|(d, r)| (d.clone(), r.clone())) else {
             return;
@@ -2703,7 +2732,18 @@ impl Clock {
         if self.life.is_none() {
             return;
         }
+        let queued = self.text.marks().0;
+        let mut ready = Vec::new();
         for soul in told {
+            let mark = *self.put_off.entry(soul).or_insert(queued);
+            if mark <= durable {
+                self.put_off.remove(&soul);
+                ready.push(soul);
+            } else {
+                self.told.insert(soul);
+            }
+        }
+        for soul in ready {
             let (verb, parameters) = if d.retired.contains(&soul) {
                 (LEAVE, BTreeMap::new())
             } else if let Some(w) = d.words.get(&soul) {
@@ -3806,9 +3846,11 @@ impl Clock {
         at[1] = mark();
         self.tick = n;
         // 0. This tick's births (C3) and the intents that waited for them; then what arrived since the last tick, and
-        // what a script set for this one, is taken now.
+        // what a script set for this one, is taken now. The words on the disk as the tick starts are what the
+        // directory's notices read by (#4134): in lockstep that is every word queued before it.
+        let words_durable = self.text.marks().1;
         self.births(now);
-        self.notices(now);
+        self.notices(now, words_durable);
         self.tell_states();
         for (bytes, reply, stamps) in std::mem::take(&mut self.pending) {
             self.arrival(&bytes, reply, stamps, now);
@@ -4015,6 +4057,7 @@ impl Clock {
                 handed,
                 bare: progress,
                 parts,
+                words: self.text.marks().0,
                 ran: None,
             });
         }
@@ -4157,109 +4200,142 @@ fn answer_loop<S: Storage + 'static>(
     served: Option<crate::views::served::Feed>,
     mut follow: Option<Offer>,
     syncs: Sender<ToSync>,
+    text: Arc<Store>,
+    halted: Option<Box<dyn FnOnce(String) + Send>>,
 ) {
     let trace = std::env::var_os("SOULS_JOIN_DELIVERY_TRACE").is_some_and(|v| v == "1");
-    for (k, t) in ticks.into_iter().enumerate() {
-        let k = k as u64;
+    // A failed log or text store ends the thread for good (`sim::log` rule 6), said by name and handed to `halted`.
+    let mut halted = halted;
+    let mut halt = |why: String| {
+        eprintln!("worldd: {why}, nothing more is answered");
+        if let Some(h) = halted.take() {
+            h(why);
+        }
+    };
+    let mut k = 0u64;
+    // Every tick handed over by now is one batch (#4134): its words and then its records go to the disk with one wait
+    // each, however many ticks a slow sync let pile up, so a busy disk delays the answers by a sync or two, not by a
+    // sync per tick. Records are appended, and answers sent, in tick order.
+    while let Ok(first) = ticks.recv() {
+        let batch: Vec<Tick> = std::iter::once(first).chain(ticks.try_iter()).collect();
+        let keys = k..k + batch.len() as u64;
+        k = keys.end;
         if let Some(m) = &measures {
-            m.queues[measures::LOG].enter(k, t.handed.unwrap_or_else(measures::steady_us));
+            for (key, t) in keys.clone().zip(&batch) {
+                m.queues[measures::LOG].enter(key, t.handed.unwrap_or_else(measures::steady_us));
+            }
+        }
+        // The batch's words first: the clock queued them and went on; the log takes no reference before the words it
+        // names are on the disk. A failed text store is final, as a failed log is.
+        let words = batch.iter().map(|t| t.words).max().unwrap_or(0);
+        if words > 0
+            && let Err(e) = text.wait(words)
+        {
+            halt(format!("the text store failed: {e}"));
+            return;
         }
         let mut last = None;
-        let mut appended = Vec::new();
-        let mut durable_part = None;
-        for (k, bytes) in [t.inputs, t.record].into_iter().enumerate() {
-            let Some(bytes) = bytes else { continue };
-            // Parts only (not the recorder's input records) go to the view tier and to what follows the world.
-            let part = k == 1;
-            let copy = (part && tier.is_some()).then(|| bytes.clone());
-            let kept = (part && follow.is_some()).then(|| bytes.clone());
-            let sent = synced.as_ref().map(|_| bytes.clone());
-            if part && served.is_some() {
-                durable_part = Some(bytes.clone());
-            }
-            match log.append(bytes) {
-                Ok(n) => {
-                    last = Some(n);
-                    if let (Some(tier), Some(b)) = (&tier, copy) {
-                        tier.offer(n, b);
+        let mut done = Vec::with_capacity(batch.len());
+        for mut t in batch {
+            let mut appended = Vec::new();
+            let mut durable_part = None;
+            for (k, bytes) in [t.inputs.take(), t.record.take()].into_iter().enumerate() {
+                let Some(bytes) = bytes else { continue };
+                // Parts only (not the recorder's input records) go to the view tier and to what follows the world.
+                let part = k == 1;
+                let copy = (part && tier.is_some()).then(|| bytes.clone());
+                let kept = (part && follow.is_some()).then(|| bytes.clone());
+                let sent = synced.as_ref().map(|_| bytes.clone());
+                if part && served.is_some() {
+                    durable_part = Some(bytes.clone());
+                }
+                match log.append(bytes) {
+                    Ok(n) => {
+                        last = Some(n);
+                        if let (Some(tier), Some(b)) = (&tier, copy) {
+                            tier.offer(n, b);
+                        }
+                        if let (Some(f), Some(b)) = (follow.as_mut(), kept) {
+                            f(n, b);
+                        }
+                        if let Some(b) = sent {
+                            appended.push(Synced {
+                                record: n,
+                                bytes: b,
+                                input: k == 0,
+                            });
+                        }
                     }
-                    if let (Some(f), Some(b)) = (follow.as_mut(), kept) {
-                        f(n, b);
-                    }
-                    if let Some(b) = sent {
-                        appended.push(Synced {
-                            record: n,
-                            bytes: b,
-                            input: k == 0,
-                        });
+                    Err(e) => {
+                        halt(format!("the log failed: {e}"));
+                        return;
                     }
                 }
-                Err(e) => {
-                    eprintln!("worldd: the log failed, nothing more is answered: {e}");
-                    return;
+            }
+            if trace {
+                for (_, frame, _) in &t.replies {
+                    delivery_trace(trace, "log-wait", frame, "appended");
                 }
             }
-        }
-        if trace {
-            for (_, frame, _) in &t.replies {
-                delivery_trace(trace, "log-wait", frame, "appended");
-            }
+            done.push((t, appended, durable_part));
         }
         if let Some(n) = last
             && let Err(e) = log.wait_durable(n + 1)
         {
-            eprintln!("worldd: the log failed, nothing more is answered: {e}");
+            halt(format!("the log failed: {e}"));
             return;
         }
-        if trace {
-            for (_, frame, _) in &t.replies {
-                delivery_trace(trace, "log-durable", frame, "ready");
-            }
-        }
-        if let Some(tx) = &synced {
-            for s in appended {
-                let _ = tx.send(s);
-            }
-        }
-        if let (Some(v), Some(r)) = (&served, durable_part) {
-            v.record(r);
-        }
-        // The sync thread's copy takes the tick once it is on the disk, before its answers leave (C16).
-        if !t.parts.is_empty() {
-            let _ = syncs.send(ToSync::Parts(t.parts));
-        }
-        let synced = measures.as_ref().map(|_| measures::steady_us());
-        for (waiters, frame, mut stamps) in t.replies {
-            let frame = match &measures {
-                Some(m) => {
-                    stamps.0[3] = t.started;
-                    stamps.0[4] = t.handed;
-                    stamps.0[5] = synced;
-                    stamps.0[6] = Some(measures::steady_us());
-                    measures::with_block(frame, &m.answered(&stamps))
+        for (key, (t, appended, durable_part)) in keys.zip(done) {
+            if trace {
+                for (_, frame, _) in &t.replies {
+                    delivery_trace(trace, "log-durable", frame, "ready");
                 }
-                None => frame,
-            };
-            for w in waiters {
-                let sent = w.send(frame.clone());
-                delivery_trace(
-                    trace,
-                    "reply-channel",
-                    &frame,
-                    if sent.is_ok() { "queued" } else { "closed" },
-                );
             }
-        }
-        for (waiters, frame) in t.bare {
-            for w in waiters {
-                let _ = w.send(frame.clone());
+            if let Some(tx) = &synced {
+                for s in appended {
+                    let _ = tx.send(s);
+                }
             }
-        }
-        if let Some((done, ran)) = t.ran {
-            let _ = done.send(ran);
-        }
-        if let Some(m) = &measures {
-            m.queues[measures::LOG].leave(k);
+            if let (Some(v), Some(r)) = (&served, durable_part) {
+                v.record(r);
+            }
+            // The sync thread's copy takes the tick once it is on the disk, before its answers leave (C16).
+            if !t.parts.is_empty() {
+                let _ = syncs.send(ToSync::Parts(t.parts));
+            }
+            let synced = measures.as_ref().map(|_| measures::steady_us());
+            for (waiters, frame, mut stamps) in t.replies {
+                let frame = match &measures {
+                    Some(m) => {
+                        stamps.0[3] = t.started;
+                        stamps.0[4] = t.handed;
+                        stamps.0[5] = synced;
+                        stamps.0[6] = Some(measures::steady_us());
+                        measures::with_block(frame, &m.answered(&stamps))
+                    }
+                    None => frame,
+                };
+                for w in waiters {
+                    let sent = w.send(frame.clone());
+                    delivery_trace(
+                        trace,
+                        "reply-channel",
+                        &frame,
+                        if sent.is_ok() { "queued" } else { "closed" },
+                    );
+                }
+            }
+            for (waiters, frame) in t.bare {
+                for w in waiters {
+                    let _ = w.send(frame.clone());
+                }
+            }
+            if let Some((done, ran)) = t.ran {
+                let _ = done.send(ran);
+            }
+            if let Some(m) = &measures {
+                m.queues[measures::LOG].leave(key);
+            }
         }
     }
 }
@@ -4757,6 +4833,8 @@ pub fn start<S: Storage + 'static>(
     let answer_tier = tier.clone();
     let answer_measures = measures.clone();
     let answer_syncs = syncs.clone();
+    let answer_text = Arc::clone(&text);
+    let halted = cfg.halted.take();
     let answering = thread::Builder::new()
         .name("answers".into())
         .spawn(move || {
@@ -4769,6 +4847,8 @@ pub fn start<S: Storage + 'static>(
                 served,
                 follow,
                 answer_syncs,
+                answer_text,
+                halted,
             )
         })
         .map_err(io)?;
@@ -4841,6 +4921,7 @@ pub fn start<S: Storage + 'static>(
         sky,
         tick_us,
         text,
+        put_off: BTreeMap::new(),
         clock: publish,
         life,
         wear: cfg.wear.take(),
@@ -5017,6 +5098,10 @@ pub fn start<S: Storage + 'static>(
                         // log) would depend on that thread's speed.
                         let live = c.replica.version();
                         c.publisher.wait_for(live, PUBLISHED_WAIT);
+                        // And the words queued on the disk, so a Soul the directory told of waits for them, or is
+                        // taken, at the same tick in every run (`notices`); only lockstep waits, a free-running clock
+                        // never does (#4134).
+                        let _ = c.text.wait(c.text.marks().0);
                         let Ok(due) = ticker.due() else { break };
                         *shared.lock().unwrap_or_else(|p| p.into_inner()) = due;
                         if let Err(e) = ticker.run_due(&mut *pace, &beat, &mut |n, s| c.tick(n, s))
@@ -5034,6 +5119,7 @@ pub fn start<S: Storage + 'static>(
                         handed: None,
                         parts: Vec::new(),
                         bare: Vec::new(),
+                        words: 0,
                         ran: Some((done, c.ran())),
                     };
                     if let Err(e) = c.answers.send(ran)
@@ -5831,6 +5917,67 @@ mod tests {
         assert!(
             !log.windows(words.len()).any(|b| b == words.as_bytes()),
             "none of the words' bytes are in the log"
+        );
+    }
+
+    /// #4134: an intent's words are queued and the clock ticks on while their sync is held; its answer and its tick's
+    /// records wait for the words, so a sync that never returns leaves the log with no reference to them, and the
+    /// failed store halts the answers thread by name ([`Config::halted`]).
+    #[test]
+    fn a4134_the_clock_ticks_on_while_the_words_sync_is_held() {
+        let store = Held::new(Vec::new());
+        let text = Mem::default();
+        let words_store = Store::open_mem(
+            text.clone(),
+            Mem::default(),
+            Minter::new(words::scope(LINEAGE)),
+        )
+        .unwrap();
+        {
+            let mut d = text.0.lock().unwrap();
+            d.stall_sync = Some(d.syncs + 1);
+        }
+        let w = toggles::World::build(1, 4, 0);
+        let pairs = w.pairs.clone();
+        let mut cfg = Config::new(LINEAGE, 1);
+        cfg.tick = Duration::from_millis(10);
+        cfg.deadline = 10_000_000;
+        cfg.text = Some(Arc::new(words_store));
+        let (halt, halted) = channel();
+        cfg.halted = Some(Box::new(move |why| {
+            let _ = halt.send(why);
+        }));
+        let w = start(w.replica, toggles::rules(), store.clone(), cfg).expect("the world starts");
+        let mut i = toggle(pairs[2].0, pairs[2].1, 1, now() + 60_000_000);
+        let said = Value::Map([(23, Value::Bytes(b"by the well".to_vec()))].into());
+        i.parameters.insert(1, said);
+        let rx = send(&w, &i);
+        thread::sleep(Duration::from_millis(100));
+        let from = w.beat.read().0;
+        thread::sleep(Duration::from_millis(300));
+        let to = w.beat.read().0;
+        assert!(to >= from + 10, "the clock ticks on: tick {from} to {to}");
+        assert!(
+            rx.try_recv().is_err(),
+            "no answer before its words are on the disk"
+        );
+        text.0.lock().unwrap().power_cut(0);
+        // The failed store ends the answers thread by name, for the process to end (`worldd serve`).
+        let why = halted
+            .recv_timeout(Duration::from_secs(10))
+            .expect("halted");
+        assert!(why.starts_with("the text store failed"), "{why}");
+        w.stop();
+        assert!(
+            rx.try_recv().is_err(),
+            "words never on the disk are never answered"
+        );
+        let records = recover(&store.bytes()).unwrap().records;
+        assert!(
+            records
+                .iter()
+                .all(|r| replica::audience::references(&decode(r).unwrap().value).is_empty()),
+            "the log holds no reference to words a crash lost"
         );
     }
 

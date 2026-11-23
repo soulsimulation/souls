@@ -78,6 +78,8 @@ check() {
   curl -fsS --max-time 5 "$DIRECTORY/v1/worlds" 2> /dev/null | grep -q "\"name\": *\"$SLUG\"" || no "the directory does not list $SLUG"
   systemctl is-active --quiet "worldd@$WORLD.service" || no "worldd@<world> is not running"
   systemctl is-active --quiet "souls-gateway@$WORLD.service" || no "souls-gateway@<world> is not running"
+  # The front door sends agents' sockets to the agents' relay (#4152): without it, agents get 502 after the reload.
+  systemctl is-active --quiet souls-agents.service || no "souls-agents (the agents' relay, 7330) is not running"
   sock=$(sed -n 's/^Environment=WORLDD_SOCKET=//p' "$R/etc/systemd/system/worldd@$WORLD.service.d/place.conf" 2> /dev/null)
   if [ -z "$sock" ]; then no "the world is not placed (no WORLDD_SOCKET in its place.conf)"; else
     n=$(printf %s "$sock" | wc -c | tr -d ' ')

@@ -20,6 +20,11 @@
 // The origin runs as its unit does: killed past --origin-memory-mb resident (its MemoryMax; 0 for no cap) and
 // restarted a second after it ends. A window with no viewers follows the ladder too: the tick bar
 // (B6) is judged against the mean of the two.
+// --agents <n> (#4152) adds n scripted agents (v2/tools/driver, `ladder-<n>-<shape>`, n of 10, 50, 100, 200, 350 or 500)
+// over the whole ladder, signed in through the agent path production gives them: --agent-path relay (default: the
+// agents' relay, v2/tools/origin/agents.mjs) or origin (the viewers' origin's own relay, as before #4152), both reading
+// the world's gateway from a placement file as the units do. Its report (sockets closed, act latency, errors) is
+// results.json's `agents` and REPORT.md's last lines. [--agent-shape uneven|even] [--driver <driver binary>]
 // Writes <out>/{results.json, REPORT.md, bench.log}; <out>/r<k>/ holds the world, its logs and souls.tokens (stays local).
 import { spawn, fork, execFileSync } from 'node:child_process';
 import { appendFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
@@ -43,6 +48,9 @@ const log = (...a) => { const s = `[${new Date().toISOString().slice(11, 19)}] $
 const wire = await import(pathToFileURL(join(PKG, 'replica.js')).href);
 wire.initSync({ module: readFileSync(join(PKG, 'replica_bg.wasm')) });
 const ORIGIN_MB = Number(opt('origin-memory-mb', 256));
+const AGENTS = Number(opt('agents', 0)), AGENT_PATH = opt('agent-path', 'relay'), AGENT_SHAPE = opt('agent-shape', 'uneven'), DRIVER = resolve(opt('driver', join(BIN, 'driver')));
+if (AGENTS && !['relay', 'origin'].includes(AGENT_PATH)) throw new Error('--agent-path relay|origin');
+if (AGENTS && !existsSync(DRIVER)) throw new Error(`missing ${DRIVER}: build the driver (--release)`);
 const FD_LIMIT = Number(execFileSync('sh', ['-c', 'ulimit -n'], { encoding: 'utf8' }).trim());
 const PEAK = Math.max(...STEPS) * (1 + SLOW_SHARE) + 5;
 if (Number.isFinite(FD_LIMIT) && FD_LIMIT < 2 * PEAK + 1024) throw new Error(`open-file limit ${FD_LIMIT} is below ${Math.ceil(2 * PEAK + 1024)}: the origin holds up to two sockets a viewer; raise it (ulimit -n)`);
@@ -63,23 +71,30 @@ function started(cmd, args, re, file, env = process.env) {
 
 async function serve(dir) {
   const w = join(dir, 'world'), sock = join(dir, 'w.sock');
-  execFileSync(join(BIN, 'worldd'), ['seed', '--facts', FACTS, '--dir', w, '--souls', String(SOULS)], { stdio: ['ignore', 'pipe', 'pipe'] });
+  execFileSync(join(BIN, 'worldd'), ['seed', '--facts', FACTS, '--dir', w, '--souls', String(SOULS + AGENTS)], { stdio: ['ignore', 'pipe', 'pipe'] });
   const world = await started(join(BIN, 'worldd'), ['serve', '--dir', w, '--socket', sock], /listening /, join(dir, 'worldd.log'));
   const gw = await started(join(BIN, 'gatewayd'), ['--listen', '127.0.0.1:0', '--world', sock, '--tokens', join(w, 'tokens'), '--build', `1220${'ab'.repeat(32)}`], /listening (\S+)\n/, join(dir, 'gatewayd.log'));
   const stream = JSON.parse(readFileSync(join(w, 'views/world.json'), 'utf8')).stream.replace(/^views\//, '');
   const s = { w, world: world.p, gateway: gw.p, gatewayAt: `ws://${gw.m[1]}/v2/ws`, stream, originRestarts: 0, originKills: 0 };
+  // The placement file the origin and the agents' relay read (world-routes.mjs), naming this gateway for `eden`.
+  const routes = join(dir, 'worlds.json'), env = { ...process.env, SOULS_WORLD_ROUTES: routes };
+  writeFileSync(routes, JSON.stringify({ schema: 'souls/world-routes/1', worlds: { eden: { gateway: `http://${gw.m[1]}`, stream: '/s/eden/', canonical: true } } }));
   // The origin as its production unit runs it (v2/tools/ops/units/souls-origin.service): MemoryMax with no swap, and
   // started again a second after it ends (Restart=always, RestartSec=1s), on the same port. The cap is a watchdog here:
   // the origin is killed once its resident memory passes --origin-memory-mb (read every 100 ms), as the kernel's
   // out-of-memory kill would end it in its unit (cgroup v1 machines give a user's scope no memory limit).
   const port = async (p) => {
-    const o = await started(process.execPath, [join(V2, 'tools/origin/origin.mjs'), join(w, 'views'), String(p), '127.0.0.1'], /origin (\d+)\n/, join(dir, 'origin.log'));
+    const o = await started(process.execPath, [join(V2, 'tools/origin/origin.mjs'), join(w, 'views'), String(p), '127.0.0.1'], /origin (\d+)\n/, join(dir, 'origin.log'), env);
     s.origin = o.p;
     const cap = ORIGIN_MB > 0 && setInterval(() => { if ((proc(o.p.pid)?.rssMb ?? 0) > ORIGIN_MB) { s.originKills++; o.p.kill('SIGKILL'); } }, 100);
     o.p.on('exit', () => { clearInterval(cap); if (!stopping) { s.originRestarts++; log(`origin ended (restart ${s.originRestarts})`); setTimeout(() => port(o.m[1]).catch((e) => log(String(e))), 1000); } });
     return o.m[1];
   };
   s.base = `http://127.0.0.1:${await port(0)}/`;
+  if (AGENTS && AGENT_PATH === 'relay') {
+    const a = await started(process.execPath, [join(V2, 'tools/origin/agents.mjs'), '0', '127.0.0.1'], /agents (\d+)\n/, join(dir, 'agents.log'), env);
+    s.agentsAt = `ws://127.0.0.1:${a.m[1]}/w/eden/v2/ws`;
+  } else if (AGENTS) s.agentsAt = `ws://${new URL(s.base).host}/w/eden/v2/ws`;
   return s;
 }
 let stopping = false;
@@ -87,7 +102,7 @@ let stopping = false;
 // ------------------------------------------------------------------ Souls walking through the gateway
 function walkers(s, targets) {
   const meta = JSON.parse(readFileSync(join(s.w, 'world.json'), 'utf8')), scope = Buffer.from(meta.souls_scope, 'hex');
-  const tokens = readFileSync(join(s.w, 'souls.tokens'), 'utf8').trim().split('\n');
+  const tokens = readFileSync(join(s.w, 'souls.tokens'), 'utf8').trim().split('\n').slice(0, SOULS); // the rest are --agents'
   const counts = { signedIn: 0, sent: 0, answers: {}, closed: 0 };
   const stops = tokens.map((token) => {
     const counter = BigInt(/^soul-[0-9a-f]+-(\d+)\./.exec(token)[1]);
@@ -223,6 +238,7 @@ async function repeat(r) {
   player.free();
   log(`baseline ${baseline.length} bytes, ${(p0.newest ?? -1) + 1} parts; ${targets.length} places to walk to`);
   const walk = walkers(s, targets);
+  const agents = AGENTS ? agentRun(s, dir) : null;
   await sleep(WARM_MS);
   log(`warm: ${JSON.stringify(walk.counts)}`);
   const d = await drivers(s);
@@ -260,12 +276,37 @@ async function repeat(r) {
   const zeroMean = (zero.tickMeanUs + after.tickMeanUs) / 2;
   for (const x of rows) if (x.bars) x.bars = bars(x, zeroMean);
   log(`0 viewers again: tick mean ${after.tickMeanUs} µs, world ${after.worldCores} cores; origin restarts ${s.originRestarts}`);
+  const agentReport = agents && await agents;
   stopping = true;
   walk.stop();
   await sleep(1000);
   for (const p of procs.splice(0)) p.kill('SIGTERM');
   await sleep(1000);
-  return { baselineBytes: baseline.length, walkTargets: targets.length, originCapMb: ORIGIN_MB, rows };
+  return { baselineBytes: baseline.length, walkTargets: targets.length, originCapMb: ORIGIN_MB, rows, ...(agentReport ? { agents: agentReport } : {}) };
+}
+
+/**
+ * --agents: the driver's schedule over the ladder's length (the windows, waves and settles, and the window after),
+ * signed in with the seeded Souls past the walkers' through `s.agentsAt`; resolves with its report's agent figures.
+ */
+async function agentRun(s, dir) {
+  const out = join(dir, 'agents'), seconds = Math.ceil((WARM_MS + WINDOW_MS * (STEPS.length + 2) + (WAVE_MS + SETTLE_MS) * STEPS.length) / 1000);
+  mkdirSync(join(out, 'run'), { recursive: true });
+  writeFileSync(join(out, 'agents.tokens'), readFileSync(join(s.w, 'souls.tokens'), 'utf8').trim().split('\n').slice(SOULS).join('\n') + '\n', { mode: 0o600 });
+  execFileSync(process.execPath, [join(V2, 'tools/driver/loads.mjs'), `ladder-${AGENTS}-${AGENT_SHAPE}`, '--seconds', String(seconds), '--seed', '1', '--out', join(out, 'schedule.txt')], { stdio: 'ignore' });
+  log(`agents: ${AGENTS} (${AGENT_SHAPE}) for ${seconds} s through the ${AGENT_PATH === 'relay' ? "agents' relay" : "viewers' origin"} at ${s.agentsAt}`);
+  const d = await started(DRIVER, ['--schedule', join(out, 'schedule.txt'), '--dir', join(out, 'run'), '--remote', s.agentsAt, '--tokens', join(out, 'agents.tokens')], /^/, join(out, 'driver.log'));
+  procs.splice(procs.indexOf(d.p), 1); // its own end, not the ladder's: never killed early
+  await new Promise((ok) => (d.p.exitCode === null ? d.p.on('exit', ok) : ok()));
+  let r;
+  try { r = JSON.parse(readFileSync(join(out, 'run/report.json'), 'utf8')); } catch { return { path: AGENT_PATH, failed: 'no report: see agents/driver.log' }; }
+  const errors = {};
+  for (const m of r.perMinute) merge(errors, m.errors);
+  const a = { path: AGENT_PATH, agents: r.agents, intended: r.intendedActs, achievedShare: r.achievedShare, receipts: r.receipts, socketsClosed: r.socketsClosed,
+    actP95MsMax: Math.max(0, ...r.perMinute.map((m) => m.latencyP95Ms)), actP95MsByMinute: r.perMinute.map((m) => m.latencyP95Ms),
+    failed: Object.values(errors).reduce((x, y) => x + y, 0), errors };
+  log(`agents: sockets closed ${a.socketsClosed}, act p95 by minute ${a.actP95MsByMinute.join(', ')} ms, failed ${a.failed} ${JSON.stringify(errors)}, achieved ${(100 * a.achievedShare).toFixed(1)} %`);
+  return a;
 }
 
 const results = { started: new Date().toISOString(), machine: { cpus: (await import('node:os')).cpus().length, platform: process.platform }, config: { steps: STEPS, souls: SOULS, windowSec: WINDOW_MS / 1000, waveSec: WAVE_MS / 1000, settleSec: SETTLE_MS / 1000, slowShare: SLOW_SHARE, drivers: DRIVERS, repeats: REPEATS }, repeats: [] };
@@ -279,6 +320,7 @@ const md = ['| repeat | viewers | first picture p50 / p95 ms (baseline drawn p95
 results.repeats.forEach((rep, i) => rep.rows.forEach((x) => md.push(x.step === 0
   ? `| ${i + 1} | 0${x.after ? ' (after)' : ''} | - | - | - | - | - | ${x.originCores}, ${x.originRssMaxMb}, - | ${x.worldCores}, ${x.worldRssMaxMb}, ${x.tickMeanUs} | ${x.gatewayCores}, ${x.gatewayRssMaxMb} | - | - |`
   : `| ${i + 1} | ${x.step} | ${x.firstPictureP50} / ${x.firstPictureP95} (${x.installedP95}; ${x.waitingAtEnd}) | ${x.latencyP50} / ${x.latencyP99} | ${x.errors} / ${x.reinstalls} / ${x.behind} | ${x.totalBytesPerViewerS} (${x.bytesPerViewerS.pointer}, ${x.bytesPerViewerS.part}, ${x.bytesPerViewerS['part.text']}) | ${Math.round(x.joinBytes.baseline / 1024)}, ${Math.round((x.joinBytes.part + x.joinBytes['part.text']) / 1024)} | ${x.originCores}, ${x.originRssMaxMb}, ${x.originRestarts} | ${x.worldCores}, ${x.worldRssMaxMb}, ${x.tickMeanUs} | ${x.gatewayCores}, ${x.gatewayRssMaxMb} | ${x.driverLoopP99Ms} | ${x.driverBound ? 'driver-bound' : x.bars.find((b) => b.met === false)?.bar ?? 'none'} |`)));
+results.repeats.forEach((rep, i) => rep.agents && md.push('', `Repeat ${i + 1}, ${rep.agents.agents ?? AGENTS} agents through the ${rep.agents.path}: sockets closed ${rep.agents.socketsClosed}, act p95 (worst minute) ${rep.agents.actP95MsMax} ms, failed requests ${rep.agents.failed} ${JSON.stringify(rep.agents.errors)}, achieved ${rep.agents.achievedShare}`));
 writeFileSync(join(OUT, 'REPORT.md'), md.join('\n') + '\n');
 console.log(md.join('\n'));
 process.exit(0);
