@@ -89,14 +89,18 @@ jobs:
           world=$(echo "$all" | head -n -1 | paste -sd, -)
           echo "runner: $(echo "$all" | wc -l) CPUs; world on $(echo "$all" | head -n -1 | wc -l) of them, the driver on the last"
           export EDEN_FACTS="$PER_RUN/eden.facts.json"
+          OUT=$(mktemp -d /tmp/pl.XXXXXX)
+          echo "OUT=$OUT" >> "$GITHUB_ENV"
           for rung in $RUNGS; do
           n=${rung%%:*} rate=${rung#*:}
           [[ $n =~ ^[0-9]+$ && $rate =~ ^(every4|burst)$ ]] || { echo "::error::rung $rung: <agents>:<every4|burst>"; exit 1; }
           for k in 1 2; do
             for arm in even uneven; do
               for r in $BUILDS; do
-                d="$PER_RUN/out/$r/$n-$arm-$rate-r$k"
-                mkdir -p "$(dirname "$d")"
+                # A short folder: the world's and the gateway's sockets live in it, and a Unix socket's path has
+                # at most 107 bytes (the runner's own folder is too deep for the gateway's control socket).
+                d="$OUT/$r/$n-${arm:0:2}-${rate:0:2}-$k"
+                mkdir -p "$OUT/$r"
                 CARGO_TARGET_DIR="$PER_RUN/bin-$r" bash "$r/v2/tools/bench/stage2a/rung.sh" "$n" "$arm" "$rate" "$world" 120 "$d" > "$d.log" 2>&1 || true
                 line=$(grep '^rung {' "$d.log" | tail -1)
                 if [ -z "$line" ]; then
@@ -118,4 +122,4 @@ jobs:
             echo "|---|---|---|---|---|---|---|---|---|---|---|---|---|"; cat "$PER_RUN/table.md"; } >> "$GITHUB_STEP_SUMMARY"
       - name: Clean up
         if: always()
-        run: rm -rf "$PER_RUN"
+        run: rm -rf "$PER_RUN" "${OUT:-/nonexistent}"
