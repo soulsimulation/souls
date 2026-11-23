@@ -102,6 +102,9 @@ test('actual launcher fences stable identity and aliases, preserves reads/other 
   }
   for (const method of ['GET', 'HEAD']) assert.equal((await fetch(base + '/w/eden/v1/edge/view?gaze=1', { method })).status, 409);
   assert.equal(readFileSync(hits, 'utf8'), before, 'no refused act/edit/gaze reached the old world');
+  // V4: Explore's place pictures (a POST that changes nothing) are the old world's to render
+  assert.notEqual((await post('/w/eden/v1/world/context/views')).status, 409, 'place pictures are not refused');
+  assert.match(readFileSync(hits, 'utf8').slice(before.length), /\/v1\/world\/context\/views/, 'and reach the old world');
   assert.equal(await (await fetch(base + '/worlds/w/eden-2026/eden.mjs')).text(), 'actual served fixture bytes');
   assert.equal((await (await fetch(base + '/w/eden/v1/config')).json()).soulClient.version, '3.0.0');
   assert.equal((await fetch(base + '/w/eden/v1/world/snapshot')).status, 200, 'read-only views remain live');
