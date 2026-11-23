@@ -75,3 +75,19 @@ test('K3: the first moment is the first bundle of the first day with public even
     globalThis.fetch = realFetch; (globalThis as { location?: unknown }).location = realLocation;
   }
 });
+
+test('V6: hour=HH:MM draws the past in that light, as live: the chunks\' clock at that hour, its day the world\'s', async () => {
+  (globalThis as { location?: unknown }).location ??= { href: 'http://127.0.0.1/w/x/' };
+  // the world's calendar (its own node's sky: a 24 h day from 2026-06-21 10:30 UTC), so its chunks carry a clock
+  const origin = Date.UTC(2026, 5, 21, 10, 30) * 1000, sky = { 60: 86_400, 61: origin };
+  const sun = (hour?: string) => {
+    const { w } = fakeWorker(), post = w.postMessage.bind(w);
+    w.postMessage = (m) => { post(m); const on = w.onmessage!; w.onmessage = (e) => { (e.data.s.nodes[0] as { sky?: unknown }).sky = sky; on(e); w.onmessage = on; }; };
+    return new V2History('/s/x/history/', () => w as unknown as Worker, { rulesVersion: 'test/1' }, hour);
+  };
+  const from = (T0 + 30_000_000) / TICK_US, to = from + 4 * TICKS;
+  const at = (c: { take: unknown }) => (c.take as { finalState: { env: { datetime: string | null } } }).finalState.env.datetime;
+  const recorded = (await sun().chunks(from, to, 4)).map(at), lit = (await sun('21:30').chunks(from, to, 4)).map(at);
+  assert.ok(recorded.every((d) => d && !d.includes('T21:30')), `the recorded clock without hour=: ${recorded[0]}`);
+  assert.ok(lit.every((d, i) => d === `${recorded[i]!.slice(0, 11)}21:30${recorded[i]!.slice(16)}`), `with hour=21:30: ${lit[0]}`);
+});
