@@ -227,6 +227,50 @@ fn records_rebuild_the_rule_after_a_restart() {
     assert_eq!(woke.next(), Some(66 * S + SHORT.wander));
 }
 
+/// S6 (0.133): a restart from a checkpoint mid-countdown, with no record of the rule since: the carried states rebuild
+/// it, and every body's due time is the one it had. Without them a body that never acted was taken as new at the
+/// restart and its countdown began again.
+#[test]
+fn a_restart_from_a_checkpoint_mid_countdown_keeps_every_due_time() {
+    let (owned, wandering, asleep) = (soul(21), soul(22), soul(23));
+    let t = Town::default();
+    let mut w = WindDown::new(SHORT);
+    t.at.borrow_mut().insert(asleep, [30 * M, 0]);
+    w.add(asleep, 0);
+    run(&mut w, &t, 0, 50 * S);
+    t.at.borrow_mut().insert(wandering, [40 * M, 0]);
+    w.add(wandering, 50 * S);
+    run(&mut w, &t, 50 * S, 61 * S);
+    t.at.borrow_mut().insert(owned, [50 * M, 0]);
+    w.add(owned, 61 * S);
+    run(&mut w, &t, 61 * S, 62 * S);
+    assert_eq!(
+        [owned, wandering, asleep].map(|b| w.word(b)),
+        [Some(Word::Awake), Some(Word::Idle), Some(Word::Asleep)]
+    );
+    // The checkpoint, mid-countdown: one Owned (due at 71 s), one wandering, one asleep (on no list).
+    let carried = w.carried();
+    let before: Vec<_> = [owned, wandering, asleep]
+        .iter()
+        .map(|b| (w.state(*b).copied(), w.word(*b)))
+        .collect();
+    let due = w.next();
+    assert!(due.is_some());
+    // Restarted at 63 s from the checkpoint alone.
+    let mut again = WindDown::new(SHORT);
+    again.resume(&carried, |_| None, [owned, wandering, asleep], 63 * S);
+    let after: Vec<_> = [owned, wandering, asleep]
+        .iter()
+        .map(|b| (again.state(*b).copied(), again.word(*b)))
+        .collect();
+    assert_eq!(after, before);
+    assert_eq!(again.next(), due);
+    // Without the carry the owned body's hour began again at the restart.
+    let mut lost = WindDown::new(SHORT);
+    lost.resume(&[], |_| None, [owned], 63 * S);
+    assert_eq!(lost.next(), Some(63 * S + SHORT.wander));
+}
+
 #[test]
 fn choices_are_the_same_every_run_and_spots_keep_apart() {
     let go = || {

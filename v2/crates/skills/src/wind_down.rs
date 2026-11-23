@@ -335,6 +335,31 @@ impl WindDown {
         self.souls.values().filter_map(|(_, d)| *d).min()
     }
 
+    /// Each body's state as a record of the rule (S6, 0.133): what a checkpoint carries, so a restart from it starts
+    /// [`WindDown::resume`] from these and the log's records after it, and every body's clock goes on where it was.
+    pub fn carried(&self) -> Vec<Effect> {
+        self.souls
+            .iter()
+            .map(|(&body, (s, _))| {
+                let phase = if s.slept {
+                    Phase::Asleep
+                } else if s.zombie.is_some() {
+                    Phase::Zombie
+                } else if s.wander.is_some() {
+                    Phase::Wander
+                } else {
+                    Phase::Woken
+                };
+                let o = Order {
+                    body,
+                    phase,
+                    what: Vec::new(),
+                };
+                record(&o, s, s.last, 0)
+            })
+            .collect()
+    }
+
     /// Rebuilds the rule from a log: each body's state from its last record or its agent's last act, whichever is
     /// later (`body_of` names a Soul's body). Bodies the log does not name are added at `now`.
     pub fn resume<'a>(
@@ -343,6 +368,19 @@ impl WindDown {
         body_of: impl Fn(Id) -> Option<Id>,
         bodies: impl IntoIterator<Item = Id>,
         now: Micros,
+    ) {
+        self.resume_since(effects, body_of, bodies, now, now);
+    }
+
+    /// As [`WindDown::resume`], with the bodies the log does not name counted from `since` (S6: when the world first
+    /// counted them, which a checkpoint carries), not from `now`.
+    pub fn resume_since<'a>(
+        &mut self,
+        effects: impl IntoIterator<Item = &'a Effect>,
+        body_of: impl Fn(Id) -> Option<Id>,
+        bodies: impl IntoIterator<Item = Id>,
+        now: Micros,
+        since: Micros,
     ) {
         let mut found: BTreeMap<Id, State> = BTreeMap::new();
         for e in effects {
@@ -358,7 +396,7 @@ impl WindDown {
             }
         }
         for body in bodies {
-            let mut s = found.remove(&body).unwrap_or_else(|| State::owned(now));
+            let mut s = found.remove(&body).unwrap_or_else(|| State::owned(since));
             // A body whose hour passed while the world was down enters Wander at the hour, as today.
             if s.wander.is_none() && now > s.last + self.knobs.wander {
                 s.wander = Some(s.last + self.knobs.wander);
