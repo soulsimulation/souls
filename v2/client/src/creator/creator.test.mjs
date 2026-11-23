@@ -498,6 +498,29 @@ test('#3728: move --by and clone go to the claims judge as any edit: refused by 
   assert.equal((await god('build', 'release', c)).ok, true);
 });
 
+test('#3728: select\'s remove and move go to the claims judge as one edit: refused edit.claimed in a claim they are not under', async () => {
+  await connected();
+  const place = (await god('describe')).nodes.find((n) => n.kind === 'souls:place');
+  const made = await god('place', 'room', '--in', place.id, '--at', '91000,0,91000');
+  assert.equal(made.ok, true, JSON.stringify(made));
+  const room = made.names['1'];
+  assert.equal((await god('place', 'souls:item', '--in', room, '--at', '500,0,500')).ok, true);
+  const claimed = await god('build', 'claim', 'shed', '--area', '90000,90000,94000,94000');
+  assert.equal(claimed.ok, true, JSON.stringify(claimed));
+  const c = claimed.claim.id;
+  assert.equal((await god('select', '--in', room)).selected, 1, 'a list is not an edit');
+  const moved = await god('select', '--in', room, '--by', '0.5,0');
+  assert.deepEqual([moved.ok, moved.code], [false, 'edit.claimed'], JSON.stringify(moved));
+  const removed = await god('select', '--in', room, '--remove');
+  assert.deepEqual([removed.ok, removed.code], [false, 'edit.claimed'], JSON.stringify(removed));
+  // Under the claim, both are made.
+  assert.equal((await god('select', '--in', room, '--by', '0.5,0', '--claim', c)).ok, true);
+  const gone = await god('select', '--in', room, '--remove', '--claim', c);
+  assert.equal(gone.ok, true, JSON.stringify(gone));
+  assert.equal((await god('select', '--in', room)).selected, 0);
+  assert.equal((await god('build', 'release', c)).ok, true);
+});
+
 test('#3700: own, access and zone words make today\'s marks in the world\'s units', () => {
   const soul = `${'ab'.repeat(16)}-4`;
   assert.deepEqual(layerOf('own', ['aa-1', soul, '--private']), { act: 'own', node: 'aa-1', owner: soul, access: 2 });
