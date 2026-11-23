@@ -15,7 +15,8 @@
 //   (a) the public stream carries both bodies, the said sentence and not the whisper's words (in no part and in no
 //       public file), a private conversation's turn as who spoke, when and among whom, never its words (#3775), the seated wave's run on A's body (#4143), and body motion: changing positions on the walk and a slot
 //       hand-off on the sit;
-//   (b) A's copy holds the world's kind entries after pairing, and `can wave:<A's body>` answers yes;
+//   (b) A's copy holds the world's kind entries after pairing, `can wave:<A's body>` answers yes, and `inspect <A's body>`
+//       offers the family's gestures; A's clap and point (toward the bench) end with their receipts;
 //   (c) the malformed word is refused by name, and the world then restarts cleanly on the same folder;
 //   (d) after the restart a new viewer's stream holds the bodies where they were, and the stream goes on (a new say);
 //   (e) hide-and-seek (#3915): A takes an apple from an Eden swap shelf and hides it in an Eden hollow stump, whose entry is
@@ -314,6 +315,9 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   // (b) can wave on my own body, from the copy alone.
   const can = await A.cli('can', `wave:${meA}`);
   assert.equal(can.can ?? can.answer ?? can.verdict, 'yes', `(b) \`can wave:<me>\` answers yes from the copy (#3772, fixed by #4075): ${JSON.stringify(can)}`);
+  // (b) inspect on my own body lists the family's gestures as its offers (E21, #2791), as `can` reads them.
+  const offered = ((await A.cli('inspect', meA)).offers ?? []).map((o) => o.name);
+  for (const g of ['wave', 'clap', 'point']) assert.ok(offered.includes(g), `(b) \`inspect <me>\` offers ${g}: ${offered.join(', ')}`);
 
   // #3775: a private conversation. A offers B one where they stand (a seat admits no conversation), B accepts and
   // takes a private turn.
@@ -447,6 +451,12 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   // are the bench's). No entry names the move: the engine writes none (`souls:form-move` was never one).
   assert.ok(accepted(wave.answer), `(a) the wave on the seated body: ${JSON.stringify(wave.answer)}`);
   assert.equal((await answered(A, wave.sent.sequence, 30_000, true)).answer, 1, "(a) the wave ends with its receipt");
+  // A clap, and a point toward the bench it sits on, from the same family, each to its receipt (0.132 B1-3).
+  for (const words of [[`clap:${meA}`], [`point:${meA}`, `toward=${bench.id}`]]) {
+    const g = await act(A, ...words);
+    assert.ok(accepted(g.answer), `(a) ${words[0]}: ${JSON.stringify(g.answer)}`);
+    if (g.answer.answer === 3) assert.equal((await answered(A, g.sent.sequence, 30_000, true)).answer, 1, `(a) ${words[0]} ends with its receipt`);
+  }
   const onA = (name) => v1.parts.slice(fromPart).flatMap((p) => p.happened ?? []).find((h) => h.name === name && h.node === pageKey(meA));
   const waved = await waitFor("the wave's run in the public stream", () => (onA('souls:form-started') && onA('souls:form-ended')) || v1.errors.length, 10_000);
   assert.deepEqual(v1.errors, []);
