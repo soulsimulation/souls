@@ -13,7 +13,6 @@ members = [
     "tools/driver",
     "tools/facts",
     "tools/form-stop",
-    "tools/import-accounts",
     "tools/import-eden",
     "tools/import-world",
     "tools/keys",

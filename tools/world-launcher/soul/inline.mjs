@@ -9,15 +9,15 @@ import { stripTypeScriptTypes } from "node:module";
 
 const here = (name) => fileURLToPath(new URL(name, import.meta.url));
 const mark = (file) => file.split("/").pop();
-/** module file -> the name eden.mjs knows it by. A module comes after anything it imports. */
+/** module file (from here) -> the name eden.mjs knows it by. A module comes after anything it imports. */
 export const MODULES = [
-  ["home.mjs", "soulHome"],
-  ["memory-folder.mjs", "soulRecords"],
-  ["brief.mjs", "soulBrief"],
-  ["people.mjs", "soulPeople"],
-  ["consolidate.mjs", "soulConsolidate"],
-  ["memory.mjs", "soulMemory"],
-  ["digest.mjs", "soulDigest"],
+  ["../../../v2/client/src/soul/home.mjs", "soulHome"],
+  ["../../../v2/client/src/soul/memory-folder.mjs", "soulRecords"],
+  ["../../../v2/client/src/soul/brief.mjs", "soulBrief"],
+  ["../../../v2/client/src/soul/people.mjs", "soulPeople"],
+  ["../../../v2/client/src/soul/consolidate.mjs", "soulConsolidate"],
+  ["../../../v2/client/src/soul/memory.mjs", "soulMemory"],
+  ["../../../v2/client/src/soul/digest.mjs", "soulDigest"],
   ["client-body-kit.mjs", "soulBodyKit"],
   ["catalog.mjs", "soulCatalog"],
   ["live.mjs", "soulLive"],
@@ -39,7 +39,8 @@ export function inlineBlock(source, file, name) {
   const body = source.replace(/^import\s*\{([^}]*)\}\s*from\s*["'](node:[a-z_/]+|\.[^"']+)["'];\n/gm, (_, names, from) => {
     const list = names.trim().replace(/\s+as\s+/g, ": ");
     if (from.startsWith(".")) {
-      const known = MODULES.find(([f]) => f === from.replace(/^\.\//, ""))?.[1];
+      // By file name: the memory modules live in v2/client/src/soul/ (0.134 D3) and import each other there.
+      const known = MODULES.find(([f]) => mark(f) === mark(from))?.[1];
       if (!known) throw new Error(`${file}: ${from} is not an inlined module`);
       unpacks.push(`const { ${list} } = ${known};`);
       return "";

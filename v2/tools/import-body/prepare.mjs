@@ -54,7 +54,7 @@ try {
   if (test) {
     run('tests', ['--test', 'v2/web/src/crowd/crowd.test.ts', 'v2/tools/import-body/import-body.test.ts', 'v2/tools/import-body/presets.test.ts', 'v2/web/body-assets.test.ts'], { ...process.env, B15_BODY_ASSETS: out, B15_MEDIA_ROOT: repo });
     const env = { ...process.env, BRAIN_MODE: 'fake', CARGO_BUILD_JOBS: '4', B15_REQUIRE_PREPARED: '1', B15_BODY_ASSETS: out, B15_IMPORT_OUTPUT: out + '-private-import' };
-    for (const [pkg, file, name] of [['import-accounts', 'owned', 'b15_mapped_released_births'], ['worldd', 'wear', 'b15_imported_choice_ordinary_c3']]) {
+    for (const [pkg, file, name] of [['worldd', 'wear', 'b15_imported_choice_ordinary_c3']]) {
       const args = ['test', '--manifest-path', join(repo, 'v2/Cargo.toml'), '--release', '-p', pkg, '--test', file, name, '--locked', '--', '--exact', '--nocapture'];
       const stdout = run('native-' + pkg, args, env, process.env.CARGO ?? 'cargo', join(repo, 'v2'), total);
       if (!/test result: ok\. 1 passed; 0 failed; 0 ignored;/.test(stdout)) throw Error('body.prepare-native-count');

@@ -195,7 +195,7 @@ step client-stats node --test client/src/stats/*.test.mjs
 # The local check (R8, #2703): R2's rules on the copy, at `can` and again at send time (the daemon's side is above).
 step client-check node --test client/src/check/*.test.mjs
 # A Soul's memory (R14, #2754): a 30-day home opened unchanged, an hour of named events, digest, consolidate, aliases.
-step client-memory node --test client/src/memory/*.test.mjs
+step client-memory node --test client/src/memory/*.test.mjs client/src/soul/*.test.mjs
 # Asking what happened (R16, #2817): a recorded Eden of 100 acting Souls in V4's files, by place, thing and Soul.
 step client-history node --test client/src/history/*.test.mjs
 # A home on today's client comes across (R18, #2821): the released 2.36.2 client against the new answers, from v2/ alone.
@@ -340,9 +340,6 @@ if on sim; then tests_sim; wasm_pkg; hatch; fi
 if on worldd; then tests_worldd; fi
 if on wasm; then wasm_pkg; wasm_loads; wasm_goldens; replica_equal; facts; fi
 if on client; then
-  # import-accounts: the pairing tests (client/src/pair/former.test.mjs) start target/debug/import-accounts, which the
-  # whole-workspace `cargo test` used to leave there.
-  step client-bins cargo build -p import-accounts --locked --quiet
   wasm_pkg; ops_health; web_steps; client_steps; driver_served
   [[ -z $full ]] || speed_bars
 fi

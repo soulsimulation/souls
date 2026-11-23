@@ -3,8 +3,8 @@
 // Nothing here talks to a world or a server, and nothing about memory goes into the replica.
 //
 // The record format, its validators and budgets, people, the brief, `digest` and `consolidate` are the shipping line's
-// modules, imported in place from tools/world-launcher/soul/ (the issue's listed alternative) until X8 retires that
-// folder: they read no world, and one copy can't drift from the other. What is new for v2 is the feeder
+// modules, in `../soul/` (moved from tools/world-launcher/soul/ in 0.134 D3; today's client re-exports them from there
+// and inlines them): they read no world, and one copy can't drift from the other. What is new for v2 is the feeder
 // (`feeder.mjs`), and the alias table read here.
 //
 // Ids change at the clean start. Old records keep old ids as text and are never rewritten. The home holds one alias
@@ -17,10 +17,10 @@
 
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join } from 'node:path';
-import { PROJECTION_BUDGETS, openMemoryFolder } from '../../../../tools/world-launcher/soul/memory-folder.mjs';
-import { openSoulMemory } from '../../../../tools/world-launcher/soul/memory.mjs';
-import { digest, readLog, renderDigest } from '../../../../tools/world-launcher/soul/digest.mjs';
-import { answerOf, consolidate, fakeMind, ownerMind, settingsOf } from '../../../../tools/world-launcher/soul/consolidate.mjs';
+import { PROJECTION_BUDGETS, openMemoryFolder } from '../soul/memory-folder.mjs';
+import { openSoulMemory } from '../soul/memory.mjs';
+import { digest, readLog, renderDigest } from '../soul/digest.mjs';
+import { answerOf, consolidate, fakeMind, ownerMind, settingsOf } from '../soul/consolidate.mjs';
 import { worldsOf } from '../home/home.mjs';
 
 export { openSoulMemory, readLog };
