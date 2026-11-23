@@ -377,7 +377,7 @@ fn slot_point(tree: &Tree, h: Handle, n: u64) -> Option<Vec3> {
     let rows = node.fields().get(&F_SLOTS).map(row)?;
     rows.iter().map(row).find_map(|r| {
         (r.first().and_then(int)? == i64::try_from(n).ok()?).then_some(())?;
-        let at = |k: usize| r.get(k).and_then(int).map(|v| v * 1000);
+        let at = |k: usize| r.get(k).and_then(um);
         Some(Vec3::new(at(1)?, at(2)?, at(3)?))
     })
 }
@@ -419,6 +419,15 @@ fn int(v: &Value) -> Option<i64> {
     }
 }
 
+/// The most mm a length or a coordinate of a node's field may be here: 1000 km. Past it, the µm arithmetic would leave
+/// `i64` (release builds check overflow), so such a value is no value (#3697 review).
+const MM_MOST: i64 = 1_000_000_000;
+
+/// A field's mm as µm: `None` when it is no whole number or beyond [`MM_MOST`].
+fn um(v: &Value) -> Option<i64> {
+    int(v).filter(|n| n.abs() <= MM_MOST).map(|n| n * 1000)
+}
+
 fn row(v: &Value) -> &[Value] {
     match v {
         Value::Array(a) => a,
@@ -431,8 +440,8 @@ fn ring_mm(v: &Value) -> Result<Vec<Xz>, String> {
         .iter()
         .map(|p| match row(p) {
             [x, z, ..] => Ok([
-                int(x).ok_or("a point")? * 1000,
-                int(z).ok_or("a point")? * 1000,
+                um(x).ok_or("a point, whole mm within the world")?,
+                um(z).ok_or("a point, whole mm within the world")?,
             ]),
             _ => Err("a point is [x, z]".to_owned()),
         })
@@ -456,7 +465,12 @@ fn solids_of(tree: &Tree, h: Handle, x: &Xform, out: &mut Vec<Solid>) -> Result<
         return Ok(());
     };
     for r in row(&v) {
-        let n: Vec<i64> = row(r).iter().map(|v| int(v).unwrap_or(0) * 1000).collect();
+        let n: Vec<i64> = row(r)
+            .iter()
+            .take(7)
+            .map(um)
+            .collect::<Option<_>>()
+            .ok_or("a solid's numbers are whole mm within the world")?;
         let [cx, cz, hx, hz, yaw_um, y0, y1, ..] = n[..] else {
             return Err("a solid is [cx, cz, hx, hz, yaw, y0, y1, …]".into());
         };
@@ -487,7 +501,7 @@ fn surfaces_of(tree: &Tree, floor: Handle, x: &Xform) -> Result<Vec<Surface>, St
         .iter()
         .map(|s| match row(s) {
             [y, ring] => {
-                let y = int(y).ok_or("a surface's y")? * 1000;
+                let y = um(y).ok_or("a surface's y")?;
                 let ring = ring_mm(ring)?
                     .into_iter()
                     .map(|p| on_plane(x, p, y).map(|q| [q.x, q.z]))
@@ -738,7 +752,8 @@ fn doorways_at(tree: &Tree, ends: &[Handle], frame: Handle, s: &mut Scene) -> Re
             };
             let r = row(r);
             let n = |k: usize| r.get(k).and_then(int).ok_or("a doorway row");
-            let (ax, az, yaw_mdeg, width) = (n(2)? * 1000, n(3)? * 1000, n(4)?, n(5)? * 1000);
+            let m = |k: usize| r.get(k).and_then(um).ok_or("a doorway row");
+            let (ax, az, yaw_mdeg, width) = (m(2)?, m(3)?, n(4)?, m(5)?);
             let d = Xform {
                 pos: Vec3::new(ax, room_y, az),
                 rot: yaw(yaw_mdeg)?,
@@ -958,8 +973,8 @@ impl Scene {
                         .transpose()?
                         .unwrap_or_default(),
                     line: f.get(&F_LINE).map(ring_mm).transpose()?.unwrap_or_default(),
-                    width: f.get(&F_LINE_WIDTH).and_then(int).unwrap_or(0) * 1000,
-                    level: f.get(&F_WATER_LEVEL).and_then(int).unwrap_or(0) * 1000,
+                    width: f.get(&F_LINE_WIDTH).and_then(um).unwrap_or(0),
+                    level: f.get(&F_WATER_LEVEL).and_then(um).unwrap_or(0),
                 });
             } else if let Some(r) = n.fields().get(&F_OUTLINE) {
                 s.areas.push(ring_mm(r)?);

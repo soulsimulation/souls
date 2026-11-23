@@ -11,6 +11,7 @@
 //   character-wire.ts         (mars/viewer/app/engine-view/) the file names, sizes and sha256s; people.ts maps a mesh
 //                             file's sha256 back to its source's for the presets' pin
 // Deterministic: --check rebuilds in memory and fails if a committed file differs.
+import { isMain } from '../lib/is-main.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -95,7 +96,7 @@ export function build(dir = DIR) {
   return { files, text };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const { files, text } = build(), check = process.argv.includes('--check'); let bad = 0;
   for (const [name, bytes] of [...files, [MODULE, Buffer.from(text)]]) {
     const path = name.startsWith('/') ? name : join(DIR, name);

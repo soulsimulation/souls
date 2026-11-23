@@ -4,9 +4,9 @@
 // in the run conditions is flagged as not like for like. With two repeats a direction is called only when the repeat
 // ranges do not overlap. Pure core; the CLI reads each artifact's summary.json (and qualify.json when present).
 //   node tools/bench/capacity/meetup/compare.mjs <baseline-dir> <candidate-dir> [--out <file>]
+import { isMain } from '../../../lib/is-main.mjs';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 
 export const COMPARE = 'cw8-compare/1';
 // headline cells (meetup report.mjs `headline`) and which way is better
@@ -113,7 +113,7 @@ export function readArtifact(dir) {
   return { summary, qualify: j('qualify.json') };
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+if (isMain(import.meta.url)) {
   const usage = () => { console.error('usage: compare.mjs <baseline-dir> <candidate-dir> [--out <file>]'); process.exit(2); };
   const dirs = []; let out = null;
   for (let a = process.argv.slice(2), i = 0; i < a.length; i++) {

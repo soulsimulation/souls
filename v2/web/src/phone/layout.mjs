@@ -11,6 +11,7 @@
 //
 //   node v2/web/src/phone/layout.mjs [--shots dir] [--only name,name] [--port 5190]
 // Exit 0 when every page passes at both sizes; each failure is printed with the element and its size.
+import { isMain } from '../../../../tools/lib/is-main.mjs';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, mkdtempSync, rmSync } from 'node:fs';
 import { tmpdir } from 'node:os';
@@ -196,4 +197,4 @@ async function main() {
   process.exit(failed ? 1 : 0);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1]).href) await main();
+if (isMain(import.meta.url)) await main();

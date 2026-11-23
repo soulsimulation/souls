@@ -12,10 +12,10 @@
 //   node root-release.mjs health <healthz.json> <build> <worlds>
 //   node root-release.mjs rehearse <rehearse.log> <build> <out.json>   (the host's boot rehearsal of every world, #1402)
 //   node root-release.mjs rehearsed <rehearse.json> <build>
+import { isMain } from '../../../lib/is-main.mjs';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 
 const read = f => JSON.parse(readFileSync(f, 'utf8'));
 const digest = f => createHash('sha256').update(readFileSync(f)).digest('hex');
@@ -208,6 +208,6 @@ export function main(argv) {
   } else if (cmd === 'rehearsed') { const r = existsSync(a[0]) ? read(a[0]) : null; if (r?.status !== 'pass' || r.build !== a[1]) fail([`no passing boot rehearsal of ${a[1]}`]); console.log(`boot rehearsal passed for ${r.worlds} worlds`); }
   else fail([`unknown command ${cmd}`]);
 }
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+if (isMain(import.meta.url)) {
   try { main(process.argv.slice(2)); } catch (e) { fail([e.message]); }
 }

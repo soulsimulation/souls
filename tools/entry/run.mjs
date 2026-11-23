@@ -42,6 +42,7 @@
 // as (a world that decides on the case's own state reads it; today's ignores it). A transport with `stepped` true runs
 // a world that changes only when asked (tools/entry/v2.mjs, Engine v2's form runner): its reads are final, so the gate
 // never waits on them.
+import { isMain } from '../lib/is-main.mjs';
 import {spawnSync} from 'node:child_process';
 import {existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -529,4 +530,4 @@ export async function main(argv) {
   return v.error ? 2 : v.ok ? 0 : 1;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) process.exitCode = await main(process.argv.slice(2));
+if (isMain(import.meta.url)) process.exitCode = await main(process.argv.slice(2));

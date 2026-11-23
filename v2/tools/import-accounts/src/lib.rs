@@ -374,18 +374,40 @@ impl LegacyBodies {
         })
     }
 
-    fn choice(&self, body: &Json, world: &str) -> R<Option<String>> {
-        let body = normalized_body(body, world)?;
+    fn choice(&self, body: &Json, world: &str) -> Choice {
+        let Ok(body) = normalized_body(body, world) else {
+            return Choice::Fallback("url-form");
+        };
         if self.defaults.contains(&body) {
-            return Ok(None);
+            return Choice::Default;
         }
-        self.definitions
-            .iter()
-            .find(|(definition, _)| definition == &body)
-            .map(|(_, hash)| Some(hash.clone()))
-            .ok_or_else(|| "body.legacy-unavailable".to_owned())
+        if let Some((_, hash)) = self.definitions.iter().find(|(d, _)| d == &body) {
+            return Choice::Mapped(hash.clone());
+        }
+        let custom = body.get("family").and_then(Json::as_str) == Some("humanoid")
+            && body
+                .get("model")
+                .and_then(Json::as_str)
+                .is_some_and(|m| m.starts_with("humanoid2-"));
+        Choice::Fallback(if custom {
+            "custom-humanoid"
+        } else {
+            "unknown-definition"
+        })
     }
 }
+
+/// A live body's place in the catalogue. A body it cannot carry (a look made in today's humanoid editor, an unknown
+/// definition, a model URL in another form) comes in the default body, counted by reason, and today's body is kept
+/// whole in the private store (`legacy_looks_v1`), so nothing the owner made is lost.
+enum Choice {
+    Default,
+    Mapped(String),
+    Fallback(&'static str),
+}
+
+/// The operator's TEST Souls' owner (`apps/server/src/op-souls.ts`): no sign-in issues it, so it is no account.
+pub const OPERATOR_ACCOUNT: &str = "op:test-operator";
 
 // --- The directory's objects as files -------------------------------------------------------------------------------
 
@@ -456,8 +478,12 @@ pub struct WorldRow {
     pub brought: usize,
     /// Live Souls whose owner is no account in either registry (not brought).
     pub unowned: usize,
+    /// The operator's TEST Souls (owner [`OPERATOR_ACCOUNT`]): no person's, not brought.
+    pub operator: usize,
     /// Souls whose body today has no v2 kind, brought in the default family; by today's preset.
     pub no_kind: BTreeMap<String, usize>,
+    /// Mapped mode: Souls brought in the default body because the catalogue cannot carry theirs, by reason.
+    pub defaulted: BTreeMap<String, usize>,
     /// The creator is an account, kept with its principal.
     pub creator: bool,
     /// Read back from the store, every live Soul (name, description, look, owner) and the creator equal the backup's.
@@ -502,7 +528,9 @@ CREATE TABLE IF NOT EXISTS souls_v1(soul TEXT PRIMARY KEY, account_id TEXT NOT N
   REFERENCES provider_accounts_v1(account_id), name TEXT NOT NULL, description TEXT NOT NULL, family TEXT NOT NULL,
   preset TEXT NOT NULL, look TEXT NOT NULL);
 CREATE TABLE IF NOT EXISTS world_creators_v1(world TEXT PRIMARY KEY, lineage TEXT NOT NULL, account_id TEXT NOT NULL
-  REFERENCES provider_accounts_v1(account_id));";
+  REFERENCES provider_accounts_v1(account_id));
+CREATE TABLE IF NOT EXISTS legacy_looks_v1(soul TEXT PRIMARY KEY REFERENCES souls_v1(soul), reason TEXT NOT NULL,
+  body TEXT NOT NULL);";
 
 fn sq<T>(r: rusqlite::Result<T>) -> R<T> {
     r.map_err(|e| format!("account store: {e}"))
@@ -514,7 +542,8 @@ pub fn import(set: &Path, extra: &[PathBuf], out: &Path) -> R<Report> {
     import_with_bodies(set, extra, out, None)
 }
 
-/// Mapped release mode: validate every owned live look before creating any output.
+/// Mapped release mode: each owned live look is mapped to its catalogue hash, or brought in the default body and
+/// counted when the catalogue cannot carry it. A catalogue that is not valid refuses before any output.
 pub fn import_with_bodies(
     set: &Path,
     extra: &[PathBuf],
@@ -555,19 +584,6 @@ pub fn import_with_bodies(
         .collect::<R<Vec<_>>>()?;
 
     let mapped = bodies.map(LegacyBodies::read).transpose()?;
-    if let Some(catalogue) = &mapped {
-        for world in &worlds {
-            for soul in &world.live {
-                if stage
-                    .iter()
-                    .chain(&forks)
-                    .any(|account| account.id == soul.owner)
-                {
-                    catalogue.choice(&soul.body, &world.world)?;
-                }
-            }
-        }
-    }
 
     fs::create_dir_all(out.join("births")).map_err(|e| format!("{}: {e}", out.display()))?;
     let store_path = out.join("accounts.sqlite");
@@ -691,7 +707,11 @@ pub fn import_with_bodies(
         let mut births = Vec::new();
         for s in &w.live {
             let Some(acct) = resolve(&tx, &s.owner)? else {
-                row.unowned += 1;
+                if s.owner == OPERATOR_ACCOUNT {
+                    row.operator += 1;
+                } else {
+                    row.unowned += 1;
+                }
                 continue;
             };
             let held: Option<String> = sq(tx
@@ -740,10 +760,16 @@ pub fn import_with_bodies(
             // K10's Birth: the Soul, the entry it comes in by (the world's arrival point: its root until N9 declares
             // one), asked at the start of the new history.
             let mut birth = serde_json::json!({ "soul": principal_text(soul), "entry": principal_text(zone), "asked": 0 });
-            if let Some(catalogue) = &mapped
-                && let Some(hash) = catalogue.choice(&s.body, &w.world)?
-            {
-                birth["body"] = Json::String(hash);
+            match mapped.as_ref().map(|c| c.choice(&s.body, &w.world)) {
+                Some(Choice::Mapped(hash)) => birth["body"] = Json::String(hash),
+                Some(Choice::Fallback(reason)) => {
+                    *row.defaulted.entry(reason.to_owned()).or_default() += 1;
+                    sq(tx.execute(
+                        "INSERT OR IGNORE INTO legacy_looks_v1(soul, reason, body) VALUES (?1, ?2, ?3)",
+                        params![principal_text(soul), reason, s.body.to_string()],
+                    ))?;
+                }
+                Some(Choice::Default) | None => {}
             }
             births.push(birth);
             row.brought += 1;
@@ -769,7 +795,7 @@ pub fn import_with_bodies(
 
     // A2: read back, per world: every live Soul with an owner (name, description, look, owner) and the creator.
     for (w, row) in worlds.iter().zip(report.worlds.iter_mut()) {
-        let mut equal = row.brought + row.unowned == row.live;
+        let mut equal = row.brought + row.unowned + row.operator == row.live;
         for s in &w.live {
             let Some(acct) = resolve_db(&db, &s.owner)? else {
                 continue;

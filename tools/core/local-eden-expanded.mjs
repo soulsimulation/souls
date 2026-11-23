@@ -1,3 +1,4 @@
+import { isMain } from '../lib/is-main.mjs';
 import {enableCurrentHumanBurstV1} from './human-burst-adapter.mjs';
 // Explicit managed local expansion bootstrap. Runtime comes only from the reviewed V3 seal.
 // Never used by main.ts, a live unit, or a default environment switch.
@@ -117,7 +118,7 @@ export async function openExpandedLocalEdenV1({input,dataDir,worldId,port=4959,w
   } catch(error){host?.stop();server?.close();db.close();throw error;}
 }
 
-if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
   const [argInput,argData,argWorld,argPort,argWeb,argMars,mode]=process.argv.slice(2);
   const input=argInput??process.env.PREVIEW_INPUT,dataDir=argData??process.env.DATA_DIR,worldId=argWorld??process.env.WORLD_ID;
   const port=argPort??process.env.PORT,webDir=argWeb??process.env.WEB_DIR,marsWebDir=argMars??process.env.MARS_WEB_DIR;

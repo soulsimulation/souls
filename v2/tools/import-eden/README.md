@@ -75,7 +75,9 @@ there, and returns one line for each point moved or left; `worldd seed --entries
 One thing per slot (C9, #3397): today a slot may hold several things (a desk's top, a hall's planter spots), the tree
 one. The first thing in the facts keeps the slot; each later one stays a plain child of the same parent at its own
 place, standing on it, and the load prints it under "left out of a full slot" with what holds the slot (29 in Eden
-2026), so K11's auditor finds no `slot-over-full`.
+2026), so K11's auditor finds no `slot-over-full`. None of Eden's 29 is lost or has a free slot to go to: each parent
+has one slot of that kind (a desk's, a table's or a counter's top, a building's roof). The 8 on a top stay on it
+where they were. The 21 on a roof are put on the roof's floor by C27 below, like the thing that holds the slot.
 
 Tests: `cargo test -p import-eden` runs a small world written in the test. The Eden 2026 test needs the exported file:
 `cargo test -p import-eden --release -- --ignored --nocapture`.
