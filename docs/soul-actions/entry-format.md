@@ -141,6 +141,10 @@ may take it while it runs) or `optional`. `places` says where a member may be: `
 order listed, each admitting a body; `in: "here"`, body slots of things in the same place within `within_mm` (whole
 millimetres above zero) of the activity, nearest first. Either may name a `posture` (`sit`, `lie`). Entering is an
 ordinary form that links the role to the actor and reparents the actor into a slot argument; the world moves no body.
+On the new engine (0.135 G3), a role's `slots` (`in: "here"` may list them too) are where its members stand when the
+activity starts: each slot's `stand` point, else the slot, in the activity's own frame. If all members stand on one
+floor, each walks to its stand and turns to its facing before the moves begin; a member farther than `within_mm`
+from their middle, or anyone when they stand on different floors or one is seated, stays where it is.
 A role may name a `move` of `content/moves` (0.134 T1): when the activity starts, each member of that role aims the move
 at the other member, as a handshake, a hug or a high five (`content/kinds/together/`) does.
 A role's move whose last phase holds (`hold_hand`, 0.134 T2) lasts until a member leaves or walks; then both are let go.

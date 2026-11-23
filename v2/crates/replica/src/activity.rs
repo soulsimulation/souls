@@ -59,6 +59,9 @@ pub struct Role {
     /// Where its members stand, in the activity's own frame, in order (0.135 G3): each a point (µm) and a facing
     /// (millidegrees of yaw); its k-th member takes the k-th. None: its members stay where they are.
     pub stands: Vec<(Vec3, i64)>,
+    /// How near the activity's middle a member stands to be walked to its stand, µm (0.135 G3, the entry's
+    /// `within_mm`): one farther keeps where it is. None: any distance.
+    pub within: Option<i64>,
 }
 
 /// An activity's kind, as data.
@@ -134,11 +137,11 @@ impl ActivityKind {
             let Value::Map(r) = r else {
                 return refuse(
                     "not-an-activity",
-                    "a role is {1: name, 2: place, 3: [want, ...], 4?: move, 5?: [[x, y, z, yaw], ...]}",
+                    "a role is {1: name, 2: place, 3: [want, ...], 4?: move, 5?: [[x, y, z, yaw], ...], 6?: within}",
                 );
             };
-            if r.keys().any(|k| *k == 0 || *k > 5) {
-                return refuse("not-an-activity", "a role has fields 1 to 5");
+            if r.keys().any(|k| *k == 0 || *k > 6) {
+                return refuse("not-an-activity", "a role has fields 1 to 6");
             }
             let rname = text(r.get(&1), "a role's name")?;
             let place = text(r.get(&2), "a role's place")?;
@@ -177,12 +180,20 @@ impl ActivityKind {
                     .collect::<R<Vec<_>>>()?,
                 Some(_) => return refuse("not-an-activity", "a role's stands are a list"),
             };
+            let within = match r.get(&6) {
+                None => None,
+                Some(v) => Some(int(v).filter(|n| *n >= 0).map_or_else(
+                    || refuse("not-an-activity", "a role's within is µm, zero or more"),
+                    Ok,
+                )?),
+            };
             roles.push(Role {
                 name: rname,
                 place,
                 claims,
                 mv,
                 stands,
+                within,
             });
         }
         if roles.len() < 2 {

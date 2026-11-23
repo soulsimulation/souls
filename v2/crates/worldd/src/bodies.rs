@@ -1420,6 +1420,7 @@ impl Bodies {
         self.wind.remove(r.body);
         self.wind_moves.remove(&r.body);
         self.sleeping.remove(&r.body);
+        self.place_moves.retain(|(_, b), _| *b != r.body);
         Ok((r, open))
     }
 }
@@ -1590,11 +1591,11 @@ impl Bodies {
         }
     }
 
-    /// A walk the world starts for `body` to `to` on the open ground, under `id` (0.135 G3): N7's walk as an intent's,
-    /// but nothing else is committed with it, so no other body's waiting sit, lie or rise result is taken or lost
-    /// (that is [`Bodies::start`]'s, with its answers).
-    fn walk_own(&mut self, body: Id, to: Vec3, id: Id) -> R<()> {
-        let goal = self.goal(body, self.town.ground, Some(Vec3::new(to.x, 0, to.z)));
+    /// A walk the world starts for `body` to `to` on `node`, in its axes, under `id` (0.135 G3): N7's walk as an
+    /// intent's, but nothing else is committed with it, so no other body's waiting sit, lie or rise result is taken or
+    /// lost (that is [`Bodies::start`]'s, with its answers).
+    fn walk_own(&mut self, body: Id, node: Id, to: Vec3, id: Id) -> R<()> {
+        let goal = self.goal(body, node, Some(Vec3::new(to.x, 0, to.z)));
         self.replace(body);
         let walk = Box::new(Route::sent(WALK, self.runner.tick));
         let r = goal.and_then(|g| self.runner.send(body, walk, g, id));
@@ -1604,32 +1605,52 @@ impl Bodies {
         r
     }
 
-    /// Members taking their places (0.135 G3, `sim::activity::places`): `(activity, body, Soul, place, facing)`. Each
-    /// walks there by the path every walk intent takes ([`Bodies::start`]), as its Soul's own, then turns to its
-    /// facing; one already within 0.15 m only turns. The place is a target, never a constraint: a walk that ends
-    /// short still ends the taking. Returns the members that have taken their places, by (activity, body).
-    pub fn take_places(&mut self, todo: &[(Id, Id, Id, Vec3, Quat)]) -> Vec<(Id, Id)> {
+    /// Members taking their places (0.135 G3, `sim::activity::places`): `(activity, body, Soul, node, place,
+    /// facing)`, the place in `node`'s axes. Each walks there by the path every walk intent takes
+    /// ([`Bodies::start`]), as its Soul's own, then turns to its facing; one already within 0.15 m only turns. The
+    /// place is a target, never a constraint: a walk that ends short, or cannot start, still ends the taking, and a
+    /// seated member, or one no longer on `node`, is placed where it is. A walk to a place no longer in `todo` (its
+    /// member left) ends. Returns the members that have taken their places, by (activity, body).
+    pub fn take_places(&mut self, todo: &[(Id, Id, Id, Id, Vec3, Quat)]) -> Vec<(Id, Id)> {
+        let gone: Vec<((Id, Id), Id)> = self
+            .place_moves
+            .iter()
+            .filter(|((a, b), _)| !todo.iter().any(|t| (t.0, t.1) == (*a, *b)))
+            .map(|(k, id)| (*k, *id))
+            .collect();
+        for ((a, body), id) in gone {
+            self.place_moves.remove(&(a, body));
+            if self.live.get(&body).is_some_and(|(i, _)| *i == id) {
+                self.runner.end_order(body);
+                self.live.remove(&body);
+            }
+        }
         let mut done = Vec::new();
-        for &(activity, body, _, to, facing) in todo {
-            let Some(at) = self.runner.controller.body(body).map(|m| m.pose.position) else {
+        for &(activity, body, _, node, to, facing) in todo {
+            let Some(m) = self.runner.controller.body(body) else {
                 done.push((activity, body));
                 continue;
             };
+            if m.pose.frame.slot.is_some() || sim::index::place_of(m).0 != node {
+                done.push((activity, body));
+                continue;
+            }
+            let at = m.pose.position;
             let (dx, dz) = (i128::from(at.x - to.x), i128::from(at.z - to.z));
             let near = dx * dx + dz * dz <= 150_000i128.pow(2);
             if let Some(&id) = self.place_moves.get(&(activity, body)) {
-                let moving = self.live.values().any(|(i, _)| *i == id)
+                let moving = self.live.get(&body).is_some_and(|(i, _)| *i == id)
                     || self.waiting.iter().any(|w| w.id == id);
                 if moving {
                     continue;
                 }
                 self.place_moves.remove(&(activity, body));
-            } else if !near {
-                let Ok(id) = self.mint.mint() else { continue };
-                if self.walk_own(body, to, id).is_ok() {
-                    self.place_moves.insert((activity, body), id);
-                    continue;
-                }
+            } else if !near
+                && let Ok(id) = self.mint.mint()
+                && self.walk_own(body, node, to, id).is_ok()
+            {
+                self.place_moves.insert((activity, body), id);
+                continue;
             }
             // Arrived (or the walk could not start): turn to the place's facing, by a driver of its legs.
             let c = &mut self.runner.controller;

@@ -3749,11 +3749,10 @@ impl Clock {
                 now,
             );
             // 0.135 G3: members of an activity just started walk to their places; its moves begin once all have.
+            // A walk to a place no longer pending (its member left) ends here too.
             let todo = e.pending_places(&b.runner.controller);
-            if !todo.is_empty() {
-                let done = b.take_places(&todo);
-                e.placed(self.replica.tree(), &mut b.runner.controller, &done, now);
-            }
+            let done = b.take_places(&todo);
+            e.placed(self.replica.tree(), &mut b.runner.controller, &done, now);
         }
     }
 

@@ -282,8 +282,10 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
             if v.get("follows") == Some(&Json::Bool(true)) {
                 follows = Some(Name::new(&format!("{ns}:{role}")).ok_or("a role's name")?);
             }
+            // A role in the activity's own slots (`this`) is placed in its first; one near it (`here`) is not.
             let slot = v
                 .get("places")
+                .filter(|p| p.get("in").and_then(Json::str) == Some("this"))
                 .and_then(|p| p.get("slots"))
                 .and_then(Json::arr)
                 .and_then(|s| s.first())
@@ -297,13 +299,15 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
                 }
             };
             // 0.135 G3: where its members stand, from its slots in the activity's own frame (a slot's stand point,
-            // else the slot itself), mm to µm, in the order its places list them.
+            // else the slot itself), mm to µm, in the order its places list them; and, for a role near the activity
+            // (`here`), how near its middle a member is walked to its stand (`within_mm`).
             let mm = |v: Option<&Json>| match v {
                 Some(Json::Int(n)) => i64::try_from(*n).ok().map(|n| n * 1000),
                 _ => None,
             };
+            let within = v.get("places").and_then(|p| mm(p.get("within_mm")));
             let stands = match v.get("places") {
-                Some(p) if p.get("in").and_then(Json::str) == Some("this") => p
+                Some(p) => p
                     .get("slots")
                     .and_then(Json::arr)
                     .unwrap_or(&[])
@@ -324,7 +328,7 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
                         Some((Vec3::new(mm(a.first())?, mm(a.get(1))?, mm(a.get(2))?), yaw))
                     })
                     .collect(),
-                _ => Vec::new(),
+                None => Vec::new(),
             };
             out.push(Role {
                 name: Name::new(&format!("{ns}:{role}")).ok_or("a role's name")?,
@@ -332,11 +336,29 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
                 claims: vec![Want::One(Class::Manipulator)],
                 mv,
                 stands,
+                within,
             });
         }
+        // 0.135 G3: the stands its roles resolve to (from the entry's slots and points) are part of what is pinned; a
+        // kind whose roles name none keeps the pin of its roles alone.
+        let stands = if out.iter().any(|r| !r.stands.is_empty()) {
+            let role = |r: &Role| {
+                r.stands
+                    .iter()
+                    .map(|(p, yaw)| format!("{},{},{},{yaw}", p.x, p.y, p.z))
+                    .collect::<Vec<_>>()
+                    .join(";")
+            };
+            format!(
+                "/stands/{}",
+                out.iter().map(role).collect::<Vec<_>>().join("|")
+            )
+        } else {
+            String::new()
+        };
         let pin = to_hex(&sha256(
             format!(
-                "souls/activity/{kind}/{}",
+                "souls/activity/{kind}/{}{stands}",
                 Json::Obj(roles.into_iter().cloned().collect()).to_json()
             )
             .as_bytes(),
@@ -2945,7 +2967,22 @@ mod tests {
                 );
             }
         }
-        for k in &kinds {
+        // 0.135 G3: and 0.135 E1's two, whose pins hold their stands too.
+        let more = [
+            (
+                "eden:fist_bump".to_owned(),
+                read(include_str!(
+                    "../../../../content/kinds/together/fist_bump.json"
+                )),
+            ),
+            (
+                "eden:harvest_together".to_owned(),
+                read(include_str!(
+                    "../../../../content/kinds/together/harvest_together.json"
+                )),
+            ),
+        ];
+        for k in kinds.iter().chain(&activity_kinds(&more).unwrap()) {
             assert!(
                 client.contains(k.name.as_str()),
                 "the client offers {}",

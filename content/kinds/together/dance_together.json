@@ -32,7 +32,8 @@
   "one": {
    "need": "required",
    "places": {
-    "in": "this",
+    "in": "here",
+    "within_mm": 3000,
     "slots": [
      "lead"
     ]
@@ -43,7 +44,8 @@
   "other": {
    "need": "required",
    "places": {
-    "in": "this",
+    "in": "here",
+    "within_mm": 3000,
     "slots": [
      "d1",
      "d2",
