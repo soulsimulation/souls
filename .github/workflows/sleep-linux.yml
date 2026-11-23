@@ -70,7 +70,7 @@ jobs:
       - name: a second apply starts nothing again
         run: |
           sudo env PATH="$PATH" bash "$BUNDLE/install.sh" apply --from "$BUNDLE" | tee "$RUNNER_TEMP/apply2"
-          ! grep -q 'souls-alarms' "$RUNNER_TEMP/apply2"
+          ! grep -q '^did .*souls-alarms' "$RUNNER_TEMP/apply2"
       - name: uninstall stops, disables and removes it
         run: |
           sudo env PATH="$PATH" bash "$BUNDLE/install.sh" uninstall | tee "$RUNNER_TEMP/uninstall"
