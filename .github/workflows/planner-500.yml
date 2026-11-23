@@ -114,12 +114,21 @@ jobs:
                   const fm = (o.threads.world.find(([n]) => n === "planner-forms") ?? [, 0])[1];
                   console.log(`| ${r} | ${rung} | ${arm} | ${k} | ${pl} | ${fm} | ${o.threads.world.slice(0, 4).map(([n, c]) => n + " " + c).join(", ")} | ${(o.tick.onTimeShare * 100).toFixed(2)} | ${o.acts.perS} | ${o.cpu.world} | ${o.accepted.p95Ms} | ${o.wait.p50Ms} / ${o.wait.p95Ms} | ${o.stuck?.stuck ?? "-"} |`);
                 ' "$r" "$rung" "$arm" "$k" "$line" | tee -a "$PER_RUN/table.md"
+                # The clock's tick by phase (mean and p99, ms) and the tick's own p50 / p99 / max: where a tick goes.
+                node -e '
+                  const [r, rung, arm, k, line] = process.argv.slice(1); const o = JSON.parse(line.slice(5));
+                  const ms = (u) => (u / 1000).toFixed(1);
+                  const ph = Object.entries(o.phases ?? {}).sort((a, b) => b[1].meanUs - a[1].meanUs).map(([n, p]) => `${n} ${ms(p.meanUs)}/${ms(p.p99Us)}`).join(", ");
+                  console.log(`| ${r} | ${rung} | ${arm} | ${k} | ${ms(o.tick.p50Us)} / ${ms(o.tick.p99Us)} / ${ms(o.tick.maxUs)} | ${ms(o.tick.meanUs)} | ${o.cpu.world} / ${o.cpu.gateway} / ${o.cpu.origin} | ${ph} |`);
+                ' "$r" "$rung" "$arm" "$k" "$line" | tee -a "$PER_RUN/phases.md"
               done
             done
           done
           done
           { echo "| build | rung | arm | repeat | planner cores | form threads cores | busiest world threads | ticks on time % | acts sent / s | world cores | accepted p95 ms | viewer delay p50 / p95 ms | stuck |"
             echo "|---|---|---|---|---|---|---|---|---|---|---|---|---|"; cat "$PER_RUN/table.md"; } >> "$GITHUB_STEP_SUMMARY"
+          { echo; echo "| build | rung | arm | repeat | tick p50 / p99 / max ms | tick mean ms | cores world / gateway / origin | phases, mean / p99 ms |"
+            echo "|---|---|---|---|---|---|---|---|"; cat "$PER_RUN/phases.md"; } >> "$GITHUB_STEP_SUMMARY"
       - name: Clean up
         if: always()
         run: rm -rf "$PER_RUN" "${OUT:-/nonexistent}"
