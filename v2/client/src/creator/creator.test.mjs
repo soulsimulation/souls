@@ -793,6 +793,36 @@ test('R8b: describe <id> reads one thing from the copy: its frames, spot, fields
   assert.equal((await god('describe', `${place.id.split('-')[0]}-99999`)).code, 'edit.node-missing');
 });
 
+test('K3: a kind whose look is an uploaded model names an allowed upload; any other hash is refused by name and nothing is sent', async () => {
+  await connected();
+  const file = join(dir, 'k3-model.png');
+  writeFileSync(file, png('the model stand-in'));
+  const up = await god('upload', file);
+  assert.equal(up.state, 'allowed', JSON.stringify(up));
+  let n = 0;
+  const record = (model) => {
+    const f = join(dir, `k3-statue-${n++}.json`);
+    writeFileSync(f, JSON.stringify({ format: 'souls-entry/1', kind: 'k3:statue', owner: 'thing', geometry: { bounds_mm: [500, 1500, 500] }, looks: { model }, text: { card: 'A statue.' } }));
+    return f;
+  };
+  const unknown = await god('define', record(`upload:1220${'0'.repeat(64)}`));
+  assert.equal(unknown.code, 'kind.model-unknown', JSON.stringify(unknown)); assert.equal(unknown.sent, false); assert.match(unknown.fix, /upload the model first/);
+  const wrong = await god('define', record('upload:not-a-hash'));
+  assert.equal(wrong.code, 'kind.model', JSON.stringify(wrong)); assert.equal(wrong.sent, false);
+  assert.equal(unknown.local, true, 'refused here, before anything went to the world (the gateway was asked for the upload)');
+  const ok = await god('define', record(`upload:${up.hash}`));
+  assert.equal(ok.ok, true, JSON.stringify(ok));
+  assert.match(ok.defines[0], /^k3:statue@1220[0-9a-f]{64}$/);
+  // a thing of it is placed; the page draws it from the kind's record, which names the model (V1, creator-kinds.ts)
+  const place = (await god('describe')).nodes.find((x) => x.kind === 'souls:place');
+  const room = await god('place', 'room', '--in', place.id);
+  const statue = await god('place', 'k3:statue', '--in', room.names['1'], '--at', '2000,0,2000');
+  assert.equal(statue.ok, true, JSON.stringify(statue));
+  const d = await god('describe');
+  assert.equal(d.nodes.find((x) => x.id === statue.names['1'])?.kind, 'k3:statue');
+  assert.ok(d.kinds[ok.defines[0]], 'the definition is in the world');
+});
+
 test('#4022: in a world that holds uploads for review, souls-god reports a held upload as held, and it is not served', async () => {
   await connected();
   // A second gateway that holds every upload (`--uploads-hold`), its own uploads folder; the upload asks no world. Its
