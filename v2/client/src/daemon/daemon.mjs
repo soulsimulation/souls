@@ -837,6 +837,7 @@ const OPS = new Set([
   'lie',
   'listen',
   'look',
+  'look-set',
   'now',
   'object',
   'pending',
@@ -1463,6 +1464,14 @@ async function answer(req, conn = null) {
 
     }
     case 'converse': return converse(req);
+    case 'look-set': {
+      // G3: the Soul's own look on its default body (`life:look`, G2): its params' bytes as T8's words shape.
+      const params = String(req.params ?? '');
+      if (!params.startsWith('{') || Buffer.byteLength(params) > 2048) return { ok: false, code: 'look-params', detail: 'one JSON object of at most 2048 bytes' };
+      const basis = shownVersion ?? state.cursor;
+      const { sequence, sent } = sendIntent(['life:look'], { words: params, basis });
+      return closing({ ok: true, sequence, sent, verb: 'life:look', basis: sequenceOf(basis) }, null, { now: true });
+    }
     case 'wear': {
       const body = String(req.body ?? '');
       if (!/^[A-Za-z0-9_.:@-]{1,80}$/.test(body)) return { ok: false, code: 'wear-names-a-body', detail: 'wear <preset>' };

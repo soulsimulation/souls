@@ -5,6 +5,9 @@
 //
 //   souls.mjs status                          the daemon: connected, cursor, intents sent and answered
 //   souls.mjs look | here                     the brief: my room, cards outward, what changed, the age
+//   souls.mjs look set <preset | params file> puts a humanoid look on your default body (`life:look`, G3): a preset
+//                                             (casual, punk, woman) or a core/humanoid@2 params JSON file; prints
+//                                             the receipt
 //   souls.mjs listen [--follow]               the owner's messages: those open now, else the next to arrive; with
 //                                             --follow, one line for each as it arrives, until stopped
 //   souls.mjs find <words...> [--limit n]     one search over the copy
@@ -319,6 +322,12 @@ export function requestOf(argv) {
     if (w.refused) return w;
     return { req: w, soul: opts.soul };
   }
+  // G3: `look set <preset | params file>` is the Soul's own `life:look`, waited for like `act --wait`.
+  if (op === 'look' && rest[0] === 'set') {
+    const look = lookParams(rest[1]);
+    if (look.refused) return look;
+    return { req: { op: 'look-set', params: look.params }, soul: opts.soul, wait: true };
+  }
   if (op === 'converse') {
     const words = rest.filter((w) => w !== '--private');
     const [does = 'list', who, ...said] = words;
@@ -377,6 +386,29 @@ export function wakeOf([what, arg, ...more]) {
     return 'hour' in req || 'day' in req ? req : usage;
   }
   return usage;
+}
+
+/** G3: the humanoid look presets a page composes (`apps/web/src/humanoid/look.ts` PRESETS), by name. */
+export const LOOK_PRESETS = ['casual', 'punk', 'woman'];
+/** G3: the most bytes a look's params take (`skills::wear::LOOK_MOST`). */
+const LOOK_MOST = 2048;
+
+/**
+ * G3: a look's params for `look set`: a preset's name gives `{"preset":"<name>"}`; anything else is a file holding one
+ * JSON object of core/humanoid@2 params, at most 2 KiB. A refusal by name otherwise, before anything is sent.
+ */
+export function lookParams(arg, read = (f) => readFileSync(f, 'utf8')) {
+  const usage = { refused: 'look-set-usage', detail: `look set <${LOOK_PRESETS.join('|')} | a params .json file>` };
+  if (!arg) return usage;
+  if (LOOK_PRESETS.includes(arg)) return { params: JSON.stringify({ preset: arg }) };
+  let text;
+  try { text = read(arg); } catch { return usage; }
+  let o;
+  try { o = JSON.parse(text); } catch { return { refused: 'look-params', detail: 'the file holds one JSON object of look params' }; }
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return { refused: 'look-params', detail: 'the file holds one JSON object of look params' };
+  const params = JSON.stringify(o);
+  if (Buffer.byteLength(params) > LOOK_MOST) return { refused: 'look-params', detail: `at most ${LOOK_MOST} bytes of params` };
+  return { params };
 }
 
 /** D1: how long `act --wait` waits for a receipt's final phase before it says the act is still running. */
