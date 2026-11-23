@@ -9,8 +9,9 @@
 // --span (0.135 P4) records a past span of a world's history instead: on its old page, from the first tick of the span
 // at ×1 or faster (the page's own ×2, ×4, ×8), uncut. A moment is world µs, a moment link (`…#t=<µs>`, the page's "Link
 // to this moment"), an ISO time, or `first` (the first moment the world ran). The camera is fixed or a path (`at`
-// seconds from the span's start), for any world the page reaches; or `{"follow": "<body id>"}` or `{"plan": {…}}`,
-// planned around the world's solids from its folder (--world-dir: `facts.json` and `history/`, a local world's).
+// seconds from the span's start), or `{"follow": "<body id>"}` or `{"plan": {…}}` (the default), planned around the
+// world's solids: from its folder when given (--world-dir: `facts.json` and `history/`), else over the network from its
+// page, as soul.game serves a world (0.135 P7: people from its public history, solids from its public stream).
 //
 // 1. The world: tools/playtest/arena/new-engine/old-page.mjs brings up the old page (apps/web) on a new-engine world of
 //    the scene's genesis (a committed template, or the scene's own file), with `world.add`'s things placed in it before
@@ -193,13 +194,12 @@ export async function recordSpan({ page, fromUs, toUs, camera = null, speed = 1,
   if (!(toUs > fromUs)) throw Error('the span ends before it starts');
   const [w, h] = size.split('x').map(Number), seconds = (toUs - fromUs) / 1e6;
   let shot;
-  camera ??= worldDir ? { plan: {} } : null;
-  if (!camera) throw Error('a span needs a camera (--camera: fixed, path, follow or plan), or --world-dir for a planned one');
+  camera ??= { plan: {} };
   if (camera.plan || camera.follow) {
-    if (!worldDir) throw Error('a planned or follow camera reads the world\'s folder: --world-dir');
     // a body by its client id (`<scope>-<n>`) or the page's (`<scope>.<n>`)
     const p = camera.plan ?? { subjects: [String(camera.follow).replace(/-(\d+)$/, '.$1')], moves: ['track', 'lead'] };
-    shot = (await shoot({ world: worldDir, fromUs, from: 0, seconds, aspect: w / h, subjects: p.subjects ?? null, moves: p.moves, framings: p.framings, log })).shot;
+    // from the world's folder when given, else over the network from its page (0.135 P7: a live world's, as soul.game's)
+    shot = (await shoot({ ...(worldDir ? { world: worldDir } : { page }), fromUs, from: 0, seconds, aspect: w / h, subjects: p.subjects ?? null, moves: p.moves, framings: p.framings, log })).shot;
   } else shot = rangeShot(camera, { fromUs, toUs, aspect: w / h });
   mkdirSync(resolve(out, '..'), { recursive: true });
   writeFileSync(`${out.replace(/\.mp4$/, '')}.shot.json`, JSON.stringify(shot));

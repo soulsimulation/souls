@@ -69,3 +69,23 @@ export async function placesIn({ history, fromUs, toUs, pkg = REPLICA_PKG }) {
   }
   return { places, nodes: nodes ?? [] };
 }
+
+/** A world's things as its public stream draws them (0.135 P7), in the shape of its facts' things (`obstaclesOfFacts`):
+ *  each node that carries solids (import-eden's field 12, mm in its own frame), with its frame in the world, mm and
+ *  mdeg (a node turns about the vertical only: yaw from its rotation). Names are the nodes' place names when known. */
+export function thingsOf(nodes) {
+  const list = nodes instanceof Map ? [...nodes.values()] : [...nodes];
+  const frameOf = frames(list);
+  return list.filter((n) => n.solids?.length).map((n) => {
+    const f = frameOf(n.id), [w, , y] = f.rot.map((c) => c / Q);
+    return { id: n.id, name: n.placeName ?? n.origin ?? n.id, world: [f.pos[0] / 1000, f.pos[1] / 1000, f.pos[2] / 1000, (2 * Math.atan2(y, w) * 180000) / Math.PI], solids: n.solids };
+  });
+}
+
+/** A world's old page as soul.game serves it (its inline config: `v2Stream`, `v2History`), as absolute addresses. */
+export async function pageSources(page) {
+  const html = await (await fetch(page, { headers: { accept: 'text/html' }, signal: AbortSignal.timeout(15_000) })).text();
+  const m = /window\.__simConfig=(\{.*?\})<\/script>/s.exec(html), cfg = m ? JSON.parse(m[1]) : {};
+  if (!cfg.v2Stream) throw Error(`${page} is not a world on the new engine (its page names no v2Stream)`);
+  return { stream: new URL(cfg.v2Stream, page).href, history: cfg.v2History ? new URL(cfg.v2History, page).href : null };
+}
