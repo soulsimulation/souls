@@ -169,10 +169,16 @@ pub enum Look {
     Write,
 }
 
-/// A look's params from parameter 1, checked: one JSON object as UTF-8, at most [`LOOK_MOST`] bytes.
+/// A look's params from parameter 1, checked: one JSON object as UTF-8, at most [`LOOK_MOST`] bytes. Parameter 1 is
+/// the bytes, or T8's words shape `{23: bytes}` as a client sends words (a wear's own shape).
 pub fn look_params(parameters: &BTreeMap<u64, Value>) -> Result<&[u8], &'static str> {
-    let Some(Value::Bytes(b)) = parameters.get(&1) else {
-        return Err("look.malformed");
+    let b = match parameters.get(&1) {
+        Some(Value::Bytes(b)) => b,
+        Some(Value::Map(m)) if m.len() == 1 => match m.get(&WORDS) {
+            Some(Value::Bytes(b)) => b,
+            _ => return Err("look.malformed"),
+        },
+        _ => return Err("look.malformed"),
     };
     let text = std::str::from_utf8(b).map_err(|_| "look.malformed")?;
     let object = json::parse(text).is_ok_and(|v| v.obj().is_some());

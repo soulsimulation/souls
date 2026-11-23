@@ -1232,6 +1232,12 @@ fn g2_a_souls_own_look_writes_field_33_once_and_is_refused_by_name_otherwise() {
         Some(Value::Bytes(params.to_vec())),
         "nothing more written"
     );
+    // As a client sends words (T8's `{23: bytes}`, a wear's shape): another look, written.
+    let other = br#"{"frame":"masc","preset":"punk"}"#;
+    let as_words = Value::Map(BTreeMap::from([(23, Value::Bytes(other.to_vec()))]));
+    a.act(skills::wear::LOOK_VERB, None, p(&[(1, as_words)]))
+        .expect("a look sent as words is written");
+    assert_eq!(field(&run).0, Some(Value::Bytes(other.to_vec())));
     run.stop();
 }
 
