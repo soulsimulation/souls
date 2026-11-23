@@ -166,6 +166,7 @@ fn humanoid() -> Family {
 
 /// Starts `body`'s walk (new to the runner, or already in it) to `goal` on `node` for `order`: its legs planned by
 /// the town, its walk the skill, the ladder keeping it.
+#[allow(clippy::too_many_arguments)]
 fn order(
     runner: &mut Runner,
     ladder: &mut Ladder,
@@ -174,7 +175,19 @@ fn order(
     order: Id,
     node: Id,
     goal: Vec3,
+    sent: Option<&mut BTreeMap<Id, (Id, Id)>>,
 ) -> Result<(), Refusal> {
+    // `--sent` (0.133 A2-4): sent to the point (N9), as a served world sends a Soul's walk: the runner asks its
+    // standing spot and gives it the route there; the ladder keeps it once its spot is granted.
+    if let Some(pending) = sent {
+        let skill = Box::new(Route::sent(SPEED, TICK));
+        if runner.controller.body(body.id).is_none() {
+            runner.add_body(humanoid(), body)?;
+        }
+        runner.send(body.id, skill, sim::spots::Target::new(node, goal), order)?;
+        pending.insert(body.id, (order, node));
+        return Ok(());
+    }
     let legs = town.plan(&body, node, goal)?;
     let skill = Box::new(Route::new(
         legs.iter()
@@ -338,6 +351,10 @@ fn pct(v: &mut [i64], q: usize) -> i64 {
 fn main() {
     let mut args: Vec<String> = std::env::args().collect();
     let fast = args.iter().any(|a| a == "--fast");
+    // `--sent` (0.133 A2-4): each walk is sent to its point (N9, `Route::sent`), the shape a served world uses.
+    let sent = args.iter().any(|a| a == "--sent");
+    // Sent walks not yet granted their spot: the order and the target's node.
+    let mut pending: BTreeMap<Id, (Id, Id)> = BTreeMap::new();
     // `--threads N` (N17b, #3255): threads stepping the walkers' skills; any count gives the same walks.
     let threads: usize = match args.iter().position(|a| a == "--threads") {
         Some(k) => {
@@ -359,10 +376,10 @@ fn main() {
     let args: Vec<&String> = args
         .iter()
         .enumerate()
-        .filter(|&(i, a)| a != "--fast" && jx.is_none_or(|j| i != j && i != j + 1))
+        .filter(|&(i, a)| a != "--fast" && a != "--sent" && jx.is_none_or(|j| i != j && i != j + 1))
         .map(|(_, a)| a)
         .collect();
-    let usage = "usage: walkers <facts.json> <labels.json> <uniform|event> <seed> [walkers] [seconds] [out-dir] [--fast] [--threads N]";
+    let usage = "usage: walkers <facts.json> <labels.json> <uniform|event> <seed> [walkers] [seconds] [out-dir] [--fast] [--sent] [--threads N]";
     let (facts, labels, arm) = (
         args.get(1).expect(usage),
         args.get(2).expect(usage),
@@ -577,6 +594,7 @@ fn main() {
                     order_id(orders),
                     g.node,
                     g.at,
+                    sent.then_some(&mut pending),
                 ) {
                     Ok(()) => break 'start,
                     Err(e) => {
@@ -730,6 +748,10 @@ fn main() {
     let mut corner_parts: Vec<[i64; 4]> = Vec::with_capacity(ticks as usize);
     let mut route_us: Vec<i64> = Vec::new();
     let (mut finished, mut ended) = (0u64, 0u64);
+    // 0.133 A2-4: trips that ended short of their goal, as near as the crowd allows: how far short, µm.
+    let mut short_um: Vec<i64> = Vec::new();
+    // Of those, the ones whose goal a body at rest stood on (within 0.3 m).
+    let mut short_taken = 0u64;
     let mut worst: (Micros, usize) = (0, 0);
     let mut next_moment = if arm == "event" {
         seed.within(45_000_000, 120_000_000)
@@ -860,6 +882,7 @@ fn main() {
                         order_id(orders),
                         g.node,
                         g.at,
+                        sent.then_some(&mut pending),
                     ) {
                         Ok(()) => {
                             placed = true;
@@ -908,6 +931,22 @@ fn main() {
                     e.name,
                     e.detail
                 );
+            }
+            // `--sent`: a walk granted its spot this tick is kept by the ladder from now, its legs to the spot.
+            if !pending.is_empty() {
+                let granted: Vec<(Id, (Id, Id), Vec3)> = pending
+                    .iter()
+                    .filter_map(|(who, o)| runner.granted.get(who).map(|p| (*who, *o, *p)))
+                    .collect();
+                for (who, (order, node), spot) in granted {
+                    pending.remove(&who);
+                    if let Some(b) = runner.controller.body(who).copied()
+                        && let Ok(legs) = w.plan(&b, node, spot)
+                    {
+                        ladder.add(who, order, SPEED, node, spot, legs);
+                    }
+                }
+                pending.retain(|who, _| runner.running(*who));
             }
             let total = a0.elapsed().as_nanos() as i64;
             let s2 = w.spent.get();
@@ -981,6 +1020,27 @@ fn main() {
                         Some((_, Progress::Done)) => {
                             finished += 1;
                             route_us.push(at - p.since);
+                            if runner
+                                .fields
+                                .get(&who)
+                                .is_some_and(|f| f.contains_key(&replica::host::F_SHORT))
+                                && let Some(b) = runner.controller.body(who)
+                            {
+                                // The leg it ended on, as the ladder keeps it (its last leg's end is the goal).
+                                let to = ladder.leg(who).map_or(p.to, |(_, l)| l.to);
+                                let q = b.pose.position;
+                                let (dx, dz) = (i128::from(q.x - to.x), i128::from(q.z - to.z));
+                                short_um.push((dx * dx + dz * dz).isqrt() as i64);
+                                // Taken: a body at rest stood within 0.3 m of its goal; else the goal was free.
+                                let taken = runner.near(who, 3_500_000).iter().any(|n| {
+                                    n.velocity.x == 0
+                                        && n.velocity.z == 0
+                                        && (i128::from(n.position.x - to.x).pow(2)
+                                            + i128::from(n.position.z - to.z).pow(2))
+                                            < 300_000i128.pow(2)
+                                });
+                                short_taken += u64::from(taken);
+                            }
                         }
                         Some((_, Progress::Failed(name))) => {
                             ended += 1;
@@ -1253,6 +1313,19 @@ fn main() {
     if arm == "event" {
         println!("walkers: crowd moments {moments}, reactions {reacted}");
     }
+    short_um.sort_unstable();
+    println!(
+        "walkers: walks {}; trips ended short (as near as the crowd allows) {}: goal taken {short_taken}, goal free {}; short of the goal median {} mm, max {} mm",
+        if sent {
+            "sent to a point (N9)"
+        } else {
+            "along planned legs"
+        },
+        short_um.len(),
+        short_um.len() as u64 - short_taken,
+        short_um.get(short_um.len() / 2).copied().unwrap_or(0) / 1000,
+        short_um.last().copied().unwrap_or(0) / 1000
+    );
     if joins > 0 {
         let born = ids.len() - n;
         let (bm, bmax) = (
