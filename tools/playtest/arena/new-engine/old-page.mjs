@@ -70,9 +70,11 @@ const kill = (p) => { try { process.kill(-p.pid, 'SIGTERM'); } catch { /* gone *
  *  is written into this run's own templates folder, which the launcher is given (`--templates-dir`).
  *  → {template: the file run.sh's export reads, name, templatesDir: null | the run's folder} */
 export function genesisFor({ template, add = [], dir }) {
-  const file = resolve(REPO_ROOT, template), name = templateName(file);
-  if (!add.length && resolve(file, '..') === join(REPO_ROOT, 'worlds/templates')) return { template: file, name, templatesDir: null };
-  const g = JSON.parse(readFileSync(file, 'utf8'));
+  const file = resolve(REPO_ROOT, template), name = templateName(file), g = JSON.parse(readFileSync(file, 'utf8'));
+  // a committed template the launcher offers is used as it is; one it hides from creation (Eden 2026: `hidden`) is
+  // offered from the run's own folder, unhidden, as the old clip worlds booted any template as their genesis
+  if (!add.length && !g.hidden && resolve(file, '..') === join(REPO_ROOT, 'worlds/templates')) return { template: file, name, templatesDir: null };
+  delete g.hidden;
   if (add.length) g.batches = [...(g.batches ?? []), { note: 'a staged scene\'s things (0.135 P3)', ops: add }];
   const templatesDir = join(dir, 'templates');
   mkdirSync(templatesDir, { recursive: true });

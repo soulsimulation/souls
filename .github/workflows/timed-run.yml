@@ -180,6 +180,29 @@ jobs:
           if grep -q 'VERSION_ID="20.04"' /etc/os-release; then export PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu22.04-x64; fi
           { echo "PLAYWRIGHT_BROWSERS_PATH=$PLAYWRIGHT_BROWSERS_PATH"; echo "PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=${PLAYWRIGHT_HOST_PLATFORM_OVERRIDE:-}"; } >> "$GITHUB_ENV"
           mars/viewer/node_modules/.bin/playwright install chromium 2>&1 | grep -v "%" | tail -20
+      # clip (0.135 P6): the new engine under the old page, as the check-0132 job builds it: release builds and replica's
+      # WASM in the per-run directory's toolchain, the new page (its pairing card) and caddy; run.sh reads them from V2_*.
+      - name: New engine for a clip
+        if: env.INPUT_COMMAND == 'clip'
+        working-directory: src/v2
+        env: { CADDY_VERSION: 2.10.0 }
+        run: |
+          channel=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' rust-toolchain.toml)
+          export RUSTUP_HOME="$PER_RUN/rustup" CARGO_HOME="$PER_RUN/cargo"
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o "$PER_RUN/rustup-init.sh"
+          sh "$PER_RUN/rustup-init.sh" -y --quiet --no-modify-path --profile minimal --default-toolchain "$channel" --target wasm32-unknown-unknown > /dev/null
+          export PATH="$CARGO_HOME/bin:$PATH"
+          cargo build --release --locked -p worldd -p gatewayd -p directoryd -p testworld
+          bindgen_version=$(sed -n '/^name = "wasm-bindgen"$/{n;s/^version = "\(.*\)"$/\1/p;}' Cargo.lock)
+          cargo install wasm-bindgen-cli --version "$bindgen_version" --locked --root target/tools --quiet
+          cargo build -p replica --release --target wasm32-unknown-unknown --locked
+          target/tools/bin/wasm-bindgen --target web --out-dir target/wasm-load/pkg target/wasm32-unknown-unknown/release/replica.wasm
+          npm --prefix web ci --no-audit --no-fund && npm --prefix web run build
+          case "$(uname -m)" in x86_64) arch=amd64;; aarch64) arch=arm64;; *) echo "::error::no caddy build for $(uname -m)"; exit 1;; esac
+          base="https://github.com/caddyserver/caddy/releases/download/v$CADDY_VERSION" tgz="caddy_${CADDY_VERSION}_linux_$arch.tar.gz"
+          mkdir -p "$PER_RUN/bin" && curl -sSfL "$base/$tgz" -o "$PER_RUN/$tgz" && curl -sSfL "$base/caddy_${CADDY_VERSION}_checksums.txt" -o "$PER_RUN/caddy-checksums.txt"
+          (cd "$PER_RUN" && grep " $tgz\$" caddy-checksums.txt | sha512sum -c -) && tar -xzf "$PER_RUN/$tgz" -C "$PER_RUN/bin" caddy
+          { echo "V2_BIN=$PWD/target/release"; echo "V2_REPLICA_PKG=$PWD/target/wasm-load/pkg"; echo "SOULS_REPLICA_PKG=$PWD/target/wasm-load/pkg"; echo "V2_WEB=$PWD/web/dist"; echo "CADDY=$PER_RUN/bin/caddy"; } >> "$GITHUB_ENV"
       # v2-bench: the channel the ref's v2/rust-toolchain.toml pins, minimal profile, in the per-run directory (no sudo, no
       # shared home); RUSTUP_TOOLCHAIN skips the file's extra components and WASM target, which a native bench never uses.
       - name: Rust toolchain
