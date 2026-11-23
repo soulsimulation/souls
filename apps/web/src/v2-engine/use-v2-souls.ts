@@ -12,6 +12,8 @@ import type { V2Bridge } from './bridge.ts';
 import { streamNotice } from './stream-health.ts';
 import { EdgeLog, WorldState, type LayerLike } from './world-state.ts';
 import { CreatorKinds } from './creator-kinds.ts';
+import { bundledEntries, CarriedParts } from './take-parts.ts';
+import { TICK_US } from './takes.ts';
 import { setAssetSource } from '../gen-mesh/gltf-assets.ts';
 import { historyBase, setV2History, V2History } from './history.ts';
 
@@ -46,6 +48,8 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
     let said: readonly unknown[] = [], seenSpeech: unknown = null, seenTurns: unknown = null;
     // 0.133 V1: a creator's kinds that exist only in the new format, drawn by the entity layer from their records
     const kinds = new CreatorKinds((h) => apiPath(`/v2/uploads/${h}`), setAssetSource); // K3: the world's own uploads, through the front door
+    // K1 (0.135): a carried load moves with its carry's samples; construction parts draw from their own entries
+    const parts = new CarriedParts(kinds, bundledEntries(import.meta.glob('../../../../content/kinds/construction/*.json', { eager: true })));
     let seenParts = 0, lastPartAt: number | null = null, errorAtParts: number | null = null, seenTo: number | null = null;
     // The scenery the page binds is the world's own (/v1/scene, published with the world); takes carry its rules version.
     void (async () => {
@@ -60,7 +64,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
       // R2: the old page's rewind reads this world's past from its history export (history.ts)
       const past = historyBase(stream, (window as unknown as { __simConfig?: unknown }).__simConfig);
       if (past) setV2History(new V2History(past, () => makeHistoryReader(new URL(apiPath('/replica.js'), location.href).href), frame));
-      bridge.start(stream, () => kinds.watch(world.watch(makeReader(new URL(apiPath('/replica.js'), location.href).href))));
+      bridge.start(stream, () => parts.watch(kinds.watch(world.watch(makeReader(new URL(apiPath('/replica.js'), location.href).href)))));
       members = (await import('./member-turns.ts')).memberTurns((h) => bridge?.heard(h), (grants) => bridge?.bodiesOf(grants) ?? []); // R3b: private turns, to their members
       if (stopped) members.stop();
       // read-only, for checks and proof: what the stream gave (parts played, newest time, the reader's last error)
@@ -103,6 +107,8 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
         // what the Souls said aloud (take-speech.ts; the speech layer and dialogue dock read it as public) and the world
         // diffs, in one log: a diff is never dropped when the speech changes
         st.edge = edges.step(said, diff) as typeof st.edge;
+        // K1: the moving frames where the page draws now (the newest chunk's end, less the play delay, and the time since)
+        kinds.apply(parts.frames((v.takes.serverTick - v.takes.playDelay) * TICK_US + (performance.now() - v.takes.receivedAt) * 1000), []);
         const made = kinds.next((window as unknown as { __soulsEntity?: { layer?: LayerLike } }).__soulsEntity?.layer, Date.now(), diff?.seq);
         if (made) st.edge = edges.step(said, made) as typeof st.edge;
       }
