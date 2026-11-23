@@ -1,0 +1,4824 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "All28 one-field literal effects, unique solution, genuine maximal-incomplete individual recovery, every admitted appearance and mutable-blank restoration; generic successful apply replay remains separate from native resend.",
+  "cases": [
+    {
+      "name": "place_r1c1_1_single_literal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:inequality_square_board",
+            "fields": {
+              "r1c1": 0,
+              "r1c2": 0,
+              "r1c3": 0,
+              "r2c1": 0,
+              "r2c2": 0,
+              "r2c3": 0,
+              "r3c1": 0,
+              "r3c2": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              550
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r1c1_1"
+          },
+          "receipt": "place_r1c1_1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c1",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:inequality_square_board",
+          "fields": {
+            "r1c1": 1,
+            "r1c2": 0,
+            "r1c3": 0,
+            "r2c1": 0,
+            "r2c2": 0,
+            "r2c3": 0,
+            "r3c1": 0,
+            "r3c2": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r1c1_2_single_literal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:inequality_square_board",
+            "fields": {
+              "r1c1": 0,
+              "r1c2": 0,
+              "r1c3": 0,
+              "r2c1": 0,
+              "r2c2": 0,
+              "r2c3": 0,
+              "r3c1": 0,
+              "r3c2": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              550
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r1c1_2"
+          },
+          "receipt": "place_r1c1_2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c1",
+                "n": 28,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:inequality_square_board",
+          "fields": {
+            "r1c1": 2,
+            "r1c2": 0,
+            "r1c3": 0,
+            "r2c1": 0,
+            "r2c2": 0,
+            "r2c3": 0,
+            "r3c1": 0,
+            "r3c2": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r1c1_3_single_literal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:inequality_square_board",
+            "fields": {
+              "r1c1": 0,
+              "r1c2": 0,
+              "r1c3": 0,
+              "r2c1": 0,
+              "r2c2": 0,
+              "r2c3": 0,
+              "r3c1": 0,
+              "r3c2": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              550
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r1c1_3"
+          },
+          "receipt": "place_r1c1_3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c1",
+                "n": 28,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:inequality_square_board",
+          "fields": {
+            "r1c1": 3,
+            "r1c2": 0,
+            "r1c3": 0,
+            "r2c1": 0,
+            "r2c2": 0,
+            "r2c3": 0,
+            "r3c1": 0,
+            "r3c2": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "clear_r1c1_single_literal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:inequality_square_board",
+            "fields": {
+              "r1c1": 1,
+              "r1c2": 0,
+              "r1c3": 0,
+              "r2c1": 0,
+              "r2c2": 0,
+              "r2c3": 0,
+              "r3c1": 0,
+              "r3c2": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              550
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r1c1"
+          },
+          "receipt": "clear_r1c1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c1",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:inequality_square_board",
+          "fields": {
+            "r1c1": 0,
+            "r1c2": 0,
+            "r1c3": 0,
+            "r2c1": 0,
+            "r2c2": 0,
+            "r2c3": 0,
+            "r3c1": 0,
+            "r3c2": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r1c2_1_single_literal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:inequality_square_board",
+            "fields": {
+              "r1c1": 0,
+              "r1c2": 0,
+              "r1c3": 0,
+              "r2c1": 0,
+              "r2c2": 0,
+              "r2c3": 0,
+              "r3c1": 0,
+              "r3c2": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              550
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r1c2_1"
+          },
+          "receipt": "place_r1c2_1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c2",
+                "n": 29,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:inequality_square_board",
+          "fields": {
+            "r1c1": 0,
+            "r1c2": 1,
+            "r1c3": 0,
+            "r2c1": 0,
+            "r2c2": 0,
+            "r2c3": 0,
+            "r3c1": 0,
+            "r3c2": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r1c2_2_single_literal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:inequality_square_board",
+            "fields": {
+              "r1c1": 0,
+              "r1c2": 0,
+              "r1c3": 0,
+              "r2c1": 0,
+              "r2c2": 0,
+              "r2c3": 0,
+              "r3c1": 0,
+              "r3c2": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              550
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r1c2_2"
+          },
+          "receipt": "place_r1c2_2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c2",
+                "n": 29,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:inequality_square_board",
+          "fields": {
+            "r1c1": 0,
+            "r1c2": 2,
+            "r1c3": 0,
+            "r2c1": 0,
+            "r2c2": 0,
+            "r2c3": 0,
+            "r3c1": 0,
+            "r3c2": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r1c2_3_single_literal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:inequality_square_board",
+            "fields": {
+              "r1c1": 0,
+              "r1c2": 0,
+              "r1c3": 0,
+              "r2c1": 0,
+              "r2c2": 0,
+              "r2c3": 0,
+              "r3c1": 0,
+              "r3c2": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              550
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r1c2_3"
+          },
+          "receipt": "place_r1c2_3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c2",
+                "n": 29,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:inequality_square_board",
+          "fields": {
+            "r1c1": 0,
+            "r1c2": 3,
+            "r1c3": 0,
+            "r2c1": 0,
+            "r2c2": 0,
+            "r2c3": 0,
+            "r3c1": 0,
+            "r3c2": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "clear_r1c2_single_literal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:inequality_square_board",
+            "fields": {
+              "r1c1": 0,
+              "r1c2": 1,
+              "r1c3": 0,
+              "r2c1": 0,
+              "r2c2": 0,
+              "r2c3": 0,
+              "r3c1": 0,
+              "r3c2": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              550
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r1c2"
+          },
+          "receipt": "clear_r1c2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c2",
+                "n": 29,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:inequality_square_board",
+          "fields": {
+            "r1c1": 0,
+            "r1c2": 0,
+            "r1c3": 0,
+            "r2c1": 0,
+            "r2c2": 0,
+            "r2c3": 0,
+            "r3c1": 0,
+            "r3c2": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r1c3_1_single_literal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:inequality_square_board",
+            "fields": {
+              "r1c1": 0,
+              "r1c2": 0,
+              "r1c3": 0,
+              "r2c1": 0,
+              "r2c2": 0,
+              "r2c3": 0,
+              "r3c1": 0,
+              "r3c2": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              550
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r1c3_1"
+          },
+          "receipt": "place_r1c3_1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c3",
+                "n": 30,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:inequality_square_board",
+          "fields": {
+            "r1c1": 0,
+            "r1c2": 0,
+            "r1c3": 1,
+            "r2c1": 0,
+            "r2c2": 0,
+            "r2c3": 0,
+            "r3c1": 0,
+            "r3c2": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r1c3_3_single_literal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:inequality_square_board",
+            "fields": {
+              "r1c1": 0,
+              "r1c2": 0,
+              "r1c3": 0,
+              "r2c1": 0,
+              "r2c2": 0,
+              "r2c3": 0,
+              "r3c1": 0,
+              "r3c2": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              550
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r1c3_3"
+          },
+          "receipt": "place_r1c3_3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c3",
+                "n": 30,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:inequality_square_board",
+          "fields": {
+            "r1c1": 0,
+            "r1c2": 0,
+            "r1c3": 3,
+            "r2c1": 0,
+            "r2c2": 0,
+            "r2c3": 0,
+            "r3c1": 0,
+            "r3c2": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "clear_r1c3_single_literal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:inequality_square_board",
+            "fields": {
+              "r1c1": 0,
+              "r1c2": 0,
+              "r1c3": 1,
+              "r2c1": 0,
+              "r2c2": 0,
+              "r2c3": 0,
+              "r3c1": 0,
+              "r3c2": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              550
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r1c3"
+          },
+          "receipt": "clear_r1c3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c3",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:inequality_square_board",
+          "fields": {
+            "r1c1": 0,
+            "r1c2": 0,
+            "r1c3": 0,
+            "r2c1": 0,
+            "r2c2": 0,
+            "r2c3": 0,
+            "r3c1": 0,
+            "r3c2": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r2c1_1_single_literal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:inequality_square_board",
+            "fields": {
+              "r1c1": 0,
+              "r1c2": 0,
+              "r1c3": 0,
+              "r2c1": 0,
+              "r2c2": 0,
+              "r2c3": 0,
+              "r3c1": 0,
+              "r3c2": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              550
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r2c1_1"
+          },
+          "receipt": "place_r2c1_1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c1",
+                "n": 31,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:inequality_square_board",
+          "fields": {
+            "r1c1": 0,
+            "r1c2": 0,
+            "r1c3": 0,
+            "r2c1": 1,
+            "r2c2": 0,
+            "r2c3": 0,
+            "r3c1": 0,
+            "r3c2": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r2c1_2_single_literal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:inequality_square_board",
+            "fields": {
+              "r1c1": 0,
+              "r1c2": 0,
+              "r1c3": 0,
+              "r2c1": 0,
+              "r2c2": 0,
+              "r2c3": 0,
+              "r3c1": 0,
+              "r3c2": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              550
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r2c1_2"
+          },
+          "receipt": "place_r2c1_2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c1",
+                "n": 31,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:inequality_square_board",
+          "fields": {
+            "r1c1": 0,
+            "r1c2": 0,
+            "r1c3": 0,
+            "r2c1": 2,
+            "r2c2": 0,
+            "r2c3": 0,
+            "r3c1": 0,
+            "r3c2": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r2c1_3_single_literal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:inequality_square_board",
+            "fields": {
+              "r1c1": 0,
+              "r1c2": 0,
+              "r1c3": 0,
+              "r2c1": 0,
+              "r2c2": 0,
+              "r2c3": 0,
+              "r3c1": 0,
+              "r3c2": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              550
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r2c1_3"
+          },
+          "receipt": "place_r2c1_3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c1",
+                "n": 31,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:inequality_square_board",
+          "fields": {
+            "r1c1": 0,
+            "r1c2": 0,
+            "r1c3": 0,
+            "r2c1": 3,
+            "r2c2": 0,
+            "r2c3": 0,
+            "r3c1": 0,
+            "r3c2": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "clear_r2c1_single_literal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:inequality_square_board",
+            "fields": {
+              "r1c1": 0,
+              "r1c2": 0,
+              "r1c3": 0,
+              "r2c1": 1,
+              "r2c2": 0,
+              "r2c3": 0,
+              "r3c1": 0,
+              "r3c2": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              550
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r2c1"
+          },
+          "receipt": "clear_r2c1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c1",
+                "n": 31,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:inequality_square_board",
+          "fields": {
+            "r1c1": 0,
+            "r1c2": 0,
+            "r1c3": 0,
+            "r2c1": 0,
+            "r2c2": 0,
+            "r2c3": 0,
+            "r3c1": 0,
+            "r3c2": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r2c2_1_single_literal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:inequality_square_board",
+            "fields": {
+              "r1c1": 0,
+              "r1c2": 0,
+              "r1c3": 0,
+              "r2c1": 0,
+              "r2c2": 0,
+              "r2c3": 0,
+              "r3c1": 0,
+              "r3c2": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              550
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r2c2_1"
+          },
+          "receipt": "place_r2c2_1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c2",
+                "n": 32,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:inequality_square_board",
+          "fields": {
+            "r1c1": 0,
+            "r1c2": 0,
+            "r1c3": 0,
+            "r2c1": 0,
+            "r2c2": 1,
+            "r2c3": 0,
+            "r3c1": 0,
+            "r3c2": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r2c2_2_single_literal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:inequality_square_board",
+            "fields": {
+              "r1c1": 0,
+              "r1c2": 0,
+              "r1c3": 0,
+              "r2c1": 0,
+              "r2c2": 0,
+              "r2c3": 0,
+              "r3c1": 0,
+              "r3c2": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              550
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r2c2_2"
+          },
+          "receipt": "place_r2c2_2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c2",
+                "n": 32,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:inequality_square_board",
+          "fields": {
+            "r1c1": 0,
+            "r1c2": 0,
+            "r1c3": 0,
+            "r2c1": 0,
+            "r2c2": 2,
+            "r2c3": 0,
+            "r3c1": 0,
+            "r3c2": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r2c2_3_single_literal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:inequality_square_board",
+            "fields": {
+              "r1c1": 0,
+              "r1c2": 0,
+              "r1c3": 0,
+              "r2c1": 0,
+              "r2c2": 0,
+              "r2c3": 0,
+              "r3c1": 0,
+              "r3c2": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              550
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r2c2_3"
+          },
+          "receipt": "place_r2c2_3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c2",
+                "n": 32,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:inequality_square_board",
+          "fields": {
+            "r1c1": 0,
+            "r1c2": 0,
+            "r1c3": 0,
+            "r2c1": 0,
+            "r2c2": 3,
+            "r2c3": 0,
+            "r3c1": 0,
+            "r3c2": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "clear_r2c2_single_literal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:inequality_square_board",
+            "fields": {
+              "r1c1": 0,
+              "r1c2": 0,
+              "r1c3": 0,
+              "r2c1": 0,
+              "r2c2": 1,
+              "r2c3": 0,
+              "r3c1": 0,
+              "r3c2": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              550
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r2c2"
+          },
+          "receipt": "clear_r2c2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c2",
+                "n": 32,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:inequality_square_board",
+          "fields": {
+            "r1c1": 0,
+            "r1c2": 0,
+            "r1c3": 0,
+            "r2c1": 0,
+            "r2c2": 0,
+            "r2c3": 0,
+            "r3c1": 0,
+            "r3c2": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r2c3_1_single_literal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:inequality_square_board",
+            "fields": {
+              "r1c1": 0,
+              "r1c2": 0,
+              "r1c3": 0,
+              "r2c1": 0,
+              "r2c2": 0,
+              "r2c3": 0,
+              "r3c1": 0,
+              "r3c2": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              550
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r2c3_1"
+          },
+          "receipt": "place_r2c3_1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c3",
+                "n": 33,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:inequality_square_board",
+          "fields": {
+            "r1c1": 0,
+            "r1c2": 0,
+            "r1c3": 0,
+            "r2c1": 0,
+            "r2c2": 0,
+            "r2c3": 1,
+            "r3c1": 0,
+            "r3c2": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r2c3_3_single_literal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:inequality_square_board",
+            "fields": {
+              "r1c1": 0,
+              "r1c2": 0,
+              "r1c3": 0,
+              "r2c1": 0,
+              "r2c2": 0,
+              "r2c3": 0,
+              "r3c1": 0,
+              "r3c2": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              550
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r2c3_3"
+          },
+          "receipt": "place_r2c3_3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c3",
+                "n": 33,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:inequality_square_board",
+          "fields": {
+            "r1c1": 0,
+            "r1c2": 0,
+            "r1c3": 0,
+            "r2c1": 0,
+            "r2c2": 0,
+            "r2c3": 3,
+            "r3c1": 0,
+            "r3c2": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "clear_r2c3_single_literal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:inequality_square_board",
+            "fields": {
+              "r1c1": 0,
+              "r1c2": 0,
+              "r1c3": 0,
+              "r2c1": 0,
+              "r2c2": 0,
+              "r2c3": 1,
+              "r3c1": 0,
+              "r3c2": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              550
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r2c3"
+          },
+          "receipt": "clear_r2c3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c3",
+                "n": 33,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:inequality_square_board",
+          "fields": {
+            "r1c1": 0,
+            "r1c2": 0,
+            "r1c3": 0,
+            "r2c1": 0,
+            "r2c2": 0,
+            "r2c3": 0,
+            "r3c1": 0,
+            "r3c2": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r3c1_1_single_literal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:inequality_square_board",
+            "fields": {
+              "r1c1": 0,
+              "r1c2": 0,
+              "r1c3": 0,
+              "r2c1": 0,
+              "r2c2": 0,
+              "r2c3": 0,
+              "r3c1": 0,
+              "r3c2": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              550
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r3c1_1"
+          },
+          "receipt": "place_r3c1_1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c1",
+                "n": 34,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:inequality_square_board",
+          "fields": {
+            "r1c1": 0,
+            "r1c2": 0,
+            "r1c3": 0,
+            "r2c1": 0,
+            "r2c2": 0,
+            "r2c3": 0,
+            "r3c1": 1,
+            "r3c2": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r3c1_3_single_literal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:inequality_square_board",
+            "fields": {
+              "r1c1": 0,
+              "r1c2": 0,
+              "r1c3": 0,
+              "r2c1": 0,
+              "r2c2": 0,
+              "r2c3": 0,
+              "r3c1": 0,
+              "r3c2": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              550
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r3c1_3"
+          },
+          "receipt": "place_r3c1_3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c1",
+                "n": 34,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:inequality_square_board",
+          "fields": {
+            "r1c1": 0,
+            "r1c2": 0,
+            "r1c3": 0,
+            "r2c1": 0,
+            "r2c2": 0,
+            "r2c3": 0,
+            "r3c1": 3,
+            "r3c2": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "clear_r3c1_single_literal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:inequality_square_board",
+            "fields": {
+              "r1c1": 0,
+              "r1c2": 0,
+              "r1c3": 0,
+              "r2c1": 0,
+              "r2c2": 0,
+              "r2c3": 0,
+              "r3c1": 1,
+              "r3c2": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              550
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r3c1"
+          },
+          "receipt": "clear_r3c1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c1",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:inequality_square_board",
+          "fields": {
+            "r1c1": 0,
+            "r1c2": 0,
+            "r1c3": 0,
+            "r2c1": 0,
+            "r2c2": 0,
+            "r2c3": 0,
+            "r3c1": 0,
+            "r3c2": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r3c2_1_single_literal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:inequality_square_board",
+            "fields": {
+              "r1c1": 0,
+              "r1c2": 0,
+              "r1c3": 0,
+              "r2c1": 0,
+              "r2c2": 0,
+              "r2c3": 0,
+              "r3c1": 0,
+              "r3c2": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              550
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r3c2_1"
+          },
+          "receipt": "place_r3c2_1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c2",
+                "n": 35,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:inequality_square_board",
+          "fields": {
+            "r1c1": 0,
+            "r1c2": 0,
+            "r1c3": 0,
+            "r2c1": 0,
+            "r2c2": 0,
+            "r2c3": 0,
+            "r3c1": 0,
+            "r3c2": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "place_r3c2_3_single_literal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:inequality_square_board",
+            "fields": {
+              "r1c1": 0,
+              "r1c2": 0,
+              "r1c3": 0,
+              "r2c1": 0,
+              "r2c2": 0,
+              "r2c3": 0,
+              "r3c1": 0,
+              "r3c2": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              550
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r3c2_3"
+          },
+          "receipt": "place_r3c2_3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c2",
+                "n": 35,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:inequality_square_board",
+          "fields": {
+            "r1c1": 0,
+            "r1c2": 0,
+            "r1c3": 0,
+            "r2c1": 0,
+            "r2c2": 0,
+            "r2c3": 0,
+            "r3c1": 0,
+            "r3c2": 3
+          }
+        }
+      }
+    },
+    {
+      "name": "clear_r3c2_single_literal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:inequality_square_board",
+            "fields": {
+              "r1c1": 0,
+              "r1c2": 0,
+              "r1c3": 0,
+              "r2c1": 0,
+              "r2c2": 0,
+              "r2c3": 0,
+              "r3c1": 0,
+              "r3c2": 1
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              550
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r3c2"
+          },
+          "receipt": "clear_r3c2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c2",
+                "n": 35,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:inequality_square_board",
+          "fields": {
+            "r1c1": 0,
+            "r1c2": 0,
+            "r1c3": 0,
+            "r2c1": 0,
+            "r2c2": 0,
+            "r2c3": 0,
+            "r3c1": 0,
+            "r3c2": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "unique_solution_and_clear",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:inequality_square_board",
+            "fields": {
+              "r1c1": 0,
+              "r1c2": 0,
+              "r1c3": 0,
+              "r2c1": 0,
+              "r2c2": 0,
+              "r2c3": 0,
+              "r3c1": 0,
+              "r3c2": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              550
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r1c1_1"
+          },
+          "receipt": "unique_solution_and_clear0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c1",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r1c2_2"
+          },
+          "receipt": "unique_solution_and_clear1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c2",
+                "n": 29,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r1c3_3"
+          },
+          "receipt": "unique_solution_and_clear2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c3",
+                "n": 30,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r2c1_2"
+          },
+          "receipt": "unique_solution_and_clear3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c1",
+                "n": 31,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r2c2_3"
+          },
+          "receipt": "unique_solution_and_clear4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c2",
+                "n": 32,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r2c3_1"
+          },
+          "receipt": "unique_solution_and_clear5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c3",
+                "n": 33,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r3c1_3"
+          },
+          "receipt": "unique_solution_and_clear6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c1",
+                "n": 34,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r3c2_1"
+          },
+          "receipt": "unique_solution_and_clear7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c2",
+                "n": 35,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r3c2"
+          },
+          "receipt": "unique_solution_and_clear8",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c2",
+                "n": 35,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r3c1"
+          },
+          "receipt": "unique_solution_and_clear9",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c1",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r2c3"
+          },
+          "receipt": "unique_solution_and_clear10",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c3",
+                "n": 33,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r2c2"
+          },
+          "receipt": "unique_solution_and_clear11",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c2",
+                "n": 32,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r2c1"
+          },
+          "receipt": "unique_solution_and_clear12",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c1",
+                "n": 31,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r1c3"
+          },
+          "receipt": "unique_solution_and_clear13",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c3",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r1c2"
+          },
+          "receipt": "unique_solution_and_clear14",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c2",
+                "n": 29,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r1c1"
+          },
+          "receipt": "unique_solution_and_clear15",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c1",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:inequality_square_board",
+          "fields": {
+            "r1c1": 0,
+            "r1c2": 0,
+            "r1c3": 0,
+            "r2c1": 0,
+            "r2c2": 0,
+            "r2c3": 0,
+            "r3c1": 0,
+            "r3c2": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "maximal_incomplete_one_clear_recovery",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:inequality_square_board",
+            "fields": {
+              "r1c1": 0,
+              "r1c2": 0,
+              "r1c3": 0,
+              "r2c1": 0,
+              "r2c2": 0,
+              "r2c3": 0,
+              "r3c1": 0,
+              "r3c2": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              550
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r1c1_1"
+          },
+          "receipt": "maximal_incomplete_one_clear_recovery0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c1",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r1c3_3"
+          },
+          "receipt": "maximal_incomplete_one_clear_recovery1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c3",
+                "n": 30,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r2c2_2"
+          },
+          "receipt": "maximal_incomplete_one_clear_recovery2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c2",
+                "n": 32,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r2c3_1"
+          },
+          "receipt": "maximal_incomplete_one_clear_recovery3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c3",
+                "n": 33,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r3c1_3"
+          },
+          "receipt": "maximal_incomplete_one_clear_recovery4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c1",
+                "n": 34,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r3c2_1"
+          },
+          "receipt": "maximal_incomplete_one_clear_recovery5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c2",
+                "n": 35,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r2c2"
+          },
+          "receipt": "maximal_incomplete_one_clear_recovery6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c2",
+                "n": 32,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r1c2_2"
+          },
+          "receipt": "maximal_incomplete_one_clear_recovery7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c2",
+                "n": 29,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r2c1_2"
+          },
+          "receipt": "maximal_incomplete_one_clear_recovery8",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c1",
+                "n": 31,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r2c2_3"
+          },
+          "receipt": "maximal_incomplete_one_clear_recovery9",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c2",
+                "n": 32,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r3c2"
+          },
+          "receipt": "maximal_incomplete_one_clear_recovery10",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c2",
+                "n": 35,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r3c1"
+          },
+          "receipt": "maximal_incomplete_one_clear_recovery11",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c1",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r2c3"
+          },
+          "receipt": "maximal_incomplete_one_clear_recovery12",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c3",
+                "n": 33,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r2c2"
+          },
+          "receipt": "maximal_incomplete_one_clear_recovery13",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c2",
+                "n": 32,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r2c1"
+          },
+          "receipt": "maximal_incomplete_one_clear_recovery14",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c1",
+                "n": 31,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r1c3"
+          },
+          "receipt": "maximal_incomplete_one_clear_recovery15",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c3",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r1c2"
+          },
+          "receipt": "maximal_incomplete_one_clear_recovery16",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c2",
+                "n": 29,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r1c1"
+          },
+          "receipt": "maximal_incomplete_one_clear_recovery17",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c1",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:inequality_square_board",
+          "fields": {
+            "r1c1": 0,
+            "r1c2": 0,
+            "r1c3": 0,
+            "r2c1": 0,
+            "r2c2": 0,
+            "r2c3": 0,
+            "r3c1": 0,
+            "r3c2": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "every_admitted_appearance",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:inequality_square_board",
+            "fields": {
+              "r1c1": 0,
+              "r1c2": 0,
+              "r1c3": 0,
+              "r2c1": 0,
+              "r2c2": 0,
+              "r2c3": 0,
+              "r3c1": 0,
+              "r3c2": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              550
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r1c1_1"
+          },
+          "receipt": "every_admitted_appearance0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c1",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r1c1"
+          },
+          "receipt": "every_admitted_appearance1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c1",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r1c1_2"
+          },
+          "receipt": "every_admitted_appearance2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c1",
+                "n": 28,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r1c1"
+          },
+          "receipt": "every_admitted_appearance3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c1",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r1c1_3"
+          },
+          "receipt": "every_admitted_appearance4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c1",
+                "n": 28,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r1c1"
+          },
+          "receipt": "every_admitted_appearance5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c1",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r1c2_1"
+          },
+          "receipt": "every_admitted_appearance6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c2",
+                "n": 29,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r1c2"
+          },
+          "receipt": "every_admitted_appearance7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c2",
+                "n": 29,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r1c2_2"
+          },
+          "receipt": "every_admitted_appearance8",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c2",
+                "n": 29,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r1c2"
+          },
+          "receipt": "every_admitted_appearance9",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c2",
+                "n": 29,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r1c2_3"
+          },
+          "receipt": "every_admitted_appearance10",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c2",
+                "n": 29,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r1c2"
+          },
+          "receipt": "every_admitted_appearance11",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c2",
+                "n": 29,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r1c3_1"
+          },
+          "receipt": "every_admitted_appearance12",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c3",
+                "n": 30,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r1c3"
+          },
+          "receipt": "every_admitted_appearance13",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c3",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r1c3_3"
+          },
+          "receipt": "every_admitted_appearance14",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c3",
+                "n": 30,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r1c3"
+          },
+          "receipt": "every_admitted_appearance15",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r1c3",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r2c1_1"
+          },
+          "receipt": "every_admitted_appearance16",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c1",
+                "n": 31,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r2c1"
+          },
+          "receipt": "every_admitted_appearance17",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c1",
+                "n": 31,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r2c1_2"
+          },
+          "receipt": "every_admitted_appearance18",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c1",
+                "n": 31,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r2c1"
+          },
+          "receipt": "every_admitted_appearance19",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c1",
+                "n": 31,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r2c1_3"
+          },
+          "receipt": "every_admitted_appearance20",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c1",
+                "n": 31,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r2c1"
+          },
+          "receipt": "every_admitted_appearance21",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c1",
+                "n": 31,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r2c2_1"
+          },
+          "receipt": "every_admitted_appearance22",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c2",
+                "n": 32,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r2c2"
+          },
+          "receipt": "every_admitted_appearance23",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c2",
+                "n": 32,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r2c2_2"
+          },
+          "receipt": "every_admitted_appearance24",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c2",
+                "n": 32,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r2c2"
+          },
+          "receipt": "every_admitted_appearance25",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c2",
+                "n": 32,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r2c2_3"
+          },
+          "receipt": "every_admitted_appearance26",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c2",
+                "n": 32,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r2c2"
+          },
+          "receipt": "every_admitted_appearance27",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c2",
+                "n": 32,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r2c3_1"
+          },
+          "receipt": "every_admitted_appearance28",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c3",
+                "n": 33,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r2c3"
+          },
+          "receipt": "every_admitted_appearance29",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c3",
+                "n": 33,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r2c3_3"
+          },
+          "receipt": "every_admitted_appearance30",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c3",
+                "n": 33,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r2c3"
+          },
+          "receipt": "every_admitted_appearance31",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r2c3",
+                "n": 33,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r3c1_1"
+          },
+          "receipt": "every_admitted_appearance32",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c1",
+                "n": 34,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r3c1"
+          },
+          "receipt": "every_admitted_appearance33",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c1",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r3c1_3"
+          },
+          "receipt": "every_admitted_appearance34",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c1",
+                "n": 34,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r3c1"
+          },
+          "receipt": "every_admitted_appearance35",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c1",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r3c2_1"
+          },
+          "receipt": "every_admitted_appearance36",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c2",
+                "n": 35,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r3c2"
+          },
+          "receipt": "every_admitted_appearance37",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c2",
+                "n": 35,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_r3c2_3"
+          },
+          "receipt": "every_admitted_appearance38",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c2",
+                "n": 35,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_placed",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "clear_r3c2"
+          },
+          "receipt": "every_admitted_appearance39",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "r3c2",
+                "n": 35,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:digit_cleared",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:inequality_square_board",
+          "fields": {
+            "r1c1": 0,
+            "r1c2": 0,
+            "r1c3": 0,
+            "r2c1": 0,
+            "r2c2": 0,
+            "r2c3": 0,
+            "r3c1": 0,
+            "r3c2": 0
+          }
+        }
+      }
+    }
+  ]
+}

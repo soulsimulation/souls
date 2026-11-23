@@ -1,0 +1,4367 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:inequality_square_board",
+  "owner": "thing",
+  "state": {
+    "r1c1": {
+      "n": 28,
+      "type": "int",
+      "min": 0,
+      "max": 3,
+      "default": 0,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "r1c2": {
+      "n": 29,
+      "type": "int",
+      "min": 0,
+      "max": 3,
+      "default": 0,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "r1c3": {
+      "n": 30,
+      "type": "int",
+      "min": 0,
+      "max": 3,
+      "default": 0,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "r2c1": {
+      "n": 31,
+      "type": "int",
+      "min": 0,
+      "max": 3,
+      "default": 0,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "r2c2": {
+      "n": 32,
+      "type": "int",
+      "min": 0,
+      "max": 3,
+      "default": 0,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "r2c3": {
+      "n": 33,
+      "type": "int",
+      "min": 0,
+      "max": 3,
+      "default": 0,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "r3c1": {
+      "n": 34,
+      "type": "int",
+      "min": 0,
+      "max": 3,
+      "default": 0,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "r3c2": {
+      "n": 35,
+      "type": "int",
+      "min": 0,
+      "max": 3,
+      "default": 0,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        1100
+      ],
+      "yaw_mdeg": 180000
+    },
+    "board": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        850,
+        550
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1420,
+      900,
+      1420
+    ]
+  },
+  "forms": {
+    "place_r1c1_1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r1c1",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c2",
+          "not": 1,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r1c3",
+          "not": 1,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r2c1",
+          "not": 1,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r3c1",
+          "not": 1,
+          "says": "repeated"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r1c1",
+          "to": 1,
+          "event": "digit_placed"
+        }
+      ]
+    },
+    "place_r1c1_2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r1c1",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c2",
+          "not": 1,
+          "says": "order"
+        },
+        {
+          "need": "state",
+          "field": "r1c2",
+          "not": 2,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r1c3",
+          "not": 2,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r2c1",
+          "not": 2,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r3c1",
+          "not": 2,
+          "says": "repeated"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r1c1",
+          "to": 2,
+          "event": "digit_placed"
+        }
+      ]
+    },
+    "place_r1c1_3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r1c1",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c2",
+          "not": 1,
+          "says": "order"
+        },
+        {
+          "need": "state",
+          "field": "r1c2",
+          "not": 2,
+          "says": "order"
+        },
+        {
+          "need": "state",
+          "field": "r1c2",
+          "not": 3,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r1c3",
+          "not": 3,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r2c1",
+          "not": 3,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r3c1",
+          "not": 3,
+          "says": "repeated"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r1c1",
+          "to": 3,
+          "event": "digit_placed"
+        }
+      ]
+    },
+    "clear_r1c1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r1c1",
+          "at_least": 1,
+          "says": "already_blank"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r1c1",
+          "to": 0,
+          "event": "digit_cleared"
+        }
+      ]
+    },
+    "place_r1c2_1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r1c2",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c1",
+          "not": 1,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r1c1",
+          "not": 2,
+          "says": "order"
+        },
+        {
+          "need": "state",
+          "field": "r1c1",
+          "not": 3,
+          "says": "order"
+        },
+        {
+          "need": "state",
+          "field": "r1c3",
+          "not": 1,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r2c2",
+          "not": 1,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r3c2",
+          "not": 1,
+          "says": "repeated"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r1c2",
+          "to": 1,
+          "event": "digit_placed"
+        }
+      ]
+    },
+    "place_r1c2_2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r1c2",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c1",
+          "not": 2,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r1c1",
+          "not": 3,
+          "says": "order"
+        },
+        {
+          "need": "state",
+          "field": "r1c3",
+          "not": 2,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r2c2",
+          "not": 2,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r3c2",
+          "not": 2,
+          "says": "repeated"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r1c2",
+          "to": 2,
+          "event": "digit_placed"
+        }
+      ]
+    },
+    "place_r1c2_3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r1c2",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c1",
+          "not": 3,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r1c3",
+          "not": 3,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r2c2",
+          "not": 3,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r3c2",
+          "not": 3,
+          "says": "repeated"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r1c2",
+          "to": 3,
+          "event": "digit_placed"
+        }
+      ]
+    },
+    "clear_r1c2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r1c2",
+          "at_least": 1,
+          "says": "already_blank"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r1c2",
+          "to": 0,
+          "event": "digit_cleared"
+        }
+      ]
+    },
+    "place_r1c3_1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r1c3",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c1",
+          "not": 1,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r1c2",
+          "not": 1,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r2c3",
+          "not": 1,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r2c3",
+          "not": 2,
+          "says": "order"
+        },
+        {
+          "need": "state",
+          "field": "r2c3",
+          "not": 3,
+          "says": "order"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r1c3",
+          "to": 1,
+          "event": "digit_placed"
+        }
+      ]
+    },
+    "place_r1c3_3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r1c3",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c1",
+          "not": 3,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r1c2",
+          "not": 3,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r2c3",
+          "not": 3,
+          "says": "repeated"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r1c3",
+          "to": 3,
+          "event": "digit_placed"
+        }
+      ]
+    },
+    "clear_r1c3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r1c3",
+          "at_least": 1,
+          "says": "already_blank"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r1c3",
+          "to": 0,
+          "event": "digit_cleared"
+        }
+      ]
+    },
+    "place_r2c1_1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r2c1",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c1",
+          "not": 1,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r2c2",
+          "not": 1,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r2c3",
+          "not": 1,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r3c1",
+          "not": 1,
+          "says": "repeated"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r2c1",
+          "to": 1,
+          "event": "digit_placed"
+        }
+      ]
+    },
+    "place_r2c1_2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r2c1",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c1",
+          "not": 2,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r2c2",
+          "not": 1,
+          "says": "order"
+        },
+        {
+          "need": "state",
+          "field": "r2c2",
+          "not": 2,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r2c3",
+          "not": 2,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r3c1",
+          "not": 2,
+          "says": "repeated"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r2c1",
+          "to": 2,
+          "event": "digit_placed"
+        }
+      ]
+    },
+    "place_r2c1_3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r2c1",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c1",
+          "not": 3,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r2c2",
+          "not": 1,
+          "says": "order"
+        },
+        {
+          "need": "state",
+          "field": "r2c2",
+          "not": 2,
+          "says": "order"
+        },
+        {
+          "need": "state",
+          "field": "r2c2",
+          "not": 3,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r2c3",
+          "not": 3,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r3c1",
+          "not": 3,
+          "says": "repeated"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r2c1",
+          "to": 3,
+          "event": "digit_placed"
+        }
+      ]
+    },
+    "clear_r2c1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r2c1",
+          "at_least": 1,
+          "says": "already_blank"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r2c1",
+          "to": 0,
+          "event": "digit_cleared"
+        }
+      ]
+    },
+    "place_r2c2_1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r2c2",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c2",
+          "not": 1,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r2c1",
+          "not": 1,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r2c1",
+          "not": 2,
+          "says": "order"
+        },
+        {
+          "need": "state",
+          "field": "r2c1",
+          "not": 3,
+          "says": "order"
+        },
+        {
+          "need": "state",
+          "field": "r2c3",
+          "not": 1,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r3c2",
+          "not": 1,
+          "says": "repeated"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r2c2",
+          "to": 1,
+          "event": "digit_placed"
+        }
+      ]
+    },
+    "place_r2c2_2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r2c2",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c2",
+          "not": 2,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r2c1",
+          "not": 2,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r2c1",
+          "not": 3,
+          "says": "order"
+        },
+        {
+          "need": "state",
+          "field": "r2c3",
+          "not": 2,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r3c2",
+          "not": 2,
+          "says": "repeated"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r2c2",
+          "to": 2,
+          "event": "digit_placed"
+        }
+      ]
+    },
+    "place_r2c2_3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r2c2",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c2",
+          "not": 3,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r2c1",
+          "not": 3,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r2c3",
+          "not": 3,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r3c2",
+          "not": 3,
+          "says": "repeated"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r2c2",
+          "to": 3,
+          "event": "digit_placed"
+        }
+      ]
+    },
+    "clear_r2c2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r2c2",
+          "at_least": 1,
+          "says": "already_blank"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r2c2",
+          "to": 0,
+          "event": "digit_cleared"
+        }
+      ]
+    },
+    "place_r2c3_1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r2c3",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c3",
+          "not": 1,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r2c1",
+          "not": 1,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r2c2",
+          "not": 1,
+          "says": "repeated"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r2c3",
+          "to": 1,
+          "event": "digit_placed"
+        }
+      ]
+    },
+    "place_r2c3_3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r2c3",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c3",
+          "not": 1,
+          "says": "order"
+        },
+        {
+          "need": "state",
+          "field": "r1c3",
+          "not": 2,
+          "says": "order"
+        },
+        {
+          "need": "state",
+          "field": "r1c3",
+          "not": 3,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r2c1",
+          "not": 3,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r2c2",
+          "not": 3,
+          "says": "repeated"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r2c3",
+          "to": 3,
+          "event": "digit_placed"
+        }
+      ]
+    },
+    "clear_r2c3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r2c3",
+          "at_least": 1,
+          "says": "already_blank"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r2c3",
+          "to": 0,
+          "event": "digit_cleared"
+        }
+      ]
+    },
+    "place_r3c1_1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r3c1",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c1",
+          "not": 1,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r2c1",
+          "not": 1,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r3c2",
+          "not": 1,
+          "says": "repeated"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r3c1",
+          "to": 1,
+          "event": "digit_placed"
+        }
+      ]
+    },
+    "place_r3c1_3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r3c1",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c1",
+          "not": 3,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r2c1",
+          "not": 3,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r3c2",
+          "not": 3,
+          "says": "repeated"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r3c1",
+          "to": 3,
+          "event": "digit_placed"
+        }
+      ]
+    },
+    "clear_r3c1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r3c1",
+          "at_least": 1,
+          "says": "already_blank"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r3c1",
+          "to": 0,
+          "event": "digit_cleared"
+        }
+      ]
+    },
+    "place_r3c2_1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r3c2",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c2",
+          "not": 1,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r2c2",
+          "not": 1,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r3c1",
+          "not": 1,
+          "says": "repeated"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r3c2",
+          "to": 1,
+          "event": "digit_placed"
+        }
+      ]
+    },
+    "place_r3c2_3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r3c2",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "r1c2",
+          "not": 3,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r2c2",
+          "not": 3,
+          "says": "repeated"
+        },
+        {
+          "need": "state",
+          "field": "r3c1",
+          "not": 3,
+          "says": "repeated"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r3c2",
+          "to": 3,
+          "event": "digit_placed"
+        }
+      ]
+    },
+    "clear_r3c2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "r3c2",
+          "at_least": 1,
+          "says": "already_blank"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "r3c2",
+          "to": 0,
+          "event": "digit_cleared"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:inequality_square_board",
+    "table": [
+      {
+        "part": "digit_r1c1_1",
+        "field": "r1c1",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 1,
+          "2": 0,
+          "3": 0
+        }
+      },
+      {
+        "part": "digit_r1c1_2",
+        "field": "r1c1",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 1,
+          "3": 0
+        }
+      },
+      {
+        "part": "digit_r1c1_3",
+        "field": "r1c1",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 1
+        }
+      },
+      {
+        "part": "digit_r1c2_1",
+        "field": "r1c2",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 1,
+          "2": 0,
+          "3": 0
+        }
+      },
+      {
+        "part": "digit_r1c2_2",
+        "field": "r1c2",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 1,
+          "3": 0
+        }
+      },
+      {
+        "part": "digit_r1c2_3",
+        "field": "r1c2",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 1
+        }
+      },
+      {
+        "part": "digit_r1c3_1",
+        "field": "r1c3",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 1,
+          "2": 0,
+          "3": 0
+        }
+      },
+      {
+        "part": "digit_r1c3_3",
+        "field": "r1c3",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 1
+        }
+      },
+      {
+        "part": "digit_r2c1_1",
+        "field": "r2c1",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 1,
+          "2": 0,
+          "3": 0
+        }
+      },
+      {
+        "part": "digit_r2c1_2",
+        "field": "r2c1",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 1,
+          "3": 0
+        }
+      },
+      {
+        "part": "digit_r2c1_3",
+        "field": "r2c1",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 1
+        }
+      },
+      {
+        "part": "digit_r2c2_1",
+        "field": "r2c2",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 1,
+          "2": 0,
+          "3": 0
+        }
+      },
+      {
+        "part": "digit_r2c2_2",
+        "field": "r2c2",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 1,
+          "3": 0
+        }
+      },
+      {
+        "part": "digit_r2c2_3",
+        "field": "r2c2",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 1
+        }
+      },
+      {
+        "part": "digit_r2c3_1",
+        "field": "r2c3",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 1,
+          "2": 0,
+          "3": 0
+        }
+      },
+      {
+        "part": "digit_r2c3_3",
+        "field": "r2c3",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 1
+        }
+      },
+      {
+        "part": "digit_r3c1_1",
+        "field": "r3c1",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 1,
+          "2": 0,
+          "3": 0
+        }
+      },
+      {
+        "part": "digit_r3c1_3",
+        "field": "r3c1",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 1
+        }
+      },
+      {
+        "part": "digit_r3c2_1",
+        "field": "r3c2",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 1,
+          "2": 0,
+          "3": 0
+        }
+      },
+      {
+        "part": "digit_r3c2_3",
+        "field": "r3c2",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 1
+        }
+      }
+    ],
+    "shape": {
+      "round": 2,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            790,
+            0
+          ],
+          "size": [
+            1400,
+            40,
+            1400
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -630,
+            385,
+            -630
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -630,
+            385,
+            630
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            630,
+            385,
+            -630
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            630,
+            385,
+            630
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            817,
+            0
+          ],
+          "size": [
+            1350,
+            14,
+            1350
+          ],
+          "tint": "paper"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -300,
+            828,
+            -300
+          ],
+          "size": [
+            220,
+            8,
+            220
+          ],
+          "tint": "pad"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            828,
+            -300
+          ],
+          "size": [
+            220,
+            8,
+            220
+          ],
+          "tint": "pad"
+        },
+        {
+          "kind": "box",
+          "at": [
+            300,
+            828,
+            -300
+          ],
+          "size": [
+            220,
+            8,
+            220
+          ],
+          "tint": "pad"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -300,
+            828,
+            0
+          ],
+          "size": [
+            220,
+            8,
+            220
+          ],
+          "tint": "pad"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            828,
+            0
+          ],
+          "size": [
+            220,
+            8,
+            220
+          ],
+          "tint": "pad"
+        },
+        {
+          "kind": "box",
+          "at": [
+            300,
+            828,
+            0
+          ],
+          "size": [
+            220,
+            8,
+            220
+          ],
+          "tint": "pad"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -300,
+            828,
+            300
+          ],
+          "size": [
+            220,
+            8,
+            220
+          ],
+          "tint": "pad"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            828,
+            300
+          ],
+          "size": [
+            220,
+            8,
+            220
+          ],
+          "tint": "pad"
+        },
+        {
+          "kind": "box",
+          "at": [
+            300,
+            828,
+            300
+          ],
+          "size": [
+            220,
+            8,
+            220
+          ],
+          "tint": "given_pad"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -450,
+            826,
+            0
+          ],
+          "size": [
+            4,
+            4,
+            900
+          ],
+          "tint": "grid"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -150,
+            826,
+            0
+          ],
+          "size": [
+            4,
+            4,
+            900
+          ],
+          "tint": "grid"
+        },
+        {
+          "kind": "box",
+          "at": [
+            150,
+            826,
+            0
+          ],
+          "size": [
+            4,
+            4,
+            900
+          ],
+          "tint": "grid"
+        },
+        {
+          "kind": "box",
+          "at": [
+            450,
+            826,
+            0
+          ],
+          "size": [
+            4,
+            4,
+            900
+          ],
+          "tint": "grid"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            826,
+            -450
+          ],
+          "size": [
+            900,
+            4,
+            4
+          ],
+          "tint": "grid"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            826,
+            -150
+          ],
+          "size": [
+            900,
+            4,
+            4
+          ],
+          "tint": "grid"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            826,
+            150
+          ],
+          "size": [
+            900,
+            4,
+            4
+          ],
+          "tint": "grid"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            826,
+            450
+          ],
+          "size": [
+            900,
+            4,
+            4
+          ],
+          "tint": "grid"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            -300,
+            824,
+            -540
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -21,
+              -21
+            ],
+            [
+              -7,
+              -21
+            ],
+            [
+              -7,
+              -35
+            ],
+            [
+              7,
+              -35
+            ],
+            [
+              7,
+              21
+            ],
+            [
+              21,
+              21
+            ],
+            [
+              21,
+              35
+            ],
+            [
+              -21,
+              35
+            ],
+            [
+              -21,
+              21
+            ],
+            [
+              -7,
+              21
+            ],
+            [
+              -7,
+              -7
+            ],
+            [
+              -21,
+              -7
+            ]
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            824,
+            -540
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -21,
+              -35
+            ],
+            [
+              21,
+              -35
+            ],
+            [
+              21,
+              7
+            ],
+            [
+              -7,
+              7
+            ],
+            [
+              -7,
+              21
+            ],
+            [
+              21,
+              21
+            ],
+            [
+              21,
+              35
+            ],
+            [
+              -21,
+              35
+            ],
+            [
+              -21,
+              -7
+            ],
+            [
+              7,
+              -7
+            ],
+            [
+              7,
+              -21
+            ],
+            [
+              -21,
+              -21
+            ]
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            300,
+            824,
+            -540
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -21,
+              -35
+            ],
+            [
+              21,
+              -35
+            ],
+            [
+              21,
+              35
+            ],
+            [
+              -21,
+              35
+            ],
+            [
+              -21,
+              21
+            ],
+            [
+              7,
+              21
+            ],
+            [
+              7,
+              7
+            ],
+            [
+              -21,
+              7
+            ],
+            [
+              -21,
+              -7
+            ],
+            [
+              7,
+              -7
+            ],
+            [
+              7,
+              -21
+            ],
+            [
+              -21,
+              -21
+            ]
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            -540,
+            824,
+            -300
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -21,
+              -21
+            ],
+            [
+              -7,
+              -21
+            ],
+            [
+              -7,
+              -35
+            ],
+            [
+              7,
+              -35
+            ],
+            [
+              7,
+              21
+            ],
+            [
+              21,
+              21
+            ],
+            [
+              21,
+              35
+            ],
+            [
+              -21,
+              35
+            ],
+            [
+              -21,
+              21
+            ],
+            [
+              -7,
+              21
+            ],
+            [
+              -7,
+              -7
+            ],
+            [
+              -21,
+              -7
+            ]
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            -540,
+            824,
+            0
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -21,
+              -35
+            ],
+            [
+              21,
+              -35
+            ],
+            [
+              21,
+              7
+            ],
+            [
+              -7,
+              7
+            ],
+            [
+              -7,
+              21
+            ],
+            [
+              21,
+              21
+            ],
+            [
+              21,
+              35
+            ],
+            [
+              -21,
+              35
+            ],
+            [
+              -21,
+              -7
+            ],
+            [
+              7,
+              -7
+            ],
+            [
+              7,
+              -21
+            ],
+            [
+              -21,
+              -21
+            ]
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            -540,
+            824,
+            300
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -21,
+              -35
+            ],
+            [
+              21,
+              -35
+            ],
+            [
+              21,
+              35
+            ],
+            [
+              -21,
+              35
+            ],
+            [
+              -21,
+              21
+            ],
+            [
+              7,
+              21
+            ],
+            [
+              7,
+              7
+            ],
+            [
+              -21,
+              7
+            ],
+            [
+              -21,
+              -7
+            ],
+            [
+              7,
+              -7
+            ],
+            [
+              7,
+              -21
+            ],
+            [
+              -21,
+              -21
+            ]
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -150,
+            827,
+            -314
+          ],
+          "size": [
+            8,
+            6,
+            56
+          ],
+          "tint": "ink",
+          "yaw": 120256
+        },
+        {
+          "kind": "box",
+          "at": [
+            -150,
+            827,
+            -286
+          ],
+          "size": [
+            8,
+            6,
+            56
+          ],
+          "tint": "ink",
+          "yaw": 59744
+        },
+        {
+          "kind": "box",
+          "at": [
+            -150,
+            827,
+            -14
+          ],
+          "size": [
+            8,
+            6,
+            56
+          ],
+          "tint": "ink",
+          "yaw": 120256
+        },
+        {
+          "kind": "box",
+          "at": [
+            -150,
+            827,
+            14
+          ],
+          "size": [
+            8,
+            6,
+            56
+          ],
+          "tint": "ink",
+          "yaw": 59744
+        },
+        {
+          "kind": "box",
+          "at": [
+            286,
+            827,
+            -150
+          ],
+          "size": [
+            8,
+            6,
+            56
+          ],
+          "tint": "ink",
+          "yaw": -149744
+        },
+        {
+          "kind": "box",
+          "at": [
+            314,
+            827,
+            -150
+          ],
+          "size": [
+            8,
+            6,
+            56
+          ],
+          "tint": "ink",
+          "yaw": 149744
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            300,
+            832,
+            300
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -36,
+              -60
+            ],
+            [
+              36,
+              -60
+            ],
+            [
+              36,
+              12
+            ],
+            [
+              -12,
+              12
+            ],
+            [
+              -12,
+              36
+            ],
+            [
+              36,
+              36
+            ],
+            [
+              36,
+              60
+            ],
+            [
+              -36,
+              60
+            ],
+            [
+              -36,
+              -12
+            ],
+            [
+              12,
+              -12
+            ],
+            [
+              12,
+              -36
+            ],
+            [
+              -36,
+              -36
+            ]
+          ],
+          "tint": "given"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            -300,
+            832,
+            -300
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -36,
+              -36
+            ],
+            [
+              -12,
+              -36
+            ],
+            [
+              -12,
+              -60
+            ],
+            [
+              12,
+              -60
+            ],
+            [
+              12,
+              36
+            ],
+            [
+              36,
+              36
+            ],
+            [
+              36,
+              60
+            ],
+            [
+              -36,
+              60
+            ],
+            [
+              -36,
+              36
+            ],
+            [
+              -12,
+              36
+            ],
+            [
+              -12,
+              -12
+            ],
+            [
+              -36,
+              -12
+            ]
+          ],
+          "tint": "digit",
+          "role": "digit_r1c1_1"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            -300,
+            832,
+            -300
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -36,
+              -60
+            ],
+            [
+              36,
+              -60
+            ],
+            [
+              36,
+              12
+            ],
+            [
+              -12,
+              12
+            ],
+            [
+              -12,
+              36
+            ],
+            [
+              36,
+              36
+            ],
+            [
+              36,
+              60
+            ],
+            [
+              -36,
+              60
+            ],
+            [
+              -36,
+              -12
+            ],
+            [
+              12,
+              -12
+            ],
+            [
+              12,
+              -36
+            ],
+            [
+              -36,
+              -36
+            ]
+          ],
+          "tint": "digit",
+          "role": "digit_r1c1_2"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            -300,
+            832,
+            -300
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -36,
+              -60
+            ],
+            [
+              36,
+              -60
+            ],
+            [
+              36,
+              60
+            ],
+            [
+              -36,
+              60
+            ],
+            [
+              -36,
+              36
+            ],
+            [
+              12,
+              36
+            ],
+            [
+              12,
+              12
+            ],
+            [
+              -36,
+              12
+            ],
+            [
+              -36,
+              -12
+            ],
+            [
+              12,
+              -12
+            ],
+            [
+              12,
+              -36
+            ],
+            [
+              -36,
+              -36
+            ]
+          ],
+          "tint": "digit",
+          "role": "digit_r1c1_3"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            832,
+            -300
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -36,
+              -36
+            ],
+            [
+              -12,
+              -36
+            ],
+            [
+              -12,
+              -60
+            ],
+            [
+              12,
+              -60
+            ],
+            [
+              12,
+              36
+            ],
+            [
+              36,
+              36
+            ],
+            [
+              36,
+              60
+            ],
+            [
+              -36,
+              60
+            ],
+            [
+              -36,
+              36
+            ],
+            [
+              -12,
+              36
+            ],
+            [
+              -12,
+              -12
+            ],
+            [
+              -36,
+              -12
+            ]
+          ],
+          "tint": "digit",
+          "role": "digit_r1c2_1"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            832,
+            -300
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -36,
+              -60
+            ],
+            [
+              36,
+              -60
+            ],
+            [
+              36,
+              12
+            ],
+            [
+              -12,
+              12
+            ],
+            [
+              -12,
+              36
+            ],
+            [
+              36,
+              36
+            ],
+            [
+              36,
+              60
+            ],
+            [
+              -36,
+              60
+            ],
+            [
+              -36,
+              -12
+            ],
+            [
+              12,
+              -12
+            ],
+            [
+              12,
+              -36
+            ],
+            [
+              -36,
+              -36
+            ]
+          ],
+          "tint": "digit",
+          "role": "digit_r1c2_2"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            832,
+            -300
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -36,
+              -60
+            ],
+            [
+              36,
+              -60
+            ],
+            [
+              36,
+              60
+            ],
+            [
+              -36,
+              60
+            ],
+            [
+              -36,
+              36
+            ],
+            [
+              12,
+              36
+            ],
+            [
+              12,
+              12
+            ],
+            [
+              -36,
+              12
+            ],
+            [
+              -36,
+              -12
+            ],
+            [
+              12,
+              -12
+            ],
+            [
+              12,
+              -36
+            ],
+            [
+              -36,
+              -36
+            ]
+          ],
+          "tint": "digit",
+          "role": "digit_r1c2_3"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            300,
+            832,
+            -300
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -36,
+              -36
+            ],
+            [
+              -12,
+              -36
+            ],
+            [
+              -12,
+              -60
+            ],
+            [
+              12,
+              -60
+            ],
+            [
+              12,
+              36
+            ],
+            [
+              36,
+              36
+            ],
+            [
+              36,
+              60
+            ],
+            [
+              -36,
+              60
+            ],
+            [
+              -36,
+              36
+            ],
+            [
+              -12,
+              36
+            ],
+            [
+              -12,
+              -12
+            ],
+            [
+              -36,
+              -12
+            ]
+          ],
+          "tint": "digit",
+          "role": "digit_r1c3_1"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            300,
+            832,
+            -300
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -36,
+              -60
+            ],
+            [
+              36,
+              -60
+            ],
+            [
+              36,
+              60
+            ],
+            [
+              -36,
+              60
+            ],
+            [
+              -36,
+              36
+            ],
+            [
+              12,
+              36
+            ],
+            [
+              12,
+              12
+            ],
+            [
+              -36,
+              12
+            ],
+            [
+              -36,
+              -12
+            ],
+            [
+              12,
+              -12
+            ],
+            [
+              12,
+              -36
+            ],
+            [
+              -36,
+              -36
+            ]
+          ],
+          "tint": "digit",
+          "role": "digit_r1c3_3"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            -300,
+            832,
+            0
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -36,
+              -36
+            ],
+            [
+              -12,
+              -36
+            ],
+            [
+              -12,
+              -60
+            ],
+            [
+              12,
+              -60
+            ],
+            [
+              12,
+              36
+            ],
+            [
+              36,
+              36
+            ],
+            [
+              36,
+              60
+            ],
+            [
+              -36,
+              60
+            ],
+            [
+              -36,
+              36
+            ],
+            [
+              -12,
+              36
+            ],
+            [
+              -12,
+              -12
+            ],
+            [
+              -36,
+              -12
+            ]
+          ],
+          "tint": "digit",
+          "role": "digit_r2c1_1"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            -300,
+            832,
+            0
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -36,
+              -60
+            ],
+            [
+              36,
+              -60
+            ],
+            [
+              36,
+              12
+            ],
+            [
+              -12,
+              12
+            ],
+            [
+              -12,
+              36
+            ],
+            [
+              36,
+              36
+            ],
+            [
+              36,
+              60
+            ],
+            [
+              -36,
+              60
+            ],
+            [
+              -36,
+              -12
+            ],
+            [
+              12,
+              -12
+            ],
+            [
+              12,
+              -36
+            ],
+            [
+              -36,
+              -36
+            ]
+          ],
+          "tint": "digit",
+          "role": "digit_r2c1_2"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            -300,
+            832,
+            0
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -36,
+              -60
+            ],
+            [
+              36,
+              -60
+            ],
+            [
+              36,
+              60
+            ],
+            [
+              -36,
+              60
+            ],
+            [
+              -36,
+              36
+            ],
+            [
+              12,
+              36
+            ],
+            [
+              12,
+              12
+            ],
+            [
+              -36,
+              12
+            ],
+            [
+              -36,
+              -12
+            ],
+            [
+              12,
+              -12
+            ],
+            [
+              12,
+              -36
+            ],
+            [
+              -36,
+              -36
+            ]
+          ],
+          "tint": "digit",
+          "role": "digit_r2c1_3"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            832,
+            0
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -36,
+              -36
+            ],
+            [
+              -12,
+              -36
+            ],
+            [
+              -12,
+              -60
+            ],
+            [
+              12,
+              -60
+            ],
+            [
+              12,
+              36
+            ],
+            [
+              36,
+              36
+            ],
+            [
+              36,
+              60
+            ],
+            [
+              -36,
+              60
+            ],
+            [
+              -36,
+              36
+            ],
+            [
+              -12,
+              36
+            ],
+            [
+              -12,
+              -12
+            ],
+            [
+              -36,
+              -12
+            ]
+          ],
+          "tint": "digit",
+          "role": "digit_r2c2_1"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            832,
+            0
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -36,
+              -60
+            ],
+            [
+              36,
+              -60
+            ],
+            [
+              36,
+              12
+            ],
+            [
+              -12,
+              12
+            ],
+            [
+              -12,
+              36
+            ],
+            [
+              36,
+              36
+            ],
+            [
+              36,
+              60
+            ],
+            [
+              -36,
+              60
+            ],
+            [
+              -36,
+              -12
+            ],
+            [
+              12,
+              -12
+            ],
+            [
+              12,
+              -36
+            ],
+            [
+              -36,
+              -36
+            ]
+          ],
+          "tint": "digit",
+          "role": "digit_r2c2_2"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            832,
+            0
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -36,
+              -60
+            ],
+            [
+              36,
+              -60
+            ],
+            [
+              36,
+              60
+            ],
+            [
+              -36,
+              60
+            ],
+            [
+              -36,
+              36
+            ],
+            [
+              12,
+              36
+            ],
+            [
+              12,
+              12
+            ],
+            [
+              -36,
+              12
+            ],
+            [
+              -36,
+              -12
+            ],
+            [
+              12,
+              -12
+            ],
+            [
+              12,
+              -36
+            ],
+            [
+              -36,
+              -36
+            ]
+          ],
+          "tint": "digit",
+          "role": "digit_r2c2_3"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            300,
+            832,
+            0
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -36,
+              -36
+            ],
+            [
+              -12,
+              -36
+            ],
+            [
+              -12,
+              -60
+            ],
+            [
+              12,
+              -60
+            ],
+            [
+              12,
+              36
+            ],
+            [
+              36,
+              36
+            ],
+            [
+              36,
+              60
+            ],
+            [
+              -36,
+              60
+            ],
+            [
+              -36,
+              36
+            ],
+            [
+              -12,
+              36
+            ],
+            [
+              -12,
+              -12
+            ],
+            [
+              -36,
+              -12
+            ]
+          ],
+          "tint": "digit",
+          "role": "digit_r2c3_1"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            300,
+            832,
+            0
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -36,
+              -60
+            ],
+            [
+              36,
+              -60
+            ],
+            [
+              36,
+              60
+            ],
+            [
+              -36,
+              60
+            ],
+            [
+              -36,
+              36
+            ],
+            [
+              12,
+              36
+            ],
+            [
+              12,
+              12
+            ],
+            [
+              -36,
+              12
+            ],
+            [
+              -36,
+              -12
+            ],
+            [
+              12,
+              -12
+            ],
+            [
+              12,
+              -36
+            ],
+            [
+              -36,
+              -36
+            ]
+          ],
+          "tint": "digit",
+          "role": "digit_r2c3_3"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            -300,
+            832,
+            300
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -36,
+              -36
+            ],
+            [
+              -12,
+              -36
+            ],
+            [
+              -12,
+              -60
+            ],
+            [
+              12,
+              -60
+            ],
+            [
+              12,
+              36
+            ],
+            [
+              36,
+              36
+            ],
+            [
+              36,
+              60
+            ],
+            [
+              -36,
+              60
+            ],
+            [
+              -36,
+              36
+            ],
+            [
+              -12,
+              36
+            ],
+            [
+              -12,
+              -12
+            ],
+            [
+              -36,
+              -12
+            ]
+          ],
+          "tint": "digit",
+          "role": "digit_r3c1_1"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            -300,
+            832,
+            300
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -36,
+              -60
+            ],
+            [
+              36,
+              -60
+            ],
+            [
+              36,
+              60
+            ],
+            [
+              -36,
+              60
+            ],
+            [
+              -36,
+              36
+            ],
+            [
+              12,
+              36
+            ],
+            [
+              12,
+              12
+            ],
+            [
+              -36,
+              12
+            ],
+            [
+              -36,
+              -12
+            ],
+            [
+              12,
+              -12
+            ],
+            [
+              12,
+              -36
+            ],
+            [
+              -36,
+              -36
+            ]
+          ],
+          "tint": "digit",
+          "role": "digit_r3c1_3"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            832,
+            300
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -36,
+              -36
+            ],
+            [
+              -12,
+              -36
+            ],
+            [
+              -12,
+              -60
+            ],
+            [
+              12,
+              -60
+            ],
+            [
+              12,
+              36
+            ],
+            [
+              36,
+              36
+            ],
+            [
+              36,
+              60
+            ],
+            [
+              -36,
+              60
+            ],
+            [
+              -36,
+              36
+            ],
+            [
+              -12,
+              36
+            ],
+            [
+              -12,
+              -12
+            ],
+            [
+              -36,
+              -12
+            ]
+          ],
+          "tint": "digit",
+          "role": "digit_r3c2_1"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            832,
+            300
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -36,
+              -60
+            ],
+            [
+              36,
+              -60
+            ],
+            [
+              36,
+              60
+            ],
+            [
+              -36,
+              60
+            ],
+            [
+              -36,
+              36
+            ],
+            [
+              12,
+              36
+            ],
+            [
+              12,
+              12
+            ],
+            [
+              -36,
+              12
+            ],
+            [
+              -36,
+              -12
+            ],
+            [
+              12,
+              -12
+            ],
+            [
+              12,
+              -36
+            ],
+            [
+              -36,
+              -36
+            ]
+          ],
+          "tint": "digit",
+          "role": "digit_r3c2_3"
+        }
+      ],
+      "palette": {
+        "wood": "#75543b",
+        "paper": "#eee2c3",
+        "pad": "#c9d2d4",
+        "given_pad": "#d6b476",
+        "given": "#142833",
+        "grid": "#526369",
+        "ink": "#142833",
+        "digit": "#214b76"
+      },
+      "tags": [
+        "puzzle",
+        "inequality",
+        "square",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "puzzle": "puzzle",
+    "card": "Complete a three-by-three digit square using row, column and ordering clues.",
+    "square": "inequality Latin square",
+    "hands_empty": "Put down what you hold before changing an indicator.",
+    "occupied": "Clear that cell before placing a different digit.",
+    "repeated": "That digit already appears in this row or column. Clear a conflicting choice.",
+    "order": "These two filled cells would violate the fixed strict inequality. Clear or choose another digit.",
+    "already_blank": "That cell is already blank. Choose a filled mutable cell to clear.",
+    "coordinates": "Rows1 to3 run from the far/top edge toward the near/bottom edge; columns1 to3 run left to right. Fixed numeric references identify them. The highlighted bottom-right r3c3 shows an immutable2. Every other cell has its own integral numeral indicators.",
+    "rules": "Place digits1,2,3 so each appears exactly once in every completed row and column. A mutable blank is0. Place only in a blank cell and clear a filled mutable cell before replacing it. No two filled cells may repeat a digit in a row or column. The fixed2 removes the digit2 choice from r1c3,r2c3,r3c1,r3c2. Other offered digits include recoverable mistakes.",
+    "clues": "Each fixed two-stroke inequality points at its smaller cell: r1c1<r1c2, r2c1<r2c2 and r2c3<r1c3. A clue with a blank endpoint does not compare values yet. When both are filled, strict numeric order must hold. Thus a smaller3 or larger1 can be placed while its neighbor is blank but can create a dead end. No automatic deduction is performed.",
+    "solution": "The unique full square is123/231/312 from far row to near row. The following literal choices are an example solution, not an automatic solver. Clear mutable cells individually to return to eight blanks and the same fixed2.",
+    "backtrack": "The partial103/021/312 is a maximal incomplete dead end: no placement remains. Clear r2c2=2, then place r1c2=2,r2c1=2,r2c2=3 to complete123/231/312. Individual clearing is the recovery action; there is no reset.",
+    "order_examples": "From legal partial020/013/002, placing r1c1=3 violates3<2, placing r2c1=2 violates2<1 and placing r1c3=1 violates3<1. These compare distinct digits without a row or column repeat; each independently violates only its own clue.",
+    "limits": "The mutable fields select fixed connected mounted numeral silhouettes, and the given2 is immutable drawing. This is not physical writing, erasing, loose digit custody or material consumption. No score, turn, solver, completion feedback, reset or timer is claimed."
+  },
+  "card": {
+    "text": "card",
+    "category": "puzzle",
+    "synonyms": [
+      "square"
+    ]
+  },
+  "howtos": {
+    "coordinates": {
+      "text": "coordinates",
+      "steps": [
+        {
+          "form": "place_r1c1_1"
+        },
+        {
+          "form": "clear_r1c1"
+        }
+      ]
+    },
+    "ordering": {
+      "text": "clues",
+      "steps": [
+        {
+          "form": "place_r1c1_1"
+        },
+        {
+          "form": "place_r1c2_2"
+        },
+        {
+          "form": "clear_r1c2"
+        },
+        {
+          "form": "clear_r1c1"
+        }
+      ]
+    },
+    "rules": {
+      "text": "rules",
+      "steps": [
+        {
+          "form": "place_r3c1_3"
+        },
+        {
+          "form": "clear_r3c1"
+        }
+      ]
+    },
+    "solution": {
+      "text": "solution",
+      "steps": [
+        {
+          "form": "place_r1c1_1"
+        },
+        {
+          "form": "place_r1c2_2"
+        },
+        {
+          "form": "place_r1c3_3"
+        },
+        {
+          "form": "place_r2c1_2"
+        },
+        {
+          "form": "place_r2c2_3"
+        },
+        {
+          "form": "place_r2c3_1"
+        },
+        {
+          "form": "place_r3c1_3"
+        },
+        {
+          "form": "place_r3c2_1"
+        },
+        {
+          "form": "clear_r3c2"
+        },
+        {
+          "form": "clear_r3c1"
+        },
+        {
+          "form": "clear_r2c3"
+        },
+        {
+          "form": "clear_r2c2"
+        },
+        {
+          "form": "clear_r2c1"
+        },
+        {
+          "form": "clear_r1c3"
+        },
+        {
+          "form": "clear_r1c2"
+        },
+        {
+          "form": "clear_r1c1"
+        }
+      ]
+    },
+    "backtracking": {
+      "text": "backtrack",
+      "steps": [
+        {
+          "form": "place_r1c1_1"
+        },
+        {
+          "form": "place_r1c3_3"
+        },
+        {
+          "form": "place_r2c2_2"
+        },
+        {
+          "form": "place_r2c3_1"
+        },
+        {
+          "form": "place_r3c1_3"
+        },
+        {
+          "form": "place_r3c2_1"
+        },
+        {
+          "form": "clear_r2c2"
+        },
+        {
+          "form": "place_r1c2_2"
+        },
+        {
+          "form": "place_r2c1_2"
+        },
+        {
+          "form": "place_r2c2_3"
+        },
+        {
+          "form": "clear_r3c2"
+        },
+        {
+          "form": "clear_r3c1"
+        },
+        {
+          "form": "clear_r2c3"
+        },
+        {
+          "form": "clear_r2c2"
+        },
+        {
+          "form": "clear_r2c1"
+        },
+        {
+          "form": "clear_r1c3"
+        },
+        {
+          "form": "clear_r1c2"
+        },
+        {
+          "form": "clear_r1c1"
+        }
+      ]
+    },
+    "fixed_indicators": {
+      "text": "limits",
+      "steps": [
+        {
+          "form": "place_r1c1_1"
+        },
+        {
+          "form": "clear_r1c1"
+        }
+      ]
+    }
+  }
+}
