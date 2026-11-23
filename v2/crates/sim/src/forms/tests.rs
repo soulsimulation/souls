@@ -91,6 +91,8 @@ struct Snap {
     /// Every distance is this far, when set.
     far: bool,
     defer_walk: bool,
+    /// Every walk's plan is no way (no legs), when set.
+    no_way: bool,
     /// The thing every move aims at, when set (worldd's thing argument).
     aimed: Option<Id>,
 }
@@ -99,6 +101,8 @@ impl Geometry for Snap {
     fn plan_walk(&self, _: Id, _: usize, _: Id, _: Vec3, _: i64) -> replica::host::WalkPlan {
         if self.defer_walk {
             replica::host::WalkPlan::Pending
+        } else if self.no_way {
+            replica::host::WalkPlan::Legs(Vec::new())
         } else {
             replica::host::WalkPlan::Unplanned
         }
@@ -636,6 +640,31 @@ fn effecting() -> (json::Value, String) {
 }
 
 /// `entry` with every `move` step taken out of its forms: a form with no hand step.
+/// `v` with every `walk_to` step taken out of its forms (S11).
+fn without_walks(v: &json::Value) -> json::Value {
+    match v {
+        json::Value::Obj(o) => json::Value::Obj(
+            o.iter()
+                .map(|(k, x)| match (k.as_str(), x) {
+                    ("steps", json::Value::Arr(s)) => (
+                        k.clone(),
+                        json::Value::Arr(
+                            s.iter()
+                                .filter(|st| {
+                                    st.get("step").and_then(json::Value::str) != Some("walk_to")
+                                })
+                                .cloned()
+                                .collect(),
+                        ),
+                    ),
+                    _ => (k.clone(), without_walks(x)),
+                })
+                .collect(),
+        ),
+        other => other.clone(),
+    }
+}
+
 fn without_moves(v: &json::Value) -> json::Value {
     match v {
         json::Value::Obj(o) => json::Value::Obj(
@@ -1213,6 +1242,59 @@ fn s11_a_walking_run_whose_legs_another_walk_takes_ends_claim_taken() {
         "the other walk keeps its claim"
     );
     b.c.release(body, other).unwrap();
+    b.clean();
+}
+
+/// S11 review: an approach whose plan, awaited, is no way goes straight to its move, and gives back the route claim
+/// it awaited the plan with. A Soul's own walk arriving during that move leaves the run at the move's phase end
+/// (`left`, intents rule 10), not `claim-taken` mid-contact.
+#[test]
+fn s11_an_approach_with_no_way_moves_and_a_souls_walk_leaves_it_at_the_phase_end() {
+    // The doorbell's ring without its walk: it starts with a move at the button, so the binding walks there first.
+    let (entry, form) = entries().remove(0);
+    let entry = without_walks(&entry);
+    assert!(matches!(
+        bind(&entry, &form).expect("binds").first(),
+        Some(skills::form_runner::Step::WalkTo { approach: true, .. })
+    ));
+    let mut b = Bench::new();
+    // Within reach of the button: the move needs no walk.
+    let (body, node) = b.add(&entry, Vec3::new(0, 0, -400_000), Vec3::ZERO);
+    b.snap.defer_walk = true;
+    b.start(body, node, &entry, &form, Limits::default());
+    let run = b.forms.by_body[&body];
+    assert!(
+        b.forms.runs[&run].walk.is_some(),
+        "the plan is awaited with a route claim"
+    );
+    (b.snap.defer_walk, b.snap.no_way) = (false, true);
+    b.tick();
+    assert!(
+        b.forms.in_hand_move(body),
+        "no way: straight to the move; at {:?}, ended {:?}, planning {:?}",
+        b.forms.at(body),
+        b.forms.ended,
+        b.forms.planning
+    );
+    assert!(
+        b.forms.runs[&run].walk.is_none(),
+        "the route claim is given back"
+    );
+    // The Soul's own walk: its claim on the legs, and the world leaves the run (acts.rs, rule 10).
+    let walk =
+        b.c.claim(body, &skills::route::Route::sent(0, 0).shape())
+            .unwrap();
+    let now = b.now;
+    let (mut w, forms) = b.world();
+    forms.leave(&mut w, body, None, now).unwrap();
+    while b.forms.ended.is_empty() && b.now < 30_000_000 {
+        b.tick();
+    }
+    let [e] = b.forms.ended.as_slice() else {
+        panic!("{:?}", b.forms.ended)
+    };
+    assert_eq!(e.how.as_str(), "left", "left at the move's phase end");
+    b.c.release(body, walk).unwrap();
     b.clean();
 }
 

@@ -373,8 +373,9 @@ fn stuck_report(
 ) -> serde_like::Obj {
     const STUCK_MS: u64 = 60_000;
     // S11: a Soul whose act is unanswered for 60 s is on its way, not stuck, when the public stream shows its body
-    // moving at the window's end (its last motion sample there or before has a speed) or a metre or more apart within
-    // the window. With no stream, or no sample of its body, it counts as stuck.
+    // moving within the window (a motion sample with a speed that arrived in it), or a metre or more on, net, from
+    // where it was at the window's start (its last sample by then) to where it was at its end. A Soul moved by others
+    // (pushed, stepped aside) counts as on its way too. With no stream, or no sample of its body, it counts as stuck.
     let moved = |k: usize, (from, to): (u64, u64)| -> bool {
         let Some(samples) = bodies
             .get(k)
@@ -384,18 +385,17 @@ fn stuck_report(
         else {
             return false;
         };
-        let upto: Vec<&stream::Sample> = samples.iter().filter(|x| x.0 <= to).collect();
-        if upto.last().is_some_and(|x| x.3) {
+        if samples.iter().any(|x| x.0 >= from && x.0 <= to && x.3) {
             return true;
         }
-        let start = upto.iter().rposition(|x| x.0 <= from).unwrap_or(0);
-        let w = &upto[start..];
-        w.iter().any(|a| {
-            w.iter().any(|b| {
+        let at = |t: u64| samples.iter().rfind(|x| x.0 <= t);
+        match (at(from).or(samples.first()), at(to)) {
+            (Some(a), Some(b)) => {
                 let (dx, dz) = ((a.2[0] - b.2[0]) as i128, (a.2[1] - b.2[1]) as i128);
                 a.1 == b.1 && dx * dx + dz * dz >= MOVED_UM * MOVED_UM
-            })
-        })
+            }
+            _ => false,
+        }
     };
     let who = |f: &dyn Fn(&Sent) -> bool| -> Vec<String> {
         agents
@@ -429,7 +429,7 @@ fn stuck_report(
     serde_like::Obj::new()
         .raw(
             "rule",
-            "\"stuck: an act unanswered for 60 s while its Soul, as the public stream shows it, was neither moving nor 1 m on\"".into(),
+            "\"stuck: an act unanswered for 60 s while its Soul, as the public stream shows it, neither moved within that time nor ended it 1 m or more from where it began it; a Soul moved by others counts as moving\"".into(),
         )
         .n("stuck", stuck.len() as f64)
         .n("onTheirWay", on_way.len() as f64)
@@ -1917,8 +1917,11 @@ mod tests {
         let bodies: Vec<Option<Id>> =
             vec![Some(id(1)), Some(id(2)), Some(id(3)), None, Some(id(5))];
         let motion: Motion = HashMap::from([
-            // Walking a straight leg since before the window: its last sample has a speed.
-            (id(1), vec![(500, ground, [0, 0], true)]),
+            // Walking in the window: a sample with a speed in it.
+            (
+                id(1),
+                vec![(500, ground, [0, 0], false), (30_000, ground, [0, 0], true)],
+            ),
             // Stopped in the window after 5 m: on its way.
             (
                 id(2),
@@ -1927,8 +1930,15 @@ mod tests {
                     (20_000, ground, [5_000_000, 0], false),
                 ],
             ),
-            // Standing the whole window.
-            (id(3), vec![(500, ground, [0, 0], false)]),
+            // A speed before the window only, and back where it began by its end: stuck.
+            (
+                id(3),
+                vec![
+                    (500, ground, [0, 0], true),
+                    (20_000, ground, [3_000_000, 0], false),
+                    (60_000, ground, [0, 0], false),
+                ],
+            ),
         ]);
         let json = stuck_report(&agents, Some(&motion), &bodies).json();
         assert!(json.contains("\"stuck\": 2"), "{json}");
