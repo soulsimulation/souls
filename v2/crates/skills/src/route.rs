@@ -21,8 +21,8 @@
 //!   a mouth or walls a walker in.
 //! - **Along an edge.** The mover slides the part of a step past the ground's edge along it. A step that left the body
 //!   where it was is tried next tick turned by 45 and then 70 degrees, either way (N7 tried them in the same tick on a
-//!   copy; through the host the skill sees each result a tick later, T1). For [`EDGE`] ticks after the mover moved it
-//!   otherwise than asked, a walker keeps its step within the guard's bounds however the mover may slide it (#4215).
+//!   copy; through the host the skill sees each result a tick later, T1). A slide is not guarded: it may close a little
+//!   on a body beside the edge, which [`SLACK`] covers in part (#4215).
 //! - **N10's ladder** (T9c #3127) reaches the walk by fields the world sets on its body: [`F_SHOULDER`] (no body
 //!   pushes it), [`F_ROUTE`] (a new route, walked from its first leg) and [`F_HELD`] (the world walks it out to legal
 //!   ground: it stands and clears its mark). Ending the walk by name is the world's: the run is ended. A route taken,
@@ -78,8 +78,6 @@ pub const HOLD: u32 = 10;
 pub const CROWDED: i64 = 3_000_000;
 /// A body this much above or below a walker, µm, stands on another level: it neither pushes nor holds it (#4215).
 pub const LEVEL: i64 = 1_000_000;
-/// A walker the mover moved otherwise than asked (at a ground edge) is taken to be near one for this many ticks.
-pub const EDGE: u32 = 20;
 /// A yielding walker stands this many ticks while the lower id holding it is near.
 pub const BACK: u32 = 10;
 
@@ -128,8 +126,6 @@ pub struct Route {
     yielding: Option<(Id, u32)>,
     /// Standing aside while waiting: where it stood last tick and the side it steps to.
     aside: Option<(Vec3, i64)>,
-    /// Ticks left near a ground edge (#4215).
-    edge: u32,
 }
 
 impl Route {
@@ -149,7 +145,6 @@ impl Route {
             window: None,
             yielding: None,
             aside: None,
-            edge: 0,
         }
     }
 
@@ -293,11 +288,7 @@ fn turned(v: [i64; 2], (c, s): (i64, i64)) -> [i64; 2] {
 /// other body keeps its own half from the same snapshot, so no pair ends a tick nearer than `room` that was not; one
 /// already inside never gets nearer. Each cut takes only the excess toward that body (a slide, its side step kept);
 /// a velocity still over a bound after three passes is a wait.
-///
-/// `edge`: the walker is near a ground edge (the mover lately moved it otherwise than asked). The mover slides the part
-/// of a step past an edge along it, which may turn it toward a body; near an edge the step keeps its bounds however
-/// the edge lies.
-fn guard(p: [i64; 2], v: [i64; 2], dt: Micros, near: &[Near], room: i64, edge: bool) -> [i64; 2] {
+fn guard(p: [i64; 2], v: [i64; 2], dt: Micros, near: &[Near], room: i64) -> [i64; 2] {
     let dt = i128::from(dt.max(1));
     let bounds: Vec<([i128; 2], i128, i128)> = near
         .iter()
@@ -335,20 +326,6 @@ fn guard(p: [i64; 2], v: [i64; 2], dt: Micros, near: &[Near], room: i64, edge: b
     }
     if bounds.iter().any(|b| over(v, b) > 0) {
         return [0, 0];
-    }
-    if edge {
-        // Near an edge the mover may slide the step along it, toward a body. A slide keeps the part of the step along
-        // the edge, so over every way the edge may lie, the most it can close on a body is half the step's speed plus
-        // half its speed toward it: that keeps within each bound. A step straight away from a body is always safe.
-        let speed = (v[0] * v[0] + v[1] * v[1]).isqrt();
-        let mut keep = 1_000_000i128;
-        for (u, gap, most) in &bounds {
-            let toward = (v[0] * u[0] + v[1] * u[1]) / gap;
-            if speed + toward > 2 * most {
-                keep = keep.min(2 * most * 1_000_000 / (speed + toward));
-            }
-        }
-        v = [v[0] * keep / 1_000_000, v[1] * keep / 1_000_000];
     }
     let fit = |v: i128| i64::try_from(v).unwrap_or(0);
     [fit(v[0]), fit(v[1])]
@@ -541,14 +518,7 @@ impl Skill for Route {
                 let l = len(o).max(1);
                 let half = self.speed / 2;
                 let want = [-o[1] * side * half / l, o[0] * side * half / l];
-                let step = guard(
-                    [p.x, p.z],
-                    want,
-                    self.tick,
-                    &near,
-                    2 * self.room + SLACK,
-                    false,
-                );
+                let step = guard([p.x, p.z], want, self.tick, &near, 2 * self.room + SLACK);
                 self.aside = Some((p, side));
                 walk(host, step);
                 return Progress::Going;
@@ -624,19 +594,7 @@ impl Skill for Route {
                 self.yielding = None;
             }
         }
-        // Near an edge: within EDGE ticks of a tick the mover moved it otherwise than asked (it cut or slid the step).
-        let turned_by_edge = self.last.is_some_and(|(q, w, _)| {
-            let moved = [p.x - q.x, p.z - q.z];
-            let asked = [w[0] * self.tick / 1_000_000, w[1] * self.tick / 1_000_000];
-            w != [0, 0] && len([moved[0] - asked[0], moved[1] - asked[1]]) > 1_000
-        });
-        self.edge = if turned_by_edge {
-            EDGE
-        } else {
-            self.edge.saturating_sub(1)
-        };
-        let edge = self.edge > 0;
-        let step = guard([p.x, p.z], want, self.tick, &near, room, edge);
+        let step = guard([p.x, p.z], want, self.tick, &near, room);
         // Judged over a window of HOLD ticks: a walker that got under a quarter of its free way, while a lower id
         // stands near it ahead, yields to that one (one behind does not hold it).
         self.held += 1;
