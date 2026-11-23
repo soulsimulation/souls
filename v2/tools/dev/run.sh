@@ -142,7 +142,7 @@ until_ready origin grep -q '^origin' logs/origin.log
   printf '{\n\tadmin off\n\tauto_https off\n\tpersist_config off\n\tdefault_bind 127.0.0.1\n\tstorage file_system "%s"\n}\n' "$DIR/caddy"
   sed -e "s|https://soul.game|$BASE|" -e "s|/usr/local/lib/souls/web|$WEB|g" \
     -e "s|/var/lib/souls-routes/slugs|$DIR/slugs|g" -e "s|/var/lib/souls-routes|$DIR/routes|g" \
-    -e "s|/var/lib/souls/models|$DIR/models|g" -e "s|localhost:7310|$DIRECTORY|g" -e "s|localhost:7320|$ORIGIN|g" \
+    -e "s|/var/lib/souls/models|$DIR/models|g" -e "s|localhost:7310|$DIRECTORY|g" -e "s|localhost:7320|$ORIGIN|g" -e "s|localhost:7330|$ORIGIN|g" \
     -e "s|localhost:@@PRODUCTION_PORT@@|$ORIGIN|g" "$V2/tools/ops/proxy/soul-game.caddy"
 } > Caddyfile
 start caddy env XDG_CONFIG_HOME="$DIR/caddy" XDG_DATA_HOME="$DIR/caddy" "$CADDY" run --adapter caddyfile --config Caddyfile
