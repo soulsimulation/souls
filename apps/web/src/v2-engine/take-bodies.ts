@@ -69,3 +69,17 @@ export function legacyBodyOf(hash: string | undefined, catalogue: ReadonlyMap<st
   return b && typeof b === 'object' && !Array.isArray(b) && ((b as { family?: unknown }).family === 'humanoid' || (b as { family?: unknown }).family === 'floater')
     ? (b as Record<string, unknown>) : null;
 }
+
+/** The catalogue's rows from `bodies.json` (`souls/bodies/1`); null for anything else. */
+export function catalogueOf(json: unknown): CatalogueBody[] | null {
+  const c = json as { format?: unknown; bodies?: unknown } | null;
+  if (!c || c.format !== 'souls/bodies/1' || !Array.isArray(c.bodies)) return null;
+  return c.bodies.filter((b): b is CatalogueBody => !!b && typeof b === 'object' && typeof (b as CatalogueBody).hash === 'string' && /^[a-f0-9]{64}$/.test((b as CatalogueBody).hash));
+}
+
+const BODIES_DIR = /^\/[A-Za-z0-9._-][A-Za-z0-9._/-]*\/$/; // one leading slash: never `//host/`
+/** The catalogue's address: `value` names a same-origin directory of the v2 page's body assets (as its `?bodies=`,
+ *  `…/assets/bodies/`); null when it names none or anything else. */
+export function bodiesUrl(value: unknown): string | null {
+  return typeof value === 'string' && BODIES_DIR.test(value) && !value.split('/').some((s) => s === '.' || s === '..') ? `${value}bodies.json` : null;
+}

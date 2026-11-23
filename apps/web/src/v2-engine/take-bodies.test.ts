@@ -7,7 +7,7 @@ import { PEOPLE, templateNameFor } from '../../../../mars/viewer/app/engine-view
 import { readFileSync } from 'node:fs';
 import { entityOf, V2Bridge } from './bridge.ts';
 import { TICK_US } from './takes.ts';
-import { defaultLookOf, entityWithLook, heldAt, legacyBodyOf, LOOKS, postureOf, propOf, seatOf } from './take-bodies.ts';
+import { bodiesUrl, catalogueOf, defaultLookOf, entityWithLook, heldAt, legacyBodyOf, LOOKS, postureOf, propOf, seatOf } from './take-bodies.ts';
 
 const E = entityWithLook('v2_b_7', defaultLookOf('b.7'));
 
@@ -111,4 +111,23 @@ test('a body kind is drawn in the old page\'s record of the same body, from the 
   const take = b.view.takes.chunks[0].take as unknown as Take & { finalState: { entities: Record<string, { body?: unknown }> } };
   assert.deepEqual(take.finalState.entities[entityOf('b.7')].body, pip);
   assert.deepEqual(sampleTake(take, 0.5).entities[entityOf('b.7')].state.body, pip, 'and in its state, which the page reads first');
+});
+
+test('the catalogue is read from the v2 body assets the page names, and a body kind takes its look once it is in', () => {
+  assert.equal(bodiesUrl('/v2/assets/bodies/'), '/v2/assets/bodies/bodies.json');
+  for (const bad of ['https://elsewhere.example/assets/', '//elsewhere.example/', '/v2/../x/', '/v2/assets', 7, null]) assert.equal(bodiesUrl(bad), null, String(bad));
+  const h = 'ef'.repeat(32), pip = { family: 'floater', model: 'pip', modelUrl: '/world-assets/pip.glb' };
+  assert.deepEqual(catalogueOf({ format: 'souls/bodies/1', bodies: [{ hash: h, preset: 'pip', legacy: [pip] }, { hash: 'nope' }, null] }), [{ hash: h, preset: 'pip', legacy: [pip] }]);
+  assert.equal(catalogueOf({ format: 'other', bodies: [] }), null);
+  assert.equal(catalogueOf(null), null);
+  // the catalogue arrives after the body is first drawn: chunks from then on carry its look
+  const b = new V2Bridge({ rulesVersion: 'test/1' });
+  b.receive({ t: 'snapshot', s: { nodes: [world, { ...body, body: h }], removed: [] } as never });
+  for (let n = 0; n < 7; n++) b.receive(part(n));
+  const before = b.view.takes.chunks.length;
+  b.looks(catalogueOf({ format: 'souls/bodies/1', bodies: [{ hash: h, legacy: [pip] }] })!);
+  for (let n = 7; n < 12; n++) b.receive(part(n));
+  const looks = b.view.takes.chunks.map((c) => (c.take as { finalState: { entities: Record<string, { body?: unknown }> } }).finalState.entities[entityOf('b.7')].body);
+  assert.ok(before > 0 && looks.slice(0, before).every((x) => x === undefined), 'before: the default person');
+  assert.ok(looks.length > before && looks.slice(before).every((x) => JSON.stringify(x) === JSON.stringify(pip)), 'after: its own look');
 });
