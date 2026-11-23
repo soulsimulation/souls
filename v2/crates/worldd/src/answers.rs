@@ -555,6 +555,9 @@ pub struct Config {
     pub lockstep: bool,
     /// K5's checkpoints: their folder and the log bytes between two.
     pub checkpoints: Option<(PathBuf, u64)>,
+    /// The newest checkpoint of that folder, already being read on another thread (S5: a serve reads it while it
+    /// builds the world's facts); none: [`start`] reads it itself.
+    pub restoring: Option<std::thread::JoinHandle<R<Option<checkpoint::Restored>>>>,
     /// Starts the view tier (R3) on the log, which each synced tick is handed to.
     pub views: bool,
     /// Nodes the auditor checks a tick (K11).
@@ -701,6 +704,7 @@ impl Config {
             clock: None,
             lockstep: false,
             checkpoints: None,
+            restoring: None,
             views: false,
             audit: 64,
             roots: None,
@@ -4606,10 +4610,14 @@ pub fn start<S: Storage + 'static>(
     mut world: Replica,
     rules: Rules,
     storage: S,
-    cfg: Config,
+    mut cfg: Config,
 ) -> R<World> {
-    let restored = match &cfg.checkpoints {
-        Some((dir, _)) if dir.exists() => checkpoint::restore(dir)?,
+    let restored = match (&cfg.checkpoints, cfg.restoring.take()) {
+        (Some(_), Some(reading)) => reading.join().map_err(|_| Refusal {
+            name: "checkpoint-restore-panicked",
+            detail: "the checkpoint's reader stopped".into(),
+        })??,
+        (Some((dir, _)), None) if dir.exists() => checkpoint::restore(dir)?,
         _ => None,
     };
     for (name, why) in restored.iter().flat_map(|r| &r.rejected) {

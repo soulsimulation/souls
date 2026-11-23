@@ -48,7 +48,7 @@
 use super::{Leg, Mark, World, node_of};
 use crate::controller::{Controller, Track};
 use crate::ground::open::Index;
-use crate::ground::scene::{FLOOR, xform_to};
+use crate::ground::scene::xform_to;
 use crate::ground::{
     HUMAN_RADIUS, Meet, OpenGround, Piece, Terrain, Versions, changed, exits, grounds,
 };
@@ -68,7 +68,7 @@ use replica::kinds::sizes::Size;
 use replica::pose::{ControllerInput, Frame, Mode, Quat, Support, Vec3};
 use replica::time::Micros;
 use replica::tree::Tree;
-use replica::world_model::{plain, show};
+use replica::world_model::show;
 use std::cell::{Cell, OnceCell, RefCell};
 use std::collections::{BTreeMap, BTreeSet};
 use std::sync::Arc;
@@ -600,9 +600,15 @@ fn find_link<'b>(
 impl Town {
     /// Everything on the open ground `ground`; openings are written by `doors`.
     pub fn new(tree: Tree, ground: Id, doors: Doors) -> Result<Town, String> {
+        Town::new_on(tree, ground, doors, 1)
+    }
+
+    /// As [`Town::new`], assembled on at most `threads` threads ([`crate::ground::START_THREADS`] at a world's
+    /// start): the same town.
+    pub fn new_on(tree: Tree, ground: Id, doors: Doors, threads: usize) -> Result<Town, String> {
         let versions = Versions::default();
         let (map, surfaces, buildings, basis, square_pieces) =
-            Town::assemble(&tree, ground, &versions)?;
+            Town::assemble_for(&tree, ground, &versions, Size::Standard, threads)?;
         let link_at = link_index(&buildings);
         Ok(Town {
             tree,
@@ -669,7 +675,7 @@ impl Town {
         for size in sizes {
             if size != Size::Standard && !self.classes.contains_key(&size) {
                 crate::commit::off_clock();
-                let g = Self::assemble_for(&self.tree, self.ground, &self.versions, size)?;
+                let g = Self::assemble_for(&self.tree, self.ground, &self.versions, size, 1)?;
                 self.classes.insert(size, Geometry::from(g));
             }
         }
@@ -789,7 +795,7 @@ impl Town {
                 Err(w) => {
                     why = Some(w);
                     Fresh::Whole(Box::new(Town::assemble_for(
-                        base, ground, &versions, basis.size,
+                        base, ground, &versions, basis.size, 1,
                     )?))
                 }
             }
@@ -797,7 +803,7 @@ impl Town {
             match Town::reread(&parents, base, ground, &touched, basis) {
                 Some(bs) => Fresh::Buildings(bs),
                 None => Fresh::Whole(Box::new(Town::assemble_for(
-                    base, ground, &versions, basis.size,
+                    base, ground, &versions, basis.size, 1,
                 )?)),
             }
         };
@@ -805,7 +811,8 @@ impl Town {
             .classes
             .keys()
             .map(|&size| {
-                Self::assemble_for(base, ground, &versions, size).map(|g| (size, Geometry::from(g)))
+                Self::assemble_for(base, ground, &versions, size, 1)
+                    .map(|g| (size, Geometry::from(g)))
             })
             .collect::<Result<_, _>>()?;
         let mut after = match &fresh {
@@ -1259,84 +1266,84 @@ impl Town {
     }
 
     /// The route map, each node's surface, the buildings and the basis for a rebuild, read from `tree` at `versions`.
-    fn assemble(tree: &Tree, ground: Id, versions: &Versions) -> Result<Assembled, String> {
-        Self::assemble_for(tree, ground, versions, Size::Standard)
-    }
     fn assemble_for(
         tree: &Tree,
         ground: Id,
         versions: &Versions,
         size: Size,
+        threads: usize,
     ) -> Result<Assembled, String> {
-        let map = Map::build_for(tree, ground, size, &|n| versions.of(n))?;
-        let mut surfaces = BTreeMap::new();
+        // One cut of the open ground and one read of its buildings, shared with the map (S5, 0.133): the squares cut
+        // on at most `threads` threads, and the buildings the map read, in the same order as reading them again gave.
         let open = OpenGround::of(tree, ground, size.radius_mm())?;
-        let terrain = open.terrain().cloned().map(Arc::new);
-        let (mut pieces, mut meets, mut squares) = (Vec::new(), Vec::new(), BTreeMap::new());
-        let mut square_pieces = BTreeMap::new();
-        let mut square_flags = BTreeMap::new();
-        for (i, j) in open.squares() {
-            let p = open.cut_square(i, j);
-            let first = pieces.len() as u32;
-            square_flags.insert((i, j), open.on_terrain(&p.pieces));
-            square_pieces.insert((i, j), (first..first + p.pieces.len() as u32).collect());
-            squares.insert((i, j), Arc::new(p.pieces.clone()));
-            pieces.extend(p.pieces);
-            meets.extend(p.meets.into_iter().map(|m| ((i, j), m)));
-        }
-        let gh = tree.handle(ground).ok_or("no such ground")?;
-        let gdoors = ground_doors(tree, ground)?;
-        let on = open.on_terrain(&pieces);
-        let mut surface = Surface::new(ground, pieces);
-        if let Some(t) = open.terrain() {
-            surface = surface.on_terrain(t.clone(), on);
-        }
-        surfaces.insert(ground, surface);
-        let mut buildings = Vec::new();
-        let mut stack = vec![gh];
-        while let Some(h) = stack.pop() {
-            let kids = tree.children(h).ok_or("a node that is gone")?;
-            if kids.iter().any(|&c| {
-                tree.node(c)
-                    .is_some_and(|n| plain(n.kind().as_str()) == FLOOR)
-            }) {
-                let id = tree.node(h).ok_or("a node that is gone")?.id();
-                let on = |sq: (i32, i32), p: [i64; 2]| map.on_square(ground, sq, p);
-                let open = Open {
-                    ground,
-                    place: xform_to(tree, h, gh)?,
-                    meets: &meets,
-                    on: &on,
-                    doors: &gdoors,
-                    terrain: open.terrain(),
-                };
-                if let Ok(b) = Building::read_sized(tree, id, Some(open), size.radius_mm()) {
-                    for (&floor, (_, patch)) in &b.floors {
-                        surfaces.insert(floor, Surface::new(floor, patch.pieces.clone()));
-                    }
-                    buildings.push(b);
-                }
+        let cuts = open.cut_all(threads);
+        // The map and the open ground's own surface, from the same cut: on two threads when it may fan out.
+        let ground_of = || {
+            let (mut pieces, mut meets, mut squares) = (Vec::new(), Vec::new(), BTreeMap::new());
+            let mut square_pieces = BTreeMap::new();
+            let mut square_flags = BTreeMap::new();
+            for ((i, j), p) in &cuts {
+                let (i, j) = (*i, *j);
+                let first = pieces.len() as u32;
+                square_flags.insert((i, j), open.on_terrain(&p.pieces));
+                square_pieces.insert((i, j), (first..first + p.pieces.len() as u32).collect());
+                squares.insert((i, j), Arc::new(p.pieces.clone()));
+                pieces.extend(p.pieces.iter().cloned());
+                meets.extend(p.meets.iter().cloned().map(|m| ((i, j), m)));
             }
-            stack.extend(kids.iter().rev().copied());
+            let on = open.on_terrain(&pieces);
+            let mut surface = Surface::new(ground, pieces);
+            if let Some(t) = open.terrain() {
+                surface = surface.on_terrain(t.clone(), on);
+            }
+            (surface, meets, squares, square_pieces, square_flags)
+        };
+        let map_of = || {
+            Map::build_cut(
+                tree,
+                ground,
+                size,
+                &|n| versions.of(n),
+                &open,
+                &cuts,
+                threads,
+            )
+        };
+        let (built, ground_part) = if threads > 1 {
+            std::thread::scope(|s| {
+                let part = s.spawn(ground_of);
+                let built = map_of();
+                (
+                    built,
+                    part.join().unwrap_or_else(|e| std::panic::resume_unwind(e)),
+                )
+            })
+        } else {
+            (map_of(), ground_of())
+        };
+        let (map, mut read, joins) = built?;
+        let (surface, meets, squares, square_pieces, square_flags) = ground_part;
+        let mut surfaces = BTreeMap::new();
+        let terrain = open.terrain().cloned().map(Arc::new);
+        let gdoors = ground_doors(tree, ground)?;
+        surfaces.insert(ground, surface);
+        // The map's reads end with the open ground's gates (its `of_ground`).
+        let gates = read.pop().ok_or("the map read no open ground")?;
+        let mut buildings = read;
+        for b in &buildings {
+            for (&floor, (_, patch)) in &b.floors {
+                surfaces.insert(floor, Surface::new(floor, patch.pieces.clone()));
+            }
         }
-        // The open ground's own links: gates in walls and fences.
+        // The open ground's own links: gates in walls and fences (the map read them with the same doorways).
         let known: BTreeMap<Id, BTreeSet<Id>> = buildings
             .iter()
             .map(|b| (b.thing, b.links.iter().map(|l| l.id).collect()))
             .collect();
-        let all = known.values().flatten().copied().collect();
-        let on = |sq: (i32, i32), p: [i64; 2]| map.on_square(ground, sq, p);
-        let open = Open {
-            ground,
-            place: crate::ground::scene::Xform::IDENTITY,
-            meets: &meets,
-            on: &on,
-            doors: &gdoors,
-            terrain: open.terrain(),
-        };
-        buildings.push(Building::of_ground(tree, open, &all)?);
+        buildings.push(gates);
         let mut joined = BTreeSet::new();
-        for (i, l) in floor_joins(&buildings.iter().collect::<Vec<_>>()) {
+        // The map's joins: its reads, gates last, are this list (S5).
+        for (i, l) in joins {
             joined.insert(buildings[i].thing);
             let far = l.ends.iter().flatten().map(|e| e.floor);
             joined.extend(far.filter_map(|f| {
@@ -1468,9 +1475,20 @@ impl Town {
     /// gets a clone of the assembled ground instead of a second assembly. Equal to [`Town::new`] then
     /// [`Town::copy`]: assembly reads only the tree, the ground and fresh versions, all the same for both.
     pub fn with_planner(tree: Tree, ground: Id, doors: Doors) -> Result<(Town, Town), String> {
+        Town::with_planner_on(tree, ground, doors, 1)
+    }
+
+    /// As [`Town::with_planner`], assembled on at most `threads` threads (a world's start-up:
+    /// [`crate::ground::START_THREADS`]).
+    pub fn with_planner_on(
+        tree: Tree,
+        ground: Id,
+        doors: Doors,
+        threads: usize,
+    ) -> Result<(Town, Town), String> {
         let frozen = tree.frozen();
         let planner_doors = Doors::new(doors.header.clone(), doors.rules.clone(), doors.next);
-        let town = Town::new(tree, ground, doors)?;
+        let town = Town::new_on(tree, ground, doors, threads)?;
         let (map, surfaces, buildings, basis, square_pieces) = (
             town.map.clone(),
             town.surfaces.clone(),
