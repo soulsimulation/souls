@@ -7,6 +7,9 @@
 // body is sampled at every tick between its own samples (never past its newest, as the v2 page draws it: no
 // extrapolation), faces the way it moves (the old take's yaw: atan2(dz, dx)), and walks while it moves.
 
+import { heldAt, postureOf, type Held, type Seat } from './take-bodies.ts';
+import { markOf, type Talk } from './take-speech.ts';
+
 /** Seconds a tick, as the old engine's takes. */
 export const DT = 0.05;
 export const TICK_US = DT * 1_000_000;
@@ -17,8 +20,9 @@ const POS_Q = 1000, ANG_Q = 1000, SPEED_Q = 100;
 /** Slower than this (m/s) a body stands. */
 const WALKING = 0.05;
 
-/** A body sample in the world frame: world time µs, position mm. */
-export type WorldSample = { at: number; p: [number, number, number] };
+/** A body sample in the world frame: world time µs, position mm; `seat` while it is in a slot (take-bodies.ts), its
+ *  position then the floor under the seat. */
+export type WorldSample = { at: number; p: [number, number, number]; seat?: Seat };
 /** One Soul's body as the chunks need it. */
 export type Body = {
   /** The take's entity id. */
@@ -33,6 +37,10 @@ export type Body = {
   /** World time (µs) from which it is not drawn: the public copy can no longer place it (a frame that is not public, or
    *  it left); absent while it is drawn. */
   until?: number;
+  /** What it holds, in time order (take-bodies.ts). */
+  held?: Held[];
+  /** What it said, as talk lines in time order (take-speech.ts). */
+  said?: Talk[];
 };
 
 export type RecordedChunk = { fromTick: number; toTick: number; take: Record<string, unknown> };
@@ -81,11 +89,13 @@ export type Frame = { rulesVersion: string; datetime: string | null; renderScene
  */
 export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame): RecordedChunk {
   const tracks: Record<string, number[][]> = {}, changes: [number, string, string, unknown][] = [], entities: Record<string, unknown> = {};
+  const events: ReturnType<typeof markOf>[] = [];
   const endUs = (fromTick + TICKS) * TICK_US;
   for (const b of bodies) {
     if (!b.samples.length || b.samples[0].at > endUs || (b.until !== undefined && fromTick * TICK_US >= b.until)) continue;
     const track: number[][] = [];
     let activity = '', speedQ: number | null = -1, heading = b.heading, p: [number, number, number] = b.samples[0].p;
+    let seatH: number | null | undefined, prop: string | null | undefined;
     for (let k = 0; k <= TICKS; k++) {
       const t = (fromTick + k) * TICK_US;
       p = positionAt(b.samples, t)!;
@@ -94,20 +104,26 @@ export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame)
       const walking = m.speed >= WALKING;
       track.push([k, Math.round(p[0]), Math.round(p[1]), Math.round(p[2]), Math.round(heading * ANG_Q)]);
       if (k === 0) { changes.push([0, b.entity, 'present', true], [0, b.entity, 'level', 0]); }
-      const nextActivity = walking ? 'walk' : 'idle';
+      const seat = walking ? null : seatAt(b.samples, t), nextSeat = seat ? seat.height / POS_Q : null, nextProp = heldAt(b.held, t);
+      if (k < TICKS && nextSeat !== (seatH ?? null)) { changes.push([k, b.entity, 'seatHeight', nextSeat]); seatH = nextSeat; }
+      if (k < TICKS && nextProp !== prop && (nextProp !== null || prop !== undefined)) { changes.push([k, b.entity, 'prop', nextProp]); prop = nextProp; }
+      const nextActivity = walking ? 'walk' : postureOf(seat) ?? 'idle';
       if (nextActivity !== activity && k < TICKS) { changes.push([k, b.entity, 'activity', nextActivity]); activity = nextActivity; }
       const q = walking ? Math.round(m.speed * SPEED_Q) : null;
       if (k < TICKS && (q === null ? speedQ !== null : speedQ === null || Math.abs(q - speedQ) > 2)) { changes.push([k, b.entity, 'speed', q]); speedQ = q; }
     }
     tracks[b.entity] = thin(track);
+    for (const l of b.said ?? []) if (l.tick >= fromTick && l.tick < fromTick + TICKS) events.push(markOf(l, fromTick));
     entities[b.entity] = {
       id: b.entity, def: 'human', kind: 'human', label: b.name,
       pose: { p: [p[0] / POS_Q, p[1] / POS_Q, p[2] / POS_Q], yaw: heading },
       provenance: { origin: 'simulation', confidence: 'hypothetical' },
-      human: { activity: activity || 'idle', level: 0, soul: b.soul, ...(speedQ !== null && speedQ >= 0 ? { speed: speedQ / SPEED_Q } : {}) },
+      human: { activity: activity || 'idle', level: 0, soul: b.soul, ...(speedQ !== null && speedQ >= 0 ? { speed: speedQ / SPEED_Q } : {}),
+        ...(seatH ? { seatHeight: seatH } : {}), ...(prop ? { prop } : {}) },
     };
   }
   changes.sort((a, b) => a[0] - b[0]);
+  events.sort((a, b) => a.t - b.t);
   const id = `v2-${fromTick}`;
   return {
     fromTick, toTick: fromTick + TICKS,
@@ -115,10 +131,17 @@ export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame)
       schema: 'mars-take/4', id, baselineStateHash: `v2-state-${fromTick}`, finalStateHash: `v2-state-${fromTick + TICKS}`,
       rulesVersion: frame.rulesVersion, ...(frame.renderSceneRef ? { renderSceneRef: frame.renderSceneRef } : {}),
       dt: DT, startTick: fromTick, ticks: TICKS, keyframeEvery: TICKS,
-      tracks, changes, events: [], removed: [], entities0: {},
+      tracks, changes, events, removed: [], entities0: {},
       finalState: { tick: fromTick + TICKS, entities, regions: {}, env: { datetime: frame.datetime } },
     },
   };
+}
+
+/** The seat of the newest sample at or before t (none before the first). */
+function seatAt(s: readonly WorldSample[], t: number): Seat | null {
+  let seat: Seat | null = null;
+  for (const x of s) { if (x.at > t) break; seat = x.seat ?? null; }
+  return seat;
 }
 
 /** Drops samples equal to both neighbours (a body standing still), keeping the first and the last. */
