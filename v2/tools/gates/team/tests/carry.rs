@@ -2,10 +2,10 @@
 //! step its own intent, on one connection and one token each. Each load is carried as its kind's entry states it
 //! (`content/kinds/construction/`): its grips, its outline and its carriers' places.
 //!
-//! On N2's test world, two Souls stand 4 m south of a rack beam's two carrying places. Each walks to its place by an
-//! ordinary walk. Soul 1 offers a carry to Soul 2 (E8's offer, Soul 1 in front). While Soul 1 is alone in it, its lift
-//! is refused `carry-needs-two`. Soul 2 accepts, so the carry starts; Soul 1 lifts the beam, both walk 25 m east, and
-//! Soul 2 sets it down. Then they carry a rack upright, which is shorter and wider, 25 m west, Soul 2 in front. Before
+//! On N2's test world, two Souls stand 4 m west of a rack beam's two carrying places, at its ends. Each walks to its
+//! place by an ordinary walk. Soul 1 offers a carry to Soul 2 (E8's offer, Soul 1 in front). While Soul 1 is alone in
+//! it, its lift is refused `carry-needs-two`. Soul 2 accepts, so the carry starts; Soul 1 lifts the beam, both walk
+//! 25 m east side by side, and Soul 2 sets it down. Then they carry a rack upright, which is shorter and wider, 25 m west, Soul 2 in front. Before
 //! that, a lift naming a way through a passage narrower than the upright is refused `carry-board-clips`. Last, in a
 //! third carry, a crate that takes three is refused `carry-crew-too-small`, and the beam, now 25 m off, is refused
 //! `carry-grip-out-of-reach`; neither moves. Every node of the world as built is still there and no other is, and the
@@ -196,11 +196,16 @@ fn walls() -> [(Vec3, i64); 2] {
 fn place(middle: Vec3, along: i64, east: bool) -> Vec3 {
     Vec3::new(middle.x + if east { along } else { -along }, 0, middle.z)
 }
-/// Each Soul starts 4 m south of its place at the beam: Soul 1 in front (east), Soul 2 behind.
+/// Where a carrier of the beam whose middle is `middle` stands, `along` µm from it at one of its ends: the beam lies
+/// with its length along z, and its front is north (0.135 C4: its carriers stand at its ends, not beside it).
+fn at_end(middle: Vec3, along: i64) -> Vec3 {
+    Vec3::new(middle.x, 0, middle.z + along)
+}
+/// Each Soul starts 4 m west of its place at the beam: Soul 1 in front (north), Soul 2 behind.
 fn start(n: u64) -> Vec3 {
     let [back, front] = places(&beam_entry());
-    let p = place(beam_at(), if n == 1 { front } else { back }, true);
-    Vec3::new(p.x, 0, p.z - 4 * M)
+    let p = at_end(beam_at(), if n == 1 { front } else { back });
+    Vec3::new(p.x - 4 * M, 0, p.z)
 }
 
 fn humanoid() -> Family {
@@ -783,9 +788,9 @@ async fn rungs_0_and_1_two_souls_carry_loads_as_their_entries_state_through_the_
 
     // The beam: each walks to its place by an ordinary walk.
     let [back, front] = places(&beam_entry());
-    a.send("eden:walk", Some(g), point(place(beam_at(), front, true)))
+    a.send("eden:walk", Some(g), point(at_end(beam_at(), front)))
         .await;
-    b.send("eden:walk", Some(g), point(place(beam_at(), back, true)))
+    b.send("eden:walk", Some(g), point(at_end(beam_at(), back)))
         .await;
     let (wa, wb) = (a.answer().await, b.answer().await);
     wa.expect("Soul 1 walks to the beam's front place");
@@ -806,13 +811,13 @@ async fn rungs_0_and_1_two_souls_carry_loads_as_their_entries_state_through_the_
     a.send(
         "eden:walk",
         Some(g),
-        point(on(place(beam_at(), front, true), CARRIED)),
+        point(on(at_end(beam_at(), front), CARRIED)),
     )
     .await;
     b.send(
         "eden:walk",
         Some(g),
-        point(on(place(beam_at(), back, true), CARRIED)),
+        point(on(at_end(beam_at(), back), CARRIED)),
     )
     .await;
     let (wa, wb) = (a.answer().await, b.answer().await);
@@ -908,9 +913,19 @@ async fn rungs_0_and_1_two_souls_carry_loads_as_their_entries_state_through_the_
     let logged = Logged::read(&store);
     let (replayed, hash, held) = logged.replay();
     let t = replayed.tree();
+    // Where each load's middle lies (0.135 C4: a laid-flat upright's origin is at its foot, not its middle).
     let lies = |n: Id| {
         let node = t.node(t.handle(n).expect("the load")).unwrap();
-        (node.parent(), node.place().unwrap().position)
+        let p = node.place().unwrap();
+        let middle = match node.kind().as_str() {
+            k if k == full(UPRIGHT) => Load::of(&upright_entry()).unwrap().middle,
+            _ => Vec3::ZERO,
+        };
+        let m = p.orientation.rotate(middle).unwrap();
+        (
+            node.parent(),
+            Vec3::new(p.position.x + m.x, 0, p.position.z + m.z),
+        )
     };
     let near = |p: Vec3, q: Vec3| (p.x - q.x).abs() < 500_000 && (p.z - q.z).abs() < 500_000;
     let (on_b, at_b) = lies(beam());
@@ -1010,15 +1025,27 @@ fn lies(store: &Mem, load: Id) -> (Option<Id>, replica::tree::Place) {
     (n.parent(), n.place().unwrap())
 }
 
-/// Each walks to its place at the beam where it lies now, heading east: Soul 1 in front.
+/// Each walks to its place at the beam where it lies now, at its ends: Soul 1 in front, at its + end.
 async fn to_the_beam(a: &mut Soul, b: &mut Soul, store: &Mem) {
     let (_, at) = lies(store, beam());
-    let [back, front] = places(&beam_entry());
+    let load = Load::of(&beam_entry()).unwrap();
+    let [back, front] = load.places();
+    // 0.135 C4: at its ends as it lies now (set down where a carry broke off, it may lie turned).
+    let axis = load
+        .lies_along(at.orientation)
+        .unwrap()
+        .expect("the beam lies flat");
+    let l = load.half_length;
+    let end = |along: i64| {
+        Vec3::new(
+            at.position.x + axis[0] * along / l,
+            0,
+            at.position.z + axis[1] * along / l,
+        )
+    };
     let g = ground();
-    a.send("eden:walk", Some(g), point(place(at.position, front, true)))
-        .await;
-    b.send("eden:walk", Some(g), point(place(at.position, back, true)))
-        .await;
+    a.send("eden:walk", Some(g), point(end(front))).await;
+    b.send("eden:walk", Some(g), point(end(back))).await;
     let (wa, wb) = (a.answer().await, b.answer().await);
     wa.expect("Soul 1 walks to the beam's front place");
     wb.expect("Soul 2 walks to the beam's back place");
