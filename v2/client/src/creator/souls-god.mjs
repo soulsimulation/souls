@@ -36,6 +36,9 @@
 //   place <kind> --in <id> --beside <id> [--dir n|ne|e|se|s|sw|w|nw] [--dist mm]   beside another (default e, 1000)
 //   place <kind> --on <id>                       in or on another: its first free slot for a thing, if it has one
 //   place|move ... --facing <id|n|e|s|w>         turned to face another, or a compass point
+//   place <kind> --in <id> --at x,y,z --row <n> --gap <mm> [--along x|z]   a row of n, centred on --at (R8a)
+//   place <kind> --in <id> --at x,y,z --grid <C>x<R> --gap <mm>[,<mm>]      a grid: C along x, R along z; one batch,
+//                                                all or none (at most 64); with --facing n|e|s|w they all face it
 //   any edit verb --build <name> --step <name>  a build's step (#3694): one batch the world keeps under that name
 //   souls-god.mjs undo [--build <name>] | redo   the newest edit undone (a whole build, step by step), or redone
 //   souls-god.mjs build district [<id>]           the district plans, or one plan with each plot's status and the next
@@ -259,6 +262,27 @@ const xyz = (t) => {
 const valueOf = (t) => (/^-?\d+$/.test(t) ? Number(t) : t === 'true' ? true : t === 'false' ? false : t);
 const node = (t) => (/^\d+$/.test(String(t)) ? Number(t) : String(t));
 
+/** R8a: the most things one row or grid places (one batch, all or none). */
+export const SPOTS_MOST = 64;
+/**
+ * R8a: the spots of a row (`--row n`, along x, or z with `--along z`) or a grid (`--grid CxR`: C along x, R along z),
+ * `--gap` mm apart (a grid may give `--gap gx,gz`), centred on `--at` (mm in the parent), in order: the first row's
+ * things west to east, then the next row south of it.
+ */
+export function spotsOf(at, row, grid, gap, along) {
+  const how = 'place <kind> --in <id> --at x,y,z --row <n> --gap <mm> [--along x|z] | --grid <C>x<R> --gap <mm>[,<mm>]';
+  if (at === undefined || (row === undefined) === (grid === undefined) || gap === undefined) throw usage(how);
+  if (along !== undefined && (row === undefined || !['x', 'z'].includes(along))) throw usage(how);
+  const whole = (t) => (/^\d+$/.test(String(t)) ? Number(t) : NaN);
+  const [cols, rows] = grid !== undefined ? String(grid).split('x').map(whole) : along === 'z' ? [1, whole(row)] : [whole(row), 1];
+  const gaps = String(gap).split(',').map(Number), gx = gaps[0], gz = gaps[1] ?? gaps[0];
+  if (!(cols >= 1 && rows >= 1) || cols * rows < 2 || gaps.length > 2 || ![gx, gz].every((g) => Number.isFinite(g) && g > 0)) throw usage(how);
+  if (cols * rows > SPOTS_MOST) throw usage(`at most ${SPOTS_MOST} things in one row or grid, not ${cols * rows}`);
+  const [x, y, z] = xyz(at), out = [];
+  for (let r = 0; r < rows; r++) for (let c = 0; c < cols; c++) out.push([Math.round(x + (c - (cols - 1) / 2) * gx), y, Math.round(z + (r - (rows - 1) / 2) * gz)]);
+  return out;
+}
+
 /** The batch a verb's words make. */
 export function opsOf(verb, words, { related = false } = {}) {
   const args = [...words];
@@ -268,9 +292,12 @@ export function opsOf(verb, words, { related = false } = {}) {
   if (verb === 'place') {
     const on = takeOpt(args, '--on');
     const into = takeOpt(args, '--in') ?? on, at = takeOpt(args, '--at'), slot = takeOpt(args, '--slot');
+    const row = takeOpt(args, '--row'), grid = takeOpt(args, '--grid'), gap = takeOpt(args, '--gap'), along = takeOpt(args, '--along');
     const fields = Object.fromEntries(takeAll(args, '--field').map((f) => { const [n, v] = f.split('='); return [n, valueOf(v)]; }));
     if (!args[0] || into === undefined) throw usage('place <kind> --in <id> [--at x,y,z] [--slot n] [--field n=v]');
-    return [{ op: 'place', name: 1, kind: args[0], in: node(into), ...(at ? { at: xyz(at) } : {}), ...(slot !== undefined ? { slot: Number(slot) } : {}), ...(Object.keys(fields).length ? { fields } : {}) }];
+    const one = { op: 'place', kind: args[0], in: node(into), ...(slot !== undefined ? { slot: Number(slot) } : {}), ...(Object.keys(fields).length ? { fields } : {}) };
+    if (row === undefined && grid === undefined && gap === undefined && along === undefined) return [{ ...one, name: 1, ...(at ? { at: xyz(at) } : {}) }];
+    return spotsOf(at, row, grid, gap, along).map((p, i) => ({ ...one, name: i + 1, at: p }));
   }
   if (verb === 'move') {
     const at = takeOpt(args, '--at'), slot = takeOpt(args, '--slot');
@@ -509,6 +536,8 @@ export function resolve(req, relation, world) {
       d = [other.at[0] - here[0], other.at[2] - here[2]];
     }
     op.yaw = ((Math.round((Math.atan2(d[0], d[1]) * 180_000) / Math.PI) % 360_000) + 360_000) % 360_000;
+    // R8a: a row or grid all face the compass point
+    if (point) for (const o of ops) if (o.op === 'place') o.yaw = op.yaw;
     if (op.op === 'move') op.at ??= self.at;
   }
   if (op.op === 'move' && !op.at) throw usage('move <id> needs --at, --beside or --facing');
