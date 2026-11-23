@@ -1014,3 +1014,44 @@ fn c24_every_effect_content_uses_applies_and_a_replay_gives_the_same_tree() {
     );
     assert_eq!(fresh.tree.to_state(), b.tree.to_state());
 }
+
+/// W14 (#4090): a thing whose map row borrows an entry reads that entry's amounts first, even when its own kind
+/// carries the same field; a thing that borrows nothing reads its own.
+#[test]
+fn w14_a_borrowed_entrys_amounts_win_over_the_things_own_kind() {
+    use super::amounts::{Limit, Limits, limits_of};
+    let lim = |max| {
+        BTreeMap::from([(
+            28,
+            Limit {
+                default: 0,
+                min: Some(0),
+                max: Some(max),
+            },
+        )])
+    };
+    let limits: Limits = BTreeMap::from([
+        ("mars:sink@1220aa".to_owned(), lim(10)),
+        ("test:tap@1220bb".to_owned(), lim(99)),
+    ]);
+    let max = |kind, borrowed| {
+        limits_of(&limits, kind, borrowed)
+            .and_then(|f| f.get(&28))
+            .and_then(|l| l.max)
+    };
+    assert_eq!(
+        max(Some("mars:sink@1220aa"), Some("test:tap")),
+        Some(99),
+        "the borrowed entry wins"
+    );
+    assert_eq!(
+        max(Some("mars:sink@1220aa"), None),
+        Some(10),
+        "borrowing nothing: its own"
+    );
+    assert_eq!(
+        max(Some("mars:sink"), Some("eden:none")),
+        Some(10),
+        "an entry not loaded: its own, by plain name"
+    );
+}

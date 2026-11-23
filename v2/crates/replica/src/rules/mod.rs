@@ -11,7 +11,7 @@
 //! | `state` | a field (or a `field` argument) `is` / is `not` a value (or a `value` argument), or lies in `at_least`..`at_most` (a `timed` field at `state.now_us`); with `of`, a field of the thing an argument names; with `link`, of the place this thing is linked to | `field_differs`, `not_linked` |
 //! | `slot_free` | a slot (of this thing, or `{node, slot}` of another) has fewer occupants than its `most` | `slot_taken` |
 //! | `within_reach` | a point is within the reach of the move the form's step makes there, as squares in `i128`; a thing the form walks to first is reached when it is in the actor's place | `out_of_reach` |
-//! | `hand` | the actor has a free hand (`free: true`), every hand empty (`empty: true`) or a hand holding a kind (`holds`) | `no_free_hand`, `hand_not_empty`, `not_holding_kind` |
+//! | `hand` | the actor has a free hand (`free: true`), every hand empty (`empty: true`) or a hand holding a kind (`holds`: a thing of that kind or one whose `entry` borrows it, [`is_kind`]) | `no_free_hand`, `hand_not_empty`, `not_holding_kind` |
 //! | `held_by_actor` | this thing (or the `thing` argument) is in one of the actor's hands | `not_held` |
 //! | `not_in_hand` | this thing is in no one's hand | `in_hand` |
 //! | `moves` | the `thing` argument's kind moves `by` carry (that many free hands) or push (one Soul) | `motion_unsaid`, `moves_by`, `needs_souls`, `no_free_hand` |
@@ -98,6 +98,23 @@ type Obj = Vec<(String, Value)>;
 
 fn has<'a>(o: Option<&'a Value>, k: &str) -> Option<&'a Value> {
     o.and_then(|o| o.get(k))
+}
+
+/// Whether `node` is of kind `k` (W14, #4090): its own `kind`, or the entry it borrows (`entry`, from its world's map:
+/// a Mars watering can borrows `eden:watering_can`). One rule for every need and selector that names a kind, in the
+/// world and in the client's copy alike.
+pub fn is_kind(node: Option<&Value>, k: &str) -> bool {
+    ["entry", "kind"]
+        .iter()
+        .any(|f| has(node, f).and_then(Value::str) == Some(k))
+}
+
+/// The entry `node` is read by: the one it borrows (`entry`) when `kinds` has it, else its own kind's (W14, #4090).
+fn entry_in<'a>(kinds: &'a Value, node: Option<&Value>) -> Option<&'a Value> {
+    ["entry", "kind"]
+        .iter()
+        .filter_map(|f| has(node, f).filter(|k| k.truthy()))
+        .find_map(|k| kinds.get(&js_text(Some(k))))
 }
 
 fn sorted(o: Option<&Value>) -> Vec<&str> {
@@ -346,9 +363,7 @@ fn measure<'a>(
     let mut values = Vec::new();
     for (id, name) in [(&from, &field), (&into, &into_field)] {
         let node = has(nodes, id);
-        let entry = has(node, "kind")
-            .and_then(Value::str)
-            .and_then(|k| kinds.get(k));
+        let entry = entry_in(kinds, node);
         let def = has(has(entry, "state"), name);
         let detail = vec![
             ("node".into(), Value::Str(id.clone())),
@@ -698,9 +713,7 @@ impl<'a> Rules<'a> {
     }
 
     fn entry_of(&self, node: Option<&Value>) -> Option<&'a Value> {
-        has(node, "kind")
-            .filter(|k| k.truthy())
-            .and_then(|k| self.kinds.get(&js_text(Some(k))))
+        entry_in(self.kinds, node)
     }
 
     fn this_id(&self) -> String {
@@ -1507,9 +1520,8 @@ impl<'a> Rules<'a> {
         }
         if let Some(kind) = n.get("holds").and_then(Value::str) {
             let holding = hands.iter().any(|(_, v)| {
-                v.str().is_some_and(|id| {
-                    has(has(self.nodes(), id), "kind").and_then(Value::str) == Some(kind)
-                })
+                v.str()
+                    .is_some_and(|id| is_kind(has(self.nodes(), id), kind))
             });
             if holding {
                 return Outcome::Ok;

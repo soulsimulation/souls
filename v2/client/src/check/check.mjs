@@ -44,7 +44,7 @@ export function judge(decide, c, { kinds, state, asker, seen = SEEN_FIELDS }) {
   if (!c.form) return { verdict: 'unknown', why: 'no-form' };
   const node = state.nodes?.[c.this];
   if (!node) return { verdict: 'unknown', why: 'not-in-copy' };
-  if (!kinds[node.kind]) return { verdict: 'unknown', why: 'kind-not-held' };
+  if (!kinds[node.entry] && !kinds[node.kind]) return { verdict: 'unknown', why: 'kind-not-held' };
   const act = { this: c.this, form: c.form, ...(c.args ? { args: c.args } : {}) };
   const v = JSON.parse(decide(JSON.stringify({ kinds, act, state, asker })));
   delete v.read;

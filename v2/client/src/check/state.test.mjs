@@ -28,6 +28,15 @@ test('a written text field reads its reference; a cleared one reads null; other 
   assert.equal(written.fields.count, 2);
 });
 
+test('W14 (#4090): a node whose map row borrows an entry keeps its own kind, names the entry, and reads fields by it', () => {
+  const record = encode(new Map([[1, [scope, 8]], [2, 'mars:board@1220bb'], [6, new Map([[4, 3], [27, 'test:board']])]]));
+  const copy = { roots: () => JSON.stringify({ x: 'h' }), record: (h) => (h === 'h' ? record : null) };
+  const node = stateOf(copy, kinds, 'me').nodes[`${'ab'.repeat(16)}-8`];
+  assert.deepEqual(node, { kind: 'mars:board', entry: 'test:board', fields: { count: 3 } });
+  const own = stateOf(copyOf(new Map()), kinds, 'me').nodes[`${'ab'.repeat(16)}-7`];
+  assert.equal(own.entry, undefined, 'a thing that borrows nothing names no entry');
+});
+
 const HUMANOID = new URL('../../../../content/kinds/body/humanoid.json', import.meta.url);
 const LAMP = { format: 'souls-entry/1', kind: 'eden:lamp', owner: 'thing', forms: {} };
 

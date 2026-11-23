@@ -138,7 +138,12 @@ impl State<'_> {
         let n = self.tree.handle(id).and_then(|h| self.tree.node(h))?;
         let kind = plain(n.kind().as_str()).to_owned();
         let mut out = vec![("kind".to_owned(), Value::s(&kind))];
-        if let Some(entry) = self.entry(&kind) {
+        // The entry a thing borrows from its world's map (W14, #4090): R2 reads it as the thing's kind too.
+        let borrowed = import_eden::entry_name(n.kind().as_str(), n.fields());
+        if borrowed != kind {
+            out.push(("entry".to_owned(), Value::s(borrowed)));
+        }
+        if let Some(entry) = self.entry(borrowed).or_else(|| self.entry(&kind)) {
             let stored = n.fields();
             let mut fields = Vec::new();
             for (name, def) in entry.get("state").and_then(Value::obj).unwrap_or(&[]) {
@@ -221,14 +226,17 @@ impl State<'_> {
             .collect();
         let two = |s: &Self, t: Id| {
             let kind = s.tree.handle(t).and_then(|h| s.tree.node(h));
-            kind.and_then(|n| s.entry(n.kind().as_str()).cloned())
-                .and_then(|e| {
-                    e.get("motion")
-                        .and_then(|m| m.get("how"))
-                        .and_then(Value::str)
-                        .map(|h| h == "two_hands")
-                })
-                .unwrap_or(false)
+            kind.and_then(|n| {
+                s.entry(import_eden::entry_name(n.kind().as_str(), n.fields()))
+                    .cloned()
+            })
+            .and_then(|e| {
+                e.get("motion")
+                    .and_then(|m| m.get("how"))
+                    .and_then(Value::str)
+                    .map(|h| h == "two_hands")
+            })
+            .unwrap_or(false)
         };
         let things: Vec<Id> = held.iter().flatten().copied().collect();
         for t in &things {
@@ -394,16 +402,28 @@ pub fn check(
         Some((e, kept)) => (e, Some(kept)),
         None => (entry, None),
     };
-    // The kinds R2 reads: the world's, with this kind's entry as this act binds it.
+    // The kinds R2 reads: the world's, with this kind's entry as this act binds it, under the thing's own kind and
+    // the entry it borrows (W14, #4090), and every other node's by both.
     let mut by_kind: Vec<(String, Value)> = Vec::new();
     by_kind.push((this_kind.clone(), form_entry.clone()));
+    let this_entry = s
+        .nodes
+        .get(&key(node))
+        .and_then(|n| n.get("entry"))
+        .and_then(Value::str);
+    if let Some(e) = this_entry {
+        by_kind.push((e.to_owned(), form_entry.clone()));
+    }
     for n in s.nodes.values() {
-        if let Some(k) = n.get("kind").and_then(Value::str)
-            && k != this_kind
-            && !by_kind.iter().any(|(x, _)| x == k)
-            && let Some(e) = kinds.get(k)
+        for k in ["entry", "kind"]
+            .iter()
+            .filter_map(|f| n.get(f).and_then(Value::str))
         {
-            by_kind.push((k.to_owned(), e.clone()));
+            if !by_kind.iter().any(|(x, _)| x == k)
+                && let Some(e) = kinds.get(k)
+            {
+                by_kind.push((k.to_owned(), e.clone()));
+            }
         }
     }
     let act = Value::Obj(vec![
