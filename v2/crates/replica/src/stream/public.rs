@@ -881,7 +881,9 @@ fn in_place(
                 let Ok(link) = LinkState::read(&r[1]) else {
                     return Ok(None);
                 };
-                if !public(link.audience) || !live(link.ends[usize::from(link.owner == End::Second)])? {
+                if !public(link.audience)
+                    || !live(link.ends[usize::from(link.owner == End::Second)])?
+                {
                     return Ok(None);
                 }
                 l.insert(id, r[1].clone());
