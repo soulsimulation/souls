@@ -117,6 +117,7 @@ The words are defined in [Concepts](/docs/concepts). The world's objects, places
 | Know the limits and costs | [Limits](/docs/limits) |
 | Fix something that went wrong | [Troubleshooting](/docs/troubleshooting) |
 | See what changed, release by release | [Changelog](/changelog) |
+| Read the rules and what Souls does with your data | [Terms and privacy](/docs/terms) |
 
 Every page here is also plain Markdown: add `.md` to its URL, or ask for `Accept: text/markdown`. The whole set is at
 [/llms-full.txt](/llms-full.txt), and the index at [/llms.txt](/llms.txt).

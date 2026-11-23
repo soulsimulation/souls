@@ -24,10 +24,42 @@ export function changedBlock(changes, most = CHANGED_SHOWN) {
   return { names: changes.slice(0, most).map(show), ...(changes.length > most ? { more: changes.length - most } : {}) };
 }
 
-/** The room a Soul's turn is about: its body's parent, else the topmost node that holds things, else the root. */
+/** A node a body stands in, as a room: a room, a floor, the ground or a place (anything else holds it: a seat, a bed). */
+const ROOMLIKE = /:(room|floor|ground|place)$/;
+
+/** My body's row: by its id, else the row a join made for my Soul (`soul`, C30), as a daemon names itself by its Soul. */
+export const bodyOf = (rows, me) => (me ? rows.get(me) ?? [...rows.values()].find((r) => r.soul === me) ?? null : null);
+
+/**
+ * Where my body is (D7): the thing that holds it when that is not a room (`seat`: a chair, a bed, a boat) and the room
+ * around it, the nearest room-like node above the body; null when the copy does not hold the body.
+ */
+export function whereOf(rows, me) {
+  const body = bodyOf(rows, me);
+  const parent = body?.parent ? rows.get(body.parent) : null;
+  if (!parent) return null;
+  if (ROOMLIKE.test(parent.kind)) return { body, room: parent };
+  let room = parent;
+  for (let n = 0; room && !ROOMLIKE.test(room.kind) && n < 16; n++) room = room.parent ? rows.get(room.parent) : null;
+  return { body, seat: parent, room: room ?? parent };
+}
+
+/**
+ * D7: which of an intent's ranked targets holds my body now, by its place in the ranking (0 is the first choice):
+ * `{ rank, verb, id, name, fallback }`, or null when none does. `r` is the daemon's receipt: `verbs` and `target`
+ * (the targets, space-separated, in rank order).
+ */
+export function heldBy(rows, me, r) {
+  const at = whereOf(rows, me), targets = String(r.target ?? '').split(' ');
+  const rank = at?.seat ? targets.indexOf(at.seat.id) : -1;
+  if (rank < 0) return null;
+  return { rank, verb: r.verbs[rank] ?? r.verbs[0], id: at.seat.id, name: at.seat.name, fallback: rank > 0 };
+}
+
+/** The room a Soul's turn is about: my body's room, else the topmost node that holds things, else the root. */
 export function roomOf(rows, me) {
-  const body = me ? rows.get(me) : null;
-  if (body?.parent && rows.has(body.parent)) return rows.get(body.parent);
+  const at = whereOf(rows, me);
+  if (at) return at.room;
   const kids = (id) => [...rows.values()].filter((r) => r.parent === id);
   const root = [...rows.values()].find((r) => !r.parent || !rows.has(r.parent));
   if (!root) return null;
@@ -45,10 +77,10 @@ export function roomOf(rows, me) {
  * turn (`copy.mjs` `changedBetween`), `ageMs` the copy's age.
  */
 export function brief(rows, { me, changes = [], heard = [], ageMs = 0, version, most = BRIEF_MOST } = {}) {
-  const room = roomOf(rows, me);
+  const at = whereOf(rows, me), room = roomOf(rows, me), mine = at?.body.id ?? me;
   const said = heard.length ? { heard: heardBlock(heard) } : {};
   if (!room) return { room: null, note: 'The copy holds nothing yet.', ...said, age: ageText(ageMs), changed: changedBlock(changes) };
-  const inRoom = [...rows.values()].filter((r) => r.parent === room.id && r.id !== me);
+  const inRoom = [...rows.values()].filter((r) => r.parent === room.id && r.id !== mine && r.id !== at?.seat?.id);
   const bodies = inRoom.filter((r) => BODY.test(r.kind)).length;
   const things = inRoom.filter((r) => !BODY.test(r.kind)).sort((a, b) => byName(a.name, b.name));
   const parent = room.parent ? rows.get(room.parent) : null;
@@ -57,6 +89,7 @@ export function brief(rows, { me, changes = [], heard = [], ageMs = 0, version, 
   const out = {
     ...(version !== undefined ? { at: version } : {}),
     room: { name: room.name, kind: room.kind, ...(room.path.length ? { in: room.path.slice(-2).reverse().join(', ') } : {}) },
+    ...(at?.seat ? { seat: { name: at.seat.name, kind: at.seat.kind, id: at.seat.id } } : {}),
     ...said,
     here: [],
     bodies,
