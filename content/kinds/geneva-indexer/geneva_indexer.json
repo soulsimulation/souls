@@ -1,0 +1,4075 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:geneva_indexer",
+  "owner": "thing",
+  "state": {
+    "phase": {
+      "n": 28,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 15,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        -140,
+        0,
+        -750
+      ],
+      "yaw_mdeg": 0
+    },
+    "control": {
+      "role": "contact",
+      "at_mm": [
+        -140,
+        1100,
+        -300
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1000,
+      1500,
+      650
+    ]
+  },
+  "forms": {
+    "next_00": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 0,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 1,
+          "event": "indexed"
+        }
+      ]
+    },
+    "next_01": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 1,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 2,
+          "event": "indexed"
+        }
+      ]
+    },
+    "next_02": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 2,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 3,
+          "event": "indexed"
+        }
+      ]
+    },
+    "next_03": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 3,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 4,
+          "event": "indexed"
+        }
+      ]
+    },
+    "next_04": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 4,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 5,
+          "event": "indexed"
+        }
+      ]
+    },
+    "next_05": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 5,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 6,
+          "event": "indexed"
+        }
+      ]
+    },
+    "next_06": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 6,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 7,
+          "event": "indexed"
+        }
+      ]
+    },
+    "next_07": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 7,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 8,
+          "event": "indexed"
+        }
+      ]
+    },
+    "next_08": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 8,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 9,
+          "event": "indexed"
+        }
+      ]
+    },
+    "next_09": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 9,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 10,
+          "event": "indexed"
+        }
+      ]
+    },
+    "next_10": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 10,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 11,
+          "event": "indexed"
+        }
+      ]
+    },
+    "next_11": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 11,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 12,
+          "event": "indexed"
+        }
+      ]
+    },
+    "next_12": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 12,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 13,
+          "event": "indexed"
+        }
+      ]
+    },
+    "next_13": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 13,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 14,
+          "event": "indexed"
+        }
+      ]
+    },
+    "next_14": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 14,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 15,
+          "event": "indexed"
+        }
+      ]
+    },
+    "next_15": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 15,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 0,
+          "event": "indexed"
+        }
+      ]
+    },
+    "previous_00": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 0,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 15,
+          "event": "indexed"
+        }
+      ]
+    },
+    "previous_01": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 1,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 0,
+          "event": "indexed"
+        }
+      ]
+    },
+    "previous_02": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 2,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 1,
+          "event": "indexed"
+        }
+      ]
+    },
+    "previous_03": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 3,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 2,
+          "event": "indexed"
+        }
+      ]
+    },
+    "previous_04": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 4,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 3,
+          "event": "indexed"
+        }
+      ]
+    },
+    "previous_05": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 5,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 4,
+          "event": "indexed"
+        }
+      ]
+    },
+    "previous_06": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 6,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 5,
+          "event": "indexed"
+        }
+      ]
+    },
+    "previous_07": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 7,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 6,
+          "event": "indexed"
+        }
+      ]
+    },
+    "previous_08": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 8,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 7,
+          "event": "indexed"
+        }
+      ]
+    },
+    "previous_09": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 9,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 8,
+          "event": "indexed"
+        }
+      ]
+    },
+    "previous_10": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 10,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 9,
+          "event": "indexed"
+        }
+      ]
+    },
+    "previous_11": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 11,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 10,
+          "event": "indexed"
+        }
+      ]
+    },
+    "previous_12": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 12,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 11,
+          "event": "indexed"
+        }
+      ]
+    },
+    "previous_13": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 13,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 12,
+          "event": "indexed"
+        }
+      ]
+    },
+    "previous_14": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 14,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 13,
+          "event": "indexed"
+        }
+      ]
+    },
+    "previous_15": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 15,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "control"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "control"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 14,
+          "event": "indexed"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:geneva_indexer",
+    "table": [
+      {
+        "part": "input",
+        "field": "phase",
+        "do": "rotate",
+        "axis": "z",
+        "at": {
+          "0": -45000,
+          "1": 0,
+          "2": 45000,
+          "3": 180000,
+          "4": -45000,
+          "5": 0,
+          "6": 45000,
+          "7": 180000,
+          "8": -45000,
+          "9": 0,
+          "10": 45000,
+          "11": 180000,
+          "12": -45000,
+          "13": 0,
+          "14": 45000,
+          "15": 180000
+        }
+      },
+      {
+        "part": "output",
+        "field": "phase",
+        "do": "rotate",
+        "axis": "z",
+        "at": {
+          "0": 0,
+          "1": -45000,
+          "2": -90000,
+          "3": -90000,
+          "4": -90000,
+          "5": -135000,
+          "6": -180000,
+          "7": -180000,
+          "8": -180000,
+          "9": -225000,
+          "10": -270000,
+          "11": -270000,
+          "12": -270000,
+          "13": -315000,
+          "14": -360000,
+          "15": -360000
+        }
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            40,
+            0
+          ],
+          "size": [
+            1000,
+            80,
+            650
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -400,
+            730,
+            -180
+          ],
+          "size": [
+            60,
+            1340,
+            60
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            400,
+            730,
+            -180
+          ],
+          "size": [
+            60,
+            1340,
+            60
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1400,
+            -180
+          ],
+          "size": [
+            1000,
+            160,
+            60
+          ],
+          "tint": "back"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -140,
+            570,
+            -160
+          ],
+          "size": [
+            80,
+            1020,
+            80
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "lathe",
+          "at": [
+            -140,
+            1100,
+            -160
+          ],
+          "profile": [
+            [
+              20,
+              -40
+            ],
+            [
+              35,
+              -40
+            ],
+            [
+              35,
+              40
+            ],
+            [
+              20,
+              40
+            ],
+            [
+              20,
+              -40
+            ]
+          ],
+          "segments": 32,
+          "pitch": 90000,
+          "tint": "bearing"
+        },
+        {
+          "kind": "box",
+          "at": [
+            140,
+            570,
+            -160
+          ],
+          "size": [
+            80,
+            1020,
+            80
+          ],
+          "tint": "frame"
+        },
+        {
+          "kind": "lathe",
+          "at": [
+            140,
+            1100,
+            -160
+          ],
+          "profile": [
+            [
+              20,
+              -40
+            ],
+            [
+              35,
+              -40
+            ],
+            [
+              35,
+              40
+            ],
+            [
+              20,
+              40
+            ],
+            [
+              20,
+              -40
+            ]
+          ],
+          "segments": 32,
+          "pitch": 90000,
+          "tint": "bearing"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            -140,
+            1100,
+            10
+          ],
+          "polygon": [
+            [
+              0,
+              0
+            ],
+            [
+              0,
+              140
+            ],
+            [
+              -2,
+              140
+            ],
+            [
+              -5,
+              140
+            ],
+            [
+              -7,
+              140
+            ],
+            [
+              -10,
+              140
+            ],
+            [
+              -12,
+              139
+            ],
+            [
+              -15,
+              139
+            ],
+            [
+              -17,
+              139
+            ],
+            [
+              -19,
+              139
+            ],
+            [
+              -22,
+              138
+            ],
+            [
+              -24,
+              138
+            ],
+            [
+              -27,
+              137
+            ],
+            [
+              -29,
+              137
+            ],
+            [
+              -31,
+              136
+            ],
+            [
+              -34,
+              136
+            ],
+            [
+              -36,
+              135
+            ],
+            [
+              -39,
+              135
+            ],
+            [
+              -41,
+              134
+            ],
+            [
+              -43,
+              133
+            ],
+            [
+              -46,
+              132
+            ],
+            [
+              -48,
+              132
+            ],
+            [
+              -50,
+              131
+            ],
+            [
+              -52,
+              130
+            ],
+            [
+              -55,
+              129
+            ],
+            [
+              -57,
+              128
+            ],
+            [
+              -59,
+              127
+            ],
+            [
+              -61,
+              126
+            ],
+            [
+              -64,
+              125
+            ],
+            [
+              -66,
+              124
+            ],
+            [
+              -68,
+              122
+            ],
+            [
+              -70,
+              121
+            ],
+            [
+              -72,
+              120
+            ],
+            [
+              -74,
+              119
+            ],
+            [
+              -76,
+              117
+            ],
+            [
+              -78,
+              116
+            ],
+            [
+              -80,
+              115
+            ],
+            [
+              -82,
+              113
+            ],
+            [
+              -84,
+              112
+            ],
+            [
+              -86,
+              110
+            ],
+            [
+              -88,
+              109
+            ],
+            [
+              -90,
+              107
+            ],
+            [
+              -92,
+              106
+            ],
+            [
+              -94,
+              104
+            ],
+            [
+              -95,
+              102
+            ],
+            [
+              -97,
+              101
+            ],
+            [
+              -99,
+              99
+            ],
+            [
+              -101,
+              97
+            ],
+            [
+              -102,
+              95
+            ],
+            [
+              -104,
+              94
+            ],
+            [
+              -106,
+              92
+            ],
+            [
+              -107,
+              90
+            ],
+            [
+              -109,
+              88
+            ],
+            [
+              -110,
+              86
+            ],
+            [
+              -112,
+              84
+            ],
+            [
+              -113,
+              82
+            ],
+            [
+              -115,
+              80
+            ],
+            [
+              -116,
+              78
+            ],
+            [
+              -117,
+              76
+            ],
+            [
+              -119,
+              74
+            ],
+            [
+              -120,
+              72
+            ],
+            [
+              -121,
+              70
+            ],
+            [
+              -122,
+              68
+            ],
+            [
+              -124,
+              66
+            ],
+            [
+              -125,
+              64
+            ],
+            [
+              -126,
+              61
+            ],
+            [
+              -127,
+              59
+            ],
+            [
+              -128,
+              57
+            ],
+            [
+              -129,
+              55
+            ],
+            [
+              -130,
+              52
+            ],
+            [
+              -131,
+              50
+            ],
+            [
+              -132,
+              48
+            ],
+            [
+              -132,
+              46
+            ],
+            [
+              -133,
+              43
+            ],
+            [
+              -134,
+              41
+            ],
+            [
+              -135,
+              39
+            ],
+            [
+              -135,
+              36
+            ],
+            [
+              -136,
+              34
+            ],
+            [
+              -136,
+              31
+            ],
+            [
+              -137,
+              29
+            ],
+            [
+              -137,
+              27
+            ],
+            [
+              -138,
+              24
+            ],
+            [
+              -138,
+              22
+            ],
+            [
+              -139,
+              19
+            ],
+            [
+              -139,
+              17
+            ],
+            [
+              -139,
+              15
+            ],
+            [
+              -139,
+              12
+            ],
+            [
+              -140,
+              10
+            ],
+            [
+              -140,
+              7
+            ],
+            [
+              -140,
+              5
+            ],
+            [
+              -140,
+              2
+            ],
+            [
+              -140,
+              0
+            ],
+            [
+              -140,
+              -2
+            ],
+            [
+              -140,
+              -5
+            ],
+            [
+              -140,
+              -7
+            ],
+            [
+              -140,
+              -10
+            ],
+            [
+              -139,
+              -12
+            ],
+            [
+              -139,
+              -15
+            ],
+            [
+              -139,
+              -17
+            ],
+            [
+              -139,
+              -19
+            ],
+            [
+              -138,
+              -22
+            ],
+            [
+              -138,
+              -24
+            ],
+            [
+              -137,
+              -27
+            ],
+            [
+              -137,
+              -29
+            ],
+            [
+              -136,
+              -31
+            ],
+            [
+              -136,
+              -34
+            ],
+            [
+              -135,
+              -36
+            ],
+            [
+              -135,
+              -39
+            ],
+            [
+              -134,
+              -41
+            ],
+            [
+              -133,
+              -43
+            ],
+            [
+              -132,
+              -46
+            ],
+            [
+              -132,
+              -48
+            ],
+            [
+              -131,
+              -50
+            ],
+            [
+              -130,
+              -52
+            ],
+            [
+              -129,
+              -55
+            ],
+            [
+              -128,
+              -57
+            ],
+            [
+              -127,
+              -59
+            ],
+            [
+              -126,
+              -61
+            ],
+            [
+              -125,
+              -64
+            ],
+            [
+              -124,
+              -66
+            ],
+            [
+              -122,
+              -68
+            ],
+            [
+              -121,
+              -70
+            ],
+            [
+              -120,
+              -72
+            ],
+            [
+              -119,
+              -74
+            ],
+            [
+              -117,
+              -76
+            ],
+            [
+              -116,
+              -78
+            ],
+            [
+              -115,
+              -80
+            ],
+            [
+              -113,
+              -82
+            ],
+            [
+              -112,
+              -84
+            ],
+            [
+              -110,
+              -86
+            ],
+            [
+              -109,
+              -88
+            ],
+            [
+              -107,
+              -90
+            ],
+            [
+              -106,
+              -92
+            ],
+            [
+              -104,
+              -94
+            ],
+            [
+              -102,
+              -95
+            ],
+            [
+              -101,
+              -97
+            ],
+            [
+              -99,
+              -99
+            ],
+            [
+              -97,
+              -101
+            ],
+            [
+              -95,
+              -102
+            ],
+            [
+              -94,
+              -104
+            ],
+            [
+              -92,
+              -106
+            ],
+            [
+              -90,
+              -107
+            ],
+            [
+              -88,
+              -109
+            ],
+            [
+              -86,
+              -110
+            ],
+            [
+              -84,
+              -112
+            ],
+            [
+              -82,
+              -113
+            ],
+            [
+              -80,
+              -115
+            ],
+            [
+              -78,
+              -116
+            ],
+            [
+              -76,
+              -117
+            ],
+            [
+              -74,
+              -119
+            ],
+            [
+              -72,
+              -120
+            ],
+            [
+              -70,
+              -121
+            ],
+            [
+              -68,
+              -122
+            ],
+            [
+              -66,
+              -124
+            ],
+            [
+              -64,
+              -125
+            ],
+            [
+              -61,
+              -126
+            ],
+            [
+              -59,
+              -127
+            ],
+            [
+              -57,
+              -128
+            ],
+            [
+              -55,
+              -129
+            ],
+            [
+              -52,
+              -130
+            ],
+            [
+              -50,
+              -131
+            ],
+            [
+              -48,
+              -132
+            ],
+            [
+              -46,
+              -132
+            ],
+            [
+              -43,
+              -133
+            ],
+            [
+              -41,
+              -134
+            ],
+            [
+              -39,
+              -135
+            ],
+            [
+              -36,
+              -135
+            ],
+            [
+              -34,
+              -136
+            ],
+            [
+              -31,
+              -136
+            ],
+            [
+              -29,
+              -137
+            ],
+            [
+              -27,
+              -137
+            ],
+            [
+              -24,
+              -138
+            ],
+            [
+              -22,
+              -138
+            ],
+            [
+              -19,
+              -139
+            ],
+            [
+              -17,
+              -139
+            ],
+            [
+              -15,
+              -139
+            ],
+            [
+              -12,
+              -139
+            ],
+            [
+              -10,
+              -140
+            ],
+            [
+              -7,
+              -140
+            ],
+            [
+              -5,
+              -140
+            ],
+            [
+              -2,
+              -140
+            ],
+            [
+              0,
+              -140
+            ]
+          ],
+          "h": 20,
+          "pitch": -90000,
+          "tint": "input",
+          "role": "input",
+          "pivot": [
+            -140,
+            1100,
+            0
+          ]
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -140,
+            1100,
+            0
+          ],
+          "r": 40,
+          "h": 20,
+          "segments": 32,
+          "pitch": 90000,
+          "tint": "input",
+          "role": "input",
+          "pivot": [
+            -140,
+            1100,
+            0
+          ]
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -140,
+            1100,
+            -150
+          ],
+          "r": 18,
+          "h": 296,
+          "segments": 32,
+          "pitch": 90000,
+          "tint": "input",
+          "role": "input",
+          "pivot": [
+            -140,
+            1100,
+            0
+          ]
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            -140,
+            1100,
+            -280
+          ],
+          "r": 26,
+          "h": 40,
+          "segments": 32,
+          "pitch": 90000,
+          "tint": "input",
+          "role": "input",
+          "pivot": [
+            -140,
+            1100,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -41,
+            1100,
+            -24
+          ],
+          "size": [
+            218,
+            20,
+            12
+          ],
+          "tint": "input",
+          "role": "input",
+          "pivot": [
+            -140,
+            1100,
+            0
+          ]
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            58,
+            1100,
+            -3
+          ],
+          "r": 6,
+          "h": 54,
+          "segments": 32,
+          "pitch": 90000,
+          "tint": "input",
+          "role": "input",
+          "pivot": [
+            -140,
+            1100,
+            0
+          ]
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            58,
+            1100,
+            24
+          ],
+          "r": 10,
+          "h": 12,
+          "segments": 32,
+          "pitch": 90000,
+          "tint": "index",
+          "role": "input",
+          "pivot": [
+            -140,
+            1100,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -110,
+            1100,
+            12
+          ],
+          "size": [
+            12,
+            12,
+            8
+          ],
+          "tint": "index",
+          "role": "input",
+          "pivot": [
+            -140,
+            1100,
+            0
+          ]
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            140,
+            1100,
+            10
+          ],
+          "polygon": [
+            [
+              161,
+              150
+            ],
+            [
+              55,
+              44
+            ],
+            [
+              44,
+              55
+            ],
+            [
+              150,
+              161
+            ],
+            [
+              147,
+              164
+            ],
+            [
+              144,
+              166
+            ],
+            [
+              141,
+              169
+            ],
+            [
+              138,
+              171
+            ],
+            [
+              135,
+              174
+            ],
+            [
+              132,
+              176
+            ],
+            [
+              129,
+              178
+            ],
+            [
+              126,
+              180
+            ],
+            [
+              123,
+              183
+            ],
+            [
+              120,
+              185
+            ],
+            [
+              116,
+              187
+            ],
+            [
+              113,
+              189
+            ],
+            [
+              109,
+              188
+            ],
+            [
+              98,
+              177
+            ],
+            [
+              90,
+              171
+            ],
+            [
+              84,
+              166
+            ],
+            [
+              79,
+              162
+            ],
+            [
+              74,
+              159
+            ],
+            [
+              69,
+              156
+            ],
+            [
+              65,
+              154
+            ],
+            [
+              61,
+              152
+            ],
+            [
+              58,
+              150
+            ],
+            [
+              54,
+              149
+            ],
+            [
+              51,
+              147
+            ],
+            [
+              47,
+              146
+            ],
+            [
+              44,
+              145
+            ],
+            [
+              41,
+              144
+            ],
+            [
+              38,
+              143
+            ],
+            [
+              35,
+              142
+            ],
+            [
+              33,
+              142
+            ],
+            [
+              30,
+              141
+            ],
+            [
+              27,
+              141
+            ],
+            [
+              25,
+              140
+            ],
+            [
+              22,
+              140
+            ],
+            [
+              20,
+              139
+            ],
+            [
+              17,
+              139
+            ],
+            [
+              15,
+              139
+            ],
+            [
+              12,
+              139
+            ],
+            [
+              10,
+              138
+            ],
+            [
+              7,
+              138
+            ],
+            [
+              5,
+              138
+            ],
+            [
+              2,
+              138
+            ],
+            [
+              0,
+              138
+            ],
+            [
+              -2,
+              138
+            ],
+            [
+              -5,
+              138
+            ],
+            [
+              -7,
+              138
+            ],
+            [
+              -10,
+              138
+            ],
+            [
+              -12,
+              139
+            ],
+            [
+              -15,
+              139
+            ],
+            [
+              -17,
+              139
+            ],
+            [
+              -20,
+              139
+            ],
+            [
+              -22,
+              140
+            ],
+            [
+              -25,
+              140
+            ],
+            [
+              -27,
+              141
+            ],
+            [
+              -30,
+              141
+            ],
+            [
+              -33,
+              142
+            ],
+            [
+              -35,
+              142
+            ],
+            [
+              -38,
+              143
+            ],
+            [
+              -41,
+              144
+            ],
+            [
+              -44,
+              145
+            ],
+            [
+              -47,
+              146
+            ],
+            [
+              -51,
+              147
+            ],
+            [
+              -54,
+              149
+            ],
+            [
+              -58,
+              150
+            ],
+            [
+              -61,
+              152
+            ],
+            [
+              -65,
+              154
+            ],
+            [
+              -69,
+              156
+            ],
+            [
+              -74,
+              159
+            ],
+            [
+              -79,
+              162
+            ],
+            [
+              -84,
+              166
+            ],
+            [
+              -90,
+              171
+            ],
+            [
+              -98,
+              177
+            ],
+            [
+              -109,
+              188
+            ],
+            [
+              -113,
+              189
+            ],
+            [
+              -116,
+              187
+            ],
+            [
+              -120,
+              185
+            ],
+            [
+              -123,
+              183
+            ],
+            [
+              -126,
+              180
+            ],
+            [
+              -129,
+              178
+            ],
+            [
+              -132,
+              176
+            ],
+            [
+              -135,
+              174
+            ],
+            [
+              -138,
+              171
+            ],
+            [
+              -141,
+              169
+            ],
+            [
+              -144,
+              166
+            ],
+            [
+              -147,
+              164
+            ],
+            [
+              -150,
+              161
+            ],
+            [
+              -44,
+              55
+            ],
+            [
+              -55,
+              44
+            ],
+            [
+              -161,
+              150
+            ],
+            [
+              -164,
+              147
+            ],
+            [
+              -166,
+              144
+            ],
+            [
+              -169,
+              141
+            ],
+            [
+              -171,
+              138
+            ],
+            [
+              -174,
+              135
+            ],
+            [
+              -176,
+              132
+            ],
+            [
+              -178,
+              129
+            ],
+            [
+              -180,
+              126
+            ],
+            [
+              -183,
+              123
+            ],
+            [
+              -185,
+              120
+            ],
+            [
+              -187,
+              116
+            ],
+            [
+              -189,
+              113
+            ],
+            [
+              -188,
+              109
+            ],
+            [
+              -177,
+              98
+            ],
+            [
+              -171,
+              90
+            ],
+            [
+              -166,
+              84
+            ],
+            [
+              -162,
+              79
+            ],
+            [
+              -159,
+              74
+            ],
+            [
+              -156,
+              69
+            ],
+            [
+              -154,
+              65
+            ],
+            [
+              -152,
+              61
+            ],
+            [
+              -150,
+              58
+            ],
+            [
+              -149,
+              54
+            ],
+            [
+              -147,
+              51
+            ],
+            [
+              -146,
+              47
+            ],
+            [
+              -145,
+              44
+            ],
+            [
+              -144,
+              41
+            ],
+            [
+              -143,
+              38
+            ],
+            [
+              -142,
+              35
+            ],
+            [
+              -142,
+              33
+            ],
+            [
+              -141,
+              30
+            ],
+            [
+              -141,
+              27
+            ],
+            [
+              -140,
+              25
+            ],
+            [
+              -140,
+              22
+            ],
+            [
+              -139,
+              20
+            ],
+            [
+              -139,
+              17
+            ],
+            [
+              -139,
+              15
+            ],
+            [
+              -139,
+              12
+            ],
+            [
+              -138,
+              10
+            ],
+            [
+              -138,
+              7
+            ],
+            [
+              -138,
+              5
+            ],
+            [
+              -138,
+              2
+            ],
+            [
+              -138,
+              0
+            ],
+            [
+              -138,
+              -2
+            ],
+            [
+              -138,
+              -5
+            ],
+            [
+              -138,
+              -7
+            ],
+            [
+              -138,
+              -10
+            ],
+            [
+              -139,
+              -12
+            ],
+            [
+              -139,
+              -15
+            ],
+            [
+              -139,
+              -17
+            ],
+            [
+              -139,
+              -20
+            ],
+            [
+              -140,
+              -22
+            ],
+            [
+              -140,
+              -25
+            ],
+            [
+              -141,
+              -27
+            ],
+            [
+              -141,
+              -30
+            ],
+            [
+              -142,
+              -33
+            ],
+            [
+              -142,
+              -35
+            ],
+            [
+              -143,
+              -38
+            ],
+            [
+              -144,
+              -41
+            ],
+            [
+              -145,
+              -44
+            ],
+            [
+              -146,
+              -47
+            ],
+            [
+              -147,
+              -51
+            ],
+            [
+              -149,
+              -54
+            ],
+            [
+              -150,
+              -58
+            ],
+            [
+              -152,
+              -61
+            ],
+            [
+              -154,
+              -65
+            ],
+            [
+              -156,
+              -69
+            ],
+            [
+              -159,
+              -74
+            ],
+            [
+              -162,
+              -79
+            ],
+            [
+              -166,
+              -84
+            ],
+            [
+              -171,
+              -90
+            ],
+            [
+              -177,
+              -98
+            ],
+            [
+              -188,
+              -109
+            ],
+            [
+              -189,
+              -113
+            ],
+            [
+              -187,
+              -116
+            ],
+            [
+              -185,
+              -120
+            ],
+            [
+              -183,
+              -123
+            ],
+            [
+              -180,
+              -126
+            ],
+            [
+              -178,
+              -129
+            ],
+            [
+              -176,
+              -132
+            ],
+            [
+              -174,
+              -135
+            ],
+            [
+              -171,
+              -138
+            ],
+            [
+              -169,
+              -141
+            ],
+            [
+              -166,
+              -144
+            ],
+            [
+              -164,
+              -147
+            ],
+            [
+              -161,
+              -150
+            ],
+            [
+              -55,
+              -44
+            ],
+            [
+              -44,
+              -55
+            ],
+            [
+              -150,
+              -161
+            ],
+            [
+              -147,
+              -164
+            ],
+            [
+              -144,
+              -166
+            ],
+            [
+              -141,
+              -169
+            ],
+            [
+              -138,
+              -171
+            ],
+            [
+              -135,
+              -174
+            ],
+            [
+              -132,
+              -176
+            ],
+            [
+              -129,
+              -178
+            ],
+            [
+              -126,
+              -180
+            ],
+            [
+              -123,
+              -183
+            ],
+            [
+              -120,
+              -185
+            ],
+            [
+              -116,
+              -187
+            ],
+            [
+              -113,
+              -189
+            ],
+            [
+              -109,
+              -188
+            ],
+            [
+              -98,
+              -177
+            ],
+            [
+              -90,
+              -171
+            ],
+            [
+              -84,
+              -166
+            ],
+            [
+              -79,
+              -162
+            ],
+            [
+              -74,
+              -159
+            ],
+            [
+              -69,
+              -156
+            ],
+            [
+              -65,
+              -154
+            ],
+            [
+              -61,
+              -152
+            ],
+            [
+              -58,
+              -150
+            ],
+            [
+              -54,
+              -149
+            ],
+            [
+              -51,
+              -147
+            ],
+            [
+              -47,
+              -146
+            ],
+            [
+              -44,
+              -145
+            ],
+            [
+              -41,
+              -144
+            ],
+            [
+              -38,
+              -143
+            ],
+            [
+              -35,
+              -142
+            ],
+            [
+              -33,
+              -142
+            ],
+            [
+              -30,
+              -141
+            ],
+            [
+              -27,
+              -141
+            ],
+            [
+              -25,
+              -140
+            ],
+            [
+              -22,
+              -140
+            ],
+            [
+              -20,
+              -139
+            ],
+            [
+              -17,
+              -139
+            ],
+            [
+              -15,
+              -139
+            ],
+            [
+              -12,
+              -139
+            ],
+            [
+              -10,
+              -138
+            ],
+            [
+              -7,
+              -138
+            ],
+            [
+              -5,
+              -138
+            ],
+            [
+              -2,
+              -138
+            ],
+            [
+              0,
+              -138
+            ],
+            [
+              2,
+              -138
+            ],
+            [
+              5,
+              -138
+            ],
+            [
+              7,
+              -138
+            ],
+            [
+              10,
+              -138
+            ],
+            [
+              12,
+              -139
+            ],
+            [
+              15,
+              -139
+            ],
+            [
+              17,
+              -139
+            ],
+            [
+              20,
+              -139
+            ],
+            [
+              22,
+              -140
+            ],
+            [
+              25,
+              -140
+            ],
+            [
+              27,
+              -141
+            ],
+            [
+              30,
+              -141
+            ],
+            [
+              33,
+              -142
+            ],
+            [
+              35,
+              -142
+            ],
+            [
+              38,
+              -143
+            ],
+            [
+              41,
+              -144
+            ],
+            [
+              44,
+              -145
+            ],
+            [
+              47,
+              -146
+            ],
+            [
+              51,
+              -147
+            ],
+            [
+              54,
+              -149
+            ],
+            [
+              58,
+              -150
+            ],
+            [
+              61,
+              -152
+            ],
+            [
+              65,
+              -154
+            ],
+            [
+              69,
+              -156
+            ],
+            [
+              74,
+              -159
+            ],
+            [
+              79,
+              -162
+            ],
+            [
+              84,
+              -166
+            ],
+            [
+              90,
+              -171
+            ],
+            [
+              98,
+              -177
+            ],
+            [
+              109,
+              -188
+            ],
+            [
+              113,
+              -189
+            ],
+            [
+              116,
+              -187
+            ],
+            [
+              120,
+              -185
+            ],
+            [
+              123,
+              -183
+            ],
+            [
+              126,
+              -180
+            ],
+            [
+              129,
+              -178
+            ],
+            [
+              132,
+              -176
+            ],
+            [
+              135,
+              -174
+            ],
+            [
+              138,
+              -171
+            ],
+            [
+              141,
+              -169
+            ],
+            [
+              144,
+              -166
+            ],
+            [
+              147,
+              -164
+            ],
+            [
+              150,
+              -161
+            ],
+            [
+              44,
+              -55
+            ],
+            [
+              55,
+              -44
+            ],
+            [
+              161,
+              -150
+            ],
+            [
+              164,
+              -147
+            ],
+            [
+              166,
+              -144
+            ],
+            [
+              169,
+              -141
+            ],
+            [
+              171,
+              -138
+            ],
+            [
+              174,
+              -135
+            ],
+            [
+              176,
+              -132
+            ],
+            [
+              178,
+              -129
+            ],
+            [
+              180,
+              -126
+            ],
+            [
+              183,
+              -123
+            ],
+            [
+              185,
+              -120
+            ],
+            [
+              187,
+              -116
+            ],
+            [
+              189,
+              -113
+            ],
+            [
+              188,
+              -109
+            ],
+            [
+              177,
+              -98
+            ],
+            [
+              171,
+              -90
+            ],
+            [
+              166,
+              -84
+            ],
+            [
+              162,
+              -79
+            ],
+            [
+              159,
+              -74
+            ],
+            [
+              156,
+              -69
+            ],
+            [
+              154,
+              -65
+            ],
+            [
+              152,
+              -61
+            ],
+            [
+              150,
+              -58
+            ],
+            [
+              149,
+              -54
+            ],
+            [
+              147,
+              -51
+            ],
+            [
+              146,
+              -47
+            ],
+            [
+              145,
+              -44
+            ],
+            [
+              144,
+              -41
+            ],
+            [
+              143,
+              -38
+            ],
+            [
+              142,
+              -35
+            ],
+            [
+              142,
+              -33
+            ],
+            [
+              141,
+              -30
+            ],
+            [
+              141,
+              -27
+            ],
+            [
+              140,
+              -25
+            ],
+            [
+              140,
+              -22
+            ],
+            [
+              139,
+              -20
+            ],
+            [
+              139,
+              -17
+            ],
+            [
+              139,
+              -15
+            ],
+            [
+              139,
+              -12
+            ],
+            [
+              138,
+              -10
+            ],
+            [
+              138,
+              -7
+            ],
+            [
+              138,
+              -5
+            ],
+            [
+              138,
+              -2
+            ],
+            [
+              138,
+              0
+            ],
+            [
+              138,
+              2
+            ],
+            [
+              138,
+              5
+            ],
+            [
+              138,
+              7
+            ],
+            [
+              138,
+              10
+            ],
+            [
+              139,
+              12
+            ],
+            [
+              139,
+              15
+            ],
+            [
+              139,
+              17
+            ],
+            [
+              139,
+              20
+            ],
+            [
+              140,
+              22
+            ],
+            [
+              140,
+              25
+            ],
+            [
+              141,
+              27
+            ],
+            [
+              141,
+              30
+            ],
+            [
+              142,
+              33
+            ],
+            [
+              142,
+              35
+            ],
+            [
+              143,
+              38
+            ],
+            [
+              144,
+              41
+            ],
+            [
+              145,
+              44
+            ],
+            [
+              146,
+              47
+            ],
+            [
+              147,
+              51
+            ],
+            [
+              149,
+              54
+            ],
+            [
+              150,
+              58
+            ],
+            [
+              152,
+              61
+            ],
+            [
+              154,
+              65
+            ],
+            [
+              156,
+              69
+            ],
+            [
+              159,
+              74
+            ],
+            [
+              162,
+              79
+            ],
+            [
+              166,
+              84
+            ],
+            [
+              171,
+              90
+            ],
+            [
+              177,
+              98
+            ],
+            [
+              188,
+              109
+            ],
+            [
+              189,
+              113
+            ],
+            [
+              187,
+              116
+            ],
+            [
+              185,
+              120
+            ],
+            [
+              183,
+              123
+            ],
+            [
+              180,
+              126
+            ],
+            [
+              178,
+              129
+            ],
+            [
+              176,
+              132
+            ],
+            [
+              174,
+              135
+            ],
+            [
+              171,
+              138
+            ],
+            [
+              169,
+              141
+            ],
+            [
+              166,
+              144
+            ],
+            [
+              164,
+              147
+            ]
+          ],
+          "h": 20,
+          "pitch": -90000,
+          "tint": "output",
+          "role": "output",
+          "pivot": [
+            140,
+            1100,
+            0
+          ]
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            140,
+            1100,
+            -150
+          ],
+          "r": 18,
+          "h": 296,
+          "segments": 32,
+          "pitch": 90000,
+          "tint": "output",
+          "role": "output",
+          "pivot": [
+            140,
+            1100,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            140,
+            1146,
+            14
+          ],
+          "size": [
+            14,
+            24,
+            12
+          ],
+          "tint": "index",
+          "role": "output",
+          "pivot": [
+            140,
+            1100,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            -400,
+            1100,
+            -80
+          ],
+          "size": [
+            12,
+            12,
+            220
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            140,
+            1350,
+            -90
+          ],
+          "size": [
+            12,
+            12,
+            220
+          ],
+          "tint": "reference"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -140,
+            1424,
+            -144
+          ],
+          "size": [
+            44,
+            8,
+            16
+          ],
+          "tint": "input"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -140,
+            1400,
+            -144
+          ],
+          "size": [
+            8,
+            48,
+            16
+          ],
+          "tint": "input"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -140,
+            1376,
+            -144
+          ],
+          "size": [
+            44,
+            8,
+            16
+          ],
+          "tint": "input"
+        },
+        {
+          "kind": "box",
+          "at": [
+            140,
+            1424,
+            -144
+          ],
+          "size": [
+            44,
+            8,
+            16
+          ],
+          "tint": "output"
+        },
+        {
+          "kind": "box",
+          "at": [
+            140,
+            1376,
+            -144
+          ],
+          "size": [
+            44,
+            8,
+            16
+          ],
+          "tint": "output"
+        },
+        {
+          "kind": "box",
+          "at": [
+            122,
+            1400,
+            -144
+          ],
+          "size": [
+            8,
+            48,
+            16
+          ],
+          "tint": "output"
+        },
+        {
+          "kind": "box",
+          "at": [
+            158,
+            1400,
+            -144
+          ],
+          "size": [
+            8,
+            48,
+            16
+          ],
+          "tint": "output"
+        }
+      ],
+      "palette": {
+        "frame": "#35424c",
+        "back": "#182b35",
+        "input": "#4e98cb",
+        "output": "#e98252",
+        "bearing": "#aebbc4",
+        "reference": "#ef4e49",
+        "index": "#fff4b7"
+      },
+      "tags": [
+        "tool",
+        "machine",
+        "indexer",
+        "exhibit"
+      ]
+    }
+  },
+  "text": {
+    "work": "work",
+    "card": "Index a four-slot wheel through pin engagement and visible dwell.",
+    "geneva": "Geneva indexer",
+    "maltese": "four-slot Maltese cross",
+    "wrong_phase": "Choose the adjacent sample matching the current phase.",
+    "free_hand": "Free a hand to turn the rear blue input control.",
+    "howto_turn": "Use the matching next or previous sample at the rear blue control, with a free hand. Blue I identifies the same original driver, pin, rear arm and genuinely cutaway circular blocking member; orange O identifies the same original four-slot wheel. The original pin enters actual open radial notches, advances the wheel and leaves it dwelling while the input continues. Four concave recesses align with the cutaway blocking member during dwell; their positive clearance depicts indexed alignment, not physical restraint. The asymmetric pale output index stays attached to its original wheel and distinguishes all four stations. The red references and I/O labels stay fixed and mounted to the support frame. Sixteen configurations cover FOUR input turns and ONE opposite output turn. Within each driver turn the input samples are minus45,0,45,180 degrees: unequal45,45,135,135 degree increments, not uniform time or angle steps. Output advances minus45,minus45,0,0 degrees across these samples, showing entry, middle, exit and dwell. Both original assemblies remain rigid and connected; reversing follows the same coupled relation, and the full cycle restores all original geometry without resetting a quarter turn. Input and output shafts sit in genuinely hollow supported bearing sleeves. Natural depth and pin-head occlusion may hide joint faces; inspect the assembled mechanism from an oblique or side view. This is untimed indexed endpoint geometry only, with no continuous path/contact solver, force, friction, torque, power, physical security lock, output item, loose custody, autonomous timing or moving engine collision/support simulation."
+  },
+  "card": {
+    "text": "card",
+    "category": "work",
+    "synonyms": [
+      "geneva",
+      "maltese"
+    ]
+  },
+  "howtos": {
+    "turn": {
+      "text": "howto_turn",
+      "steps": [
+        {
+          "form": "next_00"
+        },
+        {
+          "form": "previous_01"
+        }
+      ]
+    }
+  }
+}
