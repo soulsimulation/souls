@@ -6,6 +6,8 @@
 //        [--from <seconds into the take>] [--seconds 10] [--aspect 0.8] [--moves track,orbit] [--framings medium,close]
 //        [--pick <candidate id>] [--list] [--describe] [--pose x,y,z:x,y,z[:fov][>x,y,z:x,y,z[:fov]]]
 //   node tools/launch-video/shoot.mjs --world <world folder> --from-us <µs> [--seconds 10] --out <shot.json> …
+//   node tools/launch-video/shoot.mjs --page <a world's old page> --from-us <µs> [--seconds 10] --out <shot.json> …   (0.135 P7:
+//        over the network, as soul.game serves a world: people from its public history, solids from its public stream)
 //
 // <scene dir> is what scene.mjs wrote (run.json: each Soul's body and when its take started; the world's folder beside
 // it). --world names a world's folder instead (`worldd`'s: facts.json and history/), with the span's start in world µs.
@@ -21,20 +23,24 @@ import { dirname, join, resolve } from 'node:path';
 import { cameraScene, CAMERA_TRACK_SCHEMA, findPath, historyOfPlaces, obstaclesOfFacts, trackOf } from '../../packages/camera/src/index.ts';
 import { heightAt } from '../../packages/ground/src/index.ts';
 import { isMain } from '../lib/is-main.mjs';
-import { placesIn } from './v2-history.mjs';
+import { pageSources, placesIn, thingsOf } from './v2-history.mjs';
+import { closeViewers, streamViewer } from '../playtest/observer/new-engine/stream.mjs';
 
 export const TICK_US = 50_000;
 /** The page's key for a client id (`<scope>-<n>` → `<scope>.<n>`). */
 const pageKey = (id) => String(id).replace(/-(\d+)$/, '.$1');
 
 /** What a shot is made from: a scene dir (run.json + its world) or a world folder and a start. */
-export function sourceOf({ recording = null, world = null, fromUs = null }) {
+export function sourceOf({ recording = null, world = null, page = null, fromUs = null }) {
+  // 0.135 P7: a world's page as soul.game serves it: its people from its public history, its solids from its public
+  // stream, both over the network (no folder, so a live world's highlights can be planned)
+  if (page) { if (!(fromUs > 0)) throw Error('--page needs --from-us <µs>'); return { page, startUs: fromUs, names: {} }; }
   if (recording) {
     const dir = resolve(recording), run = JSON.parse(readFileSync(join(dir, 'run.json'), 'utf8'));
     if (!run.take?.startedAtMs) throw Error(`${dir}/run.json has no take start (a scene recorded before 0.135 P3a)`);
     return { world: join(dir, 'world/world/world'), startUs: run.take.startedAtMs * 1000, names: Object.fromEntries(Object.entries(run.bodies ?? {}).map(([k, v]) => [k, pageKey(v)])) };
   }
-  if (!world || !(fromUs > 0)) throw Error('--recording <scene dir>, or --world <world folder> --from-us <µs>');
+  if (!world || !(fromUs > 0)) throw Error('--recording <scene dir>, --world <world folder> --from-us <µs>, or --page <a world\'s old page> --from-us <µs>');
   return { world: resolve(world), startUs: fromUs, names: {} };
 }
 
@@ -45,13 +51,27 @@ export function poseShot(spec, { fromTick, seconds, aspect, subjects = [] }) {
   return { schema: 'souls-shot/1', fromTick, toTick: fromTick + Math.round(seconds * 1e6 / TICK_US), dt: TICK_US / 1e6, aspect, subjects, move: 'fixed', track: { schema: CAMERA_TRACK_SCHEMA, hz, duration: seconds, samples } };
 }
 
-export async function shoot({ recording, world: worldDir, fromUs, from = null, seconds = 10, aspect = 0.8, subjects: asked = null, moves, framings, pick: pickId, pose, describe = false, list = false, log = console.log }) {
-  const src = sourceOf({ recording, world: worldDir, fromUs });
-  const facts = JSON.parse(readFileSync(join(src.world, 'facts.json'), 'utf8')), recipe = JSON.parse(facts.ground.recipe);
-  const ground = (x, z) => heightAt(recipe, x, z);
-  const obstacles = obstaclesOfFacts(facts, ground), scene = cameraScene(null, obstacles);
+export async function shoot({ recording, world: worldDir, page = null, fromUs, from = null, seconds = 10, aspect = 0.8, subjects: asked = null, moves, framings, pick: pickId, pose, describe = false, list = false, log = console.log }) {
+  const src = sourceOf({ recording, world: worldDir, page, fromUs });
   const span = Math.max(seconds, recording ? JSON.parse(readFileSync(join(resolve(recording), 'run.json'), 'utf8')).take.seconds ?? seconds : seconds);
-  const { places } = await placesIn({ history: join(src.world, 'history'), fromUs: src.startUs, toUs: src.startUs + span * 1e6 });
+  let obstacles, ground, historyAt;
+  if (src.page) {
+    const at = await pageSources(src.page);
+    if (!at.history) throw Error(`${src.page} names no public history (v2History)`);
+    const v = await streamViewer({ stream: at.stream });
+    const ok = await v.until((x) => [...x.nodes.values()].some((n) => n.solids?.length), 60_000);
+    if (!ok) { closeViewers(); throw Error(`no solids in ${at.stream}${v.errors.length ? `: ${v.errors[0].slice(0, 200)}` : ''}`); }
+    obstacles = obstaclesOfFacts({ things: thingsOf(v.nodes) });
+    closeViewers();
+    historyAt = at.history;
+  } else {
+    const facts = JSON.parse(readFileSync(join(src.world, 'facts.json'), 'utf8')), recipe = JSON.parse(facts.ground.recipe);
+    ground = (x, z) => heightAt(recipe, x, z);
+    obstacles = obstaclesOfFacts(facts, ground);
+    historyAt = join(src.world, 'history');
+  }
+  const scene = cameraScene(null, obstacles);
+  const { places } = await placesIn({ history: historyAt, fromUs: src.startUs, toUs: src.startUs + span * 1e6 });
   const history = historyOfPlaces(places, { fromUs: src.startUs, toUs: src.startUs + span * 1e6, tickUs: TICK_US });
   const label = (id) => Object.keys(src.names).find((k) => src.names[k] === id) ?? id;
   const length = (history.toTick - history.fromTick) * history.dt;
@@ -93,7 +113,7 @@ if (isMain(import.meta.url)) {
   const arg = (k, d) => { const i = process.argv.indexOf(`--${k}`); return i >= 0 ? process.argv[i + 1] : d; };
   const list = (k) => arg(k)?.split(',').filter(Boolean), out = arg('out') ? resolve(arg('out')) : null;
   try {
-    const r = await shoot({ recording: arg('recording'), world: arg('world'), fromUs: arg('from-us') ? Number(arg('from-us')) : null, from: arg('from') === undefined ? null : Number(arg('from')),
+    const r = await shoot({ recording: arg('recording'), world: arg('world'), page: arg('page'), fromUs: arg('from-us') ? Number(arg('from-us')) : null, from: arg('from') === undefined ? null : Number(arg('from')),
       seconds: Number(arg('seconds', 10)), aspect: Number(arg('aspect', 0.8)), subjects: list('subjects') ?? null, moves: list('moves'), framings: list('framings'), pick: arg('pick'), pose: arg('pose'),
       describe: process.argv.includes('--describe'), list: process.argv.includes('--list') });
     if (r && out) { mkdirSync(dirname(out), { recursive: true }); writeFileSync(out, JSON.stringify(r.shot)); console.log(`wrote ${r.shot.move} (${r.from}–${r.from + Number(arg('seconds', 10))} s) → ${out}`); }

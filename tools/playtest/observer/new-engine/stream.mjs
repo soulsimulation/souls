@@ -44,12 +44,15 @@ export function hookOnce(pkg) {
 }
 
 let n = 0;
-/** A fresh viewer from now on. Resolves once its worker is started; `ready()` waits for the first state it plays. */
-export async function streamViewer({ world, pkg = REPLICA_PKG }) {
+/** A fresh viewer from now on, of `world`'s stream or of the `stream` address given. Resolves once its worker is started. */
+export async function streamViewer({ world = null, stream = null, pkg = REPLICA_PKG }) {
   hookOnce(pkg);
-  const advert = await fetch(`${world.page}views/world.json`, { signal: AbortSignal.timeout(10_000) }).then((r) => (r.ok ? r.json() : null), () => null)
-    ?? JSON.parse(readFileSync(join(world.dir, 'world/views/world.json'), 'utf8'));
-  const stream = streamUrl(world.page, advert);
+  // a stream's address given (a world's old page names it, as soul.game's does), else the world's advert
+  if (!stream) {
+    const advert = await fetch(`${world.page}views/world.json`, { signal: AbortSignal.timeout(10_000) }).then((r) => (r.ok ? r.json() : null), () => null)
+      ?? JSON.parse(readFileSync(join(world.dir, 'world/views/world.json'), 'utf8'));
+    stream = streamUrl(world.page, advert);
+  }
   const v = { stream, nodes: new Map(), parts: 0, saidRecs: [], errors: [], played: null };
   const self = {
     onmessage: null,
