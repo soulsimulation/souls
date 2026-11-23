@@ -6,8 +6,8 @@ import { V2Bridge } from './bridge.ts';
 
 const Q = 2 ** 30, T0 = 1_000_000_000_000;
 const node = (id: string, parent: string | null, kind: string, extra: object = {}) => ({ id, kind, parent, slot: null, pos: [0, 0, 0] as [number, number, number], rot: [Q, 0, 0, 0] as [number, number, number, number], at: null, ...extra });
-const part = (n: number, nodes: object[] = [], samples: [string, string, number | null, number, number, number, number][] = []) =>
-  ({ t: 'part' as const, p: { number: n, from: T0 + n * 500_000, to: T0 + (n + 1) * 500_000, nodes, removed: [], samples } });
+const part = (n: number, nodes: unknown[] = [], samples: [string, string, number | null, number, number, number, number][] = []) =>
+  ({ t: 'part' as const, p: { number: n, from: T0 + n * 500_000, to: T0 + (n + 1) * 500_000, nodes, removed: [], samples } }) as never;
 
 test('B3-5: a body born on the ground is in the page\'s Souls from the part that made it, by its Soul\'s id', () => {
   const b = new V2Bridge({ rulesVersion: 'test/1' });
