@@ -303,42 +303,6 @@
     "model": "look:combination_latch",
     "table": [
       {
-        "part": "left",
-        "field": "left",
-        "do": "rotate",
-        "axis": "z",
-        "at": {
-          "0": 0,
-          "1": -90000,
-          "2": -180000,
-          "3": -270000
-        }
-      },
-      {
-        "part": "middle",
-        "field": "middle",
-        "do": "rotate",
-        "axis": "z",
-        "at": {
-          "0": 0,
-          "1": -90000,
-          "2": -180000,
-          "3": -270000
-        }
-      },
-      {
-        "part": "right",
-        "field": "right",
-        "do": "rotate",
-        "axis": "z",
-        "at": {
-          "0": 0,
-          "1": -90000,
-          "2": -180000,
-          "3": -270000
-        }
-      },
-      {
         "part": "bolt",
         "field": "released",
         "do": "slide",
@@ -419,13 +383,7 @@
           "h": 70,
           "segments": 32,
           "pitch": 90000,
-          "tint": "wheel",
-          "role": "left",
-          "pivot": [
-            -440,
-            1180,
-            0
-          ]
+          "tint": "wheel"
         },
         {
           "kind": "box",
@@ -440,12 +398,56 @@
             16
           ],
           "tint": "index",
-          "role": "left",
-          "pivot": [
-            -440,
+          "roll": 0,
+          "when": "@left=0"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -385,
             1180,
-            0
-          ]
+            50
+          ],
+          "size": [
+            16,
+            88,
+            16
+          ],
+          "tint": "index",
+          "roll": -90000,
+          "when": "@left=1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -440,
+            1125,
+            50
+          ],
+          "size": [
+            16,
+            88,
+            16
+          ],
+          "tint": "index",
+          "roll": -180000,
+          "when": "@left=2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -495,
+            1180,
+            50
+          ],
+          "size": [
+            16,
+            88,
+            16
+          ],
+          "tint": "index",
+          "roll": -270000,
+          "when": "@left=3"
         },
         {
           "kind": "cyl",
@@ -478,26 +480,12 @@
           "kind": "box",
           "at": [
             -423,
-            1358,
+            1342,
             60
           ],
           "size": [
             7,
-            32,
-            10
-          ],
-          "tint": "legend"
-        },
-        {
-          "kind": "box",
-          "at": [
-            -423,
-            1326,
-            60
-          ],
-          "size": [
-            7,
-            32,
+            64,
             10
           ],
           "tint": "legend"
@@ -807,13 +795,7 @@
           "h": 70,
           "segments": 32,
           "pitch": 90000,
-          "tint": "wheel",
-          "role": "middle",
-          "pivot": [
-            0,
-            1180,
-            0
-          ]
+          "tint": "wheel"
         },
         {
           "kind": "box",
@@ -828,12 +810,56 @@
             16
           ],
           "tint": "index",
-          "role": "middle",
-          "pivot": [
-            0,
+          "roll": 0,
+          "when": "@middle=0"
+        },
+        {
+          "kind": "box",
+          "at": [
+            55,
             1180,
-            0
-          ]
+            50
+          ],
+          "size": [
+            16,
+            88,
+            16
+          ],
+          "tint": "index",
+          "roll": -90000,
+          "when": "@middle=1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1125,
+            50
+          ],
+          "size": [
+            16,
+            88,
+            16
+          ],
+          "tint": "index",
+          "roll": -180000,
+          "when": "@middle=2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -55,
+            1180,
+            50
+          ],
+          "size": [
+            16,
+            88,
+            16
+          ],
+          "tint": "index",
+          "roll": -270000,
+          "when": "@middle=3"
         },
         {
           "kind": "cyl",
@@ -1153,13 +1179,7 @@
           "h": 70,
           "segments": 32,
           "pitch": 90000,
-          "tint": "wheel",
-          "role": "right",
-          "pivot": [
-            440,
-            1180,
-            0
-          ]
+          "tint": "wheel"
         },
         {
           "kind": "box",
@@ -1174,12 +1194,56 @@
             16
           ],
           "tint": "index",
-          "role": "right",
-          "pivot": [
-            440,
+          "roll": 0,
+          "when": "@right=0"
+        },
+        {
+          "kind": "box",
+          "at": [
+            495,
             1180,
-            0
-          ]
+            50
+          ],
+          "size": [
+            16,
+            88,
+            16
+          ],
+          "tint": "index",
+          "roll": -90000,
+          "when": "@right=1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            440,
+            1125,
+            50
+          ],
+          "size": [
+            16,
+            88,
+            16
+          ],
+          "tint": "index",
+          "roll": -180000,
+          "when": "@right=2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            385,
+            1180,
+            50
+          ],
+          "size": [
+            16,
+            88,
+            16
+          ],
+          "tint": "index",
+          "roll": -270000,
+          "when": "@right=3"
         },
         {
           "kind": "cyl",
@@ -1644,13 +1708,12 @@
     "card": "Set three indexed dials to the public target 213, then release the bolt.",
     "latch": "combination latch",
     "combination": "three dial exhibit",
-    "wrong_phase": "Choose the clockwise offer matching that dial position.",
     "close_first": "Relatch the bolt before turning a dial.",
     "wrong_code": "Set left, middle and right dials to the engraved public target 213.",
     "already_open": "The bolt is already released.",
     "already_closed": "The bolt is already latched.",
     "free_hand": "Put down an object so a hand is free to operate the exhibit.",
-    "howto_set": "Read the three gold target digits left to right:213. Each pale index points to fixed legends 0 above, 1 right, 2 below and 3 left. Use the clockwise offer for a dial current value; it advances one quarter turn. Dials turn only while the bolt is latched. Set left 2, middle 1, right 3, then release. Relatch preserves all three dial values. The public target is visible to everyone; this learning exhibit grants no door or container access, security, permission or custody. Its bolt and indices prescribe indexed graphic poses, without force, load, collision, continuous-spin or physical-contact simulation.",
+    "howto_set": "Read the three gold target digits left to right:213. Each pale index points to fixed legends 0 above, 1 right, 2 below and 3 left. Use set_dial with dial left, middle or right and position 0, 1, 2 or 3. It selects that indexed position. Dials turn only while the bolt is latched. Set left 2, middle 1, right 3, then release. Relatch preserves all three dial values. The public target is visible to everyone; this learning exhibit grants no door or container access, security, permission or custody. Its bolt and indices prescribe indexed graphic poses, without force, load, collision, continuous-spin or physical-contact simulation.",
     "already_set": "That dial is already at the requested position; choose another position."
   },
   "card": {

@@ -1,4 +1,4 @@
 ---
 type: feature
 ---
-Souls can set three indexed dials to an engraved public target and release or relatch a demonstration bolt, with dial movement interlocked while released.
+Add an argument-based combination-latch display with indexed dial positions, an interlocked demonstration bolt and supported conditional kit shapes.
