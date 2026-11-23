@@ -1445,30 +1445,49 @@ fn rh_a_rehearsal_leaves_the_live_store_and_the_deploy_after_it_takes_over() {
     live.kill();
     let before = files(&d.join("store"));
     assert!(!before.is_empty(), "the live claim is in the store");
-    let out = Command::new(std::env::current_exe().expect("this test"))
-        .args([
-            "--exact",
-            "rh_a_rehearsal_leaves_the_live_store_and_the_deploy_after_it_takes_over",
-            "--nocapture",
-        ])
-        .env(CHILD, &d)
-        .env("WORLDD_STORE", &spec)
-        .env("WORLDD_MACHINE", "rehearsal")
-        .output()
-        .expect("the rehearsal runs");
-    let said = || std::fs::read_to_string(d.join("r/worldd.err")).unwrap_or_default();
-    assert!(
-        out.status.success(),
-        "the rehearsal: {}{}\nthe build said: {}",
-        String::from_utf8_lossy(&out.stdout),
-        String::from_utf8_lossy(&out.stderr),
-        said()
-    );
-    assert!(
-        files(&d.join("store")) == before,
-        "the rehearsal changed the live store; the build said: {}",
-        said()
-    );
+    // The live backup bucket, set as production sets it, shipping every second.
+    let (backup, pass) = (d.join("backup"), d.join("backup.key"));
+    std::fs::create_dir_all(&backup).expect("the backup folder");
+    std::fs::write(&pass, "a recovery passphrase for the test\n").expect("the key");
+    let backup_url = format!("folder:{}", backup.display());
+    // The store named either way worldd reads it: `$WORLDD_STORE`, and the directory's `$DIRECTORY_STORE_URL`
+    // (production's).
+    for store_env in ["WORLDD_STORE", "DIRECTORY_STORE_URL"] {
+        let out = Command::new(std::env::current_exe().expect("this test"))
+            .args([
+                "--exact",
+                "rh_a_rehearsal_leaves_the_live_store_and_the_deploy_after_it_takes_over",
+                "--nocapture",
+            ])
+            .env(CHILD, &d)
+            .env_remove("WORLDD_STORE")
+            .env_remove("DIRECTORY_STORE_URL")
+            .env(store_env, &spec)
+            .env("WORLDD_MACHINE", "rehearsal")
+            .env("SOULS_BACKUP_URL", &backup_url)
+            .env("SOULS_BACKUP_KEY_FILE", &pass)
+            .env("SOULS_BACKUP_SHIP_S", "1")
+            .output()
+            .expect("the rehearsal runs");
+        let said = || std::fs::read_to_string(d.join("r/worldd.err")).unwrap_or_default();
+        assert!(
+            out.status.success(),
+            "the rehearsal with {store_env}: {}{}\nthe build said: {}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr),
+            said()
+        );
+        assert!(
+            files(&d.join("store")) == before,
+            "the rehearsal with {store_env} changed the live store; the build said: {}",
+            said()
+        );
+        assert!(
+            files(&backup).is_empty(),
+            "the rehearsal with {store_env} wrote the live backup; the build said: {}",
+            said()
+        );
+    }
     // The real deploy's restart after it takes the world over, at the next epoch.
     let deployed = serve_with(&dir, &socket, &more);
     let shipping = deployed.line("shipping: ");
