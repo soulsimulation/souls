@@ -19,7 +19,7 @@ import { crc32, deflateSync } from 'node:zlib';
 import { DEFAULT_PKG } from '../daemon/client.mjs';
 import { readSeat } from '../home/home.mjs';
 import { pair } from '../pair/pair.mjs';
-import { areaOf, buildOf, eventOps, layerOf, opsOf, outlineOf, planRow, requestOf, resolve as resolveRelation } from './souls-god.mjs';
+import { areaOf, buildOf, eventOps, historyOf, layerOf, opsOf, outlineOf, planRow, requestOf, resolve as resolveRelation } from './souls-god.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const v2 = resolve(here, '../../..');
@@ -128,6 +128,11 @@ after(async () => {
 test('the verbs make G1 batches, and a refusal names its usage', () => {
   assert.deepEqual(opsOf('place', ['room', '--in', 'aa-0', '--at', '1,0,2']), [{ op: 'place', name: 1, kind: 'room', in: 'aa-0', at: [1, 0, 2] }]);
   assert.deepEqual(opsOf('set', ['aa-3', '1', 'true']), [{ op: 'set', node: 'aa-3', field: 1, value: true }]);
+  // R8c: history asks one place, thing or Soul, with an optional span in world µs
+  assert.deepEqual(historyOf(['--at', 'square']), { op: 'history', at: 'square' });
+  assert.deepEqual(historyOf(['--thing', 'aa-3', '--since', '100', '--until', '200']), { op: 'history', thing: 'aa-3', since: 100, until: 200 });
+  for (const bad of [[], ['--at', 'a', '--thing', 'b'], ['--soul', 'x', '--since', 'yesterday'], ['--at', 'a', 'extra']])
+    assert.throws(() => historyOf(bad), (e) => e.code === 'usage', bad.join(' '));
   assert.deepEqual(requestOf(['check', 'remove', 'aa-3']).req, { op: 'check', ops: [{ op: 'remove', node: 'aa-3' }] });
   assert.throws(() => opsOf('move', ['aa-3']), /move <id> --at/);
   assert.deepEqual(opsOf('hours', ['aa-3', '--open', '09:00-13:00@sat,sun']), [{ op: 'set', node: 'aa-3', field: 81, value: [[2, 96, 9 * 3_600_000_000, 13 * 3_600_000_000]] }]);
@@ -775,6 +780,14 @@ test('#3697: a creator uploads a picture through the check and hold point; an al
   assert.equal(bad.ok, false);
   assert.match(bad.code, /^upload\./, JSON.stringify(bad));
   assert.equal((await god('upload', join(dir, 'notes.txt'))).code, 'usage');
+});
+
+test('R8c: history reaches the daemon\'s history answer; a world that advertises no history says so by name', async () => {
+  await connected();
+  const h = await god('history', '--at', 'square');
+  assert.equal(h.ok, false, JSON.stringify(h));
+  assert.equal(h.code, 'no-history', 'this test world (gateway-link) publishes no history, and its pairing recorded none');
+  assert.equal((await god('history', '--at', 'a', '--thing', 'b')).code, 'usage');
 });
 
 test('#4022: in a world that holds uploads for review, souls-god reports a held upload as held, and it is not served', async () => {

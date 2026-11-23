@@ -74,6 +74,8 @@
 //   souls-god.mjs where <x,z|name|id> | clear <x,z|name|id> --size WxD | free WxD --near <x,z|name|id>
 //                                                the room, areas and nearest things there; whether a footprint is free
 //                                                of things and buildings; the nearest free one (world metres, space.mjs)
+//   souls-god.mjs history --at <place> | --thing <id> | --soul <name> [--since <µs>] [--until <µs>]   what happened
+//                                                there, from the world's public history, a day by default (R8c)
 //   souls-god.mjs trace [n]                      the creator's last n commands here (20, at most 200), newest first:
 //                                                time, verb, result and refusal; kept by the daemon across restarts
 //   souls-god.mjs welcome '<words>'              the words a Soul is shown when it arrives ('' clears them)
@@ -123,6 +125,7 @@ export const VERBS = [
   'event',
   'find',
   'free',
+  'history',
   'hours',
   'land',
   'layers',
@@ -258,6 +261,15 @@ const xyz = (t) => {
 /** A field's value as written: an integer, true or false, else a name. */
 const valueOf = (t) => (/^-?\d+$/.test(t) ? Number(t) : t === 'true' ? true : t === 'false' ? false : t);
 const node = (t) => (/^\d+$/.test(String(t)) ? Number(t) : String(t));
+
+/** R8c: `history --at <place> | --thing <id> | --soul <name> [--since <µs>] [--until <µs>]` as the daemon's request. */
+export function historyOf(words) {
+  const args = [...words], how = 'history --at <place> | --thing <id> | --soul <name> [--since <world µs>] [--until <world µs>]';
+  const at = takeOpt(args, '--at'), thing = takeOpt(args, '--thing'), soul = takeOpt(args, '--soul'), since = takeOpt(args, '--since'), until = takeOpt(args, '--until');
+  const asked = [at, thing, soul].filter((v) => v !== undefined);
+  if (args.length || asked.length !== 1 || [since, until].some((t) => t !== undefined && !/^\d+$/.test(t))) throw usage(how);
+  return { op: 'history', ...(at !== undefined ? { at } : thing !== undefined ? { thing } : { soul }), ...(since !== undefined ? { since: Number(since) } : {}), ...(until !== undefined ? { until: Number(until) } : {}) };
+}
 
 /** The batch a verb's words make. */
 export function opsOf(verb, words, { related = false } = {}) {
@@ -433,6 +445,8 @@ export function requestOf(argv) {
     if (rest.length !== 1 || !/\.(glb|png|jpe?g)$/i.test(rest[0])) throw usage('upload <file.glb|png|jpg>');
     return { req: { op: 'upload', path: absolute(rest[0]) }, creator };
   }
+  // R8c: what happened at a place, to a thing or a Soul, from the world's public history (the daemon's R16 answer)
+  if (verb === 'history') return { req: historyOf(rest), creator };
   if (verb === 'trace') {
     const n = rest[0] === undefined ? 20 : Number(rest[0]);
     if (!Number.isInteger(n) || n < 1 || n > TRACE_MOST || rest.length > 1) throw usage(`trace [n]: 1 to ${TRACE_MOST}`);
