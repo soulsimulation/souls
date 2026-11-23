@@ -9,6 +9,9 @@
 //   souls-god.mjs map                            the world at a glance: the extent of what stands, its buildings, named
 //                                                things, roads and zones, each with its centre and size in metres (R8d)
 //   souls-god.mjs place <kind> --in <id> [--at x,y,z] [--slot n] [--field n=v ...]   a new thing; mm in the parent
+//   souls-god.mjs place <kind> --path '[[x,z],...]' [--width m] | --area '[[x,z],...]' | --rect cx,cz,w,d
+//                         | --circle cx,cz,r [--in <id>] [--field n=v ...]   a road or an area laid on the open ground
+//                                                (metres), as today's place by a shape
 //   souls-god.mjs move <id> --at x,y,z [--slot n]                                     to another spot, same parent
 //   souls-god.mjs move <id> [<id> ...] --by dx,dz [--yaw r]   each that far over (metres), what is in it riding along;
 //                                                on the open ground it keeps its height over the ground
@@ -189,8 +192,10 @@ export const VERBS = [
 ];
 /** The world's verbs (#3695): the daemon makes their sets on the world node from its copy (`world.mjs`). */
 export const WORLD_VERBS = ['weather', 'sky', 'strike', 'land', 'time', 'expand', 'furnish', 'clone'];
-/** A world verb by its words: `move --by` (#3728) is made on the daemon's copy; `move --at` is G1's move. */
-const isWorld = (verb, words) => WORLD_VERBS.includes(verb) || (verb === 'move' && words.includes('--by'));
+/** A world verb by its words, made on the daemon's copy (#3728): a place by its shape (a road or an area, on the
+ *  open ground it knows) and `move --by`; `move --at` is G1's move. */
+const SHAPES = ['--path', '--area', '--rect', '--circle'];
+const isWorld = (verb, words) => WORLD_VERBS.includes(verb) || (verb === 'place' && words.some((w) => SHAPES.includes(w))) || (verb === 'move' && words.includes('--by'));
 /** The verbs answered from the home's library of kinds, on this machine (#3696). */
 export const LIBRARY = new Set(['catalog', 'find', 'recommend', 'taxonomy']);
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
@@ -268,6 +273,8 @@ export const FIX = {
   'import.file': 'import <file>: a file export wrote, readable here',
   'import.format': 'import a souls-world/1 file, as export writes it',
   'import.unplaced': 'some nodes name a parent or support that was not placed: export the source again and import that',
+  'shape.flag': 'place <kind> --path \'[[x,z],[x,z]]\' [--width m] | --area \'[[x,z],...]\' | --rect cx,cz,w,d | --circle cx,cz,r, in metres',
+  'shape.no-ground': 'name the parent with --in <id>',
   'move.by': 'move <id> --by dx,dz in metres [--yaw r in radians]',
   'move.where': 'use ids describe lists',
   'move.off-the-ground': 'move it less far: the world\'s ground ends there',
@@ -456,6 +463,7 @@ export function worldVerbOf(verb, words) {
     weather: ['kind', 'clouds', 'rain', 'wind', 'minutes'], sky: ['palette', 'sun'], strike: ['at'], time: ['speed'],
     land: ['at', 'radius', 'amount', 'level', 'height', 'peak', 'path', 'area', 'rect', 'circle', 'edge', 'step', 'depth', 'width', 'side', 'face', 'steps', 'by', 'toward', 'metres', 'bounds'],
     expand: [], furnish: ['style'],
+    place: ['path', 'width', 'area', 'rect', 'circle', 'in'],
     move: ['by', 'yaw'],
     clone: ['at', 'count', 'step', 'yaw'],
   }[verb];
@@ -472,6 +480,12 @@ export function worldVerbOf(verb, words) {
   if (verb === 'expand') {
     if (args[0] === undefined) throw usage('expand <metres>: the side of the centred square the world grows to');
     out.extent = args.shift();
+  }
+  if (verb === 'place') {
+    const fields = Object.fromEntries(takeAll(args, '--field').map((f) => { const [n, v] = f.split('='); return [n, valueOf(v)]; }));
+    if (Object.keys(fields).length) out.fields = fields;
+    if (args.length !== 1) throw usage('place <kind> --path \'[[x,z],...]\' [--width m] | --area \'[[x,z],...]\' | --rect cx,cz,w,d | --circle cx,cz,r [--in <id>] [--field n=v]');
+    out.kind = args.shift();
   }
   if (verb === 'move') {
     if (!args.length) throw usage('move <id> [<id> ...] --by dx,dz [--yaw r]');
