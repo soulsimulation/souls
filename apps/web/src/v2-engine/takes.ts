@@ -8,7 +8,7 @@
 // extrapolation), faces the way it moves (the old take's yaw: atan2(dz, dx)), and walks while it moves.
 
 import { heldAt, postureOf, type Held, type Seat } from './take-bodies.ts';
-import { gestureAt, type Gesture } from './take-gestures.ts';
+import { gestureNow, type Gesture } from './take-gestures.ts';
 import { markOf, type Talk } from './take-speech.ts';
 
 /** Seconds a tick, as the old engine's takes. */
@@ -28,6 +28,8 @@ export type WorldSample = { at: number; p: [number, number, number]; seat?: Seat
 export type Body = {
   /** The take's entity id. */
   entity: string;
+  /** The v2 body node it draws (an aimed gesture names its target by it). */
+  node?: string;
   /** The public Soul id the page lists. */
   soul: string;
   name: string;
@@ -99,24 +101,33 @@ export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame,
   const tracks: Record<string, number[][]> = {}, changes: [number, string, string, unknown][] = [], entities: Record<string, unknown> = {};
   const events: ReturnType<typeof markOf>[] = [];
   const endUs = (fromTick + ticks) * TICK_US;
+  const byNode = new Map(bodies.flatMap((b) => (b.node ? [[b.node, b] as const] : [])));
   for (const b of bodies) {
     if (!b.samples.length || b.samples[0].at > endUs || (b.until !== undefined && fromTick * TICK_US >= b.until)) continue;
     const track: number[][] = [];
     let activity = '', speedQ: number | null = -1, heading = b.heading, p: [number, number, number] = b.samples[0].p;
-    let seatH: number | null | undefined, prop: string | null | undefined;
+    let seatH: number | null | undefined, prop: string | null | undefined, partner: string | null | undefined, hold: string | null | undefined;
     for (let k = 0; k <= ticks; k++) {
       const t = (fromTick + k) * TICK_US;
       p = positionAt(b.samples, t)!;
       const m = motionAt(b.samples, t, heading);
       heading = m.heading;
       const walking = m.speed >= WALKING;
+      // 0.134 B4: a gesture aimed at another body faces it and names it the partner (the old paired poses meet it); a
+      // held hand is the old renderer's hand hold with it. The drawing turns; the body in the world does not.
+      const g = walking ? null : gestureNow(b.gestures, t), other = g?.target ? byNode.get(g.target) : undefined;
+      const op = other ? positionAt(other.samples, t) : null;
+      if (op && Math.hypot(op[0] - p[0], op[2] - p[2]) > 1) heading = Math.atan2(op[2] - p[2], op[0] - p[0]);
+      const nextPartner = g && !g.hold && other ? other.entity : null, nextHold = g?.hold && other ? other.entity : null;
+      if (k < ticks && nextPartner !== (partner ?? null)) { changes.push([k, b.entity, 'partner', nextPartner]); partner = nextPartner; }
+      if (k < ticks && nextHold !== (hold ?? null)) { changes.push([k, b.entity, 'handHold', nextHold ? { with: nextHold, hand: 'right' } : null]); hold = nextHold; }
       track.push([k, Math.round(p[0]), Math.round(p[1]), Math.round(p[2]), Math.round(heading * ANG_Q)]);
       if (k === 0) { changes.push([0, b.entity, 'present', true], [0, b.entity, 'level', 0]); if (b.look) changes.push([0, b.entity, 'body', b.look]); }
       const seat = walking ? null : seatAt(b.samples, t), nextSeat = seat ? seat.height / POS_Q : null, nextProp = heldAt(b.held, t);
       if (k < ticks && nextSeat !== (seatH ?? null)) { changes.push([k, b.entity, 'seatHeight', nextSeat]); seatH = nextSeat; }
       if (k < ticks && nextProp !== prop && (nextProp !== null || prop !== undefined)) { changes.push([k, b.entity, 'prop', nextProp]); prop = nextProp; }
       // A gesture plays where the body stands; seated or lying it keeps its posture (the old poses are standing ones).
-      const nextActivity = walking ? 'walk' : postureOf(seat) ?? gestureAt(b.gestures, t) ?? 'idle';
+      const nextActivity = walking ? 'walk' : postureOf(seat) ?? g?.activity ?? 'idle';
       if (nextActivity !== activity && k < ticks) { changes.push([k, b.entity, 'activity', nextActivity]); activity = nextActivity; }
       const q = walking ? Math.round(m.speed * SPEED_Q) : null;
       if (k < ticks && (q === null ? speedQ !== null : speedQ === null || Math.abs(q - speedQ) > 2)) { changes.push([k, b.entity, 'speed', q]); speedQ = q; }

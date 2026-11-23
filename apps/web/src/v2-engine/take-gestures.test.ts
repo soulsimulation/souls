@@ -26,7 +26,7 @@ test('every move a body form runs plays a pose of its own, never another move\'s
   }
   for (const [move, want] of [['souls:nod@1', 'nod'], ['shake_head', 'shake-head'], ['shrug', 'shrug'], ['look_around', 'look-around'], ['slump', 'slump']])
     assert.equal(gestureOf(move), want, move);
-  for (const move of ['consume', 'pour', 'souls:walk', 'handshake']) assert.equal(gestureOf(move), null, move);
+  for (const move of ['consume', 'pour', 'souls:walk', 'hold_hand']) assert.equal(gestureOf(move), null, move);
 });
 
 test('a standing body plays the gesture from the move start to its end, then stands idle; a cancel ends it early', () => {
@@ -48,4 +48,21 @@ test('a seated body keeps sitting through a gesture', () => {
     samples: [{ at: t0 - 1_000_000, p: [0, 0, 0], seat: { height: 450, lie: false } }] };
   const take = chunkOf([body], FROM, frame).take as unknown as Take;
   assert.equal(sampleTake(take, 0.5).entities.v2_a_2.activity, 'sit');
+});
+
+test('0.134 B4: a handshake aimed at another body faces it and names it the partner; a held hand is a hand hold', () => {
+  const a = (target: string, name: string, end: number) => gestureFrom({ name, start: t0, ends: [t0 + 600_000, end], target })!;
+  // A stands at (0, 0) facing +x (heading 0); B stands 0.6 m away along +z.
+  const A: Body = { entity: 'v2_a', node: 'n-a', soul: 's-a', name: 'Ada', heading: 0, samples: [{ at: t0 - 1_000_000, p: [0, 0, 0] }], gestures: [a('n-b', 'eden:handshake', t0 + 800_000)] };
+  const B: Body = { entity: 'v2_b', node: 'n-b', soul: 's-b', name: 'Bo', heading: Math.PI, samples: [{ at: t0 - 1_000_000, p: [0, 0, 600] }],
+    gestures: [a('n-a', 'eden:hold_hand', Number.MAX_SAFE_INTEGER)] };
+  const take = chunkOf([A, B], FROM, frame).take as unknown as Take;
+  const at = (s: number) => sampleTake(take, s).entities;
+  assert.equal(at(0.5).v2_a.activity, 'handshake');
+  assert.ok(Math.abs(at(0.5).v2_a.yaw - Math.PI / 2) < 0.01, `A faces B: ${at(0.5).v2_a.yaw}`);
+  assert.equal(at(0.5).v2_a.state.partner, 'v2_b', 'B is the partner the paired pose meets');
+  assert.equal(at(0.95).v2_a.state.partner, null, 'no partner once the handshake ends');
+  assert.equal(at(0.5).v2_b.activity, 'idle', 'a hold is not a pose');
+  assert.deepEqual(at(0.5).v2_b.state.handHold, { with: 'v2_a', hand: 'right' }, 'B holds A\'s hand');
+  assert.ok(Math.abs(Math.abs(at(0.5).v2_b.yaw) - Math.PI / 2) < 0.01, 'B faces A');
 });
