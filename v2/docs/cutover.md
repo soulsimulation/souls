@@ -60,6 +60,11 @@ node tools/world-launcher/v2-switch.mjs --back [--port <launcher port>]
 - `--stream` must reach the v2 origin on the page's origin (the front door's `/s/` route).
 - With `--port`, it reads the world's page afterwards and prints the `v2Stream` and `v2Bodies` the page carries.
 
+While routed the page also names where its owner's box reaches (B3-2b): `v2Gateway`, the world's agent socket path
+(the binding's `v2Gateway`, else `/w/<world>/v2/ws`, which the front door sends to the agents' relay) and
+`v2Directory`, `/` (the front door sends `/v1/account/*` to the directory). The box exchanges the page's own sign-in
+there: Clerk on the stages, the same provider the directory verifies with its `--issuer` and `--parties`.
+
 Run with only `--binding` (or nothing), it switches the bound world on again. `--back` clears only the flag: the next page
 names neither field, the published files are removed, the body folder is no longer served and the old world answers.
 
