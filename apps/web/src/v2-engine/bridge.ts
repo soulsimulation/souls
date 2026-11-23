@@ -5,6 +5,7 @@
 import { chunkEnd, chunkOf, TICKS, TICK_US, type Body, type Frame, type RecordedChunk, type WorldSample } from './takes.ts';
 import { defaultLookOf, entityWithLook, legacyBodyOf, propOf, seatOf, type CatalogueBody, type Held, type Seat } from './take-bodies.ts';
 import { isPublic, saidKey, speechOf, talkOf, type Said, type Talk } from './take-speech.ts';
+import { cut as cutGestures, gestureFrom, type Gesture } from './take-gestures.ts';
 
 /** What the reader's worker posts (v2/web/src/source/source.ts: NodeRec, PartRec, Pointer; only the fields read here). */
 type NodeRec = { id: string; kind: string; parent: string | null; slot: number | null; pos: [number, number, number]; rot: [number, number, number, number];
@@ -16,7 +17,8 @@ type NodeRec = { id: string; kind: string; parent: string | null; slot: number |
 type SampleRec = [string, string, number | null, number, number, number, number];
 /** A world record (sound/record.ts Happened); only the fields read here (B3-3). */
 type Happened = { at: number; node: string; name?: string };
-type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; said?: Said[]; happened?: Happened[] };
+type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; said?: Said[]; happened?: Happened[];
+  moves?: { body: string; name: string; start: number; ends: number[] }[]; runEnds?: { body: string; at: number }[] };
 type Pointer = { newest: number | null; newestTo: number | null; period: number; anchorWorld: number; anchorWallMs: number; quietUntil: number | null };
 type Msg = { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'snapshot'; s: { nodes: NodeRec[]; removed: string[] } } | { t: 'error'; message: string };
 
@@ -81,7 +83,7 @@ export class V2Bridge {
   private readonly nodes = new Map<string, NodeRec>();
   /** Each body's samples, its last record and, while the public copy cannot draw it (a frame that is not public, or it
    *  left), since when: it is not drawn from then until it is back. */
-  private readonly tracks = new Map<string, { samples: WorldSample[]; node: NodeRec | null; gone: number | null; held: Held[]; said: Talk[] }>();
+  private readonly tracks = new Map<string, { samples: WorldSample[]; node: NodeRec | null; gone: number | null; held: Held[]; said: Talk[]; gestures: Gesture[] }>();
   /** Each held thing's holder (a body node id). */
   private readonly heldBy = new Map<string, string>();
   /** Saids kept (saidKey), and those not yet in a chunk; the talk lines' next id. */
@@ -130,6 +132,9 @@ export class V2Bridge {
     this.liveFrom ??= p.from;
     this.nodesChanged(p.nodes, p.removed, p.from);
     for (const [id, frame, slot, at, x, y, z] of p.samples) this.sample(id, frame, slot, at, [x, y, z]);
+    // A gesture move plays on its body (take-gestures.ts); a run that ends early ends its gesture then.
+    for (const m of p.moves ?? []) { const g = gestureFrom(m), t = this.tracks.get(m.body); if (g && t) t.gestures.push(g); }
+    for (const e of p.runEnds ?? []) { const t = this.tracks.get(e.body); if (t) cutGestures(t.gestures, e.at); }
     for (const h of p.happened ?? []) {
       const word = h.name === undefined ? undefined : WOUND.get(h.name);
       if (word && (this.wound.get(h.node)?.at ?? -Infinity) <= h.at) this.wound.set(h.node, { at: h.at, word });
@@ -215,7 +220,7 @@ export class V2Bridge {
     const thing = slot !== null ? this.nodes.get(frame) : undefined;
     let seat: Seat | undefined;
     if (thing) { seat = seatOf(thing.kind, thing.slots?.find((x) => x[0] === slot)); p[1] -= seat.height; }
-    const t = this.tracks.get(id) ?? this.tracks.set(id, { samples: [], node: this.nodes.get(id) ?? null, gone: null, held: [], said: [] }).get(id)!;
+    const t = this.tracks.get(id) ?? this.tracks.set(id, { samples: [], node: this.nodes.get(id) ?? null, gone: null, held: [], said: [], gestures: [] }).get(id)!;
     const last = t.samples[t.samples.length - 1];
     if (last && at <= last.at) { if (at === last.at) { last.p = p; last.seat = seat; } return; }
     t.samples.push(seat ? { at, p, seat } : { at, p });
@@ -231,7 +236,7 @@ export class V2Bridge {
       const heading = w ? -2 * Math.atan2(w.q[2], w.q[0]) : 0;
       // The look the v2 page gives it: its body kind's, else the default person its id picks (on both pages alike).
       const look = legacyBodyOf(n.body, this.catalogue), entity = n.body ? entityOf(id) : entityWithLook(entityOf(id), defaultLookOf(id));
-      out.push({ node: id, entity, soul: soulIdOf(n.soul ?? id), name: nameOf(id, n), description: n.description ?? '', samples: t.samples, heading, held: t.held, said: t.said,
+      out.push({ node: id, entity, soul: soulIdOf(n.soul ?? id), name: nameOf(id, n), description: n.description ?? '', samples: t.samples, heading, held: t.held, said: t.said, gestures: t.gestures,
         ...(look ? { look } : {}), ...(t.gone !== null ? { until: t.gone } : {}) });
     }
     return out;
@@ -270,6 +275,7 @@ export class V2Bridge {
       while (h + 1 < t.held.length && t.held[h + 1].at < cut) h++;
       if (h) t.held.splice(0, h);
       t.said = t.said.filter((l) => l.tick >= first);
+      t.gestures = t.gestures.filter((g) => g.end >= cut);
     }
     this.view.takes = { serverTick: end, chunks: [...this.built.values()].sort((a, b) => a.fromTick - b.fromTick), receivedAt: performance.now() };
   }

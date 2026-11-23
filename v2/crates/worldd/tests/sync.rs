@@ -214,6 +214,106 @@ fn c16_a1_a_sync_is_answered_while_the_clock_thread_is_held() {
     w.stop();
 }
 
+/// A frame's version's sequence: an answer's or a hashes answer's field 1.
+fn sequence_of(m: &BTreeMap<u64, Value>) -> u64 {
+    match m.get(&1) {
+        Some(Value::Array(v)) => match v.get(3) {
+            Some(Value::Uint(s)) => *s,
+            _ => panic!("a version's sequence"),
+        },
+        _ => panic!("a version"),
+    }
+}
+
+/// #1960: the sync copy seals at most once every `SEAL_EVERY`. A hashes request sooner after a seal answers from that
+/// seal, at its version, behind a receipt it follows; asked again `SEAL_EVERY` after the seal (the daemon's follow
+/// again), it sees the receipt's change, and a descent from either answer completes.
+#[test]
+#[allow(clippy::disallowed_methods)] // the sync thread's pace is real time, off the world's clock
+fn a_hashes_request_within_seal_every_answers_the_last_seal_and_the_next_sees_the_receipt() {
+    let built = toggles::World::build(1, 4, 0);
+    let pairs = built.pairs.clone();
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.tick = Duration::from_millis(10);
+    let w = answers::start(built.replica, toggles::rules(), Mem::default(), cfg)
+        .expect("the world starts");
+    let door = w.door();
+    let mut ask = |m: BTreeMap<u64, Value>| {
+        let (reply, rx) = channel();
+        assert!(door.arrive(encode(&Value::Map(m)).unwrap(), reply));
+        map(&rx.recv_timeout(Duration::from_secs(60)).expect("an answer"))
+    };
+    let hashes = BTreeMap::from([
+        (wire::ASK, Value::Uint(1)),
+        (wire::IDS, Value::Array(vec![])),
+    ]);
+    // Each change by another body (an intent's sequence is its actor's: a repeat would be answered as the first).
+    let receipt = |k: usize| {
+        let (body, thing) = pairs[k];
+        let (reply, rx) = channel();
+        assert!(w.door().arrive(toggle(body, thing), reply));
+        sequence_of(&map(&rx
+            .recv_timeout(Duration::from_secs(60))
+            .expect("a receipt")))
+    };
+    let mut copy = Copy::default();
+    sync_by(&mut ask, &mut copy);
+    // A change, then a hashes request past SEAL_EVERY: it seals, and sees the change.
+    let first = receipt(0);
+    std::thread::sleep(worldd::SEAL_EVERY + Duration::from_millis(50));
+    let sealed_by = std::time::Instant::now();
+    let a = ask(hashes.clone());
+    assert!(
+        sequence_of(&a) >= first,
+        "a seal past SEAL_EVERY sees the receipt"
+    );
+    assert_eq!(
+        sync_by(&mut ask, &mut copy).changed,
+        1,
+        "the first change, synced"
+    );
+    // A second change and a hashes request within SEAL_EVERY of that seal: answered from it, behind the receipt.
+    let second = receipt(1);
+    let b = ask(hashes.clone());
+    let behind = sync_by(&mut ask, &mut copy);
+    assert!(
+        sealed_by.elapsed() < worldd::SEAL_EVERY,
+        "the receipt and the requests came within SEAL_EVERY of the seal ({:?})",
+        sealed_by.elapsed()
+    );
+    assert_eq!(sequence_of(&b), sequence_of(&a), "the last seal's version");
+    assert!(
+        sequence_of(&b) < second,
+        "behind the receipt, which the client sees"
+    );
+    assert_eq!(
+        b.get(&wire::IDS),
+        a.get(&wire::IDS),
+        "the last seal's hashes"
+    );
+    assert_eq!(behind.changed, 0, "a descent from the last seal completes");
+    // Asked again SEAL_EVERY after the seal, as the daemon follows again: it sees the receipt's change.
+    std::thread::sleep(
+        worldd::SEAL_EVERY.saturating_sub(sealed_by.elapsed()) + Duration::from_millis(20),
+    );
+    let c = ask(hashes);
+    assert!(
+        sequence_of(&c) >= second,
+        "the follow again sees the receipt"
+    );
+    assert_ne!(
+        c.get(&wire::IDS),
+        a.get(&wire::IDS),
+        "with the change's hashes"
+    );
+    assert_eq!(
+        sync_by(&mut ask, &mut copy).changed,
+        1,
+        "the second change, synced"
+    );
+    w.stop();
+}
+
 /// I1's framing: a 4-byte big-endian length, then the bytes.
 fn frame(s: &mut UnixStream, m: BTreeMap<u64, Value>) -> BTreeMap<u64, Value> {
     let bytes = encode(&Value::Map(m)).unwrap();

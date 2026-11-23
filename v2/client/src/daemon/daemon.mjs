@@ -142,7 +142,7 @@ import { find } from '../find/find.mjs';
 import { publicNameHydration } from '../find/public-names.mjs';
 import { achievedOf, causeOf, openTrace } from '../stats/trace.mjs';
 import { stats, transcriptOf } from '../stats/stats.mjs';
-import { ageOf } from './age.mjs';
+import { FOLLOW_AGAIN_MS, ageOf, followsAgain } from './age.mjs';
 import { moveForm, moveVerdict, seatedAfter } from './moves.mjs';
 import { BATCH_MOST, BATCH_READS, catalog, context, query } from './reads.mjs';
 import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check/check.mjs';
@@ -403,8 +403,15 @@ function granted() {
 /**
  * R9b: the copy brought current by hash once an entry changed the world near it, or after a drop (the items missed
  * while away are not replayed). One at a time: entries that arrive during a sync ask for one more after it.
+ * #1960: `owed` is the newest version a receipt of this Soul's or an entry named since sign-in; a follow that ends
+ * behind it (the world answered from a seal before that tick) follows again FOLLOW_AGAIN_MS later (`followsAgain`).
  */
 let followWanted = false;
+let owed = 0, again = 0, againTimer = null;
+// A refresh's waiters (an answer bringing the copy current) when it ended behind `owed`: handed to the follow again,
+// so an answer after this Soul's own write or edit shows it, not the seal before it.
+let carried = [];
+const owe = (sequence) => { if (sequence > owed) { owed = sequence; again = 0; } };
 function follow() {
   if (!followWanted || syncing || !ws || !signedIn || ws.granting) return;
   followWanted = false;
@@ -495,7 +502,7 @@ function closeMail(id, state, outcome) {
 
 /** Compare and descend through the gateway (R5b): the scope's hashes, then the records not held, level by level. */
 function startSync(sock, kind) {
-  syncing = { n: ++asked, step: 'hashes', kind, t0: performance.now(), version: null, waiters: [] };
+  syncing = { n: ++asked, step: 'hashes', kind, t0: performance.now(), version: null, waiters: carried.splice(0) };
   if (cutAt !== null) cutWhy = 'syncing';
   awaitAnswer(sock);
   sock.send(wire.wireSyncScope(BigInt(syncing.n)));
@@ -526,10 +533,21 @@ function syncAnswer(sock, n, refused, bytes) {
   const { waiters } = syncing;
   syncing = null;
   hearing();
-  for (const w of waiters) w(true);
+  const behind = (done.kind === 'refresh' || done.kind === 'follow') && followsAgain({ at: sequenceOf(copyVersion), owed, again });
+  if (behind) carried.push(...waiters);
+  else for (const w of waiters) w(true);
   // A refresh (R7) brings the copy current for an answer, and a follow for an entry (R9b); the stream's cursor stays
   // the last frame it was given.
-  if (done.kind === 'refresh' || done.kind === 'follow') { scheduleWorld(); follow(); return; }
+  if (done.kind === 'refresh' || done.kind === 'follow') {
+    scheduleWorld();
+    if (behind) {
+      again++;
+      followWanted = true;
+      clearTimeout(againTimer);
+      againTimer = setTimeout(() => { againTimer = null; follow(); }, FOLLOW_AGAIN_MS);
+    } else follow();
+    return;
+  }
   state.cursor = copyVersion; // the stream carries on from the version the hashes are at
   state.seen = null; // no frame of it applied: the gateway's default
   save();
@@ -576,6 +594,8 @@ function connect() {
         if (a === 'stream.resumed') counts.resumed++;
         if (a === 'stream.cannot-resume') counts.cannotResume++;
         log(`signed in: ${a}`);
+        owed = 0; // versions named on an earlier socket may be another epoch's
+        again = 0;
         refreshKinds();
         step = 'stream';
         clearTimeout(deadline);
@@ -605,7 +625,7 @@ function connect() {
           // read the authoritative body link and renew hearing through the usual sync completion path.
           if (Number(c) === 1) changed = true;
         }
-        if (changed) { followWanted = true; follow(); }
+        if (changed) { if (b !== '-') owe(sequenceOf(b)); followWanted = true; follow(); }
         if (movesOf.has(s) && Number(c) !== 3) { state.seated = seatedAfter(movesOf.get(s), Number(c), state.seated ?? null); movesOf.delete(s); }
         if (serving.has(s) && Number(c) !== 3) {
           closeMail(serving.get(s), achievedOf(Number(c), d) ? 'done' : 'failed', d !== '-' ? d : ['', 'receipt', 'refused', '', 'resolved', 'unread'][Number(c)] || 'answered');
@@ -637,6 +657,7 @@ function connect() {
       cutAt ??= performance.now();
       cutWhy = 'not-connected';
       if (syncing) { clearTimeout(syncing.timer); for (const w of syncing.waiters) w(false); syncing = null; }
+      for (const w of carried.splice(0)) w(false);
     }
     if (stopping) return;
     counts.drops++;
@@ -717,7 +738,8 @@ function remember(entries) {
  */
 function onEntry(e) {
   counts.entries++;
-  if (e.changes > 0) { followWanted = true; follow(); }
+  // The version after an entry is its sequence and one (`replica::apply`).
+  if (e.changes > 0) { owe(e.sequence + 1); followWanted = true; follow(); }
   const actor = e.actor === ME ? soul : e.actor;
   const events = e.events.filter((ev) => ev.name !== SAID);
   for (const ev of events) fire({ name: ev.name, fields: ev.fields, actor, toMe: Object.values(ev.fields).includes(ME), sequence: e.sequence });
@@ -983,7 +1005,8 @@ function towardOf(req) {
   const them = found[0], forms = heldKinds()[me?.kind]?.forms ?? {};
   const takes = (f) => Object.keys(forms[f]?.takes ?? {});
   const gestures = Object.entries(forms).filter(([, f]) => f.steps?.length && f.steps.every((x) => x.step === 'move') && Object.keys(f.takes ?? {}).every((k) => k === 'toward'));
-  const g = req.gesture === undefined ? null : String(req.gesture);
+  // Today's verbs are hyphenated (`shake-head`); a kind's form names are snake_case (`shake_head_at`).
+  const g = req.gesture === undefined ? null : String(req.gesture).replace(/-/g, '_');
   let form = g === null ? (forms.look_at && takes('look_at').includes('target') ? 'look_at' : null) : null, arg = 'target';
   if (g !== null) {
     form = [`${g}_at`, `${g}_to`, g].find((f) => gestures.some(([n]) => n === f) && takes(f).includes('toward')) ?? (gestures.some(([n]) => n === g) ? g : null);
@@ -1489,7 +1512,8 @@ function thingOf(id) {
   if (!row) {
     return { ok: false, code: 'inspect.unknown-id', detail: `${id ?? '(none)'} is not an id this Soul's copy holds; ids come from look and find`, did_you_mean: nearestIds(rows.values(), id) };
   }
-  const kinds = kindsIn(join(home, 'kinds')), entry = kinds[row.entry ?? row.kind];
+  // A Soul's body has the family's forms (E21, #2791), as `can` and `act` read them.
+  const kinds = heldKinds(), entry = kinds[row.entry ?? row.kind];
   return { ok: true, row, entry, offers: offersOf(row.id, entry, { moving: Boolean(row.moving) }), fields: stateOf(copy, kinds, ME).nodes[row.id]?.fields };
 }
 

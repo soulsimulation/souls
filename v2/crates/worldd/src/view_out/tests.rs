@@ -3939,3 +3939,95 @@ fn i4192_run(incremental: bool) -> (Vec<u8>, u64) {
     all.extend(wire(out.public_player().state().clone()).unwrap());
     (all, out.whole_cuts - whole)
 }
+
+/// #2731 (0.133 S4): before a still world exits to sleep, its writer writes what is open and leaves a pointer that
+/// says the world is quiet up to now and still until its next due change (field 11: `[t]`, or `[]` when nothing is
+/// due); once it is awake again its pointer has no field 11.
+#[test]
+fn s4_a_sleeping_worlds_pointer_says_it_is_still_until_its_next_due_change() {
+    let h = header();
+    let d = scratch("s4-asleep");
+    let real = 1_000_000_000_000;
+    let mapping = Mapping::new(0, real, 1, 1).unwrap();
+    let mut actual = Replica::start(h.stored()).unwrap();
+    let cp = w3e_checkpoint(&d.join("cp"), &h, &mut actual, 0);
+    let store = directoryd::directory::store::Memory::default();
+    let mut out = PublicWriter::open(
+        PublicStart {
+            root: &d.join("views"),
+            header: &h,
+            key: key(&h),
+            initial: actual.frozen(),
+            record: 0,
+            checkpoint: Some(cp),
+            text: None,
+            names: None,
+            clock_seed: Some(mapping),
+            history: None,
+        },
+        &store,
+    )
+    .unwrap();
+    let thing = Id::new(Scope([59; 16]), 1).unwrap();
+    let first = w3e_packet(
+        &h,
+        vec![
+            w3e_effect(
+                0,
+                h.zone,
+                Audience::Everyone,
+                Body::Time(vec![TimeEffect::Mapping(mapping)]),
+            ),
+            w3e_create(&h, 1, thing, h.zone, Audience::Everyone),
+        ],
+    );
+    actual.apply_bytes(&first).unwrap();
+    out.push(0, &first).unwrap();
+    out.flush().unwrap();
+    // A change at 5 s, not yet cut when the world goes to sleep at 5.1 s.
+    let mut changed = w3e_effect(
+        2,
+        thing,
+        Audience::Everyone,
+        Body::Changes(vec![ChangeRec {
+            change: set(thing, 40, Value::Uint(7)),
+            rest: Rest::new(),
+        }]),
+    );
+    changed.envelope.at = 5_000_000;
+    let p = w3e_packet(&h, vec![changed]);
+    actual.apply_bytes(&p).unwrap();
+    out.push(1, &p).unwrap();
+    let pointer = |out: &PublicWriter<_>| {
+        let bytes = fs::read(out.dir.join(POINTER)).unwrap();
+        (
+            Pointer::read(&bytes).unwrap(),
+            object_map(&bytes).unwrap().get(&11).cloned(),
+        )
+    };
+    out.sleep(real + 5_100_000, Some(60_000_000)).unwrap();
+    let (p, asleep) = pointer(&out);
+    assert_eq!(
+        p.newest,
+        Some(1),
+        "what was open is written before it sleeps"
+    );
+    assert_eq!(
+        p.quiet_until,
+        Some(5_100_000 - SETTLE_US),
+        "quiet up to now"
+    );
+    assert_eq!(
+        asleep,
+        Some(Value::Array(vec![Value::Uint(60_000_000)])),
+        "still until the next due change"
+    );
+    // Nothing due: still with no end.
+    out.sleep(real + 6_000_000, None).unwrap();
+    assert_eq!(pointer(&out).1, Some(Value::Array(Vec::new())));
+    // Awake again: the pointer it writes has no field 11.
+    out.idle(real + 7_000_000).unwrap();
+    let (p, asleep) = pointer(&out);
+    assert_eq!(p.quiet_until, Some(7_000_000 - SETTLE_US));
+    assert_eq!(asleep, None);
+}
