@@ -597,7 +597,13 @@ impl Activities {
                 .collect();
             for (m, other, mv) in aims {
                 let Some(found) = library.iter().find(|x| x.name == mv) else {
-                    refused.push((m.body, Refusal { name: "move-unknown", detail: mv.as_str().to_owned() }));
+                    refused.push((
+                        m.body,
+                        Refusal {
+                            name: "move-unknown",
+                            detail: mv.as_str().to_owned(),
+                        },
+                    ));
                     continue;
                 };
                 let Some(target) = other else {
@@ -619,7 +625,9 @@ impl Activities {
                     (3, as_bytes(r.to_value())),
                 ]);
                 let by = (at, Actor::Soul(m.soul), Cause::Intent(m.intent));
-                if let Err(r) = self.emit(tree, activity, audience, by, FORM_MOVE, fields, Vec::new()) {
+                if let Err(r) =
+                    self.emit(tree, activity, audience, by, FORM_MOVE, fields, Vec::new())
+                {
                     refused.push((m.body, r));
                 }
             }

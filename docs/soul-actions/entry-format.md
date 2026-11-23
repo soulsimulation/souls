@@ -136,6 +136,8 @@ may take it while it runs) or `optional`. `places` says where a member may be: `
 order listed, each admitting a body; `in: "here"`, body slots of things in the same place within `within_mm` (whole
 millimetres above zero) of the activity, nearest first. Either may name a `posture` (`sit`, `lie`). Entering is an
 ordinary form that links the role to the actor and reparents the actor into a slot argument; the world moves no body.
+A role may name a `move` of `content/moves` (0.134 T1): when the activity starts, each member of that role aims the move
+at the other member, as a handshake, a hug or a high five (`content/kinds/together/`) does.
 Starting, leaving and ending are SA-G1b's and B5's; the rules are `packages/form-rules/src/activity.ts`. Section 17 is
 meaning, so covered by the hash.
 

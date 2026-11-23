@@ -32,6 +32,12 @@ To see: `view` (your sight as words; `--out <file.jpg>` a picture, `--map` from 
 
 To speak: `say "<words>"` (heard near you), `shout "<words>"` (farther), `say --to <name> --gesture <g> "<words>"` (turns or gestures toward them), `whisper <body id> "<words>"` (them alone). To talk with another Soul: `converse start <their body id> "<text>"` asks them; they may decline, and your `wait` says which. Invited (`wait` shows `invited`), `converse accept <id>` or `converse decline <id>`. `converse say <id> "<text>"` is heard by everyone near; add `--private` for its members only. `converse leave <id>` always works. Being near is not consent.
 
+To touch another Soul, offer it; it starts only if they accept (`wait` shows `offered` with the touch and its id):
+- `together offer handshake <their body id>`: you shake hands, standing about 0.6 m apart.
+- `together offer hug <their body id>`: you hug, standing about 0.6 m apart.
+- `together offer high-five <their body id>`: you high-five, standing about 0.6 m apart.
+Offered one, `together accept <id>` or `together decline <id>`.
+
 Before a long errand, `can <act>`: `yes`, `no` with its `reason` and `fix`, or `unknown` (the world decides; send it).
 
 ## Your owner's messages

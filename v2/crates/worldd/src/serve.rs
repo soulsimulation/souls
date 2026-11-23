@@ -2697,6 +2697,50 @@ fn replay_stream(tier: &Tier, found: &sim::log::Recovered, base_record: u64) {
 mod tests {
     use super::*;
 
+    /// 0.134 T1: each `content/kinds/together` entry is an activity kind of two roles, each aiming the entry's move at
+    /// the other, and the client offers each by the name the world pins (`v2/client/src/together/together.mjs`).
+    #[test]
+    fn t1_together_entries_are_the_activity_kinds_the_client_offers() {
+        let read = |t: &str| json::parse(t).unwrap();
+        let entries = vec![
+            (
+                "eden:handshake".to_owned(),
+                read(include_str!(
+                    "../../../../content/kinds/together/handshake.json"
+                )),
+            ),
+            (
+                "eden:high_five".to_owned(),
+                read(include_str!(
+                    "../../../../content/kinds/together/high_five.json"
+                )),
+            ),
+            (
+                "eden:hug".to_owned(),
+                read(include_str!("../../../../content/kinds/together/hug.json")),
+            ),
+        ];
+        let client = include_str!("../../../client/src/together/together.mjs");
+        let kinds = activity_kinds(&entries).unwrap();
+        for (k, mv) in kinds.iter().zip(["handshake", "high_five", "hug"]) {
+            println!("{}", k.name.as_str());
+            assert_eq!(k.roles.len(), 2);
+            for r in &k.roles {
+                assert_eq!(
+                    r.mv.as_ref().map(Name::as_str),
+                    Some(format!("souls:{mv}").as_str())
+                );
+            }
+        }
+        for k in &kinds {
+            assert!(
+                client.contains(k.name.as_str()),
+                "the client offers {}",
+                k.name.as_str()
+            );
+        }
+    }
+
     #[test]
     fn v9b_public_history_live_binds_restored_header_and_refuses_unsafe_exports() {
         let dir = PathBuf::from(env!("CARGO_MANIFEST_DIR"))

@@ -29,6 +29,7 @@ use replica::activity::ActivityKind;
 use replica::effects::{Actor, Cause, Effect, Header, Refusal, read_id};
 use replica::encode::{Name, Value};
 use replica::ids::{Id, Minter, Scope};
+use replica::moves::{Effector, Move};
 use replica::pose::Vec3;
 use replica::time::Micros;
 use replica::tree::{Rules, Tree};
@@ -36,7 +37,6 @@ use replica::world_model::show;
 use sim::activity::carry::Carry;
 use sim::activity::{Activities, Ask};
 use sim::controller::Controller;
-use replica::moves::{Effector, Move};
 use sim::moves::{Moves, Reach};
 use sim::slots::Slots;
 use sim::timers::DueList;
@@ -134,7 +134,14 @@ impl Feet {
 }
 
 impl Reach for Feet {
-    fn distance(&self, body: Id, _: &Effector, _: Option<&Name>, target: Id, _: &Name) -> Option<i64> {
+    fn distance(
+        &self,
+        body: Id,
+        _: &Effector,
+        _: Option<&Name>,
+        target: Id,
+        _: &Name,
+    ) -> Option<i64> {
         let ((f, a), (g, b)) = (self.0.get(&body)?, self.0.get(&target)?);
         let (dx, dz) = (i128::from(a[0] - b[0]), i128::from(a[1] - b[1]));
         (f == g).then(|| i64::try_from((dx * dx + dz * dz).isqrt()).unwrap_or(i64::MAX))
@@ -336,6 +343,30 @@ impl Engine {
             }
             Verb::Accept => {
                 let offer = target("accept-needs-an-offer")?;
+                // 0.134 T1: a touch starts only where its moves reach; nothing walks the two to their places yet.
+                if let Some((kind, asker)) = e.offered(offer) {
+                    let feet = Feet::of(c, [asker, a.body]);
+                    for mv in kind.roles.iter().filter_map(|r| r.mv.as_ref()) {
+                        let Some(m) = self.library.iter().find(|m| m.name == *mv) else {
+                            continue;
+                        };
+                        let held = Effector::Held;
+                        match feet.distance(asker, &held, None, a.body, &m.contact) {
+                            Some(d) if d <= m.reach => {}
+                            d => {
+                                return Err(refusal(
+                                    "together.too-far",
+                                    format!(
+                                        "{}: {} µm apart, it reaches {} µm: stand closer, facing each other",
+                                        mv.as_str(),
+                                        d.map_or("not on one floor".into(), |d| d.to_string()),
+                                        m.reach
+                                    ),
+                                ));
+                            }
+                        }
+                    }
+                }
                 e.accept(
                     &mut tree,
                     &mut self.mint,
@@ -465,12 +496,13 @@ impl Engine {
             let tr = tree.get_or_insert_with(|| live.frozen());
             self.activities.next = tr.next();
             // A role's move (0.134 T1): its phases end here, and at contact its reach is asked again.
-            let aimed = self.moves.instance_of(&t).and_then(|n| self.moves.record(n));
+            let aimed = self
+                .moves
+                .instance_of(&t)
+                .and_then(|n| self.moves.record(n));
             if let Some((body, target)) = aimed.map(|r| (r.body, r.target)) {
                 let feet = Feet::of(c, [body, target]);
-                let _ = self
-                    .moves
-                    .fire(c, &mut self.due, &mut self.mint, &feet, &t);
+                let _ = self.moves.fire(c, &mut self.due, &mut self.mint, &feet, &t);
                 continue;
             }
             if self
