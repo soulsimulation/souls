@@ -3578,13 +3578,25 @@ impl Clock {
         let orders = std::mem::take(&mut b.orders.log);
         let wind = std::mem::take(&mut b.wind_log);
         let mut deadlines = Vec::new();
+        let mut made_way = Vec::new();
         for (id, walk) in &mut self.walks {
             let (due, blocked) = walk.step(b, now);
             if let Some(due) = due {
                 deadlines.push((*id, due));
             }
-            if blocked && b.cancel(*id) == Some(Cut::Stopped) {
-                ended.push((*id, Err(acts::BLOCKED.to_owned())));
+            // The only way is blocked (0.132 A2-3): the still bodies on it are stepped aside once, by the world, and
+            // the walk goes on; a walk that stalls again, or that nothing could be stepped aside for, ends blocked.
+            if blocked {
+                let aside = if walk.make_way_once() {
+                    b.make_way(walk.body())
+                } else {
+                    Vec::new()
+                };
+                if !aside.is_empty() {
+                    made_way.push((walk.body(), aside));
+                } else if b.cancel(*id) == Some(Cut::Stopped) {
+                    ended.push((*id, Err(acts::BLOCKED.to_owned())));
+                }
             }
         }
         // Where the planner's answers came back late (K18b), for the recorder: a replay takes them at the same tick.
@@ -3604,6 +3616,13 @@ impl Clock {
         for (speaker, said, at) in heard {
             let e = speech::entry(Clock::own(speaker, at), speaker, &said);
             self.write_own(vec![e], "an utterance");
+        }
+        for (walker, aside) in made_way {
+            let made: Vec<Effect> = aside
+                .into_iter()
+                .map(|(body, from, to)| made_way_entry(now, walker, body, from, to))
+                .collect();
+            self.write_own(made, "a still body stepped aside");
         }
         for (id, due) in deadlines {
             self.run_started(id, due, now);
@@ -7250,6 +7269,76 @@ mod tests {
             Mapping::from_fields(root.fields()),
             Some(second),
             "A3: the same on replay"
+        );
+    }
+}
+
+/// The world's entry for a still body it stepped aside for a walker whose only way it blocked (0.132 A2-3): the
+/// world is its actor, on the body moved, with a `souls:made-way` event naming the body (1), the walker (2), and
+/// where it stood and where it is going (3, 4: `[x, y, z]` µm, its node's frame). The steps are its motion.
+fn made_way_entry(at: Micros, walker: Id, body: Id, from: Vec3, to: Vec3) -> Effect {
+    let point = |p: Vec3| {
+        let i = |n: i64| {
+            u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint)
+        };
+        Value::Array(vec![i(p.x), i(p.y), i(p.z)])
+    };
+    Effect {
+        envelope: Clock::own(body, at),
+        body: Body::Changes(Vec::new()),
+        events: Some(vec![Named {
+            name: name(MADE_WAY),
+            fields: BTreeMap::from([
+                (1, body.to_value()),
+                (2, walker.to_value()),
+                (3, point(from)),
+                (4, point(to)),
+            ]),
+            changes: Vec::new(),
+            rest: Rest::new(),
+        }]),
+        rest: Rest::new(),
+    }
+}
+
+/// The event of a still body the world stepped aside ([`made_way_entry`]).
+pub const MADE_WAY: &str = "souls:made-way";
+
+#[cfg(test)]
+mod made_way_tests {
+    use super::*;
+
+    /// 0.132 A2-3: the entry for a body the world stepped aside names the world as its actor and cause, is on the
+    /// body moved, and its event names the body, the walker it made way for, and where it stood and goes.
+    #[test]
+    fn a_body_stepped_aside_is_the_worlds_entry() {
+        let (walker, body) = (
+            Id::new(Scope([0x4a; 16]), 1).unwrap(),
+            Id::new(Scope([0x4a; 16]), 2).unwrap(),
+        );
+        let e = made_way_entry(
+            7_000_000,
+            walker,
+            body,
+            Vec3::new(1_000_000, 0, -500_000),
+            Vec3::new(1_000_000, 0, 160_000),
+        );
+        assert_eq!(e.envelope.actor, Actor::World);
+        assert_eq!(e.envelope.cause, Cause::World);
+        assert_eq!((e.envelope.node, e.envelope.at), (body, 7_000_000));
+        let [ev] = e.events.as_deref().expect("an event") else {
+            panic!("one event")
+        };
+        assert_eq!(ev.name.as_str(), MADE_WAY);
+        assert_eq!(ev.fields[&1], body.to_value());
+        assert_eq!(ev.fields[&2], walker.to_value());
+        assert_eq!(
+            ev.fields[&3],
+            Value::Array(vec![
+                Value::Uint(1_000_000),
+                Value::Uint(0),
+                Value::Nint(499_999)
+            ])
         );
     }
 }

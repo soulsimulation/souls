@@ -85,9 +85,10 @@ pub const REPLAN_WITHIN: Micros = 1_000_000;
 pub use crate::routes::may_stand;
 
 /// The smallest step that takes a still body at `at` on `node` out of the walker's `line` (from, to), when it is on
-/// that line (within [`CLEAR`] across it, between the walker and the line's end): across the line to [`CLEAR`] from it, the nearer side first, then each side a [`CLEAR`] further, up to three; a point on legal
-/// ground and at least two standard radii from every body in `taken`. None when no such point is found.
-fn aside(
+/// that line (within [`CLEAR`] across it, between the walker and the line's end): across the line to [`CLEAR`] from
+/// it, the nearer side first, then each side a [`CLEAR`] further, up to three; a point on legal ground and at least
+/// two standard radii from every body in `taken`. None when no such point is found.
+pub fn aside(
     world: &impl Unstick,
     node: Id,
     at: Vec3,
