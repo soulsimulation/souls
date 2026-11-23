@@ -77,8 +77,9 @@
 //! **Activities** (C30, #3556): the engine's acts (C2) run with the conversation's kind (E26,
 //! `replica/fixtures/activities/conversation.diag`) and an activity kind for each entry whose `roles` name two or
 //! more roles, `<entry kind>_activity`; each is pinned in the header and the open ground takes it as a child, so an
-//! offer or a proposal on the ground (where bodies are born) makes its node there. A start prints `activities: <plain
-//! names>`.
+//! offer or a proposal on the ground (where bodies are born) makes its node there. Its entry's slots that admit a
+//! thing are its slots, numbered as the entry numbers them, so a carry's load rides its first (0.135 C4,
+//! `content/kinds/construction/carry.json`). A start prints `activities: <plain names>`.
 //! **Its creator** (G1e, #3532): with a store, the world's one creator is the one its record in the directory names
 //! (the list's row for its lineage and zone, then that name's record, `directoryd::worlds::list::creator_of`), read
 //! at the start and again every 30 s. Only that creator's edits are taken, each judged by G2's rule on the town before
@@ -265,9 +266,27 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
         }
         let ns = kind.split_once(':').map_or("world", |(n, _)| n);
         let mut out = Vec::new();
+        // 0.134 T3: a role's link's `most` is how many take it (a dance's offer, to several); `on_beat` puts its move
+        // on the world's beat.
+        let (mut most, mut beat, mut follows) = (0, false, None);
         for (role, v) in &roles {
+            most += match entry
+                .get("links")
+                .and_then(|l| l.get(role))
+                .and_then(|l| l.get("most"))
+            {
+                Some(Json::Int(n)) => usize::try_from(*n).map_err(|_| "a role's most")?,
+                _ => 1,
+            };
+            beat |= v.get("on_beat") == Some(&Json::Bool(true));
+            // 0.135 G2: the role that follows the other's member.
+            if v.get("follows") == Some(&Json::Bool(true)) {
+                follows = Some(Name::new(&format!("{ns}:{role}")).ok_or("a role's name")?);
+            }
+            // A role in the activity's own slots (`this`) is placed in its first; one near it (`here`) is not.
             let slot = v
                 .get("places")
+                .filter(|p| p.get("in").and_then(Json::str) == Some("this"))
                 .and_then(|p| p.get("slots"))
                 .and_then(Json::arr)
                 .and_then(|s| s.first())
@@ -280,16 +299,67 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
                     Some(Name::new(&format!("souls:{m}")).ok_or("a role's move")?)
                 }
             };
+            // 0.135 G3: where its members stand, from its slots in the activity's own frame (a slot's stand point,
+            // else the slot itself), mm to µm, in the order its places list them; and, for a role near the activity
+            // (`here`), how near its middle a member is walked to its stand (`within_mm`).
+            let mm = |v: Option<&Json>| match v {
+                Some(Json::Int(n)) => i64::try_from(*n).ok().map(|n| n * 1000),
+                _ => None,
+            };
+            let within = v.get("places").and_then(|p| mm(p.get("within_mm")));
+            let stands = match v.get("places") {
+                Some(p) => p
+                    .get("slots")
+                    .and_then(Json::arr)
+                    .unwrap_or(&[])
+                    .iter()
+                    .filter_map(Json::str)
+                    .filter_map(|slot| {
+                        let s = entry.get("slots")?.get(slot)?;
+                        let at = s
+                            .get("stand")
+                            .and_then(Json::str)
+                            .and_then(|n| entry.get("points")?.get(n))
+                            .unwrap_or(s);
+                        let a = at.get("at_mm")?.arr()?;
+                        let yaw = match at.get("yaw_mdeg") {
+                            Some(Json::Int(n)) => i64::try_from(*n).ok()?,
+                            _ => 0,
+                        };
+                        Some((Vec3::new(mm(a.first())?, mm(a.get(1))?, mm(a.get(2))?), yaw))
+                    })
+                    .collect(),
+                None => Vec::new(),
+            };
             out.push(Role {
                 name: Name::new(&format!("{ns}:{role}")).ok_or("a role's name")?,
                 place: Name::new(&place).ok_or("a role's place")?,
                 claims: vec![Want::One(Class::Manipulator)],
                 mv,
+                stands,
+                within,
             });
         }
+        // 0.135 G3: the stands its roles resolve to (from the entry's slots and points) are part of what is pinned; a
+        // kind whose roles name none keeps the pin of its roles alone.
+        let stands = if out.iter().any(|r| !r.stands.is_empty()) {
+            let role = |r: &Role| {
+                r.stands
+                    .iter()
+                    .map(|(p, yaw)| format!("{},{},{},{yaw}", p.x, p.y, p.z))
+                    .collect::<Vec<_>>()
+                    .join(";")
+            };
+            format!(
+                "/stands/{}",
+                out.iter().map(role).collect::<Vec<_>>().join("|")
+            )
+        } else {
+            String::new()
+        };
         let pin = to_hex(&sha256(
             format!(
-                "souls/activity/{kind}/{}",
+                "souls/activity/{kind}/{}{stands}",
                 Json::Obj(roles.into_iter().cloned().collect()).to_json()
             )
             .as_bytes(),
@@ -303,6 +373,9 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
                 roles: out,
                 proposal_lasts: 60_000_000,
                 leave_within: 400_000,
+                most,
+                beat,
+                follows,
             },
         );
     }
@@ -656,6 +729,23 @@ fn courses_cached(
     Ok((out, false))
 }
 
+/// The slots of activity `name`'s entry that admit a thing, numbered as the entry numbers its slots (1, 2, ... in its
+/// order): a carry's load rides its first (0.135 C4, `sim::activity::carry::SLOT`).
+fn thing_slots(
+    entries: &[(String, Json)],
+    name: &str,
+) -> BTreeMap<u64, std::collections::BTreeSet<String>> {
+    let entry = entries
+        .iter()
+        .find(|(k, _)| format!("{k}_activity") == plain(name));
+    let slots = entry.and_then(|(_, e)| e.get("slots")).and_then(Json::obj);
+    (1..)
+        .zip(slots.unwrap_or(&[]))
+        .filter(|(_, (_, s))| s.get("admits").and_then(Json::str) == Some("thing"))
+        .map(|(n, _)| (n, ["thing".to_owned()].into()))
+        .collect()
+}
+
 fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
     build_with(COURSES_CACHE.get().map(PathBuf::as_path), facts, entries)
 }
@@ -694,7 +784,7 @@ fn build_with(cache: Option<&Path>, facts: &str, entries: &[(String, Json)]) -> 
             Kind {
                 owner: "activity".into(),
                 children: Default::default(),
-                slots: Default::default(),
+                slots: thing_slots(entries, a.name.as_str()),
                 hands: None,
             },
         );
@@ -2815,12 +2905,18 @@ fn replay_stream(tier: &Tier, found: &sim::log::Recovered, base_record: u64) {
 mod tests {
     use super::*;
 
-    /// 0.134 T1 and T2: each `content/kinds/together` entry is an activity kind of two roles, each aiming the entry's move at
+    /// 0.134 T1, T2 and T3: each `content/kinds/together` entry is an activity kind of two roles, each aiming the entry's move at
     /// the other, and the client offers each by the name the world pins (`v2/client/src/together/together.mjs`).
     #[test]
     fn t1_together_entries_are_the_activity_kinds_the_client_offers() {
         let read = |t: &str| json::parse(t).unwrap();
         let entries = vec![
+            (
+                "eden:dance_together".to_owned(),
+                read(include_str!(
+                    "../../../../content/kinds/together/dance_together.json"
+                )),
+            ),
             (
                 "eden:handshake".to_owned(),
                 read(include_str!(
@@ -2843,15 +2939,45 @@ mod tests {
                     "../../../../content/kinds/together/hold_hands.json"
                 )),
             ),
+            (
+                "eden:follow".to_owned(),
+                read(include_str!(
+                    "../../../../content/kinds/together/follow.json"
+                )),
+            ),
         ];
         let client = include_str!("../../../client/src/together/together.mjs");
         let kinds = activity_kinds(&entries).unwrap();
         for (k, mv) in kinds
             .iter()
-            .zip(["handshake", "high_five", "hold_hand", "hug"])
+            .zip(["dance", "", "handshake", "high_five", "hold_hand", "hug"])
         {
             println!("{}", k.name.as_str());
             assert_eq!(k.roles.len(), 2);
+            // 0.135 G2: following names no move; its first role follows.
+            if mv.is_empty() {
+                assert!(k.roles.iter().all(|r| r.mv.is_none()));
+                assert_eq!(k.follows.as_ref().map(Name::as_str), Some("eden:one"));
+                continue;
+            }
+            assert_eq!(k.follows, None);
+            // 0.135 G3: hold hands' two stand shoulder to shoulder, facing one way; the dance's eight in a ring.
+            if mv == "hold_hand" {
+                let s: Vec<(Vec3, i64)> = k.roles.iter().flat_map(|r| r.stands.clone()).collect();
+                assert_eq!(
+                    s,
+                    vec![
+                        (Vec3::new(-250_000, 0, 0), 0),
+                        (Vec3::new(250_000, 0, 0), 0)
+                    ]
+                );
+            }
+            if mv == "dance" {
+                assert_eq!(k.roles.iter().map(|r| r.stands.len()).sum::<usize>(), 8);
+            }
+            // 0.134 T3: the dance takes up to eight, on the beat; each touch is a pair.
+            let dance = mv == "dance";
+            assert_eq!((k.most, k.beat), if dance { (8, true) } else { (2, false) });
             for r in &k.roles {
                 assert_eq!(
                     r.mv.as_ref().map(Name::as_str),
@@ -2859,7 +2985,22 @@ mod tests {
                 );
             }
         }
-        for k in &kinds {
+        // 0.135 G3: and 0.135 E1's two, whose pins hold their stands too.
+        let more = [
+            (
+                "eden:fist_bump".to_owned(),
+                read(include_str!(
+                    "../../../../content/kinds/together/fist_bump.json"
+                )),
+            ),
+            (
+                "eden:harvest_together".to_owned(),
+                read(include_str!(
+                    "../../../../content/kinds/together/harvest_together.json"
+                )),
+            ),
+        ];
+        for k in kinds.iter().chain(&activity_kinds(&more).unwrap()) {
             assert!(
                 client.contains(k.name.as_str()),
                 "the client offers {}",

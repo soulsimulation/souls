@@ -95,6 +95,7 @@ export function cutoverFence({ binding, file = process.env.SOULS_CUTOVER_BINDING
   return {
     inspect: (registry) => load()?.inspect(registry),
     v2Stream: (w) => load()?.v2Stream(w) ?? null,
+    v2World: (w) => load()?.v2World(w) ?? null,
     v2Bodies: (w) => load()?.v2Bodies(w) ?? null,
     v2Fields: (w) => load()?.v2Fields(w) ?? null,
     publish: (w, read) => load()?.publish(w, read) ?? Promise.resolve(null),
@@ -117,6 +118,7 @@ function fenceOf(binding) {
   return {
     inspect: (registry) => ({ configured: true, worlds: fences.map((f) => f.inspect(registry)) }),
     v2Stream: (w) => of(w)?.v2Stream(w) ?? null,
+    v2World: (w) => of(w)?.v2World(w) ?? null,
     v2Bodies: (w) => of(w)?.v2Bodies(w) ?? null,
     v2Fields: (w) => of(w)?.v2Fields(w) ?? null,
     publish: (w, read) => of(w)?.publish(w, read) ?? Promise.resolve(null),
@@ -180,6 +182,9 @@ function oneFence(binding) {
       if (!stream && staticDir && !publishing && existsSync(join(staticDir, 'manifest.json'))) clear();
       return stream;
     },
+    /** The world's name in the new engine (its routes key, the `world` its Souls are paired for), under the same rule as
+     *  `v2Stream` (routed, else null): the home page's My Souls reads a moved world's Souls from the directory by it. */
+    v2World(w) { return this.v2Stream(w) ? canonicalSlug : null; },
     /** #4177: the body catalogue's directory for the page, under the same rule as `v2Stream` (routed, else null). */
     v2Bodies(w) { return v2Bodies && this.v2Stream(w) ? v2Bodies : null; },
     /** B3-2b: every v2 field the routed page's inline config carries beside `v2Stream` (null when not routed): the body

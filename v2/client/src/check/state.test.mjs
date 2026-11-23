@@ -104,4 +104,35 @@ test('D8, D10: a body a seat or a bed holds has that slot\'s posture, over a wri
   // D10: a rise wrote `stand`; the seat's own sit after it wrote no posture: seated in the chair, it is the seat's.
   assert.equal(at(7).fields?.posture, 'sit', 'a written stand under a seat is the seat\'s posture');
   assert.equal(at(8).fields?.posture, 'kneel', 'any other posture the world wrote is kept');
+  // G-late: with a memo the second walk reads no record and the seat's posture is still the slot's, not carried over.
+  const memo = {};
+  assert.deepEqual(stateOf(copy, kinds, 'me', memo), stateOf(copy, kinds, 'me'));
+  assert.deepEqual(stateOf(copy, kinds, 'me', memo).nodes, nodes);
+});
+
+test('G-late: with a memo, a walk reads again only the records a sync changed, and its state is the one a walk without it gives', () => {
+  const node = (k, n, children) => encode(new Map([[1, [scope, k]], [2, 'test:board@1220aa'], [6, new Map([[4, n]])], ...(children ? [[10, children]] : [])]));
+  const records = { a1: node(2, 1), b2: node(3, 2) };
+  records.r0 = node(1, 0, ['a1', 'b2'].map((h) => Buffer.from(h, 'hex')));
+  let root = 'r0';
+  const reads = [];
+  const copy = { roots: () => JSON.stringify({ x: root }), record: (h) => { reads.push(h); return records[h] ?? null; } };
+  const memo = {};
+  const first = stateOf(copy, kinds, 'me', memo);
+  assert.deepEqual(reads.sort(), ['a1', 'b2', 'r0']);
+  reads.length = 0;
+  assert.deepEqual(stateOf(copy, kinds, 'me', memo), first, 'unchanged: the same state');
+  assert.deepEqual(reads, [], 'and no record read again');
+  // A sync changes one child: a new record under a new hash, and so a new root.
+  records.c3 = node(3, 5);
+  records.r1 = node(1, 0, ['a1', 'c3'].map((h) => Buffer.from(h, 'hex')));
+  root = 'r1';
+  const after = stateOf(copy, kinds, 'me', memo);
+  assert.deepEqual(reads.sort(), ['c3', 'r1'], 'only the changed records are read');
+  assert.deepEqual(after, stateOf({ roots: copy.roots, record: (h) => records[h] ?? null }, kinds, 'me'), 'the same state as a walk with no memo');
+  assert.equal(after.nodes[`${'ab'.repeat(16)}-3`].fields.count, 5);
+  // Other kinds: every record is read again.
+  reads.length = 0;
+  stateOf(copy, { ...kinds }, 'me', memo);
+  assert.deepEqual(reads.sort(), ['a1', 'c3', 'r1']);
 });

@@ -63,7 +63,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
       bridge = new V2Bridge(frame, hour);
       // R2: the old page's rewind reads this world's past from its history export (history.ts)
       const past = historyBase(stream, (window as unknown as { __simConfig?: unknown }).__simConfig);
-      if (past) setV2History(new V2History(past, () => makeHistoryReader(new URL(apiPath('/replica.js'), location.href).href), frame));
+      if (past) setV2History(new V2History(past, () => makeHistoryReader(new URL(apiPath('/replica.js'), location.href).href), frame, hour));
       bridge.start(stream, () => parts.watch(kinds.watch(world.watch(makeReader(new URL(apiPath('/replica.js'), location.href).href)))));
       members = (await import('./member-turns.ts')).memberTurns((h) => bridge?.heard(h), (grants) => bridge?.bodiesOf(grants) ?? []); // R3b: private turns, to their members
       if (stopped) members.stop();
