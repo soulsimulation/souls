@@ -349,8 +349,11 @@ pub fn load(text: &str) -> R<Import> {
 
 /// The slots of each kind whose entry joins parts (0.135, ahead of A2): an entry that declares a link type, or a slot
 /// that names the kinds it admits. Keyed by the kind's plain name, each slot by the number its entry gives it (K3's
-/// reader, `replica::kinds::entry`), with what it admits. Entries that do not read are left to the facts.
-fn joining_slots(entries: &[(String, String)]) -> BTreeMap<String, BTreeMap<u64, Vec<String>>> {
+/// reader, `replica::kinds::entry`), with what it admits. Entries that do not read are left to the facts. An entry whose
+/// `children` name kinds (a frame admitting the crew that holds it, 0.135 A2) joins too, and those kinds are its
+/// children beside a thing.
+type Joining = BTreeMap<String, (BTreeMap<u64, Vec<String>>, Vec<String>)>;
+fn joining_slots(entries: &[(String, String)]) -> Joining {
     use replica::rules::json::Value as J;
     let mut out = BTreeMap::new();
     for (_, text) in entries {
@@ -359,7 +362,7 @@ fn joining_slots(entries: &[(String, String)]) -> BTreeMap<String, BTreeMap<u64,
         };
         // The kind's admission only: its forms and timed fields are not read here (as `worldd` loads its forms).
         if let J::Obj(o) = &mut e {
-            o.retain(|(k, _)| k != "forms");
+            o.retain(|(k, _)| k != "forms" && k != "roles");
             if let Some((_, J::Obj(state))) = o.iter_mut().find(|(k, _)| k == "state") {
                 state.retain(|(_, f)| f.get("type").and_then(J::str) != Some("timed"));
             }
@@ -377,7 +380,14 @@ fn joining_slots(entries: &[(String, String)]) -> BTreeMap<String, BTreeMap<u64,
                 .slots
                 .values()
                 .any(|sl| sl.admits.iter().any(|a| a.contains(':')));
-            if def.links.is_empty() && !names_kinds {
+            let children: Vec<String> = def
+                .admits
+                .children
+                .iter()
+                .filter(|c| c.contains(':'))
+                .cloned()
+                .collect();
+            if def.links.is_empty() && !names_kinds && children.is_empty() {
                 continue;
             }
             let slots = def
@@ -385,7 +395,7 @@ fn joining_slots(entries: &[(String, String)]) -> BTreeMap<String, BTreeMap<u64,
                 .iter()
                 .map(|(n, sl)| (*n, sl.admits.iter().cloned().collect()))
                 .collect();
-            out.insert(plain(def.name.as_str()).to_owned(), slots);
+            out.insert(plain(def.name.as_str()).to_owned(), (slots, children));
         }
     }
     out
@@ -455,7 +465,8 @@ pub fn load_with(text: &str, entries: &[(String, String)]) -> R<Import> {
             .get(r)
             .map(|ns| ns.iter().map(|n| (*n, vec!["thing".to_owned()])).collect())
             .unwrap_or_default();
-        if let Some(own) = joining.get(kind_name(s(k, "name")?).as_str()) {
+        let own = joining.get(kind_name(s(k, "name")?).as_str());
+        if let Some((own, _)) = own {
             for (n, admits) in own {
                 if let Ok(n) = i64::try_from(*n) {
                     by_n.insert(n, admits.clone());
@@ -470,11 +481,19 @@ pub fn load_with(text: &str, entries: &[(String, String)]) -> R<Import> {
             })
             .collect::<Vec<_>>()
             .join(", ");
-        let children = if has_floors.contains(r) {
-            format!("[\"thing\", \"{FLOOR}\"]")
-        } else {
-            "[\"thing\"]".to_owned()
-        };
+        let mut children = vec!["thing".to_owned()];
+        if has_floors.contains(r) {
+            children.push(FLOOR.to_owned());
+        }
+        children.extend(own.map(|(_, c)| c.clone()).unwrap_or_default());
+        let children = format!(
+            "[{}]",
+            children
+                .iter()
+                .map(|c| format!("\"{c}\""))
+                .collect::<Vec<_>>()
+                .join(", ")
+        );
         // Section 19 holds today's def hash, so the kind's hash covers today's meaning until K3 loads real entries.
         // Named as the entries name it ([`kind_name`]), so a thing's kind finds its entry.
         let line = format!(

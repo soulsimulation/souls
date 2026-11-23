@@ -424,7 +424,7 @@
  },
  "children": {
   "crew": {
-   "kind": "mars:rack_crew",
+   "kind": "mars:carry_activity",
    "most": 2
   }
  },

@@ -51,7 +51,7 @@ const WALKER: &str =
     "test:walker@12200000000000000000000000000000000000000000000000000000000000000002";
 /// The crew's activity kind, the one B17's frame entry admits as its child (`content/kinds/construction`).
 const CREW_KIND: &str =
-    "mars:rack_crew@12200000000000000000000000000000000000000000000000000000000000000b19";
+    "mars:carry_activity@12200000000000000000000000000000000000000000000000000000000000000b19";
 const ROLES: [&str; 2] = ["mars:crew-front", "mars:crew-back"];
 /// The test world's yard and site (`v2/tools/testworld`, B17), µm on the ground.
 const YARD: Vec3 = Vec3 {
@@ -108,7 +108,10 @@ fn kinds() -> (Kinds, Vec<(String, String)>) {
         .map(|p| {
             let json = std::fs::read_to_string(&p).expect("read");
             let name = p.file_name().unwrap().to_string_lossy().into_owned();
-            (name, entry_to_kind(&json).expect("an entry"))
+            (
+                name,
+                entry_to_kind(&without_roles(&json)).expect("an entry"),
+            )
         })
         .collect();
     files.sort();
@@ -1108,7 +1111,9 @@ fn a5_each_refusal_is_returned_before_anyone_moves() {
         .most
         .iter()
         .find(|(k, _)| k.starts_with("mars:rack_upright@"));
-    let bound = upright.and_then(|(_, b)| b.get("mars:rack_crew")).copied();
+    let bound = upright
+        .and_then(|(_, b)| b.get("mars:carry_activity"))
+        .copied();
     assert_eq!(bound, Some(2), "the frame entry's bound on its crews");
     let second = w.crew(fa, &[1]);
     assert_eq!(
@@ -1167,3 +1172,13 @@ fn trace(out: &str, rows: &[Vec<Vec3>]) {
 
 #[path = "n19_tests.rs"]
 mod n19;
+
+/// An entry without its `roles`: they make the crew's activity kind (`worldd::serve::activity_kinds`), not the kind's
+/// meaning, so K3's reader is given the rest (0.135 A2).
+fn without_roles(json: &str) -> String {
+    let mut e = replica::rules::json::parse(json).expect("an entry");
+    if let replica::rules::json::Value::Obj(o) = &mut e {
+        o.retain(|(k, _)| k != "roles");
+    }
+    e.to_json()
+}
