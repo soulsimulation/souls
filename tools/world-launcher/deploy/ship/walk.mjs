@@ -16,6 +16,7 @@ export function zoomStep(d, h, zin) {
   if (zin < MAX_IN && open(d * NOTCH_FACTOR, h == null ? null : h * NOTCH_FACTOR)) return 'in';
   return open(d, h) ? null : 'out';
 }
+import { isMain } from '../../../lib/is-main.mjs';
 import { mkdirSync, writeFileSync } from 'node:fs'; import { fileURLToPath } from 'node:url'; import { loadavg } from 'node:os';
 import { chromium as playwrightChromium, launchOptions, lease } from './browser.mjs';
 const eye = (p) => p.evaluate(() => { const c = globalThis.__soulsCamera, g = globalThis.__soulsCameraGround; if (!c?.p || !c.pivot) return null;
@@ -32,7 +33,7 @@ async function zoomOpen(p) {
   if (s && !o.in && !o.out) { for (const dy of [NOTCH, -NOTCH]) { await p.mouse.wheel(0, dy); await p.waitForTimeout(400); } o.in = o.out = 1; s = await eye(p); }
   o.end = s; o.open = !!s && s.d >= ORBIT_MIN_DIST && (s.h == null || s.h >= ORBIT_MIN_HEIGHT); return o;
 }
-if (process.argv[1] !== fileURLToPath(import.meta.url)) { /* imported (tests): no walk */ } else {
+if (!isMain(import.meta.url)) { /* imported (tests): no walk */ } else {
 const [out, ...specs] = process.argv.slice(2); mkdirSync(out, { recursive: true }); const chromium = playwrightChromium();
 const release = await lease('ship-walk'); let b; const log = [];
 const slugOf = (u) => { const x = new URL(u); return (x.pathname.split('/').filter(Boolean).pop() ?? 'root') + (x.search ? '-' + x.search.replace(/\W+/g, '') : ''); };

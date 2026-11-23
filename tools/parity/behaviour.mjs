@@ -11,9 +11,9 @@
 // Fixture success proves mechanisms only and never replaces historical evidence.
 // Initial historical body/pose/posture/carried state is not reconstructed by this first gate.
 // Every nonempty historical roster therefore retains an explicit UNKNOWN state-restoration case.
+import { isMain } from '../lib/is-main.mjs';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 
 const STATUS = ['PASS', 'FAIL', 'UNKNOWN'];
 const wait = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -262,4 +262,4 @@ async function main() {
   console.log(`${report.status}: ${report.counts.PASS} pass, ${report.counts.FAIL} fail, ${report.counts.UNKNOWN} unknown; migration ${report.migrationEligible ? 'eligible' : 'blocked'}; ${out}`);
   process.exitCode = report.status === 'PASS' ? 0 : report.status === 'FAIL' ? 1 : 2;
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) main().catch((error) => { console.error(error.message); process.exitCode = 2; });
+if (isMain(import.meta.url)) main().catch((error) => { console.error(error.message); process.exitCode = 2; });

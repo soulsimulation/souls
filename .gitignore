@@ -73,6 +73,9 @@ deploy.env
 # lived beside them is dropped, never published or committed
 /mars/viewer/public/history/
 /mars/viewer/public/2020/
+# The importers' kept outputs (R9a): the template worlds' facts and baked models, exported once with v1's exporters
+# and pulled with `pnpm assets:pull --set import` (v2/tools/import-world/README.md)
+/v2/tools/import-world/kept/
 # the small own-work binaries that stay in git (tools/assets/manifest.test.mjs holds the same list)
 !/apps/web/pwa/icon-*.png
 !/apps/web/src/media/gallery-loop.mp4

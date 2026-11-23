@@ -11,9 +11,9 @@
 //
 //   node history.mjs collect --root <worlds root> --dir <store> [--every 30] [--once]
 //   node history.mjs report --dir <store> [--range 24h|7d|<n>h|<n>d] [--json]
+import { isMain } from '../../../../tools/lib/is-main.mjs';
 import { appendFileSync, mkdirSync, readFileSync, readdirSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { readWorlds } from './read.mjs';
 
 const HOUR_MS = 3_600_000, DAY_MS = 24 * HOUR_MS;
@@ -131,7 +131,7 @@ export function text(r) {
   return out.join('\n');
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const argv = process.argv.slice(2), opt = (k, d) => { const i = argv.indexOf(`--${k}`); return i < 0 ? d : argv[i + 1]; };
   const dir = opt('dir');
   if (argv[0] === 'collect') {

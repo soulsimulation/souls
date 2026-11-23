@@ -1,7 +1,7 @@
 # Installing Engine v2 beside today's system
 
 Engine v2 O17 (#2810). One script, `v2/tools/ops/install.sh`, puts the new programs on one Linux machine beside
-today's system. It serves nothing public and starts nothing: the preview is a path on the public name that the proxy
+today's system. It serves nothing public and starts nothing but the alarm daemon (below): the preview is a path on the public name that the proxy
 sends to these programs once the owner places its site file. Routing between the systems is O19 (`v2/tools/ops/proxy/README.md`); releases are O18.
 
 ## What it makes
@@ -18,16 +18,22 @@ sends to these programs once the owner places its site file. Routing between the
 | The directory's arguments, written once, never overwritten | `/etc/souls/directory.args` | root:souls, 640 |
 | Secrets, `KEY=value`, written once (empty), never overwritten | `/etc/souls/secrets.env` | root, 600 |
 | What the install made (its record; see below) | `/etc/souls/install.state` | root, 644 |
-| Units | `souls.slice`, `worldd@.service` (O1) and its drop-in `worldd@.service.d/10-install.conf`, `souls-gateway@.service`, `souls-directory.service`, `souls-origin.service` | root, 644 |
+| Units | `souls.slice`, `worldd@.service` (O1) and its drop-in `worldd@.service.d/10-install.conf`, `souls-gateway@.service`, `souls-directory.service`, `souls-origin.service`, `souls-agents.service`, `souls-alarms.service` and its drop-in `souls-alarms.service.d/10-install.conf` (the one unit it starts) | root, 644 |
 
 The view tier runs inside each world's process (`worldd`), so it has no unit of its own. Every program runs as
-`souls` in `souls.slice`, whose `MemoryMax` is 3 GB; inside it a world may use 2 GB (O1), a gateway 512 MB, the
-directory and the origin 256 MB each. The processor and the disk are shared, never capped: the slice's `CPUWeight`
+`souls` in `souls.slice`, whose `MemoryMax` is 12 GB: the largest world's cap (Eden's 8 GB) and 4 GB for the rest.
+Inside it a world may use 2 GB (O1) unless `v2/tools/ops/units/world-limits.json` gives it more (Eden 8 GB; the
+install writes its `worldd@<world>.service.d/limits.conf`, [world-restarting](world-restarting.md#how-a-world-runs)),
+a gateway 512 MB, the directory 256 MB, the origin 1 GB for all its processes (6 on 8 cores, `ORIGIN_PROCESSES`;
+[viewer cache](../viewer-cache.md)). The processor and the disk are shared, never capped: the slice's `CPUWeight`
 and `IOWeight` are 20 against the default 100, so when both systems are busy the new one gets a fifth of what today's
 gets, and all of it when today's is idle; neither system's world time is throttled. `TasksMax` is 4,096. Every unit
 runs with `NoNewPrivileges`, `ProtectSystem=strict` (writing only under `/var/lib/souls`), `ProtectHome` and
-`PrivateTmp`. Units read the secrets file as root before they drop to `souls`. The directory
-and the origin listen on loopback only (ports 7310 and 7320); each world's gateway gets its port from its own
+`PrivateTmp`. Units read the secrets file as root before they drop to `souls`. The directory,
+the origin and the agents' relay listen on loopback only (ports 7310, 7320 and 7330). The relay
+(`v2/tools/origin/agents.mjs`, #4152) carries every world's agent paths (`/w/<slug>/v2/ws`, `v2/creator-token`,
+`v2/entries`) to the world's gateway in a process apart from the viewers' origin, so a viewer join wave that saturates
+or restarts the origin drops no agent; its gauge is `/run/souls-agents/stats.json` (open agent sockets); each world's gateway gets its port from its own
 `/etc/souls/gateway-<world>.env`, written when the world is placed (X5). That file also names the world's kind
 entries (`--entries <world>/entries`), which the gateway serves to the world's paired clients at `/v2/entries` (#3760);
 a gateway whose entries folder is missing or empty refuses to start.
@@ -38,7 +44,12 @@ slice that is at most 29 GB of 30.6 GB, 9.3 GB at today's use. Yes.
 
 ## How it stays apart
 
-- It starts, enables and restarts nothing; the one systemd call is `daemon-reload` when a unit file changed.
+- It starts, enables and restarts nothing but the alarm daemon, `souls-alarms.service` (O2, #2731; runbook
+  [sleep-and-wake.md](sleep-and-wake.md)): it enables and starts it, and restarts it when its unit or drop-in
+  changed. With no world asleep it only waits. Its drop-in (`souls-alarms.service.d/10-install.conf`) keeps it root,
+  since it starts worlds, in the group souls with a group-writable socket, so worlds and gateways (the user souls)
+  reach it. Uninstall stops and disables it. Otherwise the one systemd call is `daemon-reload` when a unit file
+  changed.
 - It never reads or writes today's units, users, data, proxy, DNS or firewall. `install.sh check` (run by CI in
   `v2/tools/ci.sh` and by the workflow) plans into an empty folder and compares every path it would write, and every
   unit, user and port it names, with what today's installer and units name (read from
@@ -164,7 +175,9 @@ owner. Rules: `v2/crates/directoryd/src/worlds/list/register.rs`.
    }
    ```
 
-4. Start units by name when a world is placed (X5): `systemctl start souls-origin souls-directory`.
+4. Start units by name when a world is placed (X5): `systemctl start souls-origin souls-agents souls-directory`.
+   `souls-agents` must be running before any Caddy reload whose `soul-game.caddy` routes agents to 7330 (#4152),
+   or agents get 502 until it starts; the cut-over's `check` refuses while it is not active.
 
 ## A world's models
 

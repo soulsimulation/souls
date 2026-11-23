@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Pixel + triangle gate. Run gallery.mjs before editing, then --compare <before-dir> after.
 // Intentional differences require {"def-name": "reason"} (or "def-name/phase") in --allow JSON.
+import { isMain } from '../../lib/is-main.mjs';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 export function compareGalleries(beforeDir, afterDir, { allow = {} } = {}) {
   const read = dir => JSON.parse(readFileSync(resolve(dir, 'gallery.json'), 'utf8'));
@@ -31,7 +31,7 @@ export function compareGalleries(beforeDir, afterDir, { allow = {} } = {}) {
   return { schema: 'kit-gallery-diff/1', before: resolve(beforeDir), after: resolve(afterDir), ok: unjustified.length === 0 && errors.length === 0 && defs.length > 0, defs, changed, unjustified, errors };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const [before, after, allowPath] = process.argv.slice(2);
   if (!before || !after) throw new Error('usage: gallery-diff.mjs <before-dir> <after-dir> [allow-reasons.json]');
   const diff = compareGalleries(before, after, { allow: allowPath ? JSON.parse(readFileSync(allowPath, 'utf8')) : {} });

@@ -384,8 +384,7 @@ impl Pairing {
                 }
             }
             let temporary = authority.tokens.with_extension("tmp");
-            std::fs::write(&temporary, text)?;
-            std::fs::rename(temporary, authority.tokens)?;
+            crate::durable::replace(&authority.tokens, &temporary, text.as_bytes())?;
         }
         Ok(true)
     }

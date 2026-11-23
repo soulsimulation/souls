@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Public read-only CDN proof; derived from db11f401 tools/blobs/cdn-verify.mjs.
+import { isMain } from '../lib/is-main.mjs';
 import { createHash } from 'node:crypto';
 import { readFile } from 'node:fs/promises';
-import { pathToFileURL } from 'node:url';
 import { CACHE, TYPES, isBrKey, validKey } from './inventory.mjs';
 import { withNewReceipt } from './receipt.mjs';
 import { SCOPED_KEY } from './publish.mjs';
@@ -60,7 +60,7 @@ export async function verify(origin, plan, { sample = 3, key, fetcher = fetch, a
   }
   return { version: 1, origin: u.origin, at: new Date().toISOString(), ok: results.every(r => r.ok), cacheProof: allowWarm ? 'warm recheck allowed; inspect first cache status' : 'strict MISS then HIT', results };
 }
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+if (isMain(import.meta.url)) {
   const [origin, file, ...args] = process.argv.slice(2), value = (flag, fallback) => args.includes(flag) ? args[args.indexOf(flag) + 1] : fallback;
   try {
     const out = value('--out', 'cdn-cache-proof.json');

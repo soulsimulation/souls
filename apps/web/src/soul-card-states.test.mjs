@@ -151,3 +151,12 @@ test('#1141 A2: a visitor reads the Soul\'s story, newest first, its words as te
 test('#1141 A2: the story is the visitor\'s card; an owner\'s stays as it was',()=>{
  assert.doesNotMatch(render(h(SoulCardView,{...F['connected'],story:F['visitor-story'].story})),/data-soul-story/);
 });
+test('B3-3: a v2 Soul\'s card says its name, description and what it is doing now; asleep or a zombie, the wind-down words instead',()=>{
+ const v=F.visitor??Object.values(F).find(p=>p.view==='visitor');
+ const soul={...v.soul,name:'Ada',description:'Keeps the bees.'};
+ const t=text(render(h(SoulCardView,{...v,soul,body:{state:'awake',doing:null,since:0},place:null,now:null,doing:'Walking'})));
+ assert.match(t,/Ada/);assert.match(t,/Keeps the bees\./);assert.match(t,/Awake · Walking/);
+ assert.match(text(render(h(SoulCardView,{...v,soul,body:{state:'awake',doing:null,since:0},place:'the pond',now:null,doing:'Seated'}))),/Seated at the pond/);
+ assert.doesNotMatch(text(render(h(SoulCardView,{...v,soul,body:{state:'zombie',doing:null,since:0},place:null,now:null,doing:'zombie'}))),/· zombie/,'a wound-down body keeps its own words');
+ assert.doesNotMatch(text(render(h(SoulCardView,{...v,soul,body:{state:'awake',doing:null,since:0},place:null,now:null}))),/Walking/,'an old-engine card shows no doing');
+});

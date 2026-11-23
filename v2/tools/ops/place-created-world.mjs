@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // W3b's finite, root-owned initializer. The path unit supplies no arguments: the inbox is request identity only.
+import { isMain } from '../../../tools/lib/is-main.mjs';
 import { constants } from 'node:fs';
 import { lstat, realpath, readdir, mkdir, open, rename, chmod, copyFile } from 'node:fs/promises';
 import { dirname, join, resolve, relative, isAbsolute } from 'node:path';
@@ -276,7 +277,7 @@ export async function drain(config) {
   }
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) {
+if (isMain(import.meta.url)) {
   try {
     if (process.getuid?.() !== 0) fail('placement-root-only');
     const child = process.argv[2] === '--as-souls';

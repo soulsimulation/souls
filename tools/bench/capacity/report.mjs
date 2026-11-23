@@ -1,7 +1,7 @@
 // REPORT.md from a bench run (METRICS.md v1). Also: node tools/bench/capacity/report.mjs <out dir> (rebuilds from result files).
+import { isMain } from '../../lib/is-main.mjs';
 import { existsSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 
 const range = (xs, d = 0) => { const v = xs.filter((x) => x != null && Number.isFinite(x)); if (!v.length) return '—'; const a = Math.min(...v), b = Math.max(...v); const f = (x) => x.toFixed(d); return a === b ? f(a) : `${f(a)}–${f(b)}`; };
 const worst = (xs, hi) => { const v = xs.filter((x) => x != null && Number.isFinite(x)); return v.length ? (hi ? Math.max(...v) : Math.min(...v)) : null; };
@@ -143,7 +143,7 @@ export function report(receipt, results) {
   return L.join('\n') + '\n';
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMain(import.meta.url)) {
   const out = process.argv[2], receipt = JSON.parse(readFileSync(join(out, 'receipt.json'), 'utf8'));
   const results = readdirSync(out).filter((d) => existsSync(join(out, d, 'result.json'))).map((d) => JSON.parse(readFileSync(join(out, d, 'result.json'), 'utf8')));
   writeFileSync(join(out, 'REPORT.md'), report(receipt, results)); console.log(join(out, 'REPORT.md'));

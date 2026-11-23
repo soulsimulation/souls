@@ -41,6 +41,23 @@ use worldd::bodies::Bodies;
 use worldd::checkers::Rules;
 use worldd::words::{DESCRIPTION, NAME, WORDS};
 
+thread_local! {
+    /// The acts that had their one progress answer (C20) on this test's thread.
+    static PROGRESSED: std::cell::RefCell<std::collections::BTreeSet<(Vec<u8>, u64)>> =
+        std::cell::RefCell::default();
+}
+
+/// Whether `frame` is an act's progress answer (C20, W11 #4087), which the answer helpers read past. An act has at
+/// most one: a second fails the test.
+fn progress_once(frame: &[u8]) -> bool {
+    let Some(key) = answers::progress_of(frame) else {
+        return false;
+    };
+    let first = PROGRESSED.with(|p| p.borrow_mut().insert(key));
+    assert!(first, "a second progress answer for one act");
+    true
+}
+
 const LINEAGE: Scope = Scope([0xc3; 16]);
 const CHAIR: &str = include_str!("../../replica/fixtures/seats/chair.diag");
 
@@ -357,10 +374,16 @@ impl Client {
 
     /// The next answer: (its sequence, a receipt's entries or a refusal's reason).
     fn answer(&mut self) -> (u64, Result<Vec<u64>, String>) {
-        let mut len = [0u8; 4];
-        self.0.read_exact(&mut len).expect("an answer");
-        let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
-        self.0.read_exact(&mut frame).unwrap();
+        // A progress answer (C20, sent as a run starts) is read past.
+        let frame = loop {
+            let mut len = [0u8; 4];
+            self.0.read_exact(&mut len).expect("an answer");
+            let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
+            self.0.read_exact(&mut frame).unwrap();
+            if !progress_once(&frame) {
+                break frame;
+            }
+        };
         let Value::Map(m) = decode(&frame).unwrap().value else {
             panic!("a frame")
         };
@@ -838,6 +861,68 @@ fn w11b_a2_saved_words_reach_the_body_as_its_own_describe() {
     run.stop();
 }
 
+/// #4134 review: Ada and Bo are born in turn while the text store's writer is held, and the directory holds the very
+/// names they joined with. Ada's name reaches the disk and Bo's sync never returns: Ada is taken and her words agree,
+/// Bo waits for his own, and neither is given words it holds (W11b: only when its body's differ).
+#[test]
+fn a4134_souls_born_while_their_words_wait_are_not_given_words_they_hold() {
+    let disk = Mem::default();
+    let text = std::sync::Arc::new(
+        sim::text::Store::open_mem(
+            disk.clone(),
+            Mem::default(),
+            replica::ids::Minter::new(worldd::words::scope(LINEAGE)),
+        )
+        .expect("a text store"),
+    );
+    let (run, mut a, mut b) = serve_on("a4134", Mem::with(Vec::new()), Some(text.clone()));
+    let hex = |w: &str| replica::encode::to_hex(w.as_bytes());
+    let file = format!(
+        "words {} {} -\nwords {} {} -\n",
+        grant(ada()),
+        hex("Ada"),
+        grant(bo()),
+        hex("Bo")
+    );
+    let directory = tell(&run, &file);
+    assert!(
+        directory.recv_timeout(Duration::from_millis(300)).is_err(),
+        "no body yet, nothing to tell"
+    );
+    let until = |what: &str, done: &dyn Fn((u64, u64)) -> bool| {
+        for _ in 0..1000 {
+            if done(text.marks()) {
+                return;
+            }
+            std::thread::sleep(Duration::from_millis(10));
+        }
+        panic!("{what}: {:?}", text.marks());
+    };
+    {
+        let mut d = disk.0.lock().unwrap();
+        d.stall_sync = Some(d.syncs + 2);
+    }
+    // The writer waits for the disk while the test holds it: Ada's name is queued, then Bo's a few ticks later.
+    let held = disk.0.lock().unwrap();
+    a.send(JOIN, None, p(&[(1, words("Ada"))]));
+    until("Ada's name queued", &|(q, _)| q == 1);
+    std::thread::sleep(Duration::from_millis(200));
+    b.send(JOIN, None, p(&[(1, words("Bo"))]));
+    until("Bo's name queued", &|(q, _)| q == 2);
+    std::thread::sleep(Duration::from_millis(200));
+    // Ada's name reaches the disk; Bo's is written and its sync never returns.
+    drop(held);
+    until("Ada's name on the disk", &|(_, d)| d == 1);
+    std::thread::sleep(Duration::from_millis(500));
+    assert_eq!(
+        text.marks(),
+        (2, 1),
+        "the directory queued no words: neither Soul was given the name it holds"
+    );
+    disk.0.lock().unwrap().power_cut(0);
+    run.stop();
+}
+
 #[test]
 fn w11b_a3_a_world_down_at_the_retire_gets_it_at_its_next_start() {
     let store = Mem::with(Vec::new());
@@ -889,6 +974,156 @@ fn a3_a_walk_to_reaches_its_point_or_is_refused_by_name() {
     assert_eq!(strayed, Err("souls:no-way".to_owned()));
     run.stop();
 }
+
+/// 0.132 scaling (#1960): the bodies' motion and stances, written by the tick, are a pure function of the history.
+/// Thirty Souls join a lockstep world, walk to points on the open ground (some twice, one cut short by a new walk),
+/// and two sit, for a minute of ticks. The log's effect hash (every record the world wrote: motion samples, transfers,
+/// receipts and each tick's state hash) is pinned to the value the tick wrote before the motion write skipped its
+/// decode round trip; a speed-up of the bodies phase must leave it bit for bit.
+#[test]
+fn motion_history_is_bit_identical_to_its_pinned_hash() {
+    const SOULS: u64 = 30;
+    const TICKS: i64 = 1_200;
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.lockstep = true;
+    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
+    cfg.engine = Some((tree_rules(), vec![pair_kind()]));
+    cfg.join = Some(Join {
+        entry: (ground(), entry()),
+        family: humanoid(),
+        kind: name(&fullname(BODY)),
+        per_tick: 8,
+    });
+    let rules = Rules {
+        kinds: entries(),
+        moves: Json::Obj(Vec::new()),
+    };
+    let store = Mem::with(Vec::new());
+    let w = answers::start(world(), rules, store.clone(), cfg).expect("the world starts");
+    let soul = |i: u64| Id::new(Scope([0x5b; 16]), 100 + i).unwrap();
+    let mut sequences = BTreeMap::new();
+    let mut replies = Vec::new();
+    let mut send = |tick: i64, who: Id, verb: &str, target: Option<Id>, point: Option<Vec3>| {
+        let sequence = sequences.entry(who).or_insert(0u64);
+        *sequence += 1;
+        let mut parameters = BTreeMap::new();
+        if let Some(p) = point {
+            let i = |n: i64| {
+                u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint)
+            };
+            parameters.insert(1, Value::Array(vec![i(p.x), i(p.y), i(p.z)]));
+        }
+        let intent = Intent {
+            actor: Actor::Soul(who),
+            verb: name(verb),
+            target: target.map(Target::Node),
+            parameters,
+            sequence: *sequence,
+            basis: Version {
+                lineage: LINEAGE,
+                zone: Id::new(LINEAGE, 0).unwrap(),
+                epoch: 1,
+                sequence: 0,
+            }
+            .to_value(),
+            // Lockstep world time starts at 0: an expiry far ahead.
+            expiry: 1_000_000_000_000,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+            reflex: false,
+        };
+        let (reply, rx) = std::sync::mpsc::channel();
+        w.events
+            .send(answers::Event::ArrivalAt {
+                tick,
+                bytes: encode(&intent.to_value()).unwrap(),
+                reply,
+            })
+            .unwrap();
+        replies.push(rx);
+    };
+    // A point on the open ground east of the entry, from a fixed sequence: within 8 m east and 6 m either side.
+    let point = |k: u64| {
+        let s = first_spot();
+        let (a, b) = ((k * 7_919) % 8_000, (k * 104_729) % 12_000);
+        Vec3::new(s.x + a as i64 * 1_000, 0, s.z + (b as i64 - 6_000) * 1_000)
+    };
+    let g = ground();
+    for i in 0..SOULS {
+        let who = soul(i);
+        send(1 + i as i64 / 8, who, JOIN, None, None);
+        send(10 + 7 * i as i64, who, "eden:walk", Some(g), Some(point(i)));
+        if i % 3 == 0 {
+            send(
+                400 + 11 * i as i64,
+                who,
+                "eden:walk",
+                Some(g),
+                Some(point(i + 100)),
+            );
+        }
+    }
+    // A walk replaced by another a tick later; two sits on the one chair (the second waits or is refused by name).
+    send(700, soul(1), "eden:walk", Some(g), Some(point(200)));
+    send(701, soul(1), "eden:walk", Some(g), Some(point(201)));
+    send(800, soul(2), "eden:sit", Some(chair()), None);
+    send(810, soul(4), "eden:sit", Some(chair()), None);
+    let ran = {
+        let (done, rx) = std::sync::mpsc::channel();
+        w.events
+            .send(answers::Event::RunTo { tick: TICKS, done })
+            .unwrap();
+        rx.recv().unwrap()
+    };
+    for rx in &replies {
+        rx.recv_timeout(Duration::from_secs(20)).expect("an answer");
+    }
+    w.stop();
+    assert_eq!(ran.tick, TICKS);
+    let log = store.0.lock().unwrap().bytes.clone();
+    let records = recover(&log).unwrap().records;
+    let motions: usize = records
+        .iter()
+        .filter(|r| !sim::recorder::is_input(r))
+        .map(|r| Part::read(r).unwrap())
+        .flat_map(|p| p.effects)
+        .filter_map(|e| match e.body {
+            Body::Changes(c) => Some(c),
+            _ => None,
+        })
+        .flatten()
+        .filter(|c| matches!(c.change, Change::Motion(_)))
+        .count();
+    let hash: String = sim::recorder::effect_hash(&records)
+        .iter()
+        .map(|b| format!("{b:02x}"))
+        .collect();
+    println!(
+        "motion history: {} records, {motions} motion samples, effect hash {hash}",
+        records.len()
+    );
+    assert!(motions > 500, "the run wrote motion: {motions}");
+    assert_eq!(hash, PINNED_MOTION_HISTORY, "the history is bit-identical");
+}
+
+/// [`motion_history_is_bit_identical_to_its_pinned_hash`]'s effect hash. Re-pinned by W11 (#4087): a walk's
+/// `souls:act-deadline` now counts from the tick its route is planned, not from the move's start. Same 810 records and
+/// 1,543 motion samples; with only that rule put back the run writes the previous pin (b18f5b81...), so the deadline
+/// values are the whole difference. Re-pinned by #4216: a birth skips an entry spot a body holds, so the Souls start
+/// on other spots and walk other paths (812 records, 1,580 motion samples); with only main's birth rule put back the
+/// run writes the previous pin (6a52c87d...), so the birth places are the whole difference. Re-pinned by #4215: a
+/// walker no longer steps into another body's space (the walk skill's guard), so the walks' velocities change tick by
+/// tick (865 records, 2,573 motion samples); with main's walk skill put back the run writes the previous pin
+/// (3d64aca7...), so the walk skill is the whole difference. Re-pinned for #4220 and #4291 together: each re-pinned
+/// this alone and both changes are intended (bodies keep apart; a still body is stepped aside), so main with both writes
+/// a third history (867 records, 2,653 motion samples). Re-pinned by 0.133 N1: the never-stuck ladder climbs the
+/// gateway walks that make no progress (routed again, a still body stepped aside, a shoulder turn, ended by name) and
+/// writes its rungs as the world's entries (953 records, 3,150 motion samples); with N1's commit taken out the run
+/// writes the previous pin (dcf33b73...), so the ladder is the whole difference.
+const PINNED_MOTION_HISTORY: &str =
+    "06e9e8160f9944eb50a9469a6f9b808576fede8246c46e9982eebf55712fb42f";
 
 /// R21: private membership is checked against the joined actor's authoritative body, not its principal id.
 #[test]
@@ -951,3 +1186,68 @@ fn r21_joined_principal_private_turn_uses_body_and_rejects_nonmember() {
     }
     run.stop();
 }
+
+/// G2 (0.133, from #3998): a Soul's own `life:look` puts a humanoid look (its params, one JSON object of at most 2 KiB)
+/// on its default body: one write of field 33 by the body, answered with a receipt. The same look again is refused
+/// `look.worn`; anything but one JSON object, or one over 2 KiB, `look.malformed`; nothing more is written. (A body
+/// that wears a preset by hash is refused `look.wears-body`: `skills::wear`'s own test.)
+#[test]
+fn g2_a_souls_own_look_writes_field_33_once_and_is_refused_by_name_otherwise() {
+    let (run, mut a, _) = serve("g2look");
+    a.act(JOIN, None, p(&[(1, words("Ada"))]))
+        .expect("Ada joins");
+    let body = run.body_of(ada()).expect("born");
+    let look = |b: &[u8]| p(&[(1, Value::Bytes(b.to_vec()))]);
+    let params = br##"{"frame":"fem","hair":"bob","skin":"#a0785a"}"##;
+    let entries = a
+        .act(skills::wear::LOOK_VERB, None, look(params))
+        .expect("the look is written");
+    assert_eq!(entries.len(), 1, "one entry: the look");
+    let field = |run: &Run| {
+        let r = run.replay();
+        let t = r.tree();
+        let n = t.node(t.handle(body).expect("the body")).expect("the body");
+        (
+            n.fields().get(&skills::wear::LOOK).cloned(),
+            n.fields().get(&skills::wear::BODY).cloned(),
+        )
+    };
+    assert_eq!(field(&run), (Some(Value::Bytes(params.to_vec())), None));
+    assert_eq!(
+        a.act(skills::wear::LOOK_VERB, None, look(params)),
+        Err("look.worn".to_owned())
+    );
+    for bad in [&b"[1]"[..], b"not json", &[b'{', 0xff, b'}']] {
+        assert_eq!(
+            a.act(skills::wear::LOOK_VERB, None, look(bad)),
+            Err("look.malformed".to_owned()),
+            "{bad:?}"
+        );
+    }
+    let big = format!(r#"{{"hair":"{}"}}"#, "x".repeat(skills::wear::LOOK_MOST));
+    assert_eq!(
+        a.act(skills::wear::LOOK_VERB, None, look(big.as_bytes())),
+        Err("look.malformed".to_owned()),
+        "over 2 KiB"
+    );
+    assert_eq!(
+        a.act(skills::wear::LOOK_VERB, None, BTreeMap::new()),
+        Err("look.malformed".to_owned()),
+        "no params"
+    );
+    assert_eq!(
+        field(&run).0,
+        Some(Value::Bytes(params.to_vec())),
+        "nothing more written"
+    );
+    // As a client sends words (T8's `{23: bytes}`, a wear's shape): another look, written.
+    let other = br#"{"frame":"masc","preset":"punk"}"#;
+    let as_words = Value::Map(BTreeMap::from([(23, Value::Bytes(other.to_vec()))]));
+    a.act(skills::wear::LOOK_VERB, None, p(&[(1, as_words)]))
+        .expect("a look sent as words is written");
+    assert_eq!(field(&run).0, Some(Value::Bytes(other.to_vec())));
+    run.stop();
+}
+
+#[path = "join/base_forms.rs"]
+mod base_forms;

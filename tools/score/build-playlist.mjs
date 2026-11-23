@@ -11,6 +11,7 @@
 // Nothing plays on import. Edit PLAYLIST below to change the playlist, then rerun:
 //
 //   node tools/score/build-playlist.mjs
+import { isMain } from '../lib/is-main.mjs';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -111,4 +112,4 @@ ${text.trimEnd()}
   return { files, commit, left };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) buildPlaylist({ write: true, log: console.log });
+if (isMain(import.meta.url)) buildPlaylist({ write: true, log: console.log });

@@ -14,6 +14,10 @@ import { hourLabel, setVisitorPreviewHour, subscribeVisitorHour, visitorPreviewH
 import { subscribeWorldZone, worldZone } from './world-zone.ts';
 import { arrivalGate } from './gen-mesh/lazy-assets.ts';
 import { TouchHints } from './touch/hints.tsx';
+import { v2History } from './v2-engine/history.ts';
+import { momentLink, momentTick } from './v2-engine/moment-link.ts';
+// X3: read at module load: Shell rewrites the landing fragment to its tab (#watch) before the scene is ready.
+const landingMoment = typeof location === 'undefined' ? null : momentTick(location.hash);
 
 /** Edge overlays are measured against World's actual viewport, never the window. */
 export function useViewerInsets(root: RefObject<HTMLDivElement | null>, visible: boolean, layout: string): ViewportInsets {
@@ -80,13 +84,25 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   }, [hourOpen]);
   // DLG3 (Gene): the history scrub ("Back 1 min") is hidden for now; `?rewind` keeps it reachable for tests.
   const [rewind] = useState(() => { try { return new URLSearchParams(location.search).has('rewind'); } catch { return false; } });
+  // X3: a moved world's link to a moment. Opened, the page seeks that moment once and plays from there.
+  const [copied, setCopied] = useState<string | null>(null), opened = useRef(false);
+  useEffect(() => {
+    if (opened.current || !handle || state?.shownTick == null || state.loading || !v2History()) return;
+    opened.current = true;
+    if (landingMoment !== null) void handle.seek(landingMoment);
+  }, [handle, state?.shownTick, state?.loading]);
+  const copyMoment = (tick: number) => {
+    const link = momentLink(location.href, tick);
+    void navigator.clipboard?.writeText(link).catch(() => {});
+    setCopied(link); setTimeout(() => setCopied(null), 4000);
+  };
   const help = useRef<HTMLDivElement>(null);
   const unavailable = !!state?.unavailableReason;
   const current = state?.shownTick != null && !state.loading && !unavailable;
   // VF1: arriving = no frame drawn yet. It gets one calm card (not warnings); a drawn view that stops being
   // current says why only once that lasts (transient gaps never flash), and the pill never says "Held".
   const reason = state?.unavailableReason ?? null;
-  const blocked = !!reason && /graphics|3D/.test(reason);
+  const blocked = !!reason && /graphics|3D|stream is not available/.test(reason);
   const drawnOnce = useRef(false);
   if (state?.shownTick != null && !state.loading) drawnOnce.current = true;
   const arriving = !blocked && (!state || state.shownTick == null || (state.loading && !drawnOnce.current));
@@ -186,6 +202,7 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
         {!arriving&&!!state?.assetDownloads?.pending&&<span className="asset-download-note" role="status" title="Actual asset downloads; the world stays usable while art arrives.">Art loading · {state.assetDownloads.loaded}/{state.assetDownloads.total}</span>}
         {settledReason && !lost && <span role="status" className="warn viewer-reason" title={settledReason}>{settledReason}</span>}
         {rewind && <button disabled={!handle || state?.shownTick == null || state.loading} onClick={() => { if (state?.shownTick != null) void handle?.seek(Math.max(0, state.shownTick - 60 / dt)); }}>Back 1 min</button>}
+        {v2History() && state?.shownTick != null && !state.loading && <button type="button" data-moment-link={copied ?? ''} title="Copy a link that opens the world at this moment" onClick={() => copyMoment(state.shownTick!)}>{copied ? 'Link copied' : 'Link to this moment'}</button>}
         {state?.presentation === 'history' && <>
           <button onClick={() => handle?.setPlaying(state.playback !== 'playing')}>{state.playback === 'playing' ? 'Pause recording' : 'Play recording'}</button>
           <button onClick={() => handle?.live()}>Return to live</button>

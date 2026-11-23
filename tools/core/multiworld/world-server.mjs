@@ -1,3 +1,4 @@
+import { isMain } from '../../lib/is-main.mjs';
 import {worldAuthMode,validateWorldOrigin,worldAccountAuthRequired} from './world-auth-mode.mjs';
 // Local edge-era Mars/LM launcher. One process and durable DB per world; fake
 // world cast only, while paired Souls remain exclusively agent controlled.
@@ -174,7 +175,7 @@ export async function openWorldServer({input,dataDir,worldKey,worldId,port,build
   return{cfg,boot,db,host,auth,brain,souls,hub,server,edge,close,...(lifecycleEnabled?{lifecycleFact,bootstrapNativeLifecycle}:{})};
  }catch(error){brain?.quiesce();host?.stop();server?.close();auth?.close();if(db?.db.isOpen)db.close();releaseLock();throw error;}
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
  try{const [path,mode]=process.argv.slice(2);if(!path)throw Error('usage: node tools/core/multiworld/world-server.mjs <descriptor.json> [check]');
   const server=await openWorldServer({...JSON.parse(readFileSync(resolve(path),'utf8')),checkOnly:mode==='check'});
   if(server.checkOnly)console.log(JSON.stringify(server));else{console.log(JSON.stringify({url:server.cfg.publicUrl,worldId:server.host.worldId,boot:server.boot,mindDriver:'edge',nativeCast:'fake',budgetUsd:0}));for(const signal of ['SIGINT','SIGTERM'])process.once(signal,()=>void server.close().then(()=>process.exit(0)).catch(()=>process.exit(1)));}

@@ -5,6 +5,7 @@
 
 use std::time::Duration;
 
+use replica::effects::Refusal;
 use replica::encode::to_hex;
 use ring::{digest, hmac};
 
@@ -199,6 +200,23 @@ impl S3 {
             ),
         ]
     }
+
+    /// After a 5xx or a lost answer to a create-only write, reads `key` back (#4014): the same bytes there count as
+    /// applied (their ETag), other bytes as the key existing (`precondition-failed`, what a 412 says), and nothing
+    /// there or no answer to the read leave the write `lost`, `store-unreachable`, so nothing is decided on it.
+    fn read_back(&self, key: &str, bytes: &[u8], lost: Refusal) -> R<String> {
+        match self.get(key) {
+            Ok(Some(o)) if o.bytes == bytes => Ok(o.etag),
+            Ok(Some(_)) => refuse(
+                "precondition-failed",
+                format!(
+                    "{key}: exists, other bytes, read back after {}",
+                    lost.detail
+                ),
+            ),
+            Ok(None) | Err(_) => Err(lost),
+        }
+    }
 }
 
 /// One page of a bucket listing (ListObjectsV2): its keys, and the token for the next page when it is cut short.
@@ -321,11 +339,22 @@ impl Store for S3 {
         }
         req = match when {
             When::Absent => req.header("if-none-match", "*"),
-            When::Is(e) => req.header("if-match", format!("\"{e}\"")),
+            // The ETag bare, without quotes: R2 refuses a quoted `If-Match` on PutObject (412 even when it is the
+            // object's ETag) and takes the bare one (#1960).
+            When::Is(e) => req.header("if-match", e),
         };
-        let res = req.send(bytes).or_else(|e| unreachable(key, e))?;
-        status(res.status().as_u16(), key)?;
-        etag(&res, key)
+        let answered = req
+            .send(bytes)
+            .or_else(|e| unreachable(key, e))
+            .and_then(|res| status(res.status().as_u16(), key).map(|()| res));
+        match answered {
+            Ok(res) => etag(&res, key),
+            // A create-only write the store may have applied, though its answer was a 5xx or never came (#4014).
+            Err(e) if e.name == "store-unreachable" && when == When::Absent => {
+                self.read_back(key, bytes, e)
+            }
+            Err(e) => Err(e),
+        }
     }
 
     /// DeleteObject; a key that is not there is no refusal.

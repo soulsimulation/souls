@@ -265,6 +265,7 @@ dependencies = [
  "futures-util",
  "gatewayd",
  "libc",
+ "miniz_oxide",
  "replica",
  "tokio",
  "tokio-tungstenite",
@@ -358,6 +359,7 @@ dependencies = [
 name = "gatewayd"
 version = "0.0.0"
 dependencies = [
+ "assets",
  "axum",
  "futures-util",
  "getrandom 0.3.4",
@@ -817,6 +819,7 @@ dependencies = [
 name = "replica"
 version = "0.0.0"
 dependencies = [
+ "sha2",
  "wasm-bindgen",
  "wasmi",
 ]
@@ -967,6 +970,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "sha2"
+version = "0.10.9"
+source = "registry+https://github.com/rust-lang/crates.io-index"
+checksum = "a7507d819769d01a365ab707794a4084392c824f54a7a6a7862f8c3d0892b283"
+dependencies = [
+ "cfg-if",
+ "cpufeatures",
+ "digest",
+]
+
+[[package]]
 name = "shlex"
 version = "2.0.1"
 source = "registry+https://github.com/rust-lang/crates.io-index"
@@ -1032,6 +1046,10 @@ checksum = "3763264f6b73151db08c50ff20d7d8a0b8796e021cdea7ceedad07b80155fa0e"
 [[package]]
 name = "stall-test"
 version = "0.0.0"
+dependencies = [
+ "replica",
+ "sim",
+]
 
 [[package]]
 name = "stream-check"
@@ -1492,6 +1510,7 @@ dependencies = [
  "futures-util",
  "gatewayd",
  "import-eden",
+ "libc",
  "replica",
  "rustix",
  "sim",

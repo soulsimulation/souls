@@ -242,6 +242,8 @@ const KEY: &str = "souls:effect";
 /// A run's start and its end: fields 1 the run, 2 the body, and on the end 3 the ending's name.
 const STARTED: &str = "souls:form-started";
 const ENDED: &str = "souls:form-ended";
+/// The event of the entry that records a run's move as it starts (B2's record, field 3): observed by viewers only.
+const MOVED: &str = "souls:form-move";
 /// The reservation's link type: from the body to the thing.
 pub(crate) const RESERVES: &str = "souls:reserves";
 
@@ -413,6 +415,22 @@ struct Open {
     link: Option<Id>,
 }
 
+/// A Soul's new act waiting for its own run's posture step to end (#4187), its run number given when it was taken.
+struct Waiting {
+    run: RunId,
+    node: Id,
+    intent: Intent,
+    steps: Vec<Step>,
+    effects: Vec<form_runner::Effect>,
+    long: Option<Long>,
+    limits: Limits,
+}
+
+/// Whether `step` changes the body's posture (a seat taken or left, a ground posture): a run in one is let finish it.
+fn posture(step: &Step) -> bool {
+    matches!(step, Step::Sit { .. } | Step::Rise | Step::Settle { .. })
+}
+
 /// Every form's run in progress, with the walks they started.
 #[derive(Default)]
 pub struct Forms {
@@ -425,6 +443,9 @@ pub struct Forms {
     last: RunId,
     /// Runs that ended, in order; the caller drains it.
     pub ended: Vec<Ended>,
+    /// Runs of acts that waited on a posture step (#4187), started since: the caller drains it and gives each its
+    /// deadline and progress answer, as it does a run that starts when taken.
+    pub late: Vec<RunId>,
     /// Effects written and not yet handed to the log, sequence 0: the log's writer numbers them, appends them and
     /// hands each back to [`Forms::logged`]. Until then they are not applied.
     pub out: Vec<Effect>,
@@ -447,7 +468,15 @@ pub struct Forms {
     /// Bodies in a ground posture a `settle` took (C25), with the driver that holds it: a rise ends it, and so does
     /// any later claim on the body's legs (a walk), which stands it up.
     settled: BTreeMap<Id, Driver>,
+    /// By body, a Soul's new act waiting for its run's posture step to end (#4187).
+    waiting: BTreeMap<Id, Waiting>,
+    /// The number of each kind's `posture` field, by the kind's full name: a seat a thing's form takes or leaves
+    /// writes it on the body ([`Forms::seat_posture`]).
+    postures: BTreeMap<String, u64>,
 }
+
+/// The state field a body's kind keeps its posture in (`stand`, `sit`, `lie`, ...), by name.
+const POSTURE: &str = "posture";
 
 /// The claim that holds a settled body's legs and its ground posture (C25, #3496): any later claim on its legs ends
 /// it, and the body stands.
@@ -621,6 +650,18 @@ impl Forms {
             .collect()
     }
 
+    /// Each body whose step in progress is a walk right before a `move`: the move's name, so the world can end the walk
+    /// within that move's own reach of the thing (#4072: a `touch` on a long bench).
+    pub fn walk_moves(&self) -> BTreeMap<Id, Name> {
+        self.runs
+            .values()
+            .filter_map(|fr| match (fr.runner.step()?, fr.runner.next_step()?) {
+                (Step::WalkTo { .. }, Step::Move { name, .. }) => Some((fr.body, name.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// The bodies whose run's step in progress is an approach walk, the walk the binding adds before a form's first
     /// move at a point (#3688), so the world can aim it at clear ground on the body's side of that point.
     pub fn approaches(&self) -> std::collections::BTreeSet<Id> {
@@ -653,13 +694,28 @@ impl Forms {
     }
 
     /// The Soul on `body` leaves its run: taken at once (`form-not-running` when there is none), and the run ends
-    /// `left` at the next stable moment (the runner's rule).
+    /// `left` at the next stable moment (the runner's rule). When `intent` names the act waiting on that run (#4187),
+    /// only the waiting act is left: it ends `left` now and never starts, and the run goes on.
     pub fn leave<G: Geometry, R: Reach>(
         &mut self,
         w: &mut World<'_, G, R>,
         body: Id,
+        intent: Option<Id>,
         now: Micros,
     ) -> Result<(), Refusal> {
+        if let Some(p) = self.waiting.get(&body)
+            && Some(p.intent.id) == intent
+        {
+            let run = p.run;
+            self.waiting.remove(&body);
+            self.ended.push(Ended {
+                run,
+                body,
+                at: now,
+                how: name("left"),
+            });
+            return Ok(());
+        }
         let Some(&run) = self.by_body.get(&body) else {
             return Err(Refusal {
                 name: "form-not-running",
@@ -696,6 +752,14 @@ impl Forms {
     /// `body-gone`, and a run that reserves it ends `thing-gone`. The removal took the reservation with it, so the
     /// ending entry has no unlink.
     pub fn gone<G: Geometry, R: Reach>(&mut self, w: &mut World<'_, G, R>, node: Id, now: Micros) {
+        if let Some(p) = self.waiting.remove(&node) {
+            self.ended.push(Ended {
+                run: p.run,
+                body: node,
+                at: now,
+                how: name("body-gone"),
+            });
+        }
         let runs = [
             self.by_body.get(&node).map(|r| (*r, "body-gone")),
             self.reserved.get(&node).map(|r| (*r, "thing-gone")),
@@ -769,7 +833,8 @@ impl Forms {
     /// wakes it; the points it walks to are turned by the node's orientation in the tree ([`form_runner::turn`]). A
     /// resend of an intent whose effects are all in the log gets the first receipt, and one whose run is in progress
     /// joins it. Refused: `intent-expired` past the intent's expiry, `intent-key-reused` for an intent id
-    /// seen with other contents, `form-running` while the body has another run in progress.
+    /// seen with other contents, `form-running` while the body has a run of another actor in progress (its own Soul's
+    /// run is left for the new one, #4187).
     #[allow(clippy::too_many_arguments)]
     pub fn start<G: Geometry, R: Reach>(
         &mut self,
@@ -811,7 +876,9 @@ impl Forms {
                 _ => refuse("intent-key-reused"),
             };
         }
-        self.open(w, body, node, intent, steps, effects, None, limits, now)
+        self.open(
+            w, body, node, intent, steps, effects, None, limits, now, None,
+        )
     }
 
     /// Hands a long form ([`bind_stages`]) to a runner on `body` done at `node` for `intent`, from the stage the
@@ -881,6 +948,7 @@ impl Forms {
             Some(long),
             limits,
             now,
+            None,
         )
     }
 
@@ -891,7 +959,9 @@ impl Forms {
     }
 
     /// Opens a run once its intent is known to be new: refused `form-running` or `thing-reserved`, else reserved,
-    /// started and woken.
+    /// started and woken. A Soul's new act preempts its own run in progress (#4187): once nothing else refuses it, the
+    /// old run is left now, as a cancel leaves it (`left`, its move cut, its reservation freed), and the new one
+    /// starts in the same instant. `form-running` stays for a run of another actor on the body.
     #[allow(clippy::too_many_arguments)]
     fn open<G: Geometry, R: Reach>(
         &mut self,
@@ -904,8 +974,21 @@ impl Forms {
         long: Option<Long>,
         limits: Limits,
         now: Micros,
+        given: Option<RunId>,
     ) -> Result<Asked, Refusal> {
-        if self.by_body.contains_key(&body) {
+        if let Some(p) = self.waiting.get(&body)
+            && p.intent.id == intent.id
+        {
+            return Ok(Asked::Running(p.run));
+        }
+        let running = self.by_body.get(&body).copied();
+        if let Some(old) = running
+            && !(matches!(intent.actor, Actor::Soul(_))
+                && self
+                    .runs
+                    .get(&old)
+                    .is_some_and(|fr| fr.intent.actor == intent.actor))
+        {
             return Err(replica::effects::Refusal {
                 name: "form-running",
                 detail: replica::world_model::show(body),
@@ -918,8 +1001,26 @@ impl Forms {
         {
             form_runner::turn(&mut steps, p.orientation)?;
         }
+        // A move on the body itself (a wave, a stretch) is made where it stands: no approach walk to its own point,
+        // which a seated body's legs would refuse (`resource-held`, #4143).
+        if node == body {
+            steps.retain(|s| {
+                !matches!(
+                    s,
+                    Step::WalkTo {
+                        on: None,
+                        approach: true,
+                        ..
+                    }
+                )
+            });
+        }
         let reserves = node != body && !self.shared.contains(&node);
-        if reserves && let Some(holder) = self.holder(node) {
+        // The body's own run, which this act preempts, holds nothing against it.
+        if reserves
+            && let Some(holder) = self.holder(node)
+            && holder != body
+        {
             return Err(Refusal {
                 name: "thing-reserved",
                 detail: format!(
@@ -929,6 +1030,39 @@ impl Forms {
                 ),
             });
         }
+        if let Some(old) = running {
+            // A seat taken or left, or a ground posture, runs to its end first, as a cancel lets it: the body is never
+            // left half seated nor moved off a legal path. The new act waits, numbered now, and starts as the old run
+            // is left after that step (`wake`); a later act takes its place, and the one it replaces ends `left`.
+            if self
+                .runs
+                .get(&old)
+                .and_then(|fr| fr.runner.step())
+                .is_some_and(posture)
+            {
+                self.last += 1;
+                let run = self.last;
+                let waiting = Waiting {
+                    run,
+                    node,
+                    intent,
+                    steps,
+                    effects,
+                    long,
+                    limits,
+                };
+                if let Some(p) = self.waiting.insert(body, waiting) {
+                    self.ended.push(Ended {
+                        run: p.run,
+                        body,
+                        at: now,
+                        how: name("left"),
+                    });
+                }
+                return Ok(Asked::Started(run));
+            }
+            self.finish(w, old, name("left"), now);
+        }
         let link = match reserves {
             true => Some(w.mint.mint().map_err(|e| Refusal {
                 name: "id-counter-exhausted",
@@ -936,8 +1070,10 @@ impl Forms {
             })?),
             false => None,
         };
-        self.last += 1;
-        let run = self.last;
+        let run = given.unwrap_or_else(|| {
+            self.last += 1;
+            self.last
+        });
         let open = Open {
             run,
             body,
@@ -1052,6 +1188,68 @@ impl Forms {
     /// [`Forms::new`] or [`Forms::recover`], and again when kinds load.
     pub fn kinds(&mut self, kinds: &replica::kinds::Kinds) {
         self.limits = amounts::limits(kinds);
+        self.postures = kinds
+            .admits()
+            .keys()
+            .filter_map(|k| kinds.get(k))
+            .filter_map(|def| {
+                let (n, _) = def.state.iter().find(|(_, f)| f.name.as_str() == POSTURE)?;
+                Some((def.name.as_str().to_owned(), *n))
+            })
+            .collect();
+    }
+
+    /// A seat a thing's form took or left (its sit or lie, or its rise, ended `done`) is written on the body's
+    /// `posture` field, when its kind has one: the slot's `sit` or `lie`, or `stand`. A body's own form writes its
+    /// posture in its own effects, so nothing is written for it here.
+    fn seat_posture(&mut self, tree: &Tree, run: RunId, at: Micros) {
+        let Some(fr) = self.runs.get(&run) else {
+            return;
+        };
+        if fr.node == fr.body {
+            return;
+        }
+        let to = match fr.runner.step() {
+            Some(Step::Sit {
+                lie, stand: false, ..
+            }) => {
+                if *lie {
+                    "lie"
+                } else {
+                    "sit"
+                }
+            }
+            Some(Step::Rise) => "stand",
+            _ => return,
+        };
+        let kind = tree
+            .handle(fr.body)
+            .and_then(|h| tree.node(h))
+            .map(|n| n.kind().as_str().to_owned());
+        let Some(&field) = kind.as_deref().and_then(|k| self.postures.get(k)) else {
+            return;
+        };
+        self.out.push(Effect {
+            envelope: Envelope {
+                sequence: 0,
+                at,
+                cause: Cause::Intent(fr.intent.id),
+                actor: fr.intent.actor,
+                audience: Audience::Everyone,
+                node: fr.body,
+            },
+            body: Body::Changes(vec![ChangeRec {
+                change: Change::Set {
+                    node: fr.body,
+                    field,
+                    to: Value::Text(name(to)),
+                    by: None,
+                },
+                rest: Rest::new(),
+            }]),
+            events: None,
+            rest: Rest::new(),
+        });
     }
 
     /// The zone's header, which B4's transfer (a take or a put) writes under.
@@ -1188,6 +1386,14 @@ impl Forms {
         }
         if let Err(r) = effect {
             return self.finish(w, run, name(r.name), now);
+        }
+        // A run a new act waits on is left once its posture step is done (#4187).
+        if !matches!(next, Next::End(_))
+            && let Some(fr) = self.runs.get(&run)
+            && self.waiting.contains_key(&fr.body)
+            && !fr.runner.step().is_some_and(posture)
+        {
+            return self.finish(w, run, name("left"), now);
         }
         self.handle(w, run, next, now);
     }
@@ -1372,7 +1578,27 @@ impl Forms {
                     node,
                     now,
                 ) {
-                    Ok(n) => fr.mv = Some(n),
+                    Ok(n) => {
+                        fr.mv = Some(n);
+                        // The move's record (B2) for viewers: the page draws a gesture from it (#3741).
+                        if let Some(r) = w.moves.record(n) {
+                            let o = Open {
+                                run,
+                                body,
+                                node: fr.node,
+                                intent: fr.intent.id,
+                                actor: fr.intent.actor,
+                                link: None,
+                            };
+                            let fields = BTreeMap::from([
+                                (1, Value::Uint(run)),
+                                (2, body.to_value()),
+                                (3, as_bytes(r.to_value())),
+                            ]);
+                            self.out
+                                .push(entry(&o, now, Vec::new(), name(MOVED), fields));
+                        }
+                    }
                     Err(r) => self.wake(w, run, Woke::Moved(name(r.name)), now),
                 }
             }
@@ -1503,6 +1729,30 @@ impl Forms {
             at: now,
             how,
         });
+        if let Some(p) = self.waiting.remove(&fr.body) {
+            let (body, run) = (fr.body, p.run);
+            let opened = self.open(
+                w,
+                body,
+                p.node,
+                p.intent,
+                p.steps,
+                p.effects,
+                p.long,
+                p.limits,
+                now,
+                Some(run),
+            );
+            match opened {
+                Ok(_) => self.late.push(run),
+                Err(r) => self.ended.push(Ended {
+                    run,
+                    body,
+                    at: now,
+                    how: name(r.name),
+                }),
+            }
+        }
     }
 
     /// The tick's part for forms: the walks runs started are stepped with the host, their inputs handed on to the
@@ -1570,6 +1820,9 @@ impl Forms {
                         && fr.mv.take().is_some()
                     {
                         let how = rec.ended.map_or_else(|| name("done"), |e| e.how);
+                        if how.as_str() == "done" {
+                            self.seat_posture(w.tree, run, t.due);
+                        }
                         self.wake(w, run, Woke::Moved(how), t.due);
                     }
                 }
@@ -1685,6 +1938,17 @@ pub fn may(
             let words = who_may::sentence(&who, seen.then_some(named.as_slice()));
             refuse("not-permitted", format!("who may: {words}"))
         }
+    }
+}
+
+/// `v` with every text as bytes: a move record's names (a contact point such as `grip`) need not be namespaced, and an
+/// entry's texts must be (rule 10), so the record goes out as `souls:act-ended`'s how does (#3741).
+fn as_bytes(v: Value) -> Value {
+    match v {
+        Value::Text(t) => Value::Bytes(t.as_str().as_bytes().to_vec()),
+        Value::Array(a) => Value::Array(a.into_iter().map(as_bytes).collect()),
+        Value::Map(m) => Value::Map(m.into_iter().map(|(k, v)| (k, as_bytes(v))).collect()),
+        v => v,
     }
 }
 

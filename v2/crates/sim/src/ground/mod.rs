@@ -124,6 +124,10 @@ const DOOR_HALF_DEPTH: i64 = 100;
 /// modelled floor may stop short of its wall's inner face (the Mars campus's Mimos: 100 mm), and its door must still
 /// meet it.
 const PASSAGE_REACH: i64 = 150;
+/// How far a doorway's end on the grown wall's face may lie off the floor it meets and stay there, mm: the walker's
+/// own reach for a leg's end on its piece's edge (`walk::town`'s `AT_EDGE`). Further off, the end is put on the floor's
+/// edge ([`meets`]).
+const MEET_SHORT: i64 = 20;
 
 type P = IntPoint<i32>;
 
@@ -169,6 +173,24 @@ pub struct Meet {
     /// The doorway is a step off a low floor (`scene::Doorway::step`): a link of no tree.
     pub step: bool,
 }
+
+/// The most threads a world's start-up assembles its town on (S5, 0.133): its ground cut, its buildings read and its
+/// surface built beside its map. Only a start fans out; a rebuild after an edit, a check and a copy run on the thread
+/// that asks (one thread, its own limit, per the scaling rule).
+pub const START_THREADS: usize = 8;
+
+/// How many threads `want` threads come to for `jobs` jobs on this machine: at least one, at most one a job and no
+/// more than the machine has.
+pub fn fan_out(want: usize, jobs: usize) -> usize {
+    std::thread::available_parallelism()
+        .map_or(1, std::num::NonZeroUsize::get)
+        .min(want)
+        .min(jobs)
+        .max(1)
+}
+
+/// One square's wet pieces, each with its water's index ([`OpenGround::cut_water`]).
+pub type Wet = Vec<(u32, Piece)>;
 
 /// The walkable ground of one node (or one square of the open ground) for one radius.
 #[derive(Clone, Debug)]
@@ -710,6 +732,23 @@ fn in_any(rings: &[Vec<P>], p: P) -> bool {
     })
 }
 
+/// Where the ring `cs` (a doorway's own axes: along, across) lies nearest to `face` on the line across the doorway at
+/// `s` along it: `face` itself when that point is inside the ring, else the nearest crossing of the ring's outline;
+/// none when the line misses the ring.
+fn nearest_across(cs: &[(i64, i64)], s: i64, face: i64) -> Option<i64> {
+    let mut hits = Vec::new();
+    for k in 0..cs.len() {
+        let (a, b) = (cs[k], cs[(k + 1) % cs.len()]);
+        if a.0.min(b.0) <= s && s < a.0.max(b.0) {
+            hits.push(a.1 + (b.1 - a.1) * (s - a.0) / (b.0 - a.0));
+        }
+    }
+    if hits.iter().filter(|&&n| n <= face).count() % 2 == 1 {
+        return Some(face);
+    }
+    hits.into_iter().min_by_key(|n| (n - face).abs())
+}
+
 /// The doorways' meets with the pieces just cut (all at height `y`).
 fn meets(
     g: &Grown,
@@ -749,37 +788,67 @@ fn meets(
         }
         let width_left = a1 - a0;
         let mut sides = [false, false];
-        let mut found = Vec::new();
+        // Each part of the passage on a piece: the piece, its ring in the doorway's own axes (along, across), its
+        // side of the wall and the part of the narrowest width that reaches it.
+        let mut parts = Vec::new();
         for (k, sh) in shapes.iter().enumerate() {
             let both = shapes_op(&passage, sh, OverlayRule::Intersect);
             for part in &both {
                 let cs: Vec<(i64, i64)> = part[0].iter().map(|p| door.coords(*p)).collect();
                 let mid = cs.iter().map(|c| c.1).sum::<i64>() / cs.len().max(1) as i64;
                 let side: i8 = if mid >= 0 { 1 } else { -1 };
-                let n = if side > 0 {
-                    door.n1 + g.d
-                } else {
-                    door.n0 - g.d
-                };
                 // The segment is the part of the narrowest width that reaches this piece: where a box beyond the
                 // wall leaves the piece only one side of the doorway, the middle of the whole width lies off it.
                 let lo = cs.iter().map(|c| c.0).min().unwrap_or(a0).max(a0);
                 let hi = cs.iter().map(|c| c.0).max().unwrap_or(a1).min(a1);
                 let (s0, s1) = if lo <= hi { (lo, hi) } else { (a0, a1) };
-                let (pa, pb) = (door.point(s0, n), door.point(s1, n));
-                let ym = mm(y) as i32;
                 sides[usize::from(side > 0)] = true;
-                found.push(Meet {
-                    link: door.link,
-                    piece: first + k as u32,
-                    side,
-                    a: [pa.x, ym, pa.y],
-                    b: [pb.x, ym, pb.y],
-                    width_left,
-                    through: false,
-                    step: door.step,
-                });
+                parts.push((first + k as u32, cs, side, s0, s1));
             }
+        }
+        // A side's segments lie on the grown wall's face, where ground cut by that wall ends. A floor whose own
+        // outline stops short of the face (a modelled floor: the Mars campus's Mimos, 50 mm) leaves that end off
+        // every piece, where a route took it for a portal and no walker could aim at it (W8, #4084): the side's
+        // segments are then put on the floor's edge nearest the face. Only a floor is measured (`within` is a square
+        // of the open ground, which the grown wall itself cuts), and only when no piece of the side comes within
+        // [`MEET_SHORT`] of the face along its own segment's middle.
+        let face = |side: i8| {
+            if side > 0 {
+                door.n1 + g.d
+            } else {
+                door.n0 - g.d
+            }
+        };
+        let line = [1i8, -1].map(|side| {
+            let f = face(side);
+            if within.is_some() {
+                return f;
+            }
+            let near = parts
+                .iter()
+                .filter(|p| p.2 == side)
+                .filter_map(|(_, cs, _, s0, s1)| nearest_across(cs, (s0 + s1) / 2, f))
+                .min_by_key(|n| (n - f).abs());
+            match near {
+                Some(n) if (n - f) * i64::from(side) > MEET_SHORT => n,
+                _ => f,
+            }
+        });
+        let mut found = Vec::new();
+        for (piece, _, side, s0, s1) in parts {
+            let n = line[usize::from(side < 0)];
+            let (pa, pb) = (door.point(s0, n), door.point(s1, n));
+            let ym = mm(y) as i32;
+            found.push(Meet {
+                link: door.link,
+                piece,
+                side,
+                a: [pa.x, ym, pa.y],
+                b: [pb.x, ym, pb.y],
+                width_left,
+                through: false,
+                step: door.step,
+            });
         }
         let through = passage.len() == 1 && width_left > 0 && sides == [true, true];
         for mut m in found {
@@ -920,6 +989,46 @@ impl OpenGround {
             }
         }
         out
+    }
+
+    /// Every square's patch, in [`OpenGround::squares`]' order (S5, 0.133): the squares are cut on at most `threads`
+    /// threads (and no more than the machine has), each square on its own (a cut reads only the ground), and put back
+    /// in order, so the answer is the same as cutting them one by one.
+    pub fn cut_all(&self, threads: usize) -> Vec<((i32, i32), Patch)> {
+        self.each_square(threads, |i, j| self.cut_square(i, j))
+    }
+
+    /// Every square's wet pieces ([`OpenGround::cut_water`]), as [`OpenGround::cut_all`] cuts the dry ones.
+    pub fn cut_all_water(&self, threads: usize) -> Vec<((i32, i32), Wet)> {
+        self.each_square(threads, |i, j| self.cut_water(i, j))
+    }
+
+    /// `f` of every square, on at most `threads` threads, in [`OpenGround::squares`]' order.
+    fn each_square<T: Send>(
+        &self,
+        threads: usize,
+        f: impl Fn(i32, i32) -> T + Sync,
+    ) -> Vec<((i32, i32), T)> {
+        let squares = self.squares();
+        let threads = fan_out(threads, squares.len());
+        let chunk = squares.len().div_ceil(threads).max(1);
+        let f = &f;
+        std::thread::scope(|s| {
+            let parts: Vec<_> = squares
+                .chunks(chunk)
+                .map(|c| {
+                    s.spawn(move || {
+                        c.iter()
+                            .map(|&(i, j)| ((i, j), f(i, j)))
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect();
+            parts
+                .into_iter()
+                .flat_map(|h| h.join().unwrap_or_else(|e| std::panic::resume_unwind(e)))
+                .collect()
+        })
     }
 
     /// One square's patch.

@@ -34,7 +34,7 @@ use crate::effects::{
     TimerState, TransferRec,
 };
 use crate::encode::{Name, Value};
-use crate::ids::{Hash, Id, Scope};
+use crate::ids::{Hash, Id, Scope, Sha256};
 use crate::pose::{Frame, Owner, Pose, Quat, Support, Vec3};
 use crate::time::{Micros, TimeEffect};
 use crate::world_model::{Audience, DEPTH_LIMIT, End};
@@ -312,6 +312,9 @@ pub struct Tree {
     kept: Option<(u64, Vec<(Audience, Hash)>)>,
     /// Nodes the state hash has hashed again since the tree was built (a measure; `seal`).
     rehashed: u64,
+    /// The state hash's SHA-256 of a node's record up to its children (`seal`, #1960), by slot, for nodes whose
+    /// record is large: kept while only what is below the node changes, let go when the node itself does.
+    heads: HashMap<u32, Sha256>,
 }
 
 /// A read counter. A load and a store, not an atomic add: one thread reads a live tree. A frozen copy (K8, #2671),
@@ -355,6 +358,7 @@ impl Tree {
             changes: 0,
             kept: None,
             rehashed: 0,
+            heads: HashMap::new(),
         };
         let kind = t.intern(&kind);
         t.nodes.push(NodeRec {
@@ -483,6 +487,7 @@ impl Tree {
             changes: self.changes,
             kept: self.kept.clone(),
             rehashed: 0,
+            heads: HashMap::new(),
         }
     }
 
@@ -600,8 +605,18 @@ impl Tree {
     }
 
     /// Marks a node changed, and its ancestors: up to the first already marked, whose ancestors are marked too. A
-    /// refused part leaves its marks; the next seal hashes those nodes again and finds what they were.
+    /// refused part leaves its marks; the next seal hashes those nodes again and finds what they were. The node's own
+    /// record changed, so its kept head goes too (`seal`).
     fn touch(&mut self, slot: u32) {
+        if !self.heads.is_empty() {
+            self.heads.remove(&slot);
+        }
+        self.touch_below(slot);
+    }
+
+    /// [`Tree::touch`] for a change to a node's children only (one attached or taken out): its record up to its
+    /// children is as it was, so its kept head stays.
+    fn touch_below(&mut self, slot: u32) {
         let mut s = slot;
         while s != NONE {
             let rec = &mut self.nodes[s as usize];
@@ -636,14 +651,14 @@ impl Tree {
             .partition_point(|h| self.nodes[h.slot as usize].id < id);
         let h = self.handle_of(c);
         self.nodes[p].children.insert(at, h);
-        self.touch(p as u32);
+        self.touch_below(p as u32);
         self.log(move |t| t.unattach(c));
     }
 
     fn unattach(&mut self, c: u32) {
         let p = self.nodes[c as usize].parent as usize;
         self.nodes[p].children.retain(|h| h.slot != c);
-        self.touch(p as u32);
+        self.touch_below(p as u32);
     }
 
     fn detach(&mut self, c: u32) {
@@ -822,6 +837,7 @@ impl Tree {
         let id = rec.id;
         let slot = match self.free.pop() {
             Some(s) => {
+                self.heads.remove(&s);
                 let generation = self.nodes[s as usize].generation;
                 self.nodes[s as usize] = NodeRec { generation, ..rec };
                 s
@@ -851,6 +867,7 @@ impl Tree {
             self.moving[ix as usize] = None;
             self.moving_free.push(ix);
         }
+        self.heads.remove(&slot);
         self.free.push(slot);
     }
 
@@ -1200,7 +1217,8 @@ impl Tree {
                 own.check(pose.frame.node)?;
                 own.audience(*audience, *node)?;
                 self.fresh(*node)?;
-                if !header.kinds.contains(kind) {
+                // A creator's kind is pinned by its `souls:kind` node at the root, not the header (#3697).
+                if !header.kinds.contains(kind) && !crate::kinds::defined::defines(self, kind) {
                     return refuse("kind-not-in-header", kind.as_str());
                 }
                 let parent = self

@@ -6,6 +6,7 @@
 // (tools/world-launcher/deploy/backup.mjs) copies it, and the copy's path is returned.
 //
 //   node v2/tools/import-world/test/fixture.ts [<dir>]      (from the repository root; default .local/import-world/fixture)
+import { isMain } from '../../../../tools/lib/is-main.mjs';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readdirSync, readFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -62,6 +63,6 @@ export function makeFixture(dir: string): Fixture {
   return { backup: join(out, day, 'worlds', `${SLUG}.db`), upload, moved, movedTo, shut, placed };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === resolve(import.meta.filename)) {
+if (isMain(import.meta.url)) {
   console.log(JSON.stringify(makeFixture(resolve(process.argv[2] ?? '.local/import-world/fixture'))));
 }

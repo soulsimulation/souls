@@ -22,6 +22,23 @@ use sim::log::{FileStore, Log};
 use sim::text::{Grade, Store};
 use worldd::answers::{self, STATE};
 
+thread_local! {
+    /// The acts that had their one progress answer (C20) on this test's thread.
+    static PROGRESSED: std::cell::RefCell<std::collections::BTreeSet<(Vec<u8>, u64)>> =
+        std::cell::RefCell::default();
+}
+
+/// Whether `frame` is an act's progress answer (C20, W11 #4087), which the answer helpers read past. An act has at
+/// most one: a second fails the test.
+fn progress_once(frame: &[u8]) -> bool {
+    let Some(key) = answers::progress_of(frame) else {
+        return false;
+    };
+    let first = PROGRESSED.with(|p| p.borrow_mut().insert(key));
+    assert!(first, "a second progress answer for one act");
+    true
+}
+
 fn worldd() -> Command {
     Command::new(env!("CARGO_BIN_EXE_worldd"))
 }
@@ -104,8 +121,11 @@ fn serve_env(dir: &Path, socket: &Path, more: &[&std::ffi::OsStr], env: &[(&str,
 impl Served {
     /// The first line starting with `prefix`, within 60 s.
     fn line(&self, prefix: &str) -> String {
-        first_line(&self.lines, &self.early, prefix, Duration::from_secs(60))
-            .unwrap_or_else(|| panic!("no line {prefix:?}"))
+        first_line(&self.lines, &self.early, prefix, Duration::from_secs(60)).unwrap_or_else(|| {
+            // Say why: a process that ended closes its pipes and the wait ends early; what it printed says how.
+            let said = self.all.lock().map(|a| a.join("\n")).unwrap_or_default();
+            panic!("no line {prefix:?}; it printed:\n{said}")
+        })
     }
 
     fn kill(mut self) {
@@ -263,10 +283,16 @@ fn send(
 
 /// The next answer's kind: 1 a receipt, 2 a refusal (with its reason).
 fn answer(s: &mut UnixStream) -> (u64, String) {
-    let mut len = [0u8; 4];
-    s.read_exact(&mut len).expect("an answer");
-    let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
-    s.read_exact(&mut frame).expect("an answer");
+    // A progress answer (C20, sent as a walk's route is planned) is read past.
+    let frame = loop {
+        let mut len = [0u8; 4];
+        s.read_exact(&mut len).expect("an answer");
+        let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
+        s.read_exact(&mut frame).expect("an answer");
+        if !progress_once(&frame) {
+            break frame;
+        }
+    };
     let Value::Map(m) = decode(&frame).expect("a frame").value else {
         panic!("a frame")
     };
@@ -311,6 +337,62 @@ fn a1_a2_a5_seeded_world_serves_walks_and_restarts_after_sigkill() {
     println!("A1: {first}");
     // No store named (O3b A1): this test is C1's, unchanged.
     serves_walks_and_restarts(w, &d, &dir, body, root, ground);
+}
+
+/// #4013 A1: while it loads, `serve` tells the service manager it made progress (`EXTEND_TIMEOUT_USEC`, as much as
+/// the unit's 30 s `TimeoutStartSec`), then `READY=1`, and no more progress notices after it.
+#[test]
+fn x5_a1_serve_says_progress_while_it_loads_and_none_once_ready() {
+    let d = scratch("x5");
+    let (dir, ..) = seeded(&d);
+    let notify = d.join("n");
+    let manager = std::os::unix::net::UnixDatagram::bind(&notify).expect("a notify socket");
+    manager
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .expect("a read timeout");
+    let w = serve_env(
+        &dir,
+        &d.join("s"),
+        &[],
+        &[("NOTIFY_SOCKET", notify.to_str().expect("a path"))],
+    );
+    let mut said = Vec::new();
+    let mut buf = [0u8; 512];
+    while !said.iter().any(|s: &String| s.starts_with("READY=1")) {
+        let n = manager.recv(&mut buf).expect("a notice before READY=1");
+        said.push(String::from_utf8_lossy(&buf[..n]).into_owned());
+    }
+    let before = said
+        .iter()
+        .filter(|s| *s == "EXTEND_TIMEOUT_USEC=30000000")
+        .count();
+    println!("A1: {before} progress notices, then {:?}", said.last());
+    assert!(before >= 1, "no progress before ready: {said:?}");
+    // The watchdog's thread starts before READY=1, so its word may come first too.
+    let other = said[..said.len() - 1]
+        .iter()
+        .filter(|s| *s != "EXTEND_TIMEOUT_USEC=30000000" && *s != "WATCHDOG=1")
+        .count();
+    assert_eq!(other, 0, "only progress and alive, then ready: {said:?}");
+    // After READY=1, only the watchdog's word, twice a second: no progress notice in the next second.
+    after_ready(&manager);
+    drop(w);
+}
+
+// A real process on the real clock: the second read after READY=1 is real time.
+#[allow(clippy::disallowed_methods)]
+fn after_ready(manager: &std::os::unix::net::UnixDatagram) {
+    let mut buf = [0u8; 512];
+    manager
+        .set_read_timeout(Some(Duration::from_millis(200)))
+        .expect("a read timeout");
+    let end = Instant::now() + Duration::from_secs(1);
+    while Instant::now() < end {
+        if let Ok(n) = manager.recv(&mut buf) {
+            let s = String::from_utf8_lossy(&buf[..n]).into_owned();
+            assert_eq!(s, "WATCHDOG=1", "after READY=1");
+        }
+    }
 }
 
 /// The seeded world: its folder, its Soul's body, its root and its ground.
@@ -747,6 +829,85 @@ fn o3c_a2_a3_ships_history_to_an_s3_bucket_across_three_kills() {
     assert!(
         s.paths().iter().all(|p| p.starts_with("souls/o3c/")),
         "every object under the URL's prefix"
+    );
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// #1960: a restart whose first reads of an S3 bucket go unanswered past the client's timeout tries them again and
+/// starts; with the bucket out of reach for good it still ends, with the store's refusal, in bounded time.
+// A real process on the real clock: the stalls and the bound are real time.
+#[allow(clippy::disallowed_methods)]
+#[test]
+fn i1960_a_world_starts_through_slow_store_reads_and_ends_on_an_unreachable_store() {
+    use directoryd::directory::stand_in::{KEY_ID, StandIn};
+    use std::ffi::OsStr;
+    let d = scratch("i1960");
+    let (dir, ..) = seeded(&d);
+    let socket = d.join("s");
+    let env = [
+        ("AWS_ACCESS_KEY_ID", KEY_ID),
+        ("AWS_SECRET_ACCESS_KEY", "stand-in-secret"),
+    ];
+    let s = StandIn::start(1000).expect("a stand-in");
+    let spec = format!("{}/i1960", s.url("souls"));
+    let more = |spec: &str| {
+        [
+            OsStr::new("--store").to_owned(),
+            OsStr::new(spec).to_owned(),
+            OsStr::new("--machine").to_owned(),
+            OsStr::new("test-machine").to_owned(),
+        ]
+    };
+    let args = more(&spec);
+    let args: Vec<&OsStr> = args.iter().map(|a| a.as_os_str()).collect();
+    // The first start claims the world and writes its history's first objects.
+    let w = serve_env(&dir, &socket, &args, &env);
+    w.line("listening");
+    w.kill();
+
+    // The restart: its first two reads of the history's header (the archiver's, as production's counts read was) each
+    // go unanswered for 6 s, past the client's 5 s.
+    s.stall_reads(2, Duration::from_secs(6), "/header");
+    let begun = Instant::now();
+    let w = serve_env(&dir, &socket, &args, &env);
+    w.line("listening");
+    let took = begun.elapsed();
+    let retried: Vec<String> = w
+        .all
+        .lock()
+        .map(|l| l.clone())
+        .unwrap_or_default()
+        .into_iter()
+        .filter(|l| l.starts_with("store: ") && l.contains("out of reach"))
+        .collect();
+    println!("restart through 2 stalled reads in {took:?}: {retried:?}");
+    assert_eq!(retried.len(), 2, "the stalled read tried again twice");
+    assert!(
+        retried.iter().all(|l| l.contains("/header: timeout")),
+        "{retried:?}"
+    );
+    w.kill();
+
+    // The bucket gone: nothing listens at its address. Four tries of the first read, then the refusal.
+    let gone = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
+    let port = gone.local_addr().expect("its address").port();
+    drop(gone);
+    let args = more(&format!("s3:http://127.0.0.1:{port}/souls/i1960"));
+    let args: Vec<&OsStr> = args.iter().map(|a| a.as_os_str()).collect();
+    let begun = Instant::now();
+    let mut w = serve_env(&dir, &socket, &args, &env);
+    let ended = w.line("worldd serve: ");
+    let status = w.child.wait().expect("it ends");
+    let took = begun.elapsed();
+    println!("unreachable: {ended} after {took:?}");
+    assert!(!status.success());
+    assert!(
+        ended.starts_with("worldd serve: store-unreachable: "),
+        "{ended}"
+    );
+    assert!(
+        took >= Duration::from_secs(14) && took < Duration::from_secs(60),
+        "four tries over the waits, bounded: {took:?}"
     );
     let _ = std::fs::remove_dir_all(&d);
 }

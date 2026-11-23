@@ -21,6 +21,7 @@
 //   node cost.mjs sample <worlds root> [world=pid ...]
 //   node cost.mjs run <worlds root> [seconds]
 //   node cost.mjs page <worlds root> [day] [prices.json]
+import { isMain } from '../../../../tools/lib/is-main.mjs';
 import { execFileSync } from 'node:child_process';
 import { appendFileSync, chmodSync, existsSync, mkdirSync, readFileSync, readdirSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
@@ -254,7 +255,7 @@ export function writePage(root, day = utcDay(Date.now()), pricesPath = PRICES) {
   return { priced, check: check(priced), out };
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const [cmd, root, ...rest] = process.argv.slice(2);
   if (!root) throw new Error('usage: node cost.mjs sample|run|page <worlds root> ...');
   const pids = Object.fromEntries(rest.filter((a) => a.includes('=')).map((a) => a.split('=')).map(([w, p]) => [w, Number(p) || null]));
