@@ -4,7 +4,9 @@
 // command starts the daemon. Every answer but status's and quit's ends with `at` and `changed`.
 //
 //   souls.mjs status                          the daemon: connected, cursor, intents sent and answered
-//   souls.mjs look                            the brief: my room, cards outward, what changed, the age
+//   souls.mjs look | here                     the brief: my room, cards outward, what changed, the age
+//   souls.mjs listen [--follow]               the owner's messages: those open now, else the next to arrive; with
+//                                             --follow, one line for each as it arrives, until stopped
 //   souls.mjs find <words...> [--limit n]     one search over the copy
 //   souls.mjs pair <world url>                asks the world's directory for a Soul: prints a link and a code for the
 //                                             owner, and returns; the pairing finishes in the background (W2)
@@ -137,7 +139,9 @@ export const OPS = [
   'find',
   'history',
   'inspect',
+  'here',
   'lie',
+  'listen',
   'look',
   'now',
   'object',
@@ -160,7 +164,7 @@ export const OPS = [
   'whisper',
 ];
 /** #3705: today's names, kept: `stop` ends your act (the daemon's op `halt`), `quit` ends the daemon (its op `stop`). */
-const RENAMED = { stop: 'halt', quit: 'stop', conversations: 'converse' };
+const RENAMED = { stop: 'halt', quit: 'stop', conversations: 'converse', here: 'look' };
 const CALENDAR_USAGE = 'calendar | calendar add "<title>" --place <placeId> --in <minutes> --for <minutes> ["description"] | calendar interest|not-coming <id>';
 /** Commands that read the Soul's own memory in the home and never reach the daemon or a world. */
 export const LOCAL = [
@@ -312,12 +316,45 @@ export function requestOf(argv) {
     if (said.length) req.words = said.join(' ');
   }
   if (op === 'wait' && rest[0] !== undefined) req.seconds = Number(rest[0]);
+  if (op === 'listen' && rest.includes('--follow')) req.follow = true;
   if (op === 'history') {
     for (const [k, v] of [['at', opts.at], ['thing', opts.thing], ['soul', opts.of], ['since', opts.since], ['until', opts.until]]) if (v !== undefined) req[k] = v;
   }
   // #3706: a write sent again with the same --key is one write; the daemon answers the repeat with the first answer.
   if (opts.key !== undefined) req.key = opts.key;
   return { req, soul: opts.soul, ...(opts.now !== undefined && !LOCAL.includes(op) && op !== 'pending' ? { now: opts.now } : {}) };
+}
+
+/** What an agent does with an owner's message (the skill's "serve each open message in one call"). */
+const SERVE = (id) => `act <act> --for ${id}, or ack ${id} "<reply>" --close done|failed`;
+
+/**
+ * D2: the owner's messages, one line each: those open now, else the next to arrive; with `follow`, each as it
+ * arrives until stopped. A message is printed once. A daemon that ended (quit, a crash) is started again by the next
+ * ask, and its open messages are read again from the start, so none is missed.
+ */
+export async function listen(ask, print, { follow = false, seconds = 60, pause = (ms) => new Promise((ok) => setTimeout(ok, ms)) } = {}) {
+  const printed = new Set();
+  let since, daemon;
+  for (;;) {
+    let got;
+    try { got = await ask({ op: 'listen', seconds, ...(since !== undefined ? { since } : {}) }, seconds * 1000 + 5000); } catch (e) { got = { ok: false, code: e.code ?? 'failed', detail: String(e.message ?? e).slice(0, 200) }; }
+    if (got?.ok !== true) {
+      if (!follow) return print(got);
+      [since, daemon] = [undefined, undefined];
+      await pause(1000);
+      continue;
+    }
+    // Another daemon than the last (it was restarted): its cursor means nothing here, so read its open messages.
+    const same = daemon === undefined || got.daemon === daemon;
+    [since, daemon] = [same ? got.cursor : undefined, got.daemon];
+    for (const m of got.mail) {
+      if (printed.has(m.id)) continue;
+      printed.add(m.id);
+      print({ ok: true, kind: 'mail', id: m.id, text: m.text, at: m.at, serve: SERVE(m.id) });
+    }
+    if (!follow && (printed.size || got.timedOut)) return printed.size ? undefined : print({ ok: true, mail: [], timedOut: true });
+  }
 }
 
 /** A local command: the Soul named, else the home's only Soul with a memory folder. */
@@ -451,6 +488,7 @@ if (isMain(import.meta.url)) {
       const ms = req.op === 'wait' ? (req.seconds ?? 30) * 1000 + 5000 : req.op === 'now' || req.op === 'calendar' ? 12_000 : 5000;
       const ask = (r, within) => (resident ? request(runtimeOf(home, soul).socket, r, within)
         : call(home, soul, r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: within }));
+      if (req.op === 'listen') { await listen(ask, out, { follow: req.follow === true }); process.exit(0); }
       const answer = await ask(req, ms);
       // C14: a --now line is set once the command has answered, and its outcome added to the answer.
       if (asked.now !== undefined && answer && typeof answer === 'object') answer.now = await ask({ op: 'now', text: asked.now }, 12_000);
