@@ -71,6 +71,8 @@ struct Track {
     /// The least way left when it last shrank by [`GAIN`], and when (the backstop).
     mark: (i64, Micros),
     samples: VecDeque<Sample>,
+    /// The corners it turned away from, and when, within the last [`WINDOW`]: one aimed at again is no corner reached.
+    left: VecDeque<([i64; 2], Micros)>,
 }
 
 /// The walks watched, by walker.
@@ -117,17 +119,28 @@ impl Watch {
             aimed: now,
             mark: (left, now),
             samples: VecDeque::new(),
+            left: VecDeque::new(),
         });
         // A new leg's end, or a new corner once the walker has reached the one it aimed at (the line moves on only past
         // a corner it reached), starts the watch again: reaching a corner is progress. The way left through a corner
         // that turns away from the leg's end can be metres longer than the least before it, though the walker goes
         // on at full speed round a building (#1960). Only a new leg's end starts the backstop again.
-        let reached = t
-            .samples
-            .back()
-            .is_some_and(|b| b.aim != aim && b.near <= REACHED);
+        // A walker rocking to and fro between two corners near it (0.132 A2-3) turns back to a corner it left within
+        // the window: that is no corner reached, and the watch goes on.
+        while t.left.front().is_some_and(|&(_, at)| at <= now - WINDOW) {
+            t.left.pop_front();
+        }
+        let back = t.left.iter().any(|&(c, _)| c == aim);
+        if let Some(b) = t.samples.back().filter(|b| b.aim != aim) {
+            t.left.push_back((b.aim, now));
+        }
+        let reached = !back
+            && t.samples
+                .back()
+                .is_some_and(|b| b.aim != aim && b.near <= REACHED);
         if t.to != to {
             t.mark = (left, now);
+            t.left.clear();
         }
         if t.to != to || reached {
             (t.to, t.aimed) = (to, now);
@@ -596,5 +609,41 @@ mod tests {
             w.seen(fixture(9), start, aim, goal, Micros::from(t) * TICK)
         });
         assert_eq!(found, Some(62));
+    }
+
+    /// 0.132 A2-3, from lane D's repro on full Eden (a Soul behind a reading chair and a shelf of books, 3.1 to 3.4 m
+    /// from its goal): a walker rocking to and fro, its line flipping between two corners within [`REACHED`] of it,
+    /// each flip taken as a corner reached, which started the watch again every swing; it ran to the act's deadline.
+    /// A corner it aimed at within the last [`WINDOW`] is no corner reached: it is found stalled within the window.
+    #[test]
+    fn a_walker_rocking_between_two_near_corners_is_stalled() {
+        let mut w = Watch::new();
+        let (a, b, goal) = (
+            [800_000, 500_000],
+            [-300_000, 600_000],
+            [5_000_000, 5_000_000],
+        );
+        let mut x = 0i64;
+        let mut right = true;
+        let mut found = None;
+        for t in 0..400u32 {
+            let aim = if right { a } else { b };
+            if w.seen(fixture(9), [x, 0], aim, goal, Micros::from(t) * TICK) {
+                found = Some(t);
+                break;
+            }
+            x += if right { 70_000 } else { -70_000 };
+            if x >= 400_000 {
+                right = false;
+            } else if x <= 0 {
+                right = true;
+            }
+        }
+        let t = found.expect("found stalled, not rocking on to the deadline");
+        assert!(
+            Micros::from(t) * TICK <= WINDOW + 1_000_000,
+            "within its {} s rule: tick {t}",
+            WINDOW / 1_000_000
+        );
     }
 }

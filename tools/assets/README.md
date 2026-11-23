@@ -17,7 +17,7 @@ changed and checks it: `pnpm build` and `pnpm dev` run it, `--check` only verifi
 
 | Option | Meaning |
 |---|---|
-| `--set web,runtime,test` | Only these sets (default: all). `web`: what the web build bundles. `runtime`: dev servers, the Mars viewer, worlds, the release tree and most unit tests. `test`: walk fixtures, Mars e2e baselines, the director fixture. |
+| `--set web,runtime,test` | Only these sets (default: `web`, `runtime` and `test`; `import`, the importers' kept outputs, only when named: v2/tools/import-world/README.md). `web`: what the web build bundles. `runtime`: dev servers, the Mars viewer, worlds, the release tree and most unit tests. `test`: walk fixtures, Mars e2e baselines, the director fixture. |
 | `--only <glob>[,<glob>]` | Only matching paths, e.g. `--only 'worlds/core-assets/**'`. `**` crosses directories; a trailing `/` takes a whole subtree. |
 | `--check` | Verify the local files only. With `--remote`: stream every selected object from the CDN and verify its hash (read-only GETs, nothing written). |
 | `--dest <tree>` | Pull into another tree (the release does this for its `git archive` copy). |
