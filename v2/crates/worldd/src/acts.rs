@@ -2423,10 +2423,18 @@ impl Acts {
                 if held >= 45 && (held - 45) % 30 < 10 {
                     let v = bodies.as_deref().and_then(|b| b.runner.controller.body(body)).map(|m| (m.linear.x.abs() + m.linear.z.abs()) / 1000);
                     let running = bodies.as_deref().is_some_and(|b| b.runner.running(body));
-                    eprintln!("s11-diag form-held s={held} step={at} kind={kind} planning={planning} walking={walking} moving={moving} runner={running} speed-mm-s={v:?} due-in-s={}", (due - now) / 1_000_000);
+                    eprintln!("s11-diag form-held body:{} s={held} step={at} kind={kind} planning={planning} walking={walking} moving={moving} runner={running} speed-mm-s={v:?} due-in-s={}", body.counter(), (due - now) / 1_000_000);
                 }
             }
             *DIAG_SEEN.lock().unwrap_or_else(|e| e.into_inner()) = next;
+            if let Some(b) = bodies.as_deref() {
+                for (body, (id, _)) in b.live_diag() {
+                    eprintln!("s11-diag live body:{} intent:{}", body.counter(), id.counter());
+                }
+            }
+            for (_, body, at, kind, planning, walking, moving, _) in self.forms.diag() {
+                eprintln!("s11-diag run body:{} step={at} kind={kind} planning={planning} walking={walking} moving={moving}", body.counter());
+            }
             static WAITS: std::sync::Mutex<BTreeMap<(Id, sim::forms::RunId), Micros>> = std::sync::Mutex::new(BTreeMap::new());
             let mut waits = WAITS.lock().unwrap_or_else(|e| e.into_inner());
             let now_waiting = self.forms.diag_waiting();

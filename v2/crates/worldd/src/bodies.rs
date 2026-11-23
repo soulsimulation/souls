@@ -857,6 +857,11 @@ impl Bodies {
         std::mem::take(&mut self.late)
     }
 
+    /// S11 diagnostic only: the live moves, by body: the intent and whether a walk.
+    pub(crate) fn live_diag(&self) -> Vec<(Id, (Id, bool))> {
+        self.live.iter().map(|(b, (id, l))| (*b, (*id, matches!(l, Live::Walk)))).collect()
+    }
+
     /// Hands a batch to the planner, counted (S8).
     fn send(&mut self, w: Wants) {
         let before = self.planner.pending();

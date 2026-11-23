@@ -468,7 +468,7 @@ fn stuck_report(
                         } else {
                             "still"
                         };
-                        format!("\"{} {how}\"", a.stall_act)
+                        format!("\"{} {how} body:{:?}\"", a.stall_act, bodies.get(k).copied().flatten().map(|b| b.counter()))
                     })
                     .collect::<Vec<_>>()
                     .join(", ")
