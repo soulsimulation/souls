@@ -186,6 +186,7 @@ test('the verbs make G1 batches, and a refusal names its usage', () => {
   assert.throws(() => requestOf(['expand']), /expand <metres>/);
   // Its edit goes to the world's claims judge as any edit does: under a claim when one is named (#3701).
   assert.equal(requestOf(['expand', '1200', '--claim', 'k1a2b3c4d']).req.claim, 'c:k1a2b3c4d');
+  assert.deepEqual(requestOf(['furnish', 'aa-3', '--style', 'cottage']).req, { op: 'edit', world: { verb: 'furnish', ref: 'aa-3', style: 'cottage' } });
   // #3728: move --by and clone are made on the daemon's copy; move --at stays G1's move.
   assert.deepEqual(requestOf(['move', 'aa-3', 'aa-4', '--by', '-2,3', '--yaw', '1.5']).req, { op: 'edit', world: { verb: 'move', by: '-2,3', yaw: '1.5', refs: ['aa-3', 'aa-4'] } });
   assert.deepEqual(requestOf(['move', 'aa-3', '--at', '1,2,3']).req.ops[0].op, 'move');

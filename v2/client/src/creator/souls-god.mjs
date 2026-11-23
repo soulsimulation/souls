@@ -33,6 +33,7 @@
 //   souls-god.mjs land extend --toward n|s|e|w|ne|nw|se|sw --metres m | --bounds x0,z0,x1,z1
 //   souls-god.mjs expand <m>                     the world's ground grows (that way, or to a centred square m a side),
 //                                                flat from its edge; it only grows
+//   souls-god.mjs furnish <building or room id> [--style s]   today's furnish recipes (39 styles) in its rooms
 //   souls-god.mjs define <record.json>          a kind of your own (#3697): a souls-entry/1 record (the format of
 //                                                content/kinds), kept in the world under the full name it answers
 //                                                (`defines`); a changed record is a new revision, and old things keep
@@ -152,6 +153,7 @@ export const VERBS = [
   'export',
   'find',
   'free',
+  'furnish',
   'hours',
   'import',
   'land',
@@ -186,7 +188,7 @@ export const VERBS = [
   'zone-suggest',
 ];
 /** The world's verbs (#3695): the daemon makes their sets on the world node from its copy (`world.mjs`). */
-export const WORLD_VERBS = ['weather', 'sky', 'strike', 'land', 'time', 'expand', 'clone'];
+export const WORLD_VERBS = ['weather', 'sky', 'strike', 'land', 'time', 'expand', 'furnish', 'clone'];
 /** A world verb by its words: `move --by` (#3728) is made on the daemon's copy; `move --at` is G1's move. */
 const isWorld = (verb, words) => WORLD_VERBS.includes(verb) || (verb === 'move' && words.includes('--by'));
 /** The verbs answered from the home's library of kinds, on this machine (#3696). */
@@ -257,6 +259,11 @@ export const FIX = {
   'land.unavailable': 'use Node 22.18 or later, and the client a world serves (it carries the ground model) or a checkout with packages/ground and zod installed',
   'expand.nothing': 'the world already reaches that far: give a larger size',
   'expand.too-large': 'grow it less: one edit carries the whole ground',
+  'furnish.where': 'furnish <id>: a building\'s or a room\'s id from describe',
+  'furnish.no-rooms': 'name a building with rooms, or one of its rooms',
+  'furnish.style': 'give a style the detail lists, or leave out --style',
+  'furnish.nothing': 'every piece is there already or does not fit: the detail says why',
+  'furnish.too-many': 'furnish one room at a time',
   'strike.off-the-ground': 'strike somewhere on the world\'s ground',
   'import.file': 'import <file>: a file export wrote, readable here',
   'import.format': 'import a souls-world/1 file, as export writes it',
@@ -448,7 +455,7 @@ export function worldVerbOf(verb, words) {
   const flags = {
     weather: ['kind', 'clouds', 'rain', 'wind', 'minutes'], sky: ['palette', 'sun'], strike: ['at'], time: ['speed'],
     land: ['at', 'radius', 'amount', 'level', 'height', 'peak', 'path', 'area', 'rect', 'circle', 'edge', 'step', 'depth', 'width', 'side', 'face', 'steps', 'by', 'toward', 'metres', 'bounds'],
-    expand: [],
+    expand: [], furnish: ['style'],
     move: ['by', 'yaw'],
     clone: ['at', 'count', 'step', 'yaw'],
   }[verb];
@@ -457,6 +464,10 @@ export function worldVerbOf(verb, words) {
   if (verb === 'time') {
     for (const f of ['--pause', '--resume']) { const k = args.indexOf(f); if (k >= 0) { args.splice(k, 1); out.pause = true; } }
     if (args[0] !== undefined) out.hour = args.shift();
+  }
+  if (verb === 'furnish') {
+    if (args[0] === undefined) throw usage('furnish <building or room id> [--style s]');
+    out.ref = args.shift();
   }
   if (verb === 'expand') {
     if (args[0] === undefined) throw usage('expand <metres>: the side of the centred square the world grows to');

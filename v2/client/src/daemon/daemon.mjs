@@ -157,6 +157,7 @@ import { readLog, soulDirOf } from '../memory/memory.mjs';
 import { clockOf, worldNow } from '../clock/clock.mjs';
 import { worldOps } from '../creator/world.mjs';
 import { exportOf, importOf } from '../creator/genesis.mjs';
+import { checkedFurnish, furnishOps } from '../creator/furnish.mjs';
 import { cloneFile, moveByOps } from '../creator/things.mjs';
 import { TRACE_MOST, openCreatorTrace, rowOf } from '../creator/trace.mjs';
 import { feederFor } from '../memory/feeder.mjs';
@@ -1195,6 +1196,14 @@ function keyAnswered(a) {
  *  (`worldd::answers::now`). For the creator's weather end and strike time (#3695). */
 const worldNowOrReal = () => worldNow(clockOf(copy)) ?? Date.now() * 1000;
 
+/** #3728: today's furnish recipes on the copy (`creator/furnish.mjs`), as one edit, checked on the copy under the
+ *  edit's claim (#3701). */
+function furnishBatch(w, claim) {
+  const out = furnishOps(exportOf(copy).nodes, w.ref, { style: w.style, kinds: pinned(), entries: kindsIn(join(home, 'kinds')) });
+  if (out.ok === false) return out;
+  return checkedFurnish(out, (ops) => JSON.parse(wire.editCheck(copy, batchOf(ops, claim), kindsText())));
+}
+
 /** #3728: an import plan's edits, one at a time, each answered before the next is planned. The first refusal stops
  *  it, and says how far it got. Each edit goes under the build claim named, if any, as any edit does (#3701). */
 async function runPlan(plan, claim) {
@@ -1264,6 +1273,7 @@ async function worldBatch(req) {
     }
     return land.landOps(copy, req.world);
   }
+  if (req.world.verb === 'furnish') return furnishBatch(req.world, req.claim);
   if (req.world.verb === 'move') return moveBatch(req.world);
   return worldOps(copy, req.world, worldNowOrReal());
 }
