@@ -16,7 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { decode } from '../brief/copy.mjs';
 import { DEFAULT_PKG, request } from '../daemon/client.mjs';
 import { runtimeOf } from '../home/home.mjs';
-import { requestOf, worldOf } from './souls.mjs';
+import { actEnd, requestOf, worldOf } from './souls.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const v2 = resolve(here, '../../..');
@@ -99,10 +99,30 @@ test('the arguments: pair takes a world url, can and act take act words; a world
   assert.deepEqual(requestOf(['conversations']).req, { op: 'converse', do: 'list' });
   assert.deepEqual(requestOf(['act', 'sit:ab-1', 'walk:ab-2']).req, { op: 'act', acts: ['sit:ab-1', 'walk:ab-2'] });
   assert.deepEqual(requestOf(['can', 'fill:ab-1', 'ab-2']).req, { op: 'can', acts: ['fill:ab-1', 'ab-2'] });
+  // D1: --wait is the command's, not an act word.
+  const waited = requestOf(['act', 'sit:ab-1', '--wait', '--for', 'm1']);
+  assert.deepEqual([waited.req, waited.wait], [{ op: 'act', acts: ['sit:ab-1'], for: 'm1' }, true]);
+  assert.equal(requestOf(['act', 'sit:ab-1']).wait, undefined);
   assert.deepEqual(requestOf(['pair', 'https://soul.game/eden']).req, { op: 'pair', url: 'https://soul.game/eden' });
   assert.deepEqual(worldOf('https://soul.game/eden'), { directory: 'https://soul.game', world: 'eden', gateway: 'wss://soul.game/v2/ws' });
   assert.deepEqual(worldOf('http://127.0.0.1:9/local?gateway=ws://127.0.0.1:8/v2/ws'), { directory: 'http://127.0.0.1:9', world: 'local', gateway: 'ws://127.0.0.1:8/v2/ws' });
   assert.throws(() => worldOf('eden'), { code: 'pair-names-a-world' });
+});
+
+test('D1: act --wait returns the final phase, the refusal, or after its window a still-running line with how to check', async () => {
+  const sent = { ok: true, sequence: 7, sent: true };
+  const daemon = (answers) => async (r) => ({ ok: true, receipt: { sequence: r.sequence, answers: answers() }, ...(r.quiet ? {} : { at: 'v9', changed: { n: 1 } }) });
+  let polls = 0;
+  const done = await actEnd(daemon(() => (++polls < 3 ? [{ answer: 'accepted' }] : [{ answer: 'accepted' }, { answer: 'receipt' }])), sent, { sleep: async () => {} });
+  assert.deepEqual([done.ok, done.phase, done.sequence, done.at, done.changed], [true, 'done', 7, 'v9', { n: 1 }], 'what changed comes with the last answer');
+  const refused = await actEnd(daemon(() => [{ answer: 'refused', reason: 'seat.taken' }]), sent, { sleep: async () => {} });
+  assert.deepEqual([refused.ok, refused.phase, refused.code, refused.reason], [false, 'refused', 'seat.taken', 'seat.taken']);
+  let t = 0;
+  const still = await actEnd(daemon(() => [{ answer: 'accepted' }]), sent, { ms: 60_000, now: () => t, sleep: async (ms) => { t += ms; } });
+  assert.deepEqual([still.ok, still.stillRunning, still.phase], [true, true, 'running']);
+  assert.match(still.detail, /still running after 60 s: check with `receipt 7`/);
+  const notSent = { ok: false, code: 'stopped-locally', sent: false };
+  assert.equal(await actEnd(async () => assert.fail('nothing asked'), notSent), notSent, 'a local refusal is returned as it is');
 });
 
 test('A2: an act carries each candidate\'s own target, and the first one\'s thing arguments in parameter 1 (C2)', async () => {
@@ -243,14 +263,15 @@ test('A1, A2: can answers from the local check; a walk to a named thing and a si
   assert.equal(talks.ok, true, JSON.stringify(talks));
   assert.deepEqual(talks.conversations, souls(home, ['converse', 'list']).conversations, 'the same as converse list');
 
-  const walk = souls(home, ['act', chair]);
-  assert.equal(walk.ok, true, JSON.stringify(walk));
-  const walked = await answerOf(rt, walk.sequence);
-  assert.equal(walked.answer, 1, `the walk ends with a receipt: ${JSON.stringify(walked)}`);
-  const sit = souls(home, ['act', `sit:${chair}`, `sit:${named['the chair in the square']}`]);
-  assert.equal(sit.ok, true, JSON.stringify(sit));
-  const sat = await answerOf(rt, sit.sequence);
-  assert.equal(sat.answer, 1, `the sit ends with a receipt: ${JSON.stringify(sat)}`);
+  // D1: act --wait returns once the receipt has its final phase, or the world's refusal by name.
+  const walk = souls(home, ['act', chair, '--wait']);
+  assert.deepEqual([walk.ok, walk.phase, walk.receipt?.answers.at(-1).answer], [true, 'done', 'receipt'], `the walk ends with a receipt: ${JSON.stringify(walk)}`);
+  const sit = souls(home, ['act', `sit:${chair}`, `sit:${named['the chair in the square']}`, '--wait']);
+  assert.deepEqual([sit.ok, sit.phase], [true, 'done'], `the sit ends with a receipt: ${JSON.stringify(sit)}`);
+  assert.equal(typeof sit.changed, 'object', 'the answer closes as any command does');
+  const notCarrier = souls(home, ['act', `carrier:stop:${room}`, '--wait']);
+  assert.deepEqual([notCarrier.ok, notCarrier.phase, typeof notCarrier.code], [false, 'refused', 'string'], JSON.stringify(notCarrier));
+  assert.equal(notCarrier.code, notCarrier.reason);
   // A thing argument the copy cannot name is refused before anything is sent.
   assert.equal(souls(home, ['act', `fill:${chair}`, named['the chair in the square']]).code, 'act-arg-unnamed');
 });
