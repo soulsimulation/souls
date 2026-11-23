@@ -1457,7 +1457,9 @@ async function answer(req) {
       const which = req.sequence !== undefined ? Number(req.sequence) : [...receipts.keys()].at(-1);
       const r = receipts.get(which);
       if (!r) return { ok: false, code: 'receipt-not-found', detail: which === undefined ? 'no intent sent since the daemon started' : `no intent ${which} among the last ${RECEIPTS_KEPT} this daemon sent`, ...ageNow() };
-      return closing({ ok: true, receipt: { ...r, going: going.includes(r.sequence) } }, null, { now: true });
+      // D1: `act --wait` asks `quiet` while it waits, so what changed is kept for its last answer, not spent on a poll.
+      const got = { ok: true, receipt: { ...r, going: going.includes(r.sequence) } };
+      return req.quiet ? { ...got, ...ageNow() } : closing(got, null, { now: true });
     }
     case 'events': {
       // #3705: the events after cursor `since` (0: every one kept), without taking them: `wait` still hands them.
