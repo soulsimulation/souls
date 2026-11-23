@@ -85,6 +85,10 @@ width is the larger of its other two sides, its two outermost `grip` points alon
 hold it (each stands 0.35 m beyond its grip), and `state.hold_crew`'s default is how many must carry it. Before the
 lift, a crew too small, a carrier more than 0.7 m from its grip, and (when the lift names where the front goes) a way
 too narrow for the load are refused by name (`carry-crew-too-small`, `carry-grip-out-of-reach`, `carry-board-clips`).
+Held and set down, its longest side runs from one carrier to the other (0.135 C4: a beam whose length is its z is turned
+a quarter turn; an upright, whose length is its y, is laid flat). The carry itself is an entry too,
+`content/kinds/construction/carry.json`: its two roles (`front`, `back`) make it an activity kind in a served world, and
+its first slot admitting a `thing` is where the load rides.
 `loose` is how long a loose thing lasts once nobody holds or owns it, Engine v2 F10
 ([#2773](https://github.com/soulsimulation/souls/issues/2773)): `{"ever": true}` or `{"us": <whole microseconds above zero>}`;
 owned, or in a slot, a thing lasts. Both are meaning, so covered by the hash; a body's family says neither.
@@ -143,6 +147,10 @@ millimetres above zero) of the activity, nearest first. Either may name a `postu
 ordinary form that links the role to the actor and reparents the actor into a slot argument; the world moves no body.
 A role may name a `move` of `content/moves` (0.134 T1): when the activity starts, each member of that role aims the move
 at the other member, as a handshake, a hug or a high five (`content/kinds/together/`) does.
+A role's move whose last phase holds (`hold_hand`, 0.134 T2) lasts until a member leaves or walks; then both are let go.
+`"on_beat": true` (0.134 T3) puts the move on the world's beat: each member's begins on one beat, at its own body, and
+again on the next beat after it ends, until the member leaves. The role's link `most` is how many take it, so a dance
+(`dance_together`) offered to several takes up to eight.
 Starting, leaving and ending are SA-G1b's and B5's; the rules are `packages/form-rules/src/activity.ts`. Section 17 is
 meaning, so covered by the hash.
 

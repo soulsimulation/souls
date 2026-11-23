@@ -8,7 +8,9 @@
 //! - **Parameters.** The target is the place (propose, offer), the activity (join, start, leave, lift, set down) or the
 //!   offer (accept, decline). Propose: 1 the activity's kind. Offer: 1 the kind, 2 the asker's role, 3 the bodies
 //!   asked (ids), 4 for a give the thing the asker holds (0.133 R4: accepting hands it over, `sim::activity::offer`). Join: 1 the role, 2 the revision (default 1). Lift: 1 the thing carried, 2 where its front goes (optional, `[x, y, z]` µm: the way there is swept first, 0.135 C2). Its two carriers are the
-//!   activity's first two members, the first in front. `carrier:steer`, `carrier:stop` and `carrier:land` steer the
+//!   activity's first two members, the first in front. Only a load is lifted, a kind whose entry states its grips
+//!   (`lift-not-a-load`), and only in a carry, an activity whose kind has a slot 1 for a thing (`not-a-carry`, 0.135
+//!   C4). `carrier:steer`, `carrier:stop` and `carrier:land` steer the
 //!   boat the Soul sits in ([`crate::carrier`], #3603): the target the boat, steer's 1 a point `[x, z]` µm (land's 1
 //!   optional, a point by its home).
 //! - **Written once, as the Soul's.** Each system writes through its own writer onto a copy of the tree; its entries,
@@ -33,7 +35,7 @@ use replica::ids::{Id, Minter, Scope};
 use replica::moves::{Effector, Move};
 use replica::pose::Vec3;
 use replica::rules::json::Value as Json;
-use replica::time::Micros;
+use replica::time::{Mapping, Micros, Tempo, TickRate, Timeline};
 use replica::tree::{Rules, Tree};
 use replica::world_model::plain;
 use replica::world_model::show;
@@ -119,6 +121,8 @@ pub struct Engine {
     steered: BTreeSet<Id>,
     /// The moves an activity's roles may name (0.134 T1): content's, [`crate::moves::library`].
     library: Vec<Move>,
+    /// The world's clock, whose beats a dance's moves start on (0.134 T3): the world's own ([`Engine::with_beats`]).
+    line: Timeline,
     /// The loads the world's entries state, by plain kind (0.135 C2, [`Engine::with_loads`]).
     loads: BTreeMap<String, Load>,
     /// Loads found riding a carry at a restart, set down at the first tick (0.135 C3): (activity, load).
@@ -289,7 +293,19 @@ impl Engine {
                 eprintln!("worldd: no moves for activities: {r}");
                 Vec::new()
             }),
+            line: Timeline::start(
+                Mapping::new(0, 0, 1, 1).expect("rate one"),
+                TickRate::new(0, 0, 20).expect("20 a second"),
+                Tempo::per_minute(0, 0, 120).expect("120 a minute"),
+            )
+            .expect("a line from zero"),
         }
+    }
+
+    /// The engine on the world's own clock `line`, whose beats a dance's moves start on (0.134 T3).
+    pub fn with_beats(mut self, line: Timeline) -> Engine {
+        self.line = line;
+        self
     }
 
     /// The roles' moves of the activities just started, aimed by each member at the other (0.134 T1). A refused one
@@ -308,6 +324,7 @@ impl Engine {
             &mut self.mint,
             &self.library,
             &feet,
+            &self.line,
             now,
         ) {
             eprintln!("worldd: {}'s move was not aimed: {r}", show(body));
@@ -428,7 +445,8 @@ impl Engine {
             Verb::Accept => {
                 let offer = target("accept-needs-an-offer")?;
                 // 0.134 T1: a touch starts only where its moves reach; nothing walks the two to their places yet.
-                if let Some((kind, asker)) = e.offered(offer) {
+                // A dance (T3) touches nobody: its moves are at each member's own body.
+                if let Some((kind, asker)) = e.offered(offer).filter(|(k, _)| !k.beat) {
                     let feet = Feet::of(c, [asker, a.body]);
                     for mv in kind.roles.iter().filter_map(|r| r.mv.as_ref()) {
                         let Some(m) = self.library.iter().find(|m| m.name == *mv) else {
@@ -500,6 +518,21 @@ impl Engine {
             Verb::Steer | Verb::Land | Verb::Stop => {}
             Verb::Lift | Verb::SetDown => {
                 let activity = target("carry-needs-an-activity")?;
+                // 0.135 C4: a carry is an activity whose kind has the slot a load rides in, for a thing.
+                let kind = tree
+                    .handle(activity)
+                    .and_then(|h| tree.node(h))
+                    .map(|n| n.kind().as_str().to_owned())
+                    .ok_or_else(|| refusal("activity-missing", show(activity)))?;
+                let carries = self.rules.kinds.get(&kind).is_some_and(|k| {
+                    k.owner == "activity"
+                        && k.slots
+                            .get(&sim::activity::carry::SLOT)
+                            .is_some_and(|s| s.contains("thing"))
+                });
+                if !carries {
+                    return Err(refusal("not-a-carry", plain(&kind).to_owned()));
+                }
                 let members = self
                     .activities
                     .members(activity)
@@ -530,36 +563,60 @@ impl Engine {
                         .handle(board)
                         .and_then(|h| tree.node(h))
                         .ok_or_else(|| refusal("lift-needs-a-thing", show(board)))?;
-                    if let Some(load) = self.loads.get(plain(node.kind().as_str())) {
-                        let middle = match (node.parent(), node.place()) {
-                            (Some(p), Some(at)) if p == ground => at.position,
-                            _ => {
-                                return Err(refusal(
-                                    "carry-grip-out-of-reach",
-                                    format!(
-                                        "{} is not on the floor its carriers stand on",
-                                        show(board)
-                                    ),
-                                ));
-                            }
-                        };
-                        let to = param_point(&a.params, 2, "lift-destination")?;
-                        let fixed = match to {
-                            Some(_) => Some(
-                                Fixed::of(&tree, ground)
-                                    .map_err(|e| refusal("carry-geometry", e))?,
-                            ),
-                            None => None,
-                        };
-                        let xz = |v: Vec3| [v.x, v.z];
-                        load.check(
-                            crew,
-                            xz(f),
-                            xz(k),
-                            xz(middle),
-                            to.map(xz).zip(fixed.as_ref()),
-                        )?;
-                    }
+                    // 0.135 C4: only a load, a kind whose entry states its grips and crew, is carried.
+                    let mut load =
+                        *self.loads.get(plain(node.kind().as_str())).ok_or_else(|| {
+                            refusal(
+                                "lift-not-a-load",
+                                format!("{} ({})", show(board), plain(node.kind().as_str())),
+                            )
+                        })?;
+                    let pose = |e| refusal("carry-pose", format!("{e:?}"));
+                    // Its middle, wherever its origin is (a laid-flat upright's is at its end).
+                    let (middle, axis) = match (node.parent(), node.place()) {
+                        (Some(p), Some(at)) if p == ground => {
+                            let m = at.orientation.rotate(load.middle).map_err(pose)?;
+                            let middle = Vec3::new(at.position.x + m.x, 0, at.position.z + m.z);
+                            (middle, load.lies_along(at.orientation)?)
+                        }
+                        _ => {
+                            return Err(refusal(
+                                "carry-grip-out-of-reach",
+                                format!(
+                                    "{} is not on the floor its carriers stand on",
+                                    show(board)
+                                ),
+                            ));
+                        }
+                    };
+                    // Its grips along its own long axis; the front at its − end lifts it the other way round.
+                    let axis = match axis {
+                        Some(v)
+                            if i128::from(v[0]) * i128::from(f.x - k.x)
+                                + i128::from(v[1]) * i128::from(f.z - k.z)
+                                < 0 =>
+                        {
+                            load = load.reversed()?;
+                            Some([-v[0], -v[1]])
+                        }
+                        v => v,
+                    };
+                    let to = param_point(&a.params, 2, "lift-destination")?;
+                    let fixed = match to {
+                        Some(_) => Some(
+                            Fixed::of(&tree, ground).map_err(|e| refusal("carry-geometry", e))?,
+                        ),
+                        None => None,
+                    };
+                    let xz = |v: Vec3| [v.x, v.z];
+                    load.check(
+                        crew,
+                        xz(f),
+                        xz(k),
+                        xz(middle),
+                        axis,
+                        to.map(xz).zip(fixed.as_ref()),
+                    )?;
                     let audience = tree
                         .handle(activity)
                         .and_then(|h| tree.node(h))
@@ -573,6 +630,7 @@ impl Engine {
                         self.header.clone(),
                         self.rules.clone(),
                     );
+                    carry.load = load;
                     carry.lift(&mut tree, now, f, k, transfer)?;
                     self.carries.insert(activity, carry);
                 } else {
@@ -651,6 +709,17 @@ impl Engine {
             self.begin_moves(tr, c, now);
         }
         let _ = self.activities.settle(c, &self.moves, &mut self.due);
+        // A handshake, a hug or a high-five whose moves have ended ends: both arms free (0.134 T1).
+        if self.activities.finishing() {
+            let tr = tree.get_or_insert_with(|| live.frozen());
+            self.activities.next = tr.next();
+            for (body, r) in
+                self.activities
+                    .finish(tr, c, &mut self.moves, &mut self.due, &mut self.mint, now)
+            {
+                eprintln!("worldd: {} did not leave its touch: {r}", show(body));
+            }
+        }
         // 0.135 C3: loads found riding at a restart are set down where their carry last had them.
         for (activity, load) in std::mem::take(&mut self.riding) {
             let tr = tree.get_or_insert_with(|| live.frozen());
@@ -672,6 +741,15 @@ impl Engine {
                 self.header.clone(),
                 self.rules.clone(),
             );
+            // 0.135 C4: set down the way it is held, as its entry states it.
+            if let Some((l, held)) = tr.handle(load).and_then(|h| tr.node(h)).and_then(|n| {
+                Some((
+                    self.loads.get(plain(n.kind().as_str()))?,
+                    n.place()?.orientation,
+                ))
+            }) {
+                carry.load = Load { turn: held, ..*l };
+            }
             match break_off(
                 &mut carry,
                 &mut self.activities,
@@ -750,10 +828,10 @@ impl Engine {
         self.collect(None);
     }
 
-    /// A move `body` started for `intent` (a walk, a sit) at `now` (0.134 T2): if `body` holds hands, it leaves that
-    /// activity as `activity:leave` does, and both hands come free. Its entries wait in [`Engine::out`].
+    /// A move `body` started for `intent` (a walk, a sit) at `now` (0.134 T2): if `body` holds hands, or dances on the
+    /// beat (T3), it leaves that activity as `activity:leave` does, and both hands come free. Its entries wait in [`Engine::out`].
     pub fn walked(&mut self, live: &Tree, c: &mut Controller, body: Id, intent: Id, now: Micros) {
-        let Some(activity) = self.activities.holding_hands(&self.moves, body) else {
+        let Some(activity) = self.activities.walk_leaves(&self.moves, body) else {
             return;
         };
         let Some(soul) = self

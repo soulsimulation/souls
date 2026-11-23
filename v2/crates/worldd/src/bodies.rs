@@ -71,7 +71,7 @@ use sim::commit::spot;
 use sim::controller::Stance;
 use sim::controller::{Driver, Part};
 use sim::host::Runner;
-use sim::host::{Planned, ReachKey, ReachQuestion, Wants};
+use sim::host::{Batches, Planned, ReachKey, ReachQuestion, Wants};
 use sim::life::{Born, Life, Retired, Standing};
 use sim::mover::Body as Moved;
 use sim::moves::{Fired, Instance, Moves, Reach};
@@ -195,6 +195,8 @@ pub struct Bodies {
     live: BTreeMap<Id, (Id, Live)>,
     /// Intents ended between steps (a walk replaced): the intent and how.
     ended: Vec<(Id, Result<(), String>)>,
+    /// The walks that ended `done` as near their goal as a crowd there allows (A2-4), until the answer is written.
+    pub short: BTreeSet<Id>,
     /// The candidate each started intent took: its rank in the ranked list and its target (C14).
     took: BTreeMap<Id, (usize, Option<Id>)>,
     /// Each body's pose as last written to the log ([`Bodies::moved`]).
@@ -213,6 +215,11 @@ pub struct Bodies {
     late: Vec<(Micros, u64)>,
     /// The planner's answers for the next tick.
     planned: Planned,
+    /// Batches sent to the planner and taken back so far (S8): a request still out is not asked again.
+    sent: u64,
+    taken: u64,
+    /// Form questions out at the planner (S8): each cursor's generation and the batch it went in.
+    forms_out: BTreeMap<FormKey, (u64, u64)>,
     pub(crate) form_map: Arc<Versions>,
     pub(crate) form_answers: BTreeMap<FormKey, FormAnswer>,
     pub(crate) form_questions: BTreeMap<FormKey, FormQuestion>,
@@ -370,6 +377,9 @@ impl Bodies {
             schedule: BTreeMap::new(),
             late: Vec::new(),
             planned: Planned::default(),
+            sent: 0,
+            taken: 0,
+            forms_out: BTreeMap::new(),
             reached: BTreeMap::new(),
             waiting: Vec::new(),
             runner: Runner::new(tick),
@@ -387,6 +397,7 @@ impl Bodies {
             rise: load(RISE)?,
             live: BTreeMap::new(),
             ended: Vec::new(),
+            short: BTreeSet::new(),
             took: BTreeMap::new(),
             logged: BTreeMap::new(),
             shown: BTreeMap::new(),
@@ -849,10 +860,18 @@ impl Bodies {
         std::mem::take(&mut self.late)
     }
 
+    /// Hands a batch to the planner, counted (S8).
+    fn send(&mut self, w: Wants) {
+        let before = self.planner.pending();
+        self.planner.send(w);
+        self.sent += (self.planner.pending() - before) as u64;
+    }
+
     /// The planner's answers taken for the next tick: those [`Bodies::schedule`] names for this body tick, else every
     /// batch out, waiting at most [`Bodies::wait`] for each; a shortfall is kept for the recorder.
     fn take(&mut self) {
         let at = self.runner.now;
+        let before = self.planner.pending();
         let mut p = match self.schedule.remove(&at) {
             Some(n) => self
                 .planner
@@ -867,6 +886,7 @@ impl Bodies {
                 p
             }
         };
+        self.taken += (before - self.planner.pending()) as u64;
         // A previous map's route, line, reach or form result cannot enter any current cache.
         p.keep_map(&self.form_map);
         // A replaced move's in-flight answer cannot be used by a newer order on the same body/fixture/slot.
@@ -1072,7 +1092,7 @@ impl Bodies {
             .retain(|(body, _, _, _), _| !asked.iter().any(|w| w.body == *body));
         if !pairs.is_empty() {
             let reach = self.reach_of(pairs);
-            self.planner.send(Wants {
+            self.send(Wants {
                 form_map: Some(Arc::clone(&self.form_map)),
                 classes: self.town.body_classes.clone(),
                 reach,
@@ -1215,7 +1235,11 @@ impl Bodies {
             // A skill that panics is ended by K11's wrapper in the runner (`unit-panicked`); the tick goes on.
             crate::orders::step(self, at);
             self.wind_step(at);
-            let planned = std::mem::take(&mut self.planned);
+            let mut planned = std::mem::take(&mut self.planned);
+            planned.batches = Some(Batches {
+                taken: self.taken,
+                next: self.sent,
+            });
             self.unstuck.planned(&self.runner, &planned);
             let (mut wants, _) = self.runner.tick_planned(&mut self.town, &planned);
             // The never-stuck ladder (0.133 N1): walk-outs, then each walker's rungs; its records are the world's.
@@ -1241,10 +1265,15 @@ impl Bodies {
                 self.form_answers.clear();
             }
             wants.form_map = Some(Arc::clone(&self.form_map));
-            wants.forms = std::mem::take(&mut self.form_questions)
-                .into_values()
-                .collect();
-            self.planner.send(wants);
+            wants.forms = fresh_forms(
+                &mut self.forms_out,
+                std::mem::take(&mut self.form_questions),
+                &self.form_answers,
+                self.taken,
+                self.sent,
+            );
+            debug_assert_eq!(planned.batches.map(|b| b.next), Some(self.sent));
+            self.send(wants);
             // Who hears each utterance the step started, as the bodies stand after it (B11, #3369): every body in the
             // zone, a seated or lying one included (#3393).
             let said = std::mem::take(&mut self.runner.said);
@@ -1262,7 +1291,19 @@ impl Bodies {
                 .collect();
             for (body, id) in walks {
                 let how = match self.runner.ended.get(&body) {
-                    Some((_, Progress::Done)) => Ok(()),
+                    Some((_, Progress::Done)) => {
+                        // As near as the crowd allows (A2-4): named in the walk's `done`, then taken off the body.
+                        if self
+                            .runner
+                            .fields
+                            .get_mut(&body)
+                            .and_then(|f| f.remove(&replica::host::F_SHORT))
+                            .is_some()
+                        {
+                            self.short.insert(id);
+                        }
+                        Ok(())
+                    }
                     Some((_, Progress::Failed(n))) => Err(n.as_str().to_owned()),
                     Some((_, Progress::Going)) => continue,
                     None if self.runner.running(body) => continue,
@@ -1696,6 +1737,37 @@ fn refusal(name: &'static str, node: Id) -> Refusal {
         name,
         detail: replica::world_model::show(node),
     }
+}
+
+/// The form questions to send in batch `next` (S8): one question per cursor out at the planner at a time. While one
+/// is out (sent in a batch at or after `taken`), the cursor's question is not sent, whatever its generation: a body
+/// nudged while it waits asks a new generation every tick, and each would be a full search. Once that batch has been
+/// taken, the cursor's current question goes (its form queues it each tick until answered); a stale generation's
+/// answer is refused where it is read (`Planning::receive`). A question whose answer of the same generation has come
+/// back and waits in `answered` for its form to read it (later in the tick: the form's queue is last tick's) is not
+/// sent again either.
+pub(crate) fn fresh_forms(
+    out: &mut BTreeMap<FormKey, (u64, u64)>,
+    questions: BTreeMap<FormKey, FormQuestion>,
+    answered: &BTreeMap<FormKey, FormAnswer>,
+    taken: u64,
+    next: u64,
+) -> Vec<FormQuestion> {
+    out.retain(|_, (_, sent)| *sent >= taken);
+    questions
+        .into_values()
+        .filter(|q| {
+            if out.contains_key(&q.key)
+                || answered
+                    .get(&q.key)
+                    .is_some_and(|a| a.generation == q.generation)
+            {
+                return false;
+            }
+            out.insert(q.key, (q.generation, next));
+            true
+        })
+        .collect()
 }
 
 #[cfg(test)]

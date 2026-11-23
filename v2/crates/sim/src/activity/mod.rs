@@ -17,10 +17,19 @@
 //! - **A role may name a move (0.134 T1).** When an activity of such a kind starts, each member whose role names
 //!   one aims it at the other member through [`Activities::aim`] ([`Activities::begin_moves`]), and the move's record
 //!   goes out for viewers as a form's does (`souls:form-move`): a handshake, a hug, a high-five.
+//! - **A touch ends with its moves.** When every member's move of a touch has ended by itself, each member leaves it
+//!   ([`Activities::finish`]), so its role claims are let go: both arms are free, and the next touch between the
+//!   same two starts and plays its moves. A touch whose move holds (T2) is not ended this way.
 //! - **A held move lasts while both stay (0.134 T2).** A role's move whose last phase holds (`hold_hand`) holds until
-//!   a member leaves: then every member's held move is released, so both hands come free, and each release goes out
-//!   for viewers as its record again, ended `released` ([`Activities::leave`]). A walk sent by a member ends it the same
-//!   way ([`Activities::holding_hands`] names the activity; worldd sends the leave).
+//!   a member leaves: then every member's held move is released, so both hands come free, each release goes out
+//!   for viewers as its record again, ended `released`, and the others leave the hold too ([`Activities::leave`]). A walk sent by a member ends it the same
+//!   way ([`Activities::walk_leaves`] names the activity; worldd sends the leave).
+//! - **Dancing together on one beat (0.134 T3).** A kind whose moves go on the beat (`beat`) takes up to its `most`
+//!   members, offered to several at once; each later accept joins the offer's own activity ([`offer`]). Its first
+//!   beat is fixed when it starts: the last whole beat of the world's clock at most 2 s ahead (`v2/docs/time.md`
+//!   rule 7), so accepts that arrive within about 1.5 s of the first all begin on it. Each member's move is aimed at
+//!   its own body and starts on that beat, or, for a member who joins after it, on the next whole beat; when it ends
+//!   it begins again on the next whole beat, until the member leaves. A leave is always accepted, as any leave.
 //! - **A leave completes within the time the kind states.** Membership ends at once, in the log. A body with no move
 //!   in progress is let go at once; a body in a move is let go at the move's next phase end, or at the kind's
 //!   `leave_within`, whichever is first, by a timer in K9's due list ([`Activities::fire`]).
@@ -42,7 +51,7 @@ use replica::encode::{Name, Value, encode};
 use replica::ids::{Id, Minter};
 use replica::moves::Move;
 use replica::pose::{Frame, Pose, Quat, Support, Vec3};
-use replica::time::Micros;
+use replica::time::{Micros, Timeline};
 use replica::tree::{Rules, Tree};
 use replica::world_model::{Audience, End, show};
 
@@ -76,6 +85,32 @@ fn as_bytes(v: Value) -> Value {
         v => v,
     }
 }
+
+/// A dance's first beat when it starts at `at` (0.134 T3): the last whole beat at most 2 s ahead, or the next beat
+/// when none falls in that time. At `at` itself on error (a time before the world's start).
+fn first_beat(line: &Timeline, at: Micros) -> Micros {
+    let last = line
+        .beat_of(at.saturating_add(BEAT_AHEAD))
+        .and_then(|k| line.beat_time(k));
+    match last {
+        Ok(t) if t > at => t,
+        _ => on_beat(line, at),
+    }
+}
+
+/// The first whole beat at or after `t`.
+fn on_beat(line: &Timeline, t: Micros) -> Micros {
+    let Ok(k) = line.beat_of(t) else {
+        return t;
+    };
+    match line.beat_time(k) {
+        Ok(b) if b >= t => b,
+        _ => line.beat_time(k + 1).unwrap_or(t),
+    }
+}
+
+/// How far ahead a dance's first beat may be, µs (0.134 T3).
+const BEAT_AHEAD: Micros = 2_000_000;
 
 /// Whether move `n` is live and has a phase that holds until released (0.134 T2): its record ends it never.
 fn held(moves: &Moves, n: Instance) -> bool {
@@ -165,6 +200,12 @@ pub struct Activities {
     offers: offer::Offers,
     /// Activities started since [`Activities::begin_moves`] last ran, whose roles' moves are still to be aimed.
     begun: Vec<Id>,
+    /// Each dancing activity's first beat, µs (0.134 T3), and the members whose move was refused there, not tried
+    /// again.
+    beats: BTreeMap<Id, Micros>,
+    stalled: BTreeSet<(Id, Id)>,
+    /// Touches that end when their moves end (0.134 T1: a handshake, a hug, a high-five), by activity.
+    ending: BTreeSet<Id>,
 }
 
 impl Activities {
@@ -182,6 +223,9 @@ impl Activities {
             leaving: BTreeMap::new(),
             offers: offer::Offers::default(),
             begun: Vec::new(),
+            beats: BTreeMap::new(),
+            stalled: BTreeSet::new(),
+            ending: BTreeSet::new(),
         }
     }
 
@@ -608,8 +652,18 @@ impl Activities {
     pub fn beginning(&self) -> Vec<Id> {
         self.begun
             .iter()
+            .chain(self.dancing().iter())
             .filter_map(|a| self.live.get(a))
             .flat_map(|l| l.node.members.iter().map(|m| m.body))
+            .collect()
+    }
+
+    /// The started activities whose moves go on the beat (0.134 T3).
+    fn dancing(&self) -> Vec<Id> {
+        self.live
+            .iter()
+            .filter(|(_, l)| l.node.state == State::Started && self.kinds[&l.kind].beat)
+            .map(|(a, _)| *a)
             .collect()
     }
 
@@ -628,6 +682,7 @@ impl Activities {
         mint: &mut Minter,
         library: &[Move],
         geo: &impl Reach,
+        line: &Timeline,
         at: Micros,
     ) -> Vec<(Id, Refusal)> {
         let mut refused = Vec::new();
@@ -636,6 +691,9 @@ impl Activities {
                 continue;
             };
             let kind = &self.kinds[&l.kind];
+            if kind.beat {
+                continue;
+            }
             let audience = l.audience;
             let aims: Vec<(Member, Option<Id>, Name)> = l
                 .node
@@ -647,6 +705,10 @@ impl Activities {
                     Some((m.clone(), other.map(|o| o.body), mv))
                 })
                 .collect();
+            // A touch whose moves all end by themselves ends with them ([`Activities::finish`]); one that holds (T2's
+            // hands) lasts until a member leaves.
+            let mut held_any = false;
+            let touches = !aims.is_empty();
             for (m, other, mv) in aims {
                 let Some(found) = library.iter().find(|x| x.name == mv) else {
                     refused.push((
@@ -671,6 +733,67 @@ impl Activities {
                 let Some(r) = moves.record(n) else {
                     continue;
                 };
+                held_any |= r.ends.contains(&Micros::MAX);
+                let fields = BTreeMap::from([
+                    (1, activity.to_value()),
+                    (2, m.body.to_value()),
+                    (3, as_bytes(r.to_value())),
+                ]);
+                let by = (at, Actor::Soul(m.soul), Cause::Intent(m.intent));
+                if let Err(r) =
+                    self.emit(tree, activity, audience, by, FORM_MOVE, fields, Vec::new())
+                {
+                    refused.push((m.body, r));
+                }
+            }
+            if touches && !held_any {
+                self.ending.insert(activity);
+            }
+        }
+        for activity in self.dancing() {
+            let first = *self
+                .beats
+                .entry(activity)
+                .or_insert_with(|| first_beat(line, at));
+            let l = &self.live[&activity];
+            let (kind, audience) = (&self.kinds[&l.kind], l.audience);
+            let due_now: Vec<(Member, Name)> = l
+                .node
+                .members
+                .iter()
+                .filter(|m| {
+                    l.moves
+                        .get(&m.body)
+                        .is_none_or(|n| moves.record(*n).is_none())
+                        && !self.stalled.contains(&(activity, m.body))
+                })
+                .filter_map(|m| Some((m.clone(), kind.role(&m.role)?.mv.clone()?)))
+                .collect();
+            let start = if at <= first {
+                first
+            } else {
+                on_beat(line, at)
+            };
+            for (m, mv) in due_now {
+                if let Some(l) = self.live.get_mut(&activity) {
+                    l.moves.remove(&m.body);
+                }
+                let found = library.iter().find(|x| x.name == mv);
+                let aimed = match found {
+                    Some(f) => self.aim(c, moves, due, mint, geo, m.body, f, m.body, start),
+                    None => refuse("move-unknown", mv.as_str()),
+                };
+                let n = match aimed {
+                    Ok(n) => n,
+                    Err(r) => {
+                        self.stalled.insert((activity, m.body));
+                        refused.push((m.body, r));
+                        continue;
+                    }
+                };
+                let Some(r) = moves.record(n) else {
+                    continue;
+                };
                 let fields = BTreeMap::from([
                     (1, activity.to_value()),
                     (2, m.body.to_value()),
@@ -687,12 +810,100 @@ impl Activities {
         refused
     }
 
+    /// Ends each touch whose moves have all ended (0.134 T1: a handshake, a hug, a high-five): every member leaves it,
+    /// as its own `activity:leave` would (caused by the intent that joined it, at `at`), so its role claims are let
+    /// go and both arms are free for the next act or the next touch. Returns the leaves refused, by body.
+    #[allow(clippy::too_many_arguments)]
+    pub fn finish(
+        &mut self,
+        tree: &mut Tree,
+        c: &mut Controller,
+        moves: &mut Moves,
+        due: &mut DueList,
+        mint: &mut Minter,
+        at: Micros,
+    ) -> Vec<(Id, Refusal)> {
+        let done: Vec<Id> = self
+            .ending
+            .iter()
+            .filter(|a| {
+                self.live
+                    .get(a)
+                    .is_none_or(|l| l.moves.values().all(|n| moves.record(*n).is_none()))
+            })
+            .copied()
+            .collect();
+        let mut refused = Vec::new();
+        for activity in done {
+            self.ending.remove(&activity);
+            let members = self
+                .live
+                .get(&activity)
+                .map(|l| l.node.members.clone())
+                .unwrap_or_default();
+            for m in members {
+                let ask = Ask {
+                    soul: m.soul,
+                    intent: m.intent,
+                    at,
+                };
+                if let Err(r) = self.leave(tree, c, moves, due, mint, ask, m.body, activity) {
+                    refused.push((m.body, r));
+                }
+            }
+        }
+        refused
+    }
+
+    /// Whether a touch that ends with its moves is waiting for them to end.
+    pub fn finishing(&self) -> bool {
+        !self.ending.is_empty()
+    }
+
     /// `ask.soul` takes `body` out of `activity`. Always accepted: membership ends now, in the log, and the activity
     /// ends when its last member has left. Returns when the body is let go: now, or, in a move, at the move's next
     /// phase end or the kind's `leave_within`, whichever is first ([`Activities::fire`]). A body that is not a member
     /// is let go now and nothing is written.
     #[allow(clippy::too_many_arguments)]
     pub fn leave(
+        &mut self,
+        tree: &mut Tree,
+        c: &mut Controller,
+        moves: &mut Moves,
+        due: &mut DueList,
+        mint: &mut Minter,
+        ask: Ask,
+        body: Id,
+        activity: Id,
+    ) -> R<Micros> {
+        // A hold (T2) lasts while both stay: when one leaves, the rest leave it too, so nobody is kept in a hold that
+        // is over and the next hold between them starts.
+        let holds = self.live.get(&activity).is_some_and(|l| {
+            l.node.members.iter().any(|m| m.body == body)
+                && l.moves.values().any(|n| held(moves, *n))
+        });
+        let at = self.leave_one(tree, c, moves, due, mint, ask, body, activity)?;
+        if holds {
+            let rest: Vec<Member> = self
+                .live
+                .get(&activity)
+                .map(|l| l.node.members.clone())
+                .unwrap_or_default();
+            for m in rest {
+                let theirs = Ask {
+                    soul: m.soul,
+                    intent: m.intent,
+                    at: ask.at,
+                };
+                self.leave_one(tree, c, moves, due, mint, theirs, m.body, activity)?;
+            }
+        }
+        Ok(at)
+    }
+
+    /// One member's leave ([`Activities::leave`]).
+    #[allow(clippy::too_many_arguments)]
+    fn leave_one(
         &mut self,
         tree: &mut Tree,
         c: &mut Controller,
@@ -743,7 +954,9 @@ impl Activities {
         let instance = l.moves.remove(&body);
         if l.node.members.is_empty() {
             self.live.remove(&activity);
+            self.beats.remove(&activity);
         }
+        self.stalled.remove(&(activity, body));
         if self.holding.get(&body) == Some(&activity) {
             self.holding.remove(&body);
         }
@@ -780,12 +993,12 @@ impl Activities {
         Ok(at)
     }
 
-    /// The started activity holding `body` in which a member's move holds (0.134 T2: holding hands), if any: a walk
-    /// `body` sends ends it as a leave does.
-    pub fn holding_hands(&self, moves: &Moves, body: Id) -> Option<Id> {
+    /// The started activity holding `body` that a walk `body` sends leaves, as a leave does, if any: one in which a
+    /// member's move holds (0.134 T2: holding hands), or one on the beat (T3: a dance).
+    pub fn walk_leaves(&self, moves: &Moves, body: Id) -> Option<Id> {
         let a = *self.holding.get(&body)?;
         let l = self.live.get(&a)?;
-        l.moves.values().any(|n| held(moves, *n)).then_some(a)
+        (self.kinds[&l.kind].beat || l.moves.values().any(|n| held(moves, *n))).then_some(a)
     }
 
     /// Releases every member's held move in `activity` (0.134 T2), so both hands come free, each written for viewers
@@ -908,7 +1121,8 @@ impl Activities {
         at: Micros,
     ) -> R<Instance> {
         let a = self.holding.get(&actor);
-        let same = actor != target && a.is_some() && a == self.holding.get(&target);
+        // A move at the actor's own body touches nobody (0.134 T3: a dance on the beat).
+        let same = a.is_some() && (actor == target || a == self.holding.get(&target));
         let Some(activity) = a.copied().filter(|_| same) else {
             return refuse(
                 "target-outside-activity",
