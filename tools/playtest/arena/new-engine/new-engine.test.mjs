@@ -5,7 +5,20 @@ import { test } from 'node:test';
 import { addresses, runArgs, WORLD } from './world.mjs';
 import { lastJson, pairArgs, seatEnv } from './seat.mjs';
 import { noOldServer } from './smoke.mjs';
-import { frontDoor, templateName, withRoute } from './old-page.mjs';
+import { frontDoor, genesisFor, templateName, withRoute } from './old-page.mjs';
+import { mkdtempSync, readFileSync, rmSync } from 'node:fs';
+import { tmpdir } from 'node:os';
+import { join } from 'node:path';
+
+test("a scene's own genesis, or a template with things added, is the run's own template for both sides", () => {
+  const dir = mkdtempSync(join(tmpdir(), 'genesis-'));
+  try {
+    assert.equal(genesisFor({ template: 'worlds/templates/hello-hamlet.json', dir }).templatesDir, null, 'a committed template is used as it is');
+    const g = genesisFor({ template: 'worlds/templates/hello-hamlet.json', add: [{ op: 'place', def: 'core:bench' }], dir });
+    assert.equal(g.name, 'hello-hamlet'); assert.equal(g.templatesDir, join(dir, 'templates'));
+    assert.deepEqual(JSON.parse(readFileSync(g.template, 'utf8')).batches.at(-1).ops, [{ op: 'place', def: 'core:bench' }]);
+  } finally { rmSync(dir, { recursive: true, force: true }); }
+});
 
 test('run.sh is given its port, folder and facts, and its programs are where its header says', () => {
   assert.deepEqual(runArgs({ dir: '/x/world', port: 7400, facts: '/x/g.facts.json' }), ['--port', '7400', '--dir', '/x/world', '--facts', '/x/g.facts.json']);
@@ -46,4 +59,22 @@ test("the old page: the production front door with this run's addresses, and the
   const routes = { schema: 'souls/world-routes/1', worlds: { dev: { gateway: 'http://127.0.0.1:7802', stream: '/s/w/dev/x/', canonical: true } } };
   assert.deepEqual(withRoute(routes, 'hello-hamlet').worlds['hello-hamlet'], { gateway: 'http://127.0.0.1:7802', stream: '/s/w/dev/x/', canonical: false });
   assert.equal(templateName('worlds/templates/hello-hamlet.json'), 'hello-hamlet');
+});
+
+test("a cast's and a battery's old words in the new client's, and what the stream says back", async () => {
+  const { newWords, placePathOf, mailboxSoul } = await import('./director.mjs');
+  const { placeIds, receiptsOf, kindName } = await import('./battery.mjs');
+  assert.deepEqual(newWords(['act', 'walk to the pond hall', '--wait', '100']), ['act', '?the pond hall', '--wait']);
+  assert.deepEqual(newWords(['act', 'walk:lab-presentation-hall', '--wait', '60']), ['act', '?lab-presentation-hall', '--wait']);
+  assert.deepEqual(newWords(['act', '{{prev.found[0].act}}']), ['act', '{{prev.found[0].id}}']);
+  assert.deepEqual(newWords(['say', 'Hello']), ['say', 'Hello']);
+  assert.match(newWords(['act', 'sit-ground:here']).skip, /sit-ground/);
+  assert.match(newWords(['plan', '["walk:cottage"]', '--for', '{id}']).skip, /plan/);
+  assert.equal(mailboxSoul('s_ab12-0'), 'soul-ab12-0');
+  const nodes = new Map([['b.0', { id: 'b.0', parent: 'f.45' }], ['f.45', { id: 'f.45', parent: 'h.44' }], ['h.44', { id: 'h.44', parent: 'g.1', placeName: 'lab-pond-hall' }], ['g.1', { id: 'g.1', parent: null }]]);
+  assert.deepEqual(placePathOf(nodes, 'b.0'), ['lab-pond-hall']);
+  assert.deepEqual(placeIds(['lab-pond-hall']), ['g-lab-pond-hall']);
+  assert.equal(kindName('eden:bench@1220ab'), 'core-bench');
+  const r = receiptsOf([{ at: 5, words: ['act', 't-1', '--wait'], answer: { phase: 'done', receipt: { verbs: ['dev:sit'], target: 't-1' } } }, { at: 1, words: ['act', 'x'], answer: { receipt: { verbs: ['dev:walk'] } } }], 2);
+  assert.deepEqual(r.map((x) => [x.capability, x.phase]), [['sit:t-1', 'completed']]);
 });

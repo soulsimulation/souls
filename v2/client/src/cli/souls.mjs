@@ -15,7 +15,8 @@
 //                                             owner, and returns; the pairing finishes in the background (W2)
 //   souls.mjs act <act> [<act>...]            a ranked list: the first is the act, the rest its fallbacks. An act is
 //                                             <verb>:<id> (sit:<seat id>), an id alone (walk there), or a verb; ids
-//                                             or <name>=<id> after an act are its thing arguments (C10)
+//                                             or <name>=<id> after an act are its thing arguments (C10); a walk's
+//                                             gait=walk|jog|run sets its pace (0.135 G1)
 //   souls.mjs act <act> ... --wait            the same, then returns its receipt's final phase (done, refused with the
 //                                             reason, resolved) or, after 60 s, a still-running line saying how to check
 //   souls.mjs inspect <id>                    the thing as the copy holds it and its own offers, each with its parameters
@@ -38,6 +39,8 @@
 //   souls.mjs give accept|decline <offer id>   takes an offered thing into a free hand, or declines it
 //   souls.mjs together offer <handshake|hug|high-five|hold-hands|fist-bump|harvest> <body id>   offers that body a touch; when it accepts, each
 //                                             one's move is aimed at the other (0.134 T1); hands stay held until either leaves or walks (T2)
+//   souls.mjs together offer dance <body id> [<body id> ...]   up to seven; all who accept dance on one beat (T3)
+//   souls.mjs together offer follow <body id>   once it accepts, this Soul follows its trail (0.135 G2)
 //   souls.mjs together accept|decline <offer id>   accepts the touch, or declines it and nobody moves
 //   souls.mjs lie <id>                        lies down on that bed (stand again with act <ns>:rise)
 //   souls.mjs pray "<words>"                  a prayer to the world's creator (G11); the answer comes to `wait`
@@ -351,7 +354,7 @@ export function requestOf(argv) {
   }
   if (op === 'together') {
     // 0.134 T1: together offer <touch> <body id>, or together accept|decline <offer id>.
-    if (rest[0] === 'offer') Object.assign(req, { do: 'offer', touch: rest[1], to: rest[2] });
+    if (rest[0] === 'offer') Object.assign(req, { do: 'offer', touch: rest[1], to: rest.length > 3 ? rest.slice(2) : rest[2] });
     else Object.assign(req, { do: rest[0], offer: rest[1] });
   }
   if (op === 'wait' && rest[0] !== undefined) req.seconds = Number(rest[0]);

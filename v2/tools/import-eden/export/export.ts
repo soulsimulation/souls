@@ -126,6 +126,9 @@ for (const e of m.entities.values()) {
     ...(isWorldShape ? { worldShape: true } : {}),
     ...live?.thing(e, d),
     ...(entryOf?.(ref) ? { entry: entryOf(ref) } : {}),
+    // W3 (0.135): its def's params as today's model holds them, as JSON text (the facts reader takes whole numbers only),
+    // which the tree keeps as field 19 so a page drawing from the stream alone draws it as today's page does
+    ...(e.params && Object.keys(e.params).length ? { params: JSON.stringify(e.params) } : {}),
   };
   if (isDoorDef(d as never)) {
     const v = e.state?.open ?? (d.state as Record<string, { default?: unknown } | undefined>)?.open?.default;

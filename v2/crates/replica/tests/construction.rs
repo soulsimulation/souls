@@ -20,7 +20,7 @@ fn without_roles(json: &str) -> String {
     e.to_json()
 }
 
-/// The four entries, loaded; panics on any refusal.
+/// The construction entries (the rack's four parts and the carry), loaded with their `roles` set aside; panics on any refusal.
 fn loaded() -> Kinds {
     let mut files: Vec<(String, String)> = std::fs::read_dir(folder())
         .unwrap()

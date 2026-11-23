@@ -184,3 +184,14 @@ test('K2: a walk to a seat and the sit in one part is drawn seated, not standing
   assert.equal(on(b, 2).state.seatHeight, 0.45);
   assert.equal(on(b, 4).activity, 'sit', 'and while it stays');
 });
+
+test('V5: a state that lists a seated body before its chair (a history bundle\'s) draws it seated, not nowhere', () => {
+  const b = new V2Bridge({ rulesVersion: 'test/1' });
+  // as history.ts replays a bundle: its whole state in one part, the body ahead of the chair it sits in, no motion
+  b.receive(part(0, [{ ...body, parent: 'w.3', slot: 0, pos: [0, 0, 0] }, world, chair]));
+  for (let n = 1; n < 10; n++) b.receive(part(n));
+  assert.equal(b.view.unplaced, 0, 'its frame was found');
+  const seated = on(b, 1);
+  assert.equal(seated?.activity, 'sit');
+  assert.deepEqual(seated.p.map((x) => +x.toFixed(3)), [2, 0, 0]);
+});

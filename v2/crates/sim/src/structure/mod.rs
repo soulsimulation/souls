@@ -48,6 +48,10 @@ pub const ONE_LEVEL_MOST_MM: i64 = 2_896;
 const UP_MOST: usize = 3;
 /// An activity's state when started (`replica::activity::State`).
 const STARTED: u64 = 2;
+/// A crew's field (0.135 A2): the holders its hold still counts for after its last holder left the world and setting
+/// its part down would have left another hanging. The hold is kept until another crew holds the part; 0 or absent is
+/// none.
+pub const F_KEPT: u64 = 5;
 
 type R<T> = Result<T, Refusal>;
 
@@ -91,6 +95,8 @@ struct Bay {
     joints: BTreeMap<Id, (Id, Id)>,
     /// activity → (the part it holds, started, membership links)
     acts: BTreeMap<Id, (Id, bool, BTreeSet<Id>)>,
+    /// activity → the holders its kept hold stands for ([`F_KEPT`]).
+    kept: BTreeMap<Id, u64>,
 }
 
 fn uint(v: Option<&Value>) -> Option<u64> {
@@ -416,6 +422,8 @@ impl Structure {
                 let Some(n) = tree.node(a) else { continue };
                 if let Some((started, members)) = Self::act(tree, n.id()) {
                     b.acts.insert(n.id(), (p, started, members));
+                    b.kept
+                        .insert(n.id(), uint(n.fields().get(&F_KEPT)).unwrap_or(0));
                 }
             }
         }
@@ -551,6 +559,18 @@ impl Structure {
                 {
                     // An activity comes to a part (B19: a carry becomes a hold), with its members.
                     b.acts.insert(*node, (pose.frame.node, a.0, a.1));
+                    let kept = tree
+                        .handle(*node)
+                        .and_then(|h| tree.node(h))
+                        .and_then(|n| uint(n.fields().get(&F_KEPT)));
+                    b.kept.insert(*node, kept.unwrap_or(0));
+                }
+            }
+            Change::Set {
+                node, field, to, ..
+            } if *field == F_KEPT => {
+                if b.acts.contains_key(node) {
+                    b.kept.insert(*node, uint(Some(to)).unwrap_or(0));
                 }
             }
             Change::Set {
@@ -604,9 +624,9 @@ impl Bay {
 
     fn holders(&self, part: Id) -> usize {
         self.acts
-            .values()
-            .filter(|a| a.0 == part && a.1)
-            .map(|a| a.2.len())
+            .iter()
+            .filter(|(_, a)| a.0 == part && a.1)
+            .map(|(id, a)| a.2.len() + self.kept.get(id).copied().unwrap_or(0) as usize)
             .sum()
     }
 

@@ -42,7 +42,7 @@ use replica::ids::{Id, Minter, Scope};
 use replica::moves::{Effector, Move};
 use replica::pose::Vec3;
 use replica::rules::json::Value as Json;
-use replica::time::Micros;
+use replica::time::{Mapping, Micros, Tempo, TickRate, Timeline};
 use replica::tree::{Rules, Tree};
 use replica::world_model::plain;
 use replica::world_model::show;
@@ -141,6 +141,8 @@ pub struct Engine {
     steered: BTreeSet<Id>,
     /// The moves an activity's roles may name (0.134 T1): content's, [`crate::moves::library`].
     library: Vec<Move>,
+    /// The world's clock, whose beats a dance's moves start on (0.134 T3): the world's own ([`Engine::with_beats`]).
+    line: Timeline,
     /// The loads the world's entries state, by plain kind (0.135 C2, [`Engine::with_loads`]).
     loads: BTreeMap<String, Load>,
     /// The crews' seating, when the world's kinds join parts (0.135 A2, [`Engine::with_structure`]).
@@ -322,16 +324,28 @@ impl Engine {
             mint: Minter::new(scope),
             out: Vec::new(),
             steered: BTreeSet::new(),
-            loads: BTreeMap::new(),
             asm: None,
             taking: BTreeMap::new(),
             joining: None,
-            riding: Vec::new(),
             library: crate::moves::library().unwrap_or_else(|r| {
                 eprintln!("worldd: no moves for activities: {r}");
                 Vec::new()
             }),
+            line: Timeline::start(
+                Mapping::new(0, 0, 1, 1).expect("rate one"),
+                TickRate::new(0, 0, 20).expect("20 a second"),
+                Tempo::per_minute(0, 0, 120).expect("120 a minute"),
+            )
+            .expect("a line from zero"),
+            loads: BTreeMap::new(),
+            riding: Vec::new(),
         }
+    }
+
+    /// The engine on the world's own clock `line`, whose beats a dance's moves start on (0.134 T3).
+    pub fn with_beats(mut self, line: Timeline) -> Engine {
+        self.line = line;
+        self
     }
 
     /// The roles' moves of the activities just started, aimed by each member at the other (0.134 T1). A refused one
@@ -350,6 +364,7 @@ impl Engine {
             &mut self.mint,
             &self.library,
             &feet,
+            &self.line,
             now,
         ) {
             eprintln!("worldd: {}'s move was not aimed: {r}", show(body));
@@ -490,8 +505,9 @@ impl Engine {
             }
             Verb::Accept => {
                 let offer = target("accept-needs-an-offer")?;
-                // 0.134 T1: a touch starts only where its moves reach; nothing walks the two to their places yet.
-                if let Some((kind, asker)) = e.offered(offer) {
+                // 0.134 T1: a touch starts only where its moves reach; then the two take their places (0.135 G3).
+                // A dance (T3) touches nobody: its moves are at each member's own body.
+                if let Some((kind, asker)) = e.offered(offer).filter(|(k, _)| !k.beat) {
                     let feet = Feet::of(c, [asker, a.body]);
                     for mv in kind.roles.iter().filter_map(|r| r.mv.as_ref()) {
                         let Some(m) = self.library.iter().find(|m| m.name == *mv) else {
@@ -817,6 +833,17 @@ impl Engine {
                 }
             }
         }
+        // A crew started on a part ends the kept holds on it (0.135 A2).
+        if a.verb == Verb::Accept
+            && let Some(t) = a.target
+            && self.activities.started(t)
+            && let Some(part) = tree
+                .handle(t)
+                .and_then(|h| tree.node(h))
+                .and_then(|n| n.parent())
+        {
+            self.unkeep(&mut tree, part, t, ask)?;
+        }
         self.begin_moves(&mut tree, c, now);
         self.collect(Some((a.id, a.soul)));
         Ok(())
@@ -879,6 +906,17 @@ impl Engine {
             self.begin_moves(tr, c, now);
         }
         let _ = self.activities.settle(c, &self.moves, &mut self.due);
+        // A handshake, a hug or a high-five whose moves have ended ends: both arms free (0.134 T1).
+        if self.activities.finishing() {
+            let tr = tree.get_or_insert_with(|| live.frozen());
+            self.activities.next = tr.next();
+            for (body, r) in
+                self.activities
+                    .finish(tr, c, &mut self.moves, &mut self.due, &mut self.mint, now)
+            {
+                eprintln!("worldd: {} did not leave its touch: {r}", show(body));
+            }
+        }
         // 0.135 C3: loads found riding at a restart are set down where their carry last had them.
         for (activity, load) in std::mem::take(&mut self.riding) {
             let tr = tree.get_or_insert_with(|| live.frozen());
@@ -1150,121 +1188,33 @@ impl Engine {
                 body,
                 activity,
             );
-            // The last holder of a part B18 would leave hanging: the part is laid down beside its bay as its retire's
-            // first step, or, with no room there, set down where it stands (C3), and named in the retire's entries;
-            // then it leaves. B18 is never broken by a Soul going.
+            // The last holder of a part B18 would leave hanging: the part is set down as its retire's first step
+            // (laid beside its bay, or where it stands), each part that hangs by it laid down before it, all checked by
+            // B18 together; when that cannot be done whole, the structure is kept as it stands, its hold left for
+            // another crew to take over. Named in the retire's entries; B18 is never broken by a Soul going.
             if left.as_ref().is_err_and(|r| r.name == "support.none")
                 && let Some(part) = tree
                     .handle(activity)
                     .and_then(|h| tree.node(h))
                     .and_then(|n| n.parent())
             {
-                let audience = tree
-                    .handle(activity)
-                    .and_then(|h| tree.node(h))
-                    .map(|n| n.audience());
-                let laid = self.lay_place(&tree, c, body, part);
-                if let (Some(audience), Some(ground)) =
-                    (audience, stands(c, body).ok().map(|s| s.0))
-                {
-                    let mut carry = Carry::new(
-                        activity,
-                        part,
-                        ground,
-                        audience,
-                        self.header.clone(),
-                        self.rules.clone(),
-                    );
-                    let (here, why) = match laid {
-                        Ok((_, place, yaw, load)) => {
-                            carry.load = load;
-                            carry.track.push((now, place, yaw));
-                            (None, "souls:holder-left")
-                        }
-                        Err(_) => {
-                            // Where it stands: laid flat there as its entry lays it when that is clear, else left
-                            // standing as it is, on the ground with no offset.
-                            let entry = tree
-                                .handle(part)
-                                .and_then(|h| tree.node(h))
-                                .and_then(|n| self.loads.get(plain(n.kind().as_str())).copied())
-                                .unwrap_or_else(Load::board);
-                            let stand = tree
-                                .handle(part)
-                                .zip(tree.handle(ground))
-                                .and_then(|(p, g)| sim::ground::scene::xform_to(&tree, p, g).ok());
-                            match stand {
-                                Some(st) => {
-                                    let ax = st
-                                        .rot
-                                        .rotate(Vec3::new(1_000_000, 0, 0))
-                                        .map_or([1_000_000, 0], |v| [v.x, v.z]);
-                                    let yaw = sim::activity::carry::yaw_toward(ax)
-                                        .unwrap_or(replica::pose::Quat::IDENTITY);
-                                    let a = [
-                                        (i128::from(ax[0]) * i128::from(entry.half_length)
-                                            / 1_000_000)
-                                            as i64,
-                                        (i128::from(ax[1]) * i128::from(entry.half_length)
-                                            / 1_000_000)
-                                            as i64,
-                                    ];
-                                    let flat = sim::activity::carry::outline(
-                                        [st.pos.x + a[0], st.pos.z + a[1]],
-                                        [st.pos.x - a[0], st.pos.z - a[1]],
-                                        &entry,
-                                    );
-                                    let over =
-                                        Vec3::new(st.pos.x, sim::activity::carry::HEIGHT, st.pos.z);
-                                    if self.room_at(&tree, c, ground, part, &flat, body) {
-                                        carry.load = entry;
-                                        carry.track.push((now, over, yaw));
-                                        (None, "souls:holder-left-flat")
-                                    } else {
-                                        carry.load = Load {
-                                            turn: st.rot,
-                                            middle: Vec3::ZERO,
-                                            rest: 0,
-                                            ..entry
-                                        };
-                                        carry.track.push((
-                                            now,
-                                            over,
-                                            replica::pose::Quat::IDENTITY,
-                                        ));
-                                        (None, "souls:holder-left-standing")
-                                    }
-                                }
-                                None => (None, "souls:holder-left-in-place"),
-                            }
-                        }
-                    };
-                    match break_off(
-                        &mut carry,
-                        &mut self.activities,
-                        &mut self.mint,
-                        &mut tree,
-                        now,
-                        here,
-                        why,
-                        Some((intent, soul)),
-                    ) {
-                        Ok(()) => {
-                            self.activities.next = tree.next();
-                            left = self.activities.leave(
-                                &mut tree,
-                                c,
-                                &mut self.moves,
-                                &mut self.due,
-                                &mut self.mint,
-                                ask,
-                                body,
-                                activity,
-                            );
-                        }
-                        Err(r) => {
-                            eprintln!("worldd: a retiring holder's part was not set down: {r}")
-                        }
+                match self.holder_left(&mut tree, c, body, activity, part, now, (intent, soul)) {
+                    Ok(true) => {
+                        self.activities.next = tree.next();
+                        left = self.activities.leave(
+                            &mut tree,
+                            c,
+                            &mut self.moves,
+                            &mut self.due,
+                            &mut self.mint,
+                            ask,
+                            body,
+                            activity,
+                        );
+                    }
+                    Ok(false) => continue,
+                    Err(r) => {
+                        eprintln!("worldd: a retiring holder's part was not set down: {r}")
                     }
                 }
             }
@@ -1292,6 +1242,320 @@ impl Engine {
             .collect()
     }
 
+    /// The last holder `body` of crew `activity` leaves the world while it holds `part` in its bay (0.135 A2), for
+    /// `by` (intent, Soul) at `now`. Each part joined to `part` in the bay (it would hang by it) is laid down first as a
+    /// lone holder's lay-down lays a part ([`Engine::lay_place`], with no reach), then `part` itself
+    /// ([`Engine::holder_rest`]); B18 judges all of it together against the tree as it was. Written to `tree` and the
+    /// activities' entries when it holds: `true`. When a part has no room, or B18 refuses, nothing moves: the
+    /// structure is kept as it stands with its hold (`souls:holder-left-structure-kept`), `false`.
+    #[allow(clippy::too_many_arguments)]
+    fn holder_left(
+        &mut self,
+        tree: &mut Tree,
+        c: &Controller,
+        body: Id,
+        activity: Id,
+        part: Id,
+        now: Micros,
+        by: (Id, Id),
+    ) -> R<bool> {
+        let audience =
+            |t: &Tree, id: Id| t.handle(id).and_then(|h| t.node(h)).map(|n| n.audience());
+        let ground = stands(c, body)?.0;
+        let crew_audience =
+            audience(tree, activity).ok_or_else(|| refusal("activity-missing", show(activity)))?;
+        let mut scratch = tree.frozen();
+        let mut laid: Vec<Effect> = Vec::new();
+        let mut room = true;
+        for hanging in self.joined_in_bay(tree, part) {
+            let skip = self.joined_in_bay(&scratch, hanging);
+            let Some(a) = audience(&scratch, hanging) else {
+                room = false;
+                break;
+            };
+            let Ok((_, place, yaw, load)) =
+                self.lay_place(&scratch, c, body, hanging, false, &skip)
+            else {
+                room = false;
+                break;
+            };
+            let mut carry = Carry::new(
+                hanging,
+                hanging,
+                ground,
+                a,
+                self.header.clone(),
+                self.rules.clone(),
+            );
+            // Its joints undone, each by the node that owns the link, then the part laid down.
+            let unlinks = self.joints_of(&scratch, hanging, a);
+            if !unlinks.is_empty() {
+                carry.log.next = scratch.next();
+                carry.log.write(&mut scratch, now, unlinks)?;
+            }
+            carry.load = load;
+            carry.track.push((now, place, yaw));
+            let transfer = self
+                .mint
+                .mint()
+                .map_err(|e| refusal("id-counter-exhausted", e.to_string()))?;
+            carry.set_down_here(&mut scratch, now, ground, None, transfer)?;
+            laid.extend(carry.log.parts.drain(..).flatten());
+        }
+        let rest = match room {
+            true => self.holder_rest(&scratch, c, body, part, ground),
+            false => None,
+        };
+        let (header, rules) = (self.header.clone(), self.rules.clone());
+        let held = |load: Load, place: Vec3, yaw: replica::pose::Quat| {
+            let mut carry = Carry::new(
+                activity,
+                part,
+                ground,
+                crew_audience,
+                header.clone(),
+                rules.clone(),
+            );
+            carry.load = load;
+            carry.track.push((now, place, yaw));
+            carry
+        };
+        // B18 on the whole set-down, as the tree was.
+        let whole = match (&rest, self.asm.as_ref()) {
+            (None, _) => false,
+            (Some(_), None) => true,
+            (Some((load, place, yaw, _)), Some(asm)) => {
+                let mut probe = held(*load, *place, *yaw);
+                let mut t = scratch.frozen();
+                let transfer = self
+                    .mint
+                    .mint()
+                    .map_err(|e| refusal("id-counter-exhausted", e.to_string()))?;
+                probe.set_down_here(&mut t, now, ground, None, transfer)?;
+                let mut all = laid.clone();
+                all.extend(probe.log.parts.drain(..).flatten());
+                asm.structure().check(tree, &all).is_ok()
+            }
+        };
+        let act = (now, Actor::Soul(by.1), Cause::Intent(by.0));
+        let Some((load, place, yaw, why)) = rest.filter(|_| whole) else {
+            // The hold keeps counting, for B18, the holders it has now, once its holder's body (and so its membership
+            // link) is gone: the bay stays as B18 had it until another crew holds the part ([`Engine::unkeep`]).
+            let holding = tree
+                .handle(activity)
+                .and_then(|h| tree.links_of(h))
+                .unwrap_or(&[])
+                .iter()
+                .filter(|e| tree.ty(e).as_str() == replica::activity::MEMBER)
+                .count()
+                .max(1) as u64;
+            self.mark(tree, now, activity, crew_audience, holding)?;
+            self.activities.next = tree.next();
+            self.activities.hold_kept(
+                tree,
+                activity,
+                part,
+                "souls:holder-left-structure-kept",
+                act,
+            )?;
+            return Ok(false);
+        };
+        self.activities.stream.extend(laid);
+        *tree = scratch;
+        let mut carry = held(load, place, yaw);
+        break_off(
+            &mut carry,
+            &mut self.activities,
+            &mut self.mint,
+            tree,
+            now,
+            None,
+            why,
+            Some(by),
+        )?;
+        Ok(true)
+    }
+
+    /// Sets crew `activity`'s kept holders ([`sim::structure::F_KEPT`]) to `holding` on `tree`, its entry added to the
+    /// activities' entries.
+    fn mark(
+        &mut self,
+        tree: &mut Tree,
+        now: Micros,
+        activity: Id,
+        audience: replica::world_model::Audience,
+        holding: u64,
+    ) -> R<()> {
+        use replica::effects::{Body, Change, ChangeRec, Rest};
+        let mut log =
+            sim::slots::hands::Log::new(self.header.clone(), self.rules.clone(), tree.next());
+        let set = Change::Set {
+            node: activity,
+            field: sim::structure::F_KEPT,
+            to: Value::Uint(holding),
+            by: None,
+        };
+        log.write(
+            tree,
+            now,
+            vec![(
+                activity,
+                audience,
+                Body::Changes(vec![ChangeRec {
+                    change: set,
+                    rest: Rest::new(),
+                }]),
+            )],
+        )?;
+        self.activities.stream.extend(log.parts.drain(..).flatten());
+        self.activities.next = tree.next();
+        Ok(())
+    }
+
+    /// Another crew, `activity`, holds `part` now, or has taken or unseated it (0.135 A2): every kept hold on it (its
+    /// last holder gone, [`Engine::holder_left`]) ends, its node removed and forgotten, for `ask`.
+    fn unkeep(&mut self, tree: &mut Tree, part: Id, activity: Id, ask: Ask) -> R<()> {
+        let kept: Vec<Id> = tree
+            .handle(part)
+            .and_then(|h| tree.children(h))
+            .unwrap_or(&[])
+            .iter()
+            .filter_map(|h| tree.node(*h))
+            .filter(|n| n.id() != activity)
+            .filter(|n| {
+                matches!(n.fields().get(&sim::structure::F_KEPT), Some(Value::Uint(k)) if *k > 0)
+            })
+            .map(|n| n.id())
+            .collect();
+        for k in kept {
+            self.activities.next = tree.next();
+            self.activities.forget(tree, k, ask)?;
+            if let Some(s) = self.asm.as_mut() {
+                s.ended(k);
+            }
+        }
+        Ok(())
+    }
+
+    /// The parts of `part`'s bay joined to it (B18's joints): each would hang by it.
+    fn joined_in_bay(&self, tree: &Tree, part: Id) -> Vec<Id> {
+        let Some(s) = self.asm.as_ref().map(|a| a.structure()) else {
+            return Vec::new();
+        };
+        let node = |id: Id| tree.handle(id).and_then(|h| tree.node(h));
+        let Some(ph) = tree.handle(part) else {
+            return Vec::new();
+        };
+        let bay = node(part).and_then(|n| n.parent());
+        let mut out = Vec::new();
+        for e in tree.links_of(ph).unwrap_or(&[]) {
+            if !s.joint(tree.ty(e).as_str()) {
+                continue;
+            }
+            let Some((_, ends, _, _)) = tree.link(e.link) else {
+                continue;
+            };
+            let other = if ends[0] == part { ends[1] } else { ends[0] };
+            let in_bay =
+                node(other).is_some_and(|n| s.is_part(n.kind().as_str()) && n.parent() == bay);
+            if in_bay && !out.contains(&other) {
+                out.push(other);
+            }
+        }
+        out
+    }
+
+    /// The entries undoing `part`'s joints, each written by the node that owns the link (as an unseat undoes them).
+    fn joints_of(
+        &self,
+        tree: &Tree,
+        part: Id,
+        audience: replica::world_model::Audience,
+    ) -> Vec<sim::slots::hands::Entry> {
+        use replica::effects::{Body, Change, ChangeRec, Rest};
+        let Some(s) = self.asm.as_ref().map(|a| a.structure()) else {
+            return Vec::new();
+        };
+        let Some(ph) = tree.handle(part) else {
+            return Vec::new();
+        };
+        tree.links_of(ph)
+            .unwrap_or(&[])
+            .iter()
+            .filter(|e| s.joint(tree.ty(e).as_str()))
+            .filter_map(|e| {
+                let (_, ends, owner, _) = tree.link(e.link)?;
+                let by = ends[usize::from(owner == replica::world_model::End::Second)];
+                Some((
+                    by,
+                    audience,
+                    Body::Changes(vec![ChangeRec {
+                        change: Change::Unlink { link: e.link },
+                        rest: Rest::new(),
+                    }]),
+                ))
+            })
+            .collect()
+    }
+
+    /// Where a retiring last holder `body` sets its seated `part` down on `ground` (0.135 A2): laid beside its bay
+    /// when it is within reach and a side is free ([`Engine::lay_place`], `souls:holder-left`); else laid flat where
+    /// it stands, as its entry lays it, when that resting outline is clear (`souls:holder-left-flat`); else left
+    /// standing as it is (`souls:holder-left-standing`). Either of the last two rests on the part's own base, the
+    /// ground under it (raised or sloped terrain included). Its load, the middle of its resting place at carrying
+    /// height (C3's set-down takes it down from there), its turn, and why; `None` when it has no place on `ground`.
+    fn holder_rest(
+        &self,
+        tree: &Tree,
+        c: &Controller,
+        body: Id,
+        part: Id,
+        ground: Id,
+    ) -> Option<(Load, Vec3, replica::pose::Quat, &'static str)> {
+        if let Ok((_, place, yaw, load)) = self.lay_place(tree, c, body, part, true, &[]) {
+            return Some((load, place, yaw, "souls:holder-left"));
+        }
+        let entry = tree
+            .handle(part)
+            .and_then(|h| tree.node(h))
+            .and_then(|n| self.loads.get(plain(n.kind().as_str())).copied())
+            .unwrap_or_else(Load::board);
+        let st = tree
+            .handle(part)
+            .zip(tree.handle(ground))
+            .and_then(|(p, g)| sim::ground::scene::xform_to(tree, p, g).ok())?;
+        let ax = st
+            .rot
+            .rotate(Vec3::new(1_000_000, 0, 0))
+            .map_or([1_000_000, 0], |v| [v.x, v.z]);
+        let yaw = sim::activity::carry::yaw_toward(ax).unwrap_or(replica::pose::Quat::IDENTITY);
+        let a = [
+            (i128::from(ax[0]) * i128::from(entry.half_length) / 1_000_000) as i64,
+            (i128::from(ax[1]) * i128::from(entry.half_length) / 1_000_000) as i64,
+        ];
+        let flat = sim::activity::carry::outline(
+            [st.pos.x + a[0], st.pos.z + a[1]],
+            [st.pos.x - a[0], st.pos.z - a[1]],
+            &entry,
+        );
+        let over = Vec3::new(st.pos.x, st.pos.y + sim::activity::carry::HEIGHT, st.pos.z);
+        if self.room_at(tree, c, ground, part, &flat, body) {
+            return Some((entry, over, yaw, "souls:holder-left-flat"));
+        }
+        let standing = Load {
+            turn: st.rot,
+            middle: Vec3::ZERO,
+            rest: 0,
+            ..entry
+        };
+        Some((
+            standing,
+            over,
+            replica::pose::Quat::IDENTITY,
+            "souls:holder-left-standing",
+        ))
+    }
+
     /// Where a lone holder `holder` lays its seated `part` down beside its bay (0.135 A2): its ground, the middle of
     /// its resting place at carrying height (C3's set-down takes it down from there), its turn, and its load. The holder
     /// must be within reach of it. The sides of the part in its bay's frame are tried out of the bay first, then the
@@ -1300,12 +1564,15 @@ impl Engine {
     /// hull, as C4's route check sweeps a lift) is clear of fixed geometry (`carry::Fixed`), of every other part the
     /// joined-part rule reads at any height, and of every body but its holder's, and its resting outline of its holder
     /// too; else `laydown.no-room`.
+    #[allow(clippy::too_many_arguments)]
     fn lay_place(
         &self,
         tree: &Tree,
         c: &Controller,
         holder: Id,
         part: Id,
+        reach: bool,
+        skip: &[Id],
     ) -> R<(Id, Vec3, replica::pose::Quat, Load)> {
         use sim::activity::carry::{Fixed, Quad, outline, overlap};
         let node = |id: Id| tree.handle(id).and_then(|h| tree.node(h));
@@ -1321,7 +1588,7 @@ impl Engine {
             _ => return Err(refusal("part-missing", show(part))),
         };
         let x = sim::ground::scene::xform_to(tree, ph, gh).map_err(|e| refusal("part-pose", e))?;
-        if apart(at, x.pos) > crate::assembly::GRASP {
+        if reach && apart(at, x.pos) > crate::assembly::GRASP {
             return Err(refusal("part.out-of-reach", show(part)));
         }
         let fixed = Fixed::of(tree, ground).map_err(|e| refusal("laydown.geometry", e))?;
@@ -1332,7 +1599,7 @@ impl Engine {
         while let Some(h) = stack.pop() {
             stack.extend(tree.children(h).unwrap_or(&[]).iter().copied());
             let Some(n) = tree.node(h) else { continue };
-            if n.id() == part || !is_part(n.kind().as_str()) {
+            if n.id() == part || skip.contains(&n.id()) || !is_part(n.kind().as_str()) {
                 continue;
             }
             let Ok(o) = sim::ground::scene::xform_to(tree, h, gh) else {
@@ -1405,12 +1672,16 @@ impl Engine {
         .collect();
         sides.retain(|d| dot(d, outward) >= 0);
         sides.sort_by_key(|d| (dot(d, outward) <= 0, -dot(d, to_holder)));
-        // Its own fixed outlines: those lying wholly within its plan footprint where it stands.
-        let hw = load.half_width + 10_000;
-        let own_box = [x.pos.x - hw, x.pos.z - hw, x.pos.x + hw, x.pos.z + hw];
+        // Its own fixed outlines, and those of the parts it is joined to (`skip`, which it slides off): those lying
+        // wholly within one of their plan footprints where they stand.
+        let boxes: Vec<[i64; 4]> = std::iter::once(part)
+            .chain(skip.iter().copied())
+            .filter_map(|id| self.plan_box(tree, id, gh))
+            .collect();
         let mine = |q: &Quad| {
-            q.iter().all(|p| {
-                p[0] >= own_box[0] && p[0] <= own_box[2] && p[1] >= own_box[1] && p[1] <= own_box[3]
+            boxes.iter().any(|b| {
+                q.iter()
+                    .all(|p| p[0] >= b[0] && p[0] <= b[2] && p[1] >= b[1] && p[1] <= b[3])
             })
         };
         let scaled = |d: [i64; 2], by: i64| {
@@ -1466,13 +1737,44 @@ impl Engine {
         let Some((c0, along)) = free else {
             return Err(refusal("laydown.no-room", show(part)));
         };
-        let place = Vec3::new(c0[0], sim::activity::carry::HEIGHT, c0[1]);
+        // At the ground's height where it rests (raised or sloped terrain), as C4's set-down rests a load at its
+        // carriers' feet; read near its bay's base (its own, out of a bay), never near a far-off holder's feet.
+        let base = sim::ground::scene::Terrain::within(
+            tree,
+            ground,
+            [c0[0] - 1, c0[1] - 1, c0[0] + 1, c0[1] + 1],
+        )
+        .ok()
+        .flatten();
+        let floor = sim::ground::scene::Terrain::ground(base.as_ref(), c0[0], c0[1], bay_at.y);
+        let place = Vec3::new(c0[0], floor + sim::activity::carry::HEIGHT, c0[1]);
         Ok((
             ground,
             place,
             sim::activity::carry::yaw_toward(along)?,
             load,
         ))
+    }
+
+    /// The plan box of part `id` where it stands, in the frame of ground `gh` (µm): its long axis's ends (its kind's
+    /// load, C4) widened by its half width and 10 mm.
+    fn plan_box(&self, tree: &Tree, id: Id, gh: replica::tree::Handle) -> Option<[i64; 4]> {
+        let h = tree.handle(id)?;
+        let l = self
+            .loads
+            .get(plain(tree.node(h)?.kind().as_str()))
+            .copied()
+            .unwrap_or_else(Load::board);
+        let x = sim::ground::scene::xform_to(tree, h, gh).ok()?;
+        let a = x.point(l.middle.plus(l.long).ok()?).ok()?;
+        let b = x.point(l.middle.minus(l.long).ok()?).ok()?;
+        let w = l.half_width + 10_000;
+        Some([
+            a.x.min(b.x) - w,
+            a.z.min(b.z) - w,
+            a.x.max(b.x) + w,
+            a.z.max(b.z) + w,
+        ])
     }
 
     /// Whether `quad` (a resting outline on `ground`, µm) is clear of fixed geometry (`part`'s own outlines aside), of
@@ -1592,7 +1894,7 @@ impl Engine {
         let audience = node(activity)
             .map(|n| n.audience())
             .ok_or_else(|| refusal("activity-missing", show(activity)))?;
-        let (ground, place, yaw, load) = self.lay_place(tree, c, holder, part)?;
+        let (ground, place, yaw, load) = self.lay_place(tree, c, holder, part, true, &[])?;
         let mut carry = Carry::new(
             activity,
             part,
@@ -1672,14 +1974,33 @@ impl Engine {
             self.stop_refused(&mut tree, now);
             return;
         }
-        let (Some(asm), Some((ground, at, turn, span))) = (self.asm.as_mut(), taking) else {
+        let Some((ground, at, turn, span)) = taking else {
             return;
         };
-        let part = asm.held.get(&r.activity).copied();
+        let part = self
+            .asm
+            .as_ref()
+            .and_then(|a| a.held.get(&r.activity).copied());
         let audience = live
             .handle(r.activity)
             .and_then(|h| live.node(h))
             .map(|n| n.audience());
+        // A take or an unseat committed ends the kept holds on the part (0.135 A2): they rode out with it.
+        if written && let Some(p) = part {
+            let mut tree = live.frozen();
+            let ask = Ask {
+                soul: r.soul,
+                intent: r.intent,
+                at: now,
+            };
+            match self.unkeep(&mut tree, p, r.activity, ask) {
+                Ok(()) => self.collect(Some((r.intent, r.soul))),
+                Err(e) => eprintln!("worldd: a kept hold did not end at a take: {e}"),
+            }
+        }
+        let Some(asm) = self.asm.as_mut() else {
+            return;
+        };
         match (written, part, audience) {
             (true, Some(part), Some(audience)) => {
                 let mut carry = Carry::new(
@@ -1702,10 +2023,51 @@ impl Engine {
         }
     }
 
-    /// A move `body` started for `intent` (a walk, a sit) at `now` (0.134 T2): if `body` holds hands, it leaves that
-    /// activity as `activity:leave` does, and both hands come free. Its entries wait in [`Engine::out`].
+    /// The follow `activity` is over (0.135 G2: its follower's order ended): its follower leaves it, as
+    /// `activity:leave` does, caused by the intent that joined, and so the leader too. Its entries wait in
+    /// [`Engine::out`].
+    pub fn end_follow(&mut self, live: &Tree, c: &mut Controller, activity: Id, now: Micros) {
+        let Some((_, _, follower, _)) = self
+            .activities
+            .following()
+            .into_iter()
+            .find(|f| f.0 == activity)
+        else {
+            return;
+        };
+        let Some(m) = self
+            .activities
+            .members(activity)
+            .and_then(|ms| ms.iter().find(|m| m.body == follower).cloned())
+        else {
+            return;
+        };
+        let mut tree = live.frozen();
+        self.activities.next = tree.next();
+        let ask = Ask {
+            soul: m.soul,
+            intent: m.intent,
+            at: now,
+        };
+        if let Err(r) = self.activities.leave(
+            &mut tree,
+            c,
+            &mut self.moves,
+            &mut self.due,
+            &mut self.mint,
+            ask,
+            follower,
+            activity,
+        ) {
+            eprintln!("worldd: {}'s follow did not end: {r}", show(follower));
+        }
+        self.collect(None);
+    }
+
+    /// A move `body` started for `intent` (a walk, a sit) at `now` (0.134 T2): if `body` holds hands, or dances on the
+    /// beat (T3), it leaves that activity as `activity:leave` does, and both hands come free. Its entries wait in [`Engine::out`].
     pub fn walked(&mut self, live: &Tree, c: &mut Controller, body: Id, intent: Id, now: Micros) {
-        let Some(activity) = self.activities.holding_hands(&self.moves, body) else {
+        let Some(activity) = self.activities.walk_leaves(&self.moves, body) else {
             return;
         };
         let Some(soul) = self
@@ -1736,6 +2098,38 @@ impl Engine {
             eprintln!("worldd: {}'s walk did not let go: {r}", show(body));
         }
         self.collect(Some((intent, soul)));
+    }
+
+    /// The places still to take (0.135 G3, `sim::activity::places`), each activity's frame set from where its members
+    /// stand in `c`, on their node (`sim::index::place_of`): `(activity, body, Soul, node, point, facing)`.
+    pub fn pending_places(
+        &mut self,
+        c: &Controller,
+    ) -> Vec<(Id, Id, Id, Id, Vec3, replica::pose::Quat)> {
+        self.activities.pending_places(|b| {
+            c.body(b)
+                .map(|m| (sim::index::place_of(m).0, m.pose.position))
+        })
+    }
+
+    /// Members that have taken their places (0.135 G3), by (activity, body): an activity's moves begin once all
+    /// have, at `now` on a copy of `live`. Its entries wait in [`Engine::out`].
+    pub fn placed(&mut self, live: &Tree, c: &mut Controller, done: &[(Id, Id)], now: Micros) {
+        if done.is_empty() {
+            return;
+        }
+        for &(a, b) in done {
+            self.activities.placed(a, b);
+        }
+        let mut tree = live.frozen();
+        self.activities.next = tree.next();
+        self.begin_moves(&mut tree, c, now);
+        self.collect(None);
+    }
+
+    /// Every follow running (0.135 G2): its activity, the leader's body, and the follower's body and Soul.
+    pub fn following(&self) -> Vec<(Id, Id, Id, Id)> {
+        self.activities.following()
     }
 
     /// The entries written since the last call, in order, to be numbered and applied.

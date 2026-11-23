@@ -3,7 +3,7 @@
 //! two roles each name content's `handshake` move (B2's, `content/moves/handshake.json`).
 //!
 //! - An accepted handshake writes both members' moves for viewers (`souls:form-move`), each aimed at the other, with
-//!   their contact times within 50 ms of each other; when the moves are done both leave.
+//!   their contact times within 50 ms of each other; when the moves are done the handshake ends, both leaving it.
 //! - A declined offer, and one left to lapse, move nobody. An accept from 2.6 m away is refused `together.too-far`
 //!   (nothing walks a member to its place yet) and leaves the offer open.
 //!
@@ -37,8 +37,8 @@ use replica::world_model::{Audience, Kind};
 use sim::links::Doors;
 use sim::log::{Mem, recover};
 use sim::walk::town::Town;
-use worldd::answers::{self, Config};
-use worldd::bodies::Bodies;
+use worldd::answers::{self, BODIES, Config};
+use worldd::bodies::{Bodies, read_row};
 use worldd::checkers::Rules;
 
 const LINEAGE: Scope = Scope([0x71; 16]);
@@ -49,6 +49,64 @@ const HANDSHAKE: &str = "test:handshake";
 const BRIEF: &str = "test:brief_handshake";
 /// Holding hands (0.134 T2): each role names content's `hold_hand`, whose last phase holds until released.
 const HOLD: &str = "test:hold_hands";
+/// Following (0.135 G2): no move; the giver's role follows.
+/// Holding hands whose two roles stand shoulder to shoulder, 0.25 m either side, facing one way (0.135 G3).
+fn hold_at() -> ActivityKind {
+    let mut k = touch(HOLD_AT, 60_000_000, "souls:hold_hand");
+    k.roles[0].stands = vec![(Vec3::new(-250_000, 0, 0), 0)];
+    k.roles[1].stands = vec![(Vec3::new(250_000, 0, 0), 0)];
+    k
+}
+
+/// A dance whose members stand in a ring of 1 m, facing its middle (0.135 G3): the first role's one place, then the
+/// other role's seven.
+fn dance_at() -> ActivityKind {
+    let ring = |k: i64| {
+        // At 45° steps from +z toward +x: whole-mm points, as the entry states them.
+        let (s, c) = [
+            (0, 1000),
+            (707, 707),
+            (1000, 0),
+            (707, -707),
+            (0, -1000),
+            (-707, -707),
+            (-1000, 0),
+            (-707, 707),
+        ][k as usize];
+        (
+            Vec3::new(s * 1000, 0, c * 1000),
+            (k * 45_000 + 180_000) % 360_000,
+        )
+    };
+    let mut k = ActivityKind {
+        most: 8,
+        beat: true,
+        ..touch(DANCE_AT, 60_000_000, "souls:dance")
+    };
+    k.roles[0].stands = vec![ring(0)];
+    k.roles[1].stands = (1..8).map(ring).collect();
+    k
+}
+
+fn follow() -> ActivityKind {
+    let mut k = touch(FOLLOW, 60_000_000, "souls:none");
+    for r in &mut k.roles {
+        r.mv = None;
+    }
+    k.follows = Some(name(GIVER));
+    k
+}
+
+/// Dancing together (0.134 T3).
+const DANCE: &str = "test:dance";
+/// A hug and a high-five, as the handshake: each ends with its moves.
+const HUG: &str = "test:hug";
+const HIGH_FIVE: &str = "test:high_five";
+/// Following (0.135 G2): the asker (the giver's role) follows the other.
+const FOLLOW: &str = "test:follow";
+/// Holding hands and a dance whose roles say where members stand (0.135 G3).
+const HOLD_AT: &str = "test:hold_at";
+const DANCE_AT: &str = "test:dance_at";
 const GIVER: &str = "test:giver";
 const TAKER: &str = "test:taker";
 
@@ -68,6 +126,12 @@ fn kinds() -> Vec<(&'static str, String)> {
         (HANDSHAKE, pinned(HANDSHAKE, 3)),
         (BRIEF, pinned(BRIEF, 4)),
         (HOLD, pinned(HOLD, 5)),
+        (DANCE, pinned(DANCE, 6)),
+        (HUG, pinned(HUG, 7)),
+        (HIGH_FIVE, pinned(HIGH_FIVE, 8)),
+        (FOLLOW, pinned(FOLLOW, 9)),
+        (HOLD_AT, pinned(HOLD_AT, 10)),
+        (DANCE_AT, pinned(DANCE_AT, 11)),
     ]
 }
 
@@ -88,6 +152,8 @@ fn touch(plain: &str, lasts: Micros, mv: &str) -> ActivityKind {
         place: name("souls:here"),
         claims: vec![Want::One(Class::Manipulator)],
         mv: Some(name(mv)),
+        stands: Vec::new(),
+        within: None,
     };
     ActivityKind {
         name: name(&full(plain)),
@@ -95,6 +161,18 @@ fn touch(plain: &str, lasts: Micros, mv: &str) -> ActivityKind {
         roles: vec![role(GIVER), role(TAKER)],
         proposal_lasts: lasts,
         leave_within: 400_000,
+        most: 2,
+        beat: false,
+        follows: None,
+    }
+}
+
+/// Dancing together (0.134 T3): content's `dance` on the world's beat, up to eight members.
+fn dance() -> ActivityKind {
+    ActivityKind {
+        most: 8,
+        beat: true,
+        ..touch(DANCE, 60_000_000, "souls:dance")
     }
 }
 
@@ -152,14 +230,15 @@ fn soul(n: u64) -> Id {
 }
 
 /// Where the bodies stand on the test world's open ground, west of the square, µm: Souls 1 and 2 0.6 m apart, as a
-/// handshake's roles place them, and Soul 3 2 m on.
+/// handshake's roles place them, and Soul 3 2 m on; Soul 4 a dancer 1.5 m north of them.
 fn at(n: u64) -> Vec3 {
     let x = match n {
         1 => -40_000_000,
         2 => -40_600_000,
+        4 => -41_600_000,
         _ => -42_600_000,
     };
-    Vec3::new(x, 0, 30_000_000)
+    Vec3::new(x, 0, if n == 4 { 28_500_000 } else { 30_000_000 })
 }
 
 fn header(zone: Id) -> Header {
@@ -196,13 +275,28 @@ fn tree_rules() -> TreeRules {
     };
     TreeRules {
         kinds: BTreeMap::from([
-            (full(PLACE), k("place", &["body", HANDSHAKE, BRIEF, HOLD])),
+            (
+                full(PLACE),
+                k(
+                    "place",
+                    &[
+                        "body", HANDSHAKE, BRIEF, HOLD, DANCE, HUG, HIGH_FIVE, FOLLOW, HOLD_AT,
+                        DANCE_AT,
+                    ],
+                ),
+            ),
             (full(WALKER), k("family", &[])),
             (full(HANDSHAKE), k("activity", &[])),
             (full(BRIEF), k("activity", &[])),
             (full(HOLD), k("activity", &[])),
+            (full(DANCE), k("activity", &[])),
+            (full(HUG), k("activity", &[])),
+            (full(HIGH_FIVE), k("activity", &[])),
+            (full(FOLLOW), k("activity", &[])),
+            (full(HOLD_AT), k("activity", &[])),
+            (full(DANCE_AT), k("activity", &[])),
         ]),
-        souls: [soul(1), soul(2), soul(3)].into(),
+        souls: [soul(1), soul(2), soul(3), soul(4)].into(),
         audiences: BTreeMap::new(),
     }
 }
@@ -212,7 +306,7 @@ fn world() -> Replica {
     let g = ground();
     let h = header(g);
     let mut r = Replica::start(h.stored()).expect("a replica");
-    let effects: Vec<Value> = (1..=3)
+    let effects: Vec<Value> = (1..=4)
         .map(|n| {
             Effect {
                 envelope: Envelope {
@@ -260,15 +354,29 @@ fn world() -> Replica {
     r
 }
 
-fn bodies() -> Result<Bodies, replica::effects::Refusal> {
+/// The test world's building's ground floor (0.135 G3).
+fn floor() -> Id {
+    let w = testworld::generate(1, 0).expect("the test world");
+    import_eden::load(&w.text)
+        .expect("the test world loads")
+        .nodes["building/floor-0"]
+}
+
+/// Where Souls 1 and 2 stand indoors (0.135 G3): 0.6 m apart in a room of the building's ground floor, in its axes.
+fn indoors(n: u64) -> Vec3 {
+    Vec3::new(if n == 1 { 200_000 } else { 800_000 }, 0, -3_000_000)
+}
+
+/// The bodies; `indoor`, Souls 1 and 2 on the building's ground floor ([`indoors`]).
+fn bodies_on(indoor: bool) -> Result<Bodies, replica::effects::Refusal> {
     let (town, ground) = town();
-    let frame = Frame {
-        node: ground,
-        slot: None,
+    let on = |n: u64| {
+        let node = if indoor && n <= 2 { floor() } else { ground };
+        let p = if indoor && n <= 2 { indoors(n) } else { at(n) };
+        let frame = Frame { node, slot: None };
+        town.surfaces[&node].place(soul(n), frame, p, Quat::IDENTITY)
     };
-    let placed = (1..=3)
-        .map(|n| town.surfaces[&ground].place(soul(n), frame, at(n), Quat::IDENTITY))
-        .collect::<Result<Vec<_>, _>>()?;
+    let placed = (1..=4).map(on).collect::<Result<Vec<_>, _>>()?;
     let mut b = Bodies::new(town, 50_000)?;
     for p in placed {
         b.add_body(humanoid(), p)?;
@@ -367,15 +475,36 @@ struct Run {
 }
 
 fn serve(tag: &str) -> Run {
-    let store = Mem::with(Vec::new());
+    serve_on(tag, Mem::with(Vec::new()))
+}
+
+/// [`serve`] from `store`'s log, if it has one: a restart.
+fn serve_on(tag: &str, store: Mem) -> Run {
+    serve_with(tag, store, false)
+}
+
+/// [`serve`] with Souls 1 and 2 indoors ([`indoors`]).
+fn serve_indoors(tag: &str) -> Run {
+    serve_with(tag, Mem::with(Vec::new()), true)
+}
+
+fn serve_with(tag: &str, store: Mem, indoor: bool) -> Run {
     let mut cfg = Config::new(LINEAGE, 1);
-    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
+    cfg.bodies = Some(Box::new(move |_: &worldd::bodies::Placed| {
+        bodies_on(indoor)
+    }));
     cfg.engine = Some((
         tree_rules(),
         vec![
             handshake(HANDSHAKE, 60_000_000),
             handshake(BRIEF, 500_000),
             touch(HOLD, 60_000_000, "souls:hold_hand"),
+            dance(),
+            touch(HUG, 60_000_000, "souls:hug"),
+            touch(HIGH_FIVE, 60_000_000, "souls:high_five"),
+            follow(),
+            hold_at(),
+            dance_at(),
         ],
     ));
     let rules = Rules {
@@ -424,9 +553,12 @@ impl Run {
             if let Body::Changes(cs) = &e.body {
                 for c in cs {
                     if let Change::Create { node, kind, .. } = &c.change
-                        && [HANDSHAKE, BRIEF, HOLD]
-                            .iter()
-                            .any(|k| kind.as_str() == full(k))
+                        && [
+                            HANDSHAKE, BRIEF, HOLD, DANCE, HUG, HIGH_FIVE, FOLLOW, HOLD_AT,
+                            DANCE_AT,
+                        ]
+                        .iter()
+                        .any(|k| kind.as_str() == full(k))
                     {
                         return *node;
                     }
@@ -490,6 +622,36 @@ impl Run {
             .collect()
     }
 
+    /// Each dance move written for viewers in `activity`, in order: its body and the start in its record.
+    fn starts(&self, activity: Id) -> Vec<(Id, Micros)> {
+        self.entries()
+            .into_iter()
+            .flat_map(|e| e.events.into_iter().flatten())
+            .filter(|ev| {
+                ev.name.as_str() == "souls:form-move"
+                    && read_id(&ev.fields[&1]).ok() == Some(activity)
+            })
+            .map(|ev| {
+                let Value::Map(r) = &ev.fields[&3] else {
+                    panic!("a move record")
+                };
+                let Some(Value::Uint(start)) = r.get(&7) else {
+                    panic!("a start after the world began")
+                };
+                (read_id(&ev.fields[&2]).unwrap(), *start as Micros)
+            })
+            .collect()
+    }
+
+    /// The world time of the effect numbered `seq`.
+    fn at_seq(&self, seq: u64) -> Micros {
+        self.entries()
+            .into_iter()
+            .find(|e| e.envelope.sequence == seq)
+            .map(|e| e.envelope.at)
+            .expect("that entry")
+    }
+
     /// How many `souls:activity-left` events the log holds.
     fn lefts(&self) -> usize {
         self.entries()
@@ -528,12 +690,9 @@ fn t1_an_accepted_handshake_writes_both_moves_touching_together() {
         (c1 - c2).abs() <= 50_000,
         "contacts within 50 ms: {c1} and {c2} µs"
     );
-    // The moves take 2.3 s; then both leave.
+    // The moves take 2.3 s; then the handshake ends by itself, both leaving it.
     std::thread::sleep(Duration::from_millis(2_600));
-    a.act("activity:leave", Some(offer), &[])
-        .expect("Soul 1 leaves");
-    b.act("activity:leave", Some(offer), &[])
-        .expect("Soul 2 leaves");
+    assert_eq!(run.lefts(), 2, "both left when the moves ended");
     println!("t1: contacts at {c1} and {c2} µs; both left");
     run.stop();
 }
@@ -599,8 +758,7 @@ fn t2_holding_hands_lasts_until_either_leaves_or_walks() {
         BTreeSet::from([soul(1), soul(2)]),
         "a leave frees both hands"
     );
-    a.act("activity:leave", Some(held), &[])
-        .expect("Soul 1 leaves too");
+    assert_eq!(run.lefts(), 2, "the hold is over: Soul 1 left it too");
     let after_leave = run.ended().len();
 
     // Held again, then Soul 1 walks 2 m off: its walk leaves the activity, and both hands come free.
@@ -625,14 +783,648 @@ fn t2_holding_hands_lasts_until_either_leaves_or_walks() {
     assert!(walked.iter().all(|(_, how)| how == "released"));
     assert_eq!(
         run.lefts(),
-        lefts + 1,
-        "the walk left the activity as a leave does"
+        lefts + 2,
+        "the walk left the activity as a leave does, and the hold is over for both"
     );
-    b.act("activity:leave", Some(again), &[])
-        .expect("Soul 2 leaves");
     println!(
         "t2: held 1.5 s; a leave freed both hands; held again, a walk freed both ({} released)",
         walked.len()
     );
+    run.stop();
+}
+
+/// 0.134 T3: four scripted Souls dance together. Soul 1 offers the dance to Souls 2, 3 and 4 at once, and their
+/// accepts arrive up to 500 ms apart. In each of 20 runs, every member's first dance move starts on the same beat of
+/// the world's clock (120 a minute from 0: a whole multiple of 500 ms), at most 2 s after the first accept. In the
+/// first run the dance goes on: each member's next move starts on the next whole beat after the first ends. Every
+/// leave is accepted.
+#[test]
+fn t3_four_souls_dance_on_one_beat_in_20_runs() {
+    let run = serve("dance");
+    let mut c: Vec<Client> = (1..=4).map(|n| run.client(n)).collect();
+    let beat = replica::time::Tempo::per_minute(0, 0, 120).unwrap();
+    let line = replica::time::Timeline::start(
+        replica::time::Mapping::new(0, 0, 1, 1).unwrap(),
+        replica::time::TickRate::new(0, 0, 20).unwrap(),
+        beat,
+    )
+    .unwrap();
+    let on_beat = |t: Micros| line.beat_of(t).and_then(|k| line.beat_time(k)) == Ok(t);
+    let mut spreads = Vec::new();
+    for r in 0..20u64 {
+        let asked = Value::Array((2..=4).map(|n| soul(n).to_value()).collect());
+        let offered = c[0]
+            .act(
+                "activity:offer",
+                Some(ground()),
+                &[
+                    (1, Value::Text(name(&full(DANCE)))),
+                    (2, Value::Text(name(GIVER))),
+                    (3, asked),
+                ],
+            )
+            .expect("offered to three");
+        let dance = run.created(&offered);
+        // Three accepts, each 0 to 249 ms after the one before: at most 500 ms from first to last.
+        let gaps = [0, (r * 37) % 250, (r * 91 + 40) % 250];
+        let mut first = None;
+        for (k, gap) in gaps.iter().enumerate() {
+            std::thread::sleep(Duration::from_millis(*gap));
+            let e = c[k + 1]
+                .act("activity:accept", Some(dance), &[])
+                .unwrap_or_else(|x| panic!("run {r}: Soul {} accepts: {x}", k + 2));
+            first.get_or_insert(run.at_seq(e[0]));
+        }
+        let first = first.unwrap();
+        let starts = run.starts(dance);
+        let members: BTreeSet<Id> = starts.iter().map(|s| s.0).collect();
+        assert_eq!(
+            members,
+            (1..=4).map(soul).collect(),
+            "run {r}: all four dance"
+        );
+        let s0 = starts[0].1;
+        assert!(
+            starts.iter().all(|s| s.1 == s0),
+            "run {r}: one beat for all: {starts:?}"
+        );
+        assert!(on_beat(s0), "run {r}: {s0} µs is a whole beat");
+        assert!(
+            s0 > first && s0 - first <= 2_000_000,
+            "run {r}: the beat is {} µs after the first accept",
+            s0 - first
+        );
+        spreads.push(gaps.iter().sum::<u64>());
+        if r == 0 {
+            // Beat after beat: the dance (0.8 s) ends, and each member's next begins on the next whole beat.
+            let wait = s0 - answers::now() + 1_300_000;
+            std::thread::sleep(Duration::from_micros(u64::try_from(wait).unwrap_or(0)));
+            let again: Vec<(Id, Micros)> = run.starts(dance).split_off(4);
+            assert_eq!(
+                again.iter().map(|s| s.0).collect::<BTreeSet<_>>(),
+                members,
+                "each member dances again: {again:?}"
+            );
+            assert!(
+                again.iter().all(|s| s.1 == s0 + 1_000_000),
+                "the next whole beat after the first dance: {again:?}"
+            );
+        }
+        for (k, cl) in c.iter_mut().enumerate() {
+            cl.act("activity:leave", Some(dance), &[])
+                .unwrap_or_else(|x| panic!("run {r}: Soul {} leaves: {x}", k + 1));
+        }
+        // Let the leaves end the moves in progress (at most the kind's 400 ms).
+        std::thread::sleep(Duration::from_millis(600));
+    }
+    println!(
+        "t3: 20 runs, four Souls on one beat each; accepts spread over {spreads:?} ms; leaves accepted"
+    );
+    run.stop();
+}
+
+/// Lane B's find on 0.134 T1: a touch kept running after its moves ended, holding both arms, so a later point or
+/// wave was refused and a later touch between the same two never started. Each touch now ends with its moves: both
+/// members leave it by themselves (`souls:activity-left`), and the same touch again between the same two plays both
+/// moves.
+#[test]
+fn t1_each_touch_ends_with_its_moves_and_the_next_one_plays() {
+    let run = serve("again");
+    let (mut a, mut b) = (run.client(1), run.client(2));
+    for kind in [HANDSHAKE, HUG, HIGH_FIVE] {
+        for round in 1..=2 {
+            let moved = run.touches().len();
+            let lefts = run.lefts();
+            let touch = run.created(&a.offer(kind, 2).expect("offered"));
+            b.act("activity:accept", Some(touch), &[])
+                .unwrap_or_else(|r| panic!("{kind} {round}: accepted: {r}"));
+            assert_eq!(
+                run.touches().len(),
+                moved + 2,
+                "{kind} {round}: both moves written"
+            );
+            // The longest (a hug) takes 2.8 s; then the touch ends by itself.
+            std::thread::sleep(Duration::from_millis(3_300));
+            assert_eq!(
+                run.lefts(),
+                lefts + 2,
+                "{kind} {round}: both left when the moves ended"
+            );
+        }
+    }
+    println!(
+        "t1: a handshake, a hug and a high-five each ended with its moves, and each played again"
+    );
+    run.stop();
+}
+
+/// Lane B's find on 0.134 T2: a body that had held hands once got no held move again, because the one who stayed
+/// was still in the old hold. Now when one leaves, the hold is over for both. Two holds in a row between the same
+/// two, then one Soul with a second partner: each hold writes both `souls:hold_hand` moves, releases both, and both
+/// leave it.
+#[test]
+fn t2_holds_again_and_with_another_partner() {
+    let run = serve("hold-again");
+    let (mut a, mut b, mut c) = (run.client(1), run.client(2), run.client(3));
+    let holds = |run: &Run| -> usize {
+        run.touches()
+            .iter()
+            .filter(|t| t.1 == "souls:hold_hand")
+            .count()
+    };
+    let released = |run: &Run| -> usize {
+        run.ended()
+            .iter()
+            .filter(|(_, how)| how == "released")
+            .count()
+    };
+    let hold = |asker: &mut Client, other: &mut Client, to: u64, round: &str| {
+        let (h, r, l) = (holds(&run), released(&run), run.lefts());
+        let held = run.created(&asker.offer(HOLD, to).expect("offered"));
+        other
+            .act("activity:accept", Some(held), &[])
+            .unwrap_or_else(|e| panic!("{round}: accepted: {e}"));
+        assert_eq!(holds(&run), h + 2, "{round}: both hold");
+        std::thread::sleep(Duration::from_millis(800));
+        other
+            .act("activity:leave", Some(held), &[])
+            .unwrap_or_else(|e| panic!("{round}: left: {e}"));
+        assert_eq!(released(&run), r + 2, "{round}: both released");
+        assert_eq!(run.lefts(), l + 2, "{round}: the hold is over, both left");
+    };
+    hold(&mut a, &mut b, 2, "first");
+    hold(&mut a, &mut b, 2, "again, the same two");
+    // Soul 3 comes to stand 0.5 m east of Soul 1 and holds its hand.
+    let to = Value::Array(vec![
+        Value::Nint(39_499_999),
+        Value::Uint(0),
+        Value::Uint(30_000_000),
+    ]);
+    c.act("eden:walk", Some(ground()), &[(1, to)])
+        .expect("Soul 3 comes over");
+    hold(&mut a, &mut c, 3, "with another partner");
+    println!("t2: three holds, each with both moves and both released");
+    run.stop();
+}
+
+impl Run {
+    /// Each body row the log holds, in order: the body and where it stood.
+    fn rows(&self) -> Vec<(Id, Vec3)> {
+        let log = self.store.0.lock().unwrap().bytes.clone();
+        recover(&log)
+            .unwrap()
+            .records
+            .into_iter()
+            .filter(|r| !sim::recorder::is_input(r))
+            .flat_map(|r| match Part::read(&r).unwrap().rest.get(&BODIES) {
+                Some(Value::Array(rows)) => rows.clone(),
+                _ => Vec::new(),
+            })
+            .filter_map(|v| read_row(&v).map(|(b, p, _)| (b, p.position)))
+            .collect()
+    }
+}
+
+fn walk_to(x: i64, z: i64) -> Value {
+    let int =
+        |n: i64| u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint);
+    Value::Array(vec![int(x), int(0), int(z)])
+}
+
+/// The follower's track since row `from`: the furthest it was from its place (1 m from the leader, toward the
+/// follower) and the most it moved in one tick.
+fn track(run: &Run, from: usize) -> (i64, i64, Vec3, Vec3) {
+    let len = |a: Vec3, b: Vec3| {
+        ((((a.x - b.x) as i128).pow(2) + ((a.z - b.z) as i128).pow(2)).isqrt()) as i64
+    };
+    let rows = run.rows();
+    let (mut l, mut f) = (at(1), at(2));
+    for (body, p) in rows.iter().take(from) {
+        if *body == soul(1) {
+            l = *p;
+        } else if *body == soul(2) {
+            f = *p;
+        }
+    }
+    let (mut worst, mut step) = (0_i64, 0_i64);
+    for (body, p) in rows.into_iter().skip(from) {
+        if body == soul(1) {
+            l = p;
+        } else if body == soul(2) {
+            step = step.max(len(p, f));
+            f = p;
+        } else {
+            continue;
+        }
+        let d = len(f, l).max(1);
+        let place = Vec3::new(
+            l.x + (i128::from(f.x - l.x) * 1_000_000 / i128::from(d)) as i64,
+            0,
+            l.z + (i128::from(f.z - l.z) * 1_000_000 / i128::from(d)) as i64,
+        );
+        worst = worst.max(len(f, place));
+    }
+    (worst, step, l, f)
+}
+
+/// 0.135 G2: Soul 2 offers to follow Soul 1, and Soul 1 accepts; Soul 2's own `souls:follow` order then walks it
+/// along Soul 1's trail. Soul 1 walks 30 m with two turns (10 m east, 8 m south, 12 m east): at every tick either
+/// moved, Soul 2 is within 2.5 m of its place 1 m behind and never moves more than 0.2 m in a tick (walked, never
+/// placed). Soul 2 walking on its own ends the follow for both. Followed again, Soul 1 turns back through Soul 2
+/// (8 m east, then 12 m west), and Soul 2 keeps the same bounds; Soul 2's own order (a held stance) ends that follow
+/// for both too.
+#[test]
+fn g2_a_soul_follows_another_over_a_walk_with_two_turns() {
+    let run = serve("follow");
+    let (mut a, mut b) = (run.client(1), run.client(2));
+    let len = |a: Vec3, b: Vec3| {
+        ((((a.x - b.x) as i128).pow(2) + ((a.z - b.z) as i128).pow(2)).isqrt()) as i64
+    };
+    let follow = run.created(&b.offer(FOLLOW, 1).expect("Soul 2 offers to follow"));
+    a.act("activity:accept", Some(follow), &[])
+        .expect("Soul 1 accepts");
+    let from = run.rows().len();
+    for (x, z) in [
+        (-30_000_000, 30_000_000),
+        (-30_000_000, 22_000_000),
+        (-18_000_000, 22_000_000),
+    ] {
+        a.act("eden:walk", Some(ground()), &[(1, walk_to(x, z))])
+            .unwrap_or_else(|e| panic!("Soul 1 walks to ({x}, {z}): {e}"));
+    }
+    std::thread::sleep(Duration::from_millis(2_000));
+    let (worst, step, leader, follower) = track(&run, from);
+    println!(
+        "g2: two turns: the follower within {} mm of its place; at most {} mm a tick",
+        worst / 1000,
+        step / 1000
+    );
+    assert!(worst <= 2_500_000, "within 2.5 m of its place: {worst} µm");
+    assert!(
+        step <= 200_000,
+        "walked, never placed: {step} µm in one tick"
+    );
+    assert!(
+        len(follower, leader) < 3_000_000,
+        "the follower ended behind: {follower:?} {leader:?}"
+    );
+    // Soul 2 walks on its own: the follow ends for both.
+    let lefts = run.lefts();
+    b.act(
+        "eden:walk",
+        Some(ground()),
+        &[(1, walk_to(-19_000_000, 24_000_000))],
+    )
+    .expect("Soul 2 walks on its own");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(run.lefts(), lefts + 2, "the follow is over for both");
+
+    // Followed again; Soul 1 turns back through Soul 2.
+    let again = run.created(&b.offer(FOLLOW, 1).expect("offered again"));
+    a.act("activity:accept", Some(again), &[])
+        .expect("accepted again");
+    let from = run.rows().len();
+    for (x, z) in [(-10_000_000, 22_000_000), (-22_000_000, 22_000_000)] {
+        a.act("eden:walk", Some(ground()), &[(1, walk_to(x, z))])
+            .unwrap_or_else(|e| panic!("Soul 1 walks to ({x}, {z}): {e}"));
+    }
+    std::thread::sleep(Duration::from_millis(2_000));
+    let (worst, step, _, _) = track(&run, from);
+    println!(
+        "g2: turned back through: the follower within {} mm of its place; at most {} mm a tick",
+        worst / 1000,
+        step / 1000
+    );
+    assert!(worst <= 2_500_000, "within 2.5 m of its place: {worst} µm");
+    assert!(
+        step <= 200_000,
+        "walked, never placed: {step} µm in one tick"
+    );
+    // Soul 2's own order (a held stance) ends the follow for both.
+    let lefts = run.lefts();
+    b.act("souls:hold", None, &[(1, Value::Uint(1))])
+        .expect("Soul 2 holds its stance");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(
+        run.lefts(),
+        lefts + 2,
+        "its own order ends the follow for both"
+    );
+    run.stop();
+}
+
+/// 0.135 G2 after G1: the follower walks at the leader's gait. Soul 1 jogs 12 m east, then runs 16 m east (`gait:jog`,
+/// `gait:run`, parameter 2); Soul 2 keeps within 2.5 m of its place 1 m behind (at walking pace's closing cap,
+/// 2.4 m/s, it fell more than 6 m behind on the run), and never moves more than the run's 0.2 m in a tick, plus 5 %.
+#[test]
+fn g2_a_follower_keeps_the_leaders_gait() {
+    let run = serve("follow-gait");
+    let (mut a, mut b) = (run.client(1), run.client(2));
+    let follow = run.created(&b.offer(FOLLOW, 1).expect("Soul 2 offers to follow"));
+    a.act("activity:accept", Some(follow), &[])
+        .expect("Soul 1 accepts");
+    let from = run.rows().len();
+    for (x, gait) in [(-28_000_000, "gait:jog"), (-12_000_000, "gait:run")] {
+        a.act(
+            "eden:walk",
+            Some(ground()),
+            &[(1, walk_to(x, 30_000_000)), (2, Value::Text(name(gait)))],
+        )
+        .unwrap_or_else(|e| panic!("Soul 1 goes to x {x} at {gait}: {e}"));
+    }
+    std::thread::sleep(Duration::from_millis(2_000));
+    let (worst, step, leader, follower) = track(&run, from);
+    println!(
+        "g2 gait: the follower within {} mm of its place; at most {} mm a tick; ended {} mm from the leader",
+        worst / 1000,
+        step / 1000,
+        (follower.x - leader.x).abs() / 1000
+    );
+    assert!(worst <= 2_500_000, "within 2.5 m of its place: {worst} µm");
+    assert!(step <= 210_000, "at most a run's tick: {step} µm");
+    run.stop();
+}
+
+/// 0.135 G2, review R1 and R2: a follow survives a restart. The follower's order is taken up from the log as it is;
+/// an intent arriving after the restart never takes the order's id (the world made the order on the intents'
+/// counter); and the leader's leave then ends the follow for both and cancels the order, in the same tick.
+#[test]
+fn g2_a_follow_across_a_restart() {
+    let run = serve("follow-restart");
+    let (mut a, mut b) = (run.client(1), run.client(2));
+    let follow = run.created(&b.offer(FOLLOW, 1).expect("Soul 2 offers to follow"));
+    a.act("activity:accept", Some(follow), &[])
+        .expect("Soul 1 accepts");
+    std::thread::sleep(Duration::from_millis(300));
+    let order = |run: &Run, name: &str| -> Vec<Id> {
+        let log = run.store.0.lock().unwrap().bytes.clone();
+        recover(&log)
+            .unwrap()
+            .records
+            .into_iter()
+            .filter(|r| !sim::recorder::is_input(r))
+            .flat_map(|r| Part::read(&r).unwrap().effects)
+            .flat_map(|e| e.events.into_iter().flatten())
+            .filter(|ev| ev.name.as_str() == name)
+            .filter_map(|ev| read_id(&ev.fields[&1]).ok())
+            .collect()
+    };
+    let orders = order(&run, "souls:order");
+    assert_eq!(orders.len(), 1, "the follower's own follow order");
+    let Run { world, store, path } = run;
+    world.stop();
+    let _ = std::fs::remove_file(&path);
+    let run = serve_on("follow-restart-2", store);
+    let mut a = run.client(1);
+    a.2 = 100;
+    // An intent after the restart: its effects name its own id, never the order's.
+    let walked = a
+        .act(
+            "eden:walk",
+            Some(ground()),
+            &[(1, walk_to(-36_000_000, 30_000_000))],
+        )
+        .expect("Soul 1 walks after the restart");
+    let log = run.store.0.lock().unwrap().bytes.clone();
+    let causes: BTreeSet<Id> = recover(&log)
+        .unwrap()
+        .records
+        .into_iter()
+        .filter(|r| !sim::recorder::is_input(r))
+        .flat_map(|r| Part::read(&r).unwrap().effects)
+        .filter(|e| walked.contains(&e.envelope.sequence))
+        .filter_map(|e| match e.envelope.cause {
+            Cause::Intent(i) => Some(i),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        !causes.is_empty() && !causes.contains(&orders[0]),
+        "a fresh id: {causes:?}"
+    );
+    // The order was taken up as it is: no second order, and the leader's leave ends both and cancels it.
+    let lefts = run.lefts();
+    a.act("activity:leave", Some(follow), &[])
+        .expect("Soul 1 leaves");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(run.lefts(), lefts + 2, "the follow is over for both");
+    assert_eq!(order(&run, "souls:order"), orders, "no second order");
+    assert_eq!(
+        order(&run, "souls:order-ended"),
+        orders,
+        "the order ended with the follow"
+    );
+    run.stop();
+}
+
+impl Run {
+    /// Each body row the log holds, in order, with its whole pose.
+    fn poses(&self) -> Vec<(Id, Pose)> {
+        let log = self.store.0.lock().unwrap().bytes.clone();
+        recover(&log)
+            .unwrap()
+            .records
+            .into_iter()
+            .filter(|r| !sim::recorder::is_input(r))
+            .flat_map(|r| match Part::read(&r).unwrap().rest.get(&BODIES) {
+                Some(Value::Array(rows)) => rows.clone(),
+                _ => Vec::new(),
+            })
+            .filter_map(|v| read_row(&v).map(|(b, p, _)| (b, p)))
+            .collect()
+    }
+
+    /// Each body's last pose in the log (its start if it never moved).
+    fn last(&self, n: u64) -> (Vec3, Quat) {
+        self.poses()
+            .into_iter()
+            .filter(|(b, _)| *b == soul(n))
+            .map(|(_, p)| (p.position, p.orientation))
+            .next_back()
+            .unwrap_or((at(n), Quat::IDENTITY))
+    }
+}
+
+/// Where a facing looks on the plan: +z turned by it, µm per metre.
+fn ahead(q: Quat) -> (i64, i64) {
+    let v = q.rotate(Vec3::new(0, 0, 1_000_000)).unwrap();
+    (v.x, v.z)
+}
+
+/// 0.135 G3: members take their places when a group activity starts. Holding hands: the two end shoulder to
+/// shoulder, 0.5 m apart, facing the same way, across the line between them; the hold's moves begin after. A dance
+/// of four: each walks (never more than 0.2 m a tick) to its place on a 1 m ring round where its first two members
+/// stood when it started, faces its middle, and all four start dancing on the same beat.
+#[test]
+fn g3_members_take_their_places_then_their_moves_begin() {
+    let run = serve("places");
+    let mut c: Vec<Client> = (1..=4).map(|n| run.client(n)).collect();
+    let len = |x: i64, z: i64| ((i128::from(x).pow(2) + i128::from(z).pow(2)).isqrt()) as i64;
+
+    // Holding hands.
+    let hold = run.created(&c[0].offer(HOLD_AT, 2).expect("offered"));
+    c[1].act("activity:accept", Some(hold), &[])
+        .expect("accepted");
+    std::thread::sleep(Duration::from_millis(1_500));
+    let ((p1, q1), (p2, q2)) = (run.last(1), run.last(2));
+    let apart = len(p1.x - p2.x, p1.z - p2.z);
+    let (f1, f2) = (ahead(q1), ahead(q2));
+    println!("g3: hold hands {apart} µm apart, facing {f1:?} and {f2:?}");
+    assert!(
+        (apart - 500_000).abs() <= 100_000,
+        "shoulder to shoulder: {apart} µm"
+    );
+    assert!(
+        (f1.0 - f2.0).abs() < 20_000 && (f1.1 - f2.1).abs() < 20_000,
+        "one way: {f1:?} {f2:?}"
+    );
+    let across = (i128::from(f1.0) * i128::from(p2.x - p1.x)
+        + i128::from(f1.1) * i128::from(p2.z - p1.z))
+    .abs();
+    assert!(
+        across < i128::from(apart) * 100_000,
+        "facing across the line between them"
+    );
+    let holds: Vec<_> = run
+        .touches()
+        .into_iter()
+        .filter(|t| t.1 == "souls:hold_hand")
+        .collect();
+    assert_eq!(
+        holds.len(),
+        2,
+        "the hold's moves begin once both are placed"
+    );
+    c[1].act("activity:leave", Some(hold), &[]).expect("left");
+
+    // A dance of four.
+    let from = run.poses().len();
+    let start: Vec<Vec3> = (1..=4).map(|n| run.last(n).0).collect();
+    // The ring's middle is fixed when the dance starts: at the first accept, between its first two members.
+    let middle = Vec3::new(
+        (start[0].x + start[1].x) / 2,
+        0,
+        (start[0].z + start[1].z) / 2,
+    );
+    let asked = Value::Array((2..=4).map(|n| soul(n).to_value()).collect());
+    let offered = c[0]
+        .act(
+            "activity:offer",
+            Some(ground()),
+            &[
+                (1, Value::Text(name(&full(DANCE_AT)))),
+                (2, Value::Text(name(GIVER))),
+                (3, asked),
+            ],
+        )
+        .expect("offered to three");
+    let dance = run.created(&offered);
+    for cl in c.iter_mut().skip(1) {
+        cl.act("activity:accept", Some(dance), &[])
+            .expect("accepted");
+    }
+    std::thread::sleep(Duration::from_millis(5_000));
+    let mut step = 0;
+    let mut last: BTreeMap<Id, Vec3> = (1..=4).map(|n| (soul(n), start[n as usize - 1])).collect();
+    for (b, p) in run.poses().into_iter().skip(from) {
+        if let Some(l) = last.get_mut(&b) {
+            step = step.max(len(p.position.x - l.x, p.position.z - l.z));
+            *l = p.position;
+        }
+    }
+    assert!(step <= 200_000, "walked, never placed: {step} µm in a tick");
+    for n in 1..=4 {
+        let (p, q) = run.last(n);
+        let r = len(p.x - middle.x, p.z - middle.z);
+        let f = ahead(q);
+        let inward = i128::from(f.0) * i128::from(middle.x - p.x)
+            + i128::from(f.1) * i128::from(middle.z - p.z);
+        println!("g3: dancer {n} {r} µm from the middle, facing {f:?}");
+        assert!(
+            (r - 1_000_000).abs() <= 50_000,
+            "dancer {n} on the ring: {r} µm"
+        );
+        assert!(
+            inward > i128::from(r) * 900_000,
+            "dancer {n} faces the middle: {f:?}"
+        );
+    }
+    let starts = run.starts(dance);
+    let first: BTreeSet<Micros> = starts.iter().take(4).map(|s| s.1).collect();
+    assert_eq!(
+        starts
+            .iter()
+            .take(4)
+            .map(|s| s.0)
+            .collect::<BTreeSet<_>>()
+            .len(),
+        4,
+        "all four dance"
+    );
+    assert_eq!(first.len(), 1, "on one beat: {starts:?}");
+    run.stop();
+}
+
+impl Run {
+    /// Soul `n`'s body's last pose in the log, whole (0.135 G3); none if it never changed.
+    fn last_pose(&self, n: u64) -> Option<Pose> {
+        self.poses()
+            .into_iter()
+            .filter(|(b, _)| *b == soul(n))
+            .map(|(_, p)| p)
+            .next_back()
+    }
+}
+
+/// 0.135 G3, indoors: two Souls in a room of the building's ground floor start a dance; each walks to its place on
+/// the 1 m ring round where they stood, on that floor and in its axes, not to the same numbers on the open ground.
+#[test]
+fn g3_indoors_members_take_their_places_on_their_floor() {
+    let run = serve_indoors("places-indoors");
+    let mut c: Vec<Client> = (1..=2).map(|n| run.client(n)).collect();
+    let dance = run.created(&c[0].offer(DANCE_AT, 2).expect("offered"));
+    c[1].act("activity:accept", Some(dance), &[])
+        .expect("accepted");
+    std::thread::sleep(Duration::from_millis(3_000));
+    let len = |x: i64, z: i64| ((i128::from(x).pow(2) + i128::from(z).pow(2)).isqrt()) as i64;
+    let middle = Vec3::new(500_000, 0, -3_000_000);
+    for n in 1..=2 {
+        let p = run.last_pose(n).expect("it moved");
+        let r = len(p.position.x - middle.x, p.position.z - middle.z);
+        println!(
+            "g3 indoors: dancer {n} at {:?} on {:?}, {r} µm from the middle",
+            p.position, p.frame.node
+        );
+        assert_eq!(p.frame.node, floor(), "dancer {n} stays on its floor");
+        assert!(
+            (r - 1_000_000).abs() <= 50_000,
+            "dancer {n} on the ring round where they stood: {r} µm"
+        );
+    }
+    run.stop();
+}
+
+/// 0.135 G3: a Soul that leaves while it walks to its place stops: the world's walk to a place ends with the
+/// membership it was for.
+#[test]
+fn g3_a_leave_while_taking_places_ends_the_walk() {
+    let run = serve("places-leave");
+    let mut c: Vec<Client> = (1..=2).map(|n| run.client(n)).collect();
+    let dance = run.created(&c[0].offer(DANCE_AT, 2).expect("offered"));
+    c[1].act("activity:accept", Some(dance), &[])
+        .expect("accepted");
+    let mut waited = 0;
+    while run.last(2).0 == at(2) {
+        assert!(waited < 3_000, "Soul 2 walks to its place");
+        std::thread::sleep(Duration::from_millis(20));
+        waited += 20;
+    }
+    c[1].act("activity:leave", Some(dance), &[]).expect("left");
+    std::thread::sleep(Duration::from_millis(300));
+    let stopped = run.last(2).0;
+    std::thread::sleep(Duration::from_millis(1_500));
+    let later = run.last(2).0;
+    println!("g3: left on its way at {stopped:?}; 1.5 s on, at {later:?}");
+    assert_eq!(stopped, later, "the walk to its place ended with the leave");
     run.stop();
 }

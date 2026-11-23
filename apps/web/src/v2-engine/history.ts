@@ -27,7 +27,9 @@ export class V2History {
   private readonly base: string;
   private readonly make: () => Worker;
   private readonly frame: Omit<Frame, 'datetime'>;
-  constructor(base: string, make: () => Worker, frame: Omit<Frame, 'datetime'>) { this.base = base; this.make = make; this.frame = frame; }
+  /** V6 (0.133): `hour=HH:MM`, as the live bridge has it: the past is drawn in that light too, its clock unchanged. */
+  private readonly hour: string | undefined;
+  constructor(base: string, make: () => Worker, frame: Omit<Frame, 'datetime'>, hour?: string) { this.base = base; this.make = make; this.frame = frame; this.hour = hour; }
 
   private seek(at: number): Promise<Seeked> {
     if (!this.worker) {
@@ -48,7 +50,7 @@ export class V2History {
   /** The recorded chunks from take tick `from` to `to`, at most `limit`, as the old server's `/v1/takes` gives them. */
   async chunks(from: number, to: number, limit: number, signal?: AbortSignal): Promise<RecordedChunk[]> {
     // one-second chunks, as the old /v1/takes gives a past window (B3-4: the live page plays half-second ones)
-    const bridge = new V2Bridge(this.frame, undefined, TICKS), got = new Map<number, RecordedChunk>(), endUs = to * TICK_US;
+    const bridge = new V2Bridge(this.frame, this.hour, TICKS), got = new Map<number, RecordedChunk>(), endUs = to * TICK_US;
     let at = from * TICK_US, first = true, next: number | null = null;
     // K3: once the first moment is known, a window before it starts there (no walk back through empty days)
     const known = this.firstAt ? await this.firstAt.catch(() => null) : null;
@@ -60,7 +62,7 @@ export class V2History {
       // K3: a window that begins before the world's first moment (a link to its first minute) is read from that moment
       const s = await this.seek(at).catch(async (e) => { const f = first ? await this.first(endUs).catch(() => null) : null; if (f === null || f <= at) throw e; at = f; return this.seek(f); }), until = Math.min(s.next ?? s.start + s.length, endUs + 2 * STEP_US);
       // the bundle's state and its motion, then its time step by step
-      bridge.receive({ t: 'part', p: { number: 0, from: first ? s.at : s.start, to: first ? s.at : s.start, nodes: s.nodes as never, removed: [], samples: s.samples } });
+      bridge.receive({ t: 'part', p: { number: 0, from: first ? s.at : s.start, to: first ? s.at : s.start, nodes: s.nodes as never, removed: [], samples: s.samples, ...(s.courses ? { courses: s.courses } : {}) } });
       first = false;
       for (let t = s.start + STEP_US; t < until + STEP_US && got.size < limit; t += STEP_US) {
         bridge.receive({ t: 'pointer', p: { newest: null, newestTo: null, period: 0, anchorWorld: 0, anchorWallMs: 0, quietUntil: Math.min(t, until) } });

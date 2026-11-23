@@ -218,6 +218,11 @@ impl Assembly {
         self.seating.structure.is_bay(kind)
     }
 
+    /// The joined-part rule (B18) the crews' seating is checked by.
+    pub fn structure(&self) -> &Structure {
+        &self.seating.structure
+    }
+
     /// Whether the world's kinds join parts at all.
     pub fn any(&self) -> bool {
         !self.seating.structure.kinds().0.is_empty()

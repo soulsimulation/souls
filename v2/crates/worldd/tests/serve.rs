@@ -1380,3 +1380,119 @@ fn c30_served_subscription_socket_replays_ownership_and_private_words() {
     w.kill();
     let _ = std::fs::remove_dir_all(&d);
 }
+
+/// Every file under `dir`, by its path there, with its bytes.
+fn files(dir: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
+    let mut all = BTreeMap::new();
+    let mut todo = vec![dir.to_path_buf()];
+    while let Some(d) = todo.pop() {
+        for e in std::fs::read_dir(&d).expect("reads the folder").flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                todo.push(p);
+            } else {
+                let rel = p.strip_prefix(dir).expect("under the folder").to_path_buf();
+                all.insert(rel, std::fs::read(&p).expect("reads the file"));
+            }
+        }
+    }
+    all
+}
+
+/// 0.132.1 RH: a deploy's rehearsal serves its scratch copy of the world and never the shared store, even when the
+/// deploy runs with the live store's settings in its environment: the store stays byte for byte as the live world left
+/// it (its claim, its epoch, its history), and the restart of the real deploy after it takes the world over at the
+/// next epoch, as it would with no rehearsal.
+#[test]
+fn rh_a_rehearsal_leaves_the_live_store_and_the_deploy_after_it_takes_over() {
+    use std::ffi::OsStr;
+    const CHILD: &str = "SOULS_RH_REHEARSAL_CHILD";
+    // The rehearsal as the deploy runs it, in a process whose environment names the live store and machine.
+    if let Some(d) = std::env::var_os(CHILD).map(PathBuf::from) {
+        let canary = supervisor::deploy::Canary {
+            window: Duration::from_millis(100),
+            start_within: Duration::from_secs(60),
+            answer_within: Duration::from_secs(5),
+            every: Duration::from_millis(50),
+        };
+        let r = supervisor::deploy::rehearse(
+            Path::new(env!("CARGO_BIN_EXE_worldd")),
+            &d.join("w"),
+            &d.join("r"),
+            0,
+            &canary,
+            &mut supervisor::deploy::Probe::Ask(0),
+        )
+        .expect("the rehearsal passes");
+        assert!(r.served_kept && r.copied > 0, "{r:?}");
+        return;
+    }
+    let d = scratch("rh");
+    let (dir, ..) = seeded(&d);
+    let spec = format!("folder:{}", d.join("store").display());
+    let more = [
+        OsStr::new("--store"),
+        OsStr::new(&spec),
+        OsStr::new("--machine"),
+        OsStr::new("live"),
+    ];
+    let socket = d.join("s");
+    // The live world claims its history at epoch 1 and ships; then it is stopped, its claim left in the store.
+    let live = serve_with(&dir, &socket, &more);
+    let shipping = live.line("shipping: ");
+    assert!(shipping.starts_with("shipping: epoch 1 "), "{shipping}");
+    live.line("listening");
+    live.kill();
+    let before = files(&d.join("store"));
+    assert!(!before.is_empty(), "the live claim is in the store");
+    // The live backup bucket, set as production sets it, shipping every second.
+    let (backup, pass) = (d.join("backup"), d.join("backup.key"));
+    std::fs::create_dir_all(&backup).expect("the backup folder");
+    std::fs::write(&pass, "a recovery passphrase for the test\n").expect("the key");
+    let backup_url = format!("folder:{}", backup.display());
+    // The store named either way worldd reads it: `$WORLDD_STORE`, and the directory's `$DIRECTORY_STORE_URL`
+    // (production's).
+    for store_env in ["WORLDD_STORE", "DIRECTORY_STORE_URL"] {
+        let out = Command::new(std::env::current_exe().expect("this test"))
+            .args([
+                "--exact",
+                "rh_a_rehearsal_leaves_the_live_store_and_the_deploy_after_it_takes_over",
+                "--nocapture",
+            ])
+            .env(CHILD, &d)
+            .env_remove("WORLDD_STORE")
+            .env_remove("DIRECTORY_STORE_URL")
+            .env(store_env, &spec)
+            .env("WORLDD_MACHINE", "rehearsal")
+            .env("SOULS_BACKUP_URL", &backup_url)
+            .env("SOULS_BACKUP_KEY_FILE", &pass)
+            .env("SOULS_BACKUP_SHIP_S", "1")
+            .output()
+            .expect("the rehearsal runs");
+        let said = || std::fs::read_to_string(d.join("r/worldd.err")).unwrap_or_default();
+        assert!(
+            out.status.success(),
+            "the rehearsal with {store_env}: {}{}\nthe build said: {}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr),
+            said()
+        );
+        assert!(
+            files(&d.join("store")) == before,
+            "the rehearsal with {store_env} changed the live store; the build said: {}",
+            said()
+        );
+        assert!(
+            files(&backup).is_empty(),
+            "the rehearsal with {store_env} wrote the live backup; the build said: {}",
+            said()
+        );
+    }
+    // The real deploy's restart after it takes the world over, at the next epoch.
+    let deployed = serve_with(&dir, &socket, &more);
+    let shipping = deployed.line("shipping: ");
+    assert!(shipping.starts_with("shipping: epoch 2 "), "{shipping}");
+    deployed.line("listening");
+    drop(deployed);
+    let _ = std::fs::remove_dir_all(&d);
+}

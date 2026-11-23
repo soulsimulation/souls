@@ -64,7 +64,7 @@ function SoulModal({ soul, onClose }: { soul: HomeSoul; onClose: () => void }) {
         </div>
         <div className="hs-details">
           <h2 id="hs-modal-name">{soul.name}</h2>
-          <p className="hs-age dim">{bornText(soul.bornAt)}</p>
+          {soul.bornAt !== null && <p className="hs-age dim">{bornText(soul.bornAt)}</p>}
           {soul.description && <p className="hs-desc">{soul.description}</p>}
           <h3 className="lh-label">{soul.worlds.length === 1 ? 'World' : 'Worlds'}</h3>
           <ul className="hs-worlds">

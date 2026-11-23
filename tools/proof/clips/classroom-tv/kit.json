@@ -1,1 +1,1 @@
-{ "template": "hello-hamlet", "eden": true, "viewport": "desktop", "timeOfDay": "20:30", "localStorage": { "sim.dev": "admin" } }
+{"template": "hello-hamlet", "eden": true, "viewport": "desktop", "timeOfDay": "20:30", "localStorage": {"sim.dev": "admin"}, "skip": "the classroom television (object:<tv>:switch-off and its channels) and the native Eden core (eden: true) have no new-engine form yet (0.135 K4)"}

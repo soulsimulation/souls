@@ -24,7 +24,7 @@ Logged in once on this computer (`login <world url> [--as alias]`, then `login -
 
 1. **Look.** `look` (or `here`): your room, the places around it, what changed, and `age`.
 2. **Find the id.** `find <words>`: places, things, acts, nearest first; every word must match a name, so use one or two (`find library`, then `find armchair`). Same name twice: pick by where it is, or ask; never guess an id. `inspect <id>` lists a thing's offers, each with the act that sends it. Several reads in one call: `query '[{"find":"library"},{"kind":"<kind>","near":"me"}]'` or `batch '[{"look":{}},{"inspect":"<id>"}]'`; `catalog` lists the kinds here, `context [<words>]` the named places with the world's text for them.
-3. **Act, one call.** `act <act> [<act> ...] --wait`: a ranked list, best first, up to 5. An act is an id alone (walk there) or `<verb>:<id>` (`sit:<id>`, `lie:<id>`); ids right after an act are its things (`fill:<cup id> <tap id>`). The first the world can take is done; the rest are your fallbacks. Write fallbacks for anything others may want (a seat, a table, a turn), each with its verb: `act sit:<id> sit:<id> --wait`. Walk to a seat before you sit on it. `set-down <held id> here` (or `next_to <id>`) puts down what you carry. Seated in a boat that moves by itself: `act carrier:steer:<boat id> x=<m> z=<m>`, `act carrier:stop:<boat id>`, `act carrier:land:<boat id>`.
+3. **Act, one call.** `act <act> [<act> ...] --wait`: a ranked list, best first, up to 5. An act is an id alone (walk there; add `gait=jog` or `gait=run` to hurry) or `<verb>:<id>` (`sit:<id>`, `lie:<id>`); ids right after an act are its things (`fill:<cup id> <tap id>`). The first the world can take is done; the rest are your fallbacks. Write fallbacks for anything others may want (a seat, a table, a turn), each with its verb: `act sit:<id> sit:<id> --wait`. Walk to a seat before you sit on it. `set-down <held id> here` (or `next_to <id>`) puts down what you carry. Seated in a boat that moves by itself: `act carrier:steer:<boat id> x=<m> z=<m>`, `act carrier:stop:<boat id>`, `act carrier:land:<boat id>`.
 4. **Read the answer.** With `--wait` it returns the act's end: `phase` `done`, or `refused` with its `code`; still going after 60 s, `stillRunning` says how to check. Without it, `ok: true` only means sent. Not sure it went (a timeout)? Send it again with the same `--key <k>`: one write, and the first answer back. `receipt [<sequence>]` shows an act's answers so far; `stop` ends your own act where you stand (seated, `act <ns>:rise`). `quit` ends the daemon.
 5. **Report** what happened. A fallback is not the first choice: say which one held. `look` names your seat; `act --wait` names the one that held.
 
@@ -37,8 +37,10 @@ To touch another Soul, offer it; it starts only if they accept (`wait` shows `of
 - `together offer hug <their body id>`: you hug, standing about 0.6 m apart.
 - `together offer high-five <their body id>`: you high-five, standing about 0.6 m apart.
 - `together offer hold-hands <their body id>`: you hold hands, side by side about 0.5 m apart, until either of you leaves or walks.
+- `together offer follow <their body id>`: once they accept, you follow along their way, 1 to 2.5 m behind. It ends after an hour, when either of you leaves, or when you do anything else.
 - `together offer fist-bump <their body id>`: you bump fists, standing about 0.6 m apart.
 - `together offer harvest <their body id>`: you pick into one basket together; then you `act eden:pick:<its id>`, they `eden:pick_too`.
+- `together offer dance <body id> [<body id> ...]`: up to seven dance with you, everyone starting on one beat, until each leaves or walks.
 Offered one, `together accept <id>` or `together decline <id>`.
 
 Before a long errand, `can <act>`: `yes`, `no` with its `reason` and `fix`, or `unknown` (the world decides; send it).

@@ -61,8 +61,8 @@ use replica::bodies::Family;
 use replica::effects::{Change, Event, Refusal, read_id};
 use replica::encode::{Name, Value};
 use replica::host::{
-    Answer, Ask, F_CROSSING, F_HELD, F_ROUTE, F_SETTLED, F_SHOULDER, F_WAITING, Host, Near,
-    Progress, Seen, Skill, WalkPlan,
+    Answer, Ask, F_CROSSING, F_HELD, F_ROUTE, F_SETTLED, F_SHORT, F_SHOULDER, F_WAITING, Host,
+    Near, Progress, Seen, Skill, WalkPlan,
 };
 use replica::ids::{Id, Minter, Scope};
 use replica::pose::{ControllerInput, Vec3};
@@ -594,8 +594,10 @@ pub struct Runner {
     /// What each body was sent to, and the order it was sent for: it asks a standing spot near the point (N9) while
     /// its order lasts.
     pub asks: BTreeMap<Id, (Target, Id)>,
-    /// The place each asker was granted (µm, the target node's frame).
+    /// The place each asker was granted (µm, the frame of the node it stands on there: the target's, or an overflow's).
     pub granted: BTreeMap<Id, Vec3>,
+    /// The walks granted an overflow point round a crowded target, until they end (A2-5).
+    pub overflow: BTreeSet<Id>,
     /// The actual planner's route metrics, bound to the body and its current order (C29).
     route_metrics: BTreeMap<Id, (Id, crate::walk::town::RouteMetrics)>,
     /// The last tick's refusals, each of one body (the tick went on for the others), in the order they came; each
@@ -621,6 +623,10 @@ pub struct Runner {
     pub threads: usize,
     /// How many such skills one thread takes at a time, in body order. The outcome does not depend on it either.
     pub chunk: usize,
+    /// The walks' place requests still out at the planner (S8): each walk's order and the batch it went in.
+    out_places: BTreeMap<Id, (Id, u64)>,
+    /// The walkers' line requests still out at the planner (S8): each walker's leg end and the batch it went in.
+    out_lines: BTreeMap<Id, (Vec3, u64)>,
 }
 
 fn decode_int(v: &Value) -> Option<i64> {
@@ -706,7 +712,14 @@ pub struct Wants {
 }
 
 /// A walk's place and legs, or a refusal's name.
-pub type Placed = Result<(Vec3, Vec<Leg>, crate::walk::town::RouteMetrics), &'static str>;
+pub type Placed = Result<
+    (
+        crate::spots::Granted,
+        Vec<Leg>,
+        crate::walk::town::RouteMetrics,
+    ),
+    &'static str,
+>;
 
 /// The lines a tick's walkers asked for: the body as it stood and the leg's end.
 type Asked = RefCell<Vec<(Moved, Vec3)>>;
@@ -718,6 +731,9 @@ pub struct Planned {
     pub map: Option<std::sync::Arc<crate::ground::Versions>>,
     /// Each walk given an answer: its order, then its place and legs, or a refusal's name.
     pub places: BTreeMap<Id, (Id, Placed)>,
+    /// The walks whose granted place a change of the ground took away in the planner's spot tables (A2-5): planned
+    /// again.
+    pub revoked: Vec<Id>,
     /// Each walker's line (#3167's, found by the planning call `View::search`) toward the leg's end it asked for, or
     /// the search's refusal.
     pub lines: Found,
@@ -726,6 +742,26 @@ pub struct Planned {
     /// Route searches run for these answers (legs and lines).
     pub searched: u64,
     pub forms: BTreeMap<crate::planner::FormKey, crate::planner::FormAnswer>,
+    /// Where the planner's batches stand as this tick reads its answers (S8), set by whoever sends and takes them:
+    /// with it, a walk or a walker whose request is still out is not asked again; without, every tick asks again.
+    pub batches: Option<Batches>,
+}
+
+/// The planner's batches as a tick reads its answers (S8), counted from the first batch sent: those taken so far
+/// (every batch below `taken` has been answered or dropped) and the number of the batch this tick's wants go in.
+/// Counted on the clock's side, from what it sent and took, so a lockstep replay that takes the same batches at the
+/// same ticks (K12) asks the same questions.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Batches {
+    pub taken: u64,
+    pub next: u64,
+}
+
+impl Batches {
+    /// Whether a request that went in batch `sent` is still out.
+    fn out(self, sent: u64) -> bool {
+        sent >= self.taken
+    }
 }
 
 impl Planned {
@@ -747,6 +783,8 @@ impl Planned {
     /// Takes `later`'s answers over these. A different map cannot retain answers from its predecessor.
     pub fn merge(&mut self, later: Planned) {
         // Unstamped legacy answers cannot acquire a stamped cache's current identity.
+        // A revoked grant is let go whatever map it came with (A2-5).
+        self.revoked.extend(later.revoked);
         if self.map.is_some() && later.map.is_none() {
             self.searched += later.searched;
             return;
@@ -768,6 +806,9 @@ impl Planned {
             }
         }
         self.searched += later.searched;
+        if later.batches.is_some() {
+            self.batches = later.batches;
+        }
     }
 }
 
@@ -899,6 +940,7 @@ impl Runner {
             ended: BTreeMap::new(),
             asks: BTreeMap::new(),
             granted: BTreeMap::new(),
+            overflow: BTreeSet::new(),
             route_metrics: BTreeMap::new(),
             refused: Vec::new(),
             said: Vec::new(),
@@ -911,6 +953,8 @@ impl Runner {
             units: Units::new(),
             threads: 1,
             chunk: CHUNK,
+            out_places: BTreeMap::new(),
+            out_lines: BTreeMap::new(),
         }
     }
 
@@ -940,17 +984,20 @@ impl Runner {
 
     /// Runs `skill` on `body`, under a new driver claiming what the skill's shape claims. The marks a run before it
     /// left on the body go (#3168): a route the world gave it (`F_ROUTE`; a new walk would take it for its own and
-    /// walk the old route's legs from wherever it stands now), its waiting mark and the shoulder turn.
+    /// walk the old route's legs from wherever it stands now), its waiting mark, the shoulder turn and a last walk's
+    /// end short of its goal (`F_SHORT`, A2-4).
     pub fn start(&mut self, body: Id, skill: Box<dyn Skill>) -> Result<(), Refusal> {
         let driver = self.controller.claim(body, &skill.shape())?;
         if let Some(f) = self.fields.get_mut(&body) {
             f.remove(&F_ROUTE);
             f.remove(&F_WAITING);
             f.remove(&F_SHOULDER);
+            f.remove(&F_SHORT);
         }
         self.ended.remove(&body);
         self.asks.remove(&body);
         self.granted.remove(&body);
+        self.overflow.remove(&body);
         self.route_metrics.remove(&body);
         self.runs.push(Run {
             body,
@@ -977,6 +1024,7 @@ impl Runner {
         self.start(body, skill)?;
         self.asks.insert(body, (target, order));
         self.granted.remove(&body);
+        self.overflow.remove(&body);
         self.route_metrics.remove(&body);
         Ok(())
     }
@@ -1028,6 +1076,7 @@ impl Runner {
         }
         self.asks.remove(&body);
         self.granted.remove(&body);
+        self.overflow.remove(&body);
         self.route_metrics.remove(&body);
         self.ended.insert(body, (self.now, Progress::Failed(name)));
     }
@@ -1040,6 +1089,7 @@ impl Runner {
         }
         self.asks.remove(&body);
         self.granted.remove(&body);
+        self.overflow.remove(&body);
         self.route_metrics.remove(&body);
     }
 
@@ -1192,6 +1242,16 @@ impl Runner {
             None => world.or(town.spots(&marks, at).err()),
             Some(_) => world,
         };
+        // A place a change of the ground took away: its grant is let go, and the walk is planned again from the place
+        // it is granted now (A2-5).
+        let revoked = match planned {
+            None => town.revoked(),
+            Some(p) => p.revoked.clone(),
+        };
+        for who in revoked {
+            self.granted.remove(&who);
+            self.overflow.remove(&who);
+        }
         // A walk sent to a point gets its route once its place is granted; a refusal ends it by name.
         let running = self.running_bodies();
         let waiting: Vec<(Id, Target, Id)> = self
@@ -1200,6 +1260,22 @@ impl Runner {
             .filter(|(who, _)| running.contains(*who) && !self.granted.contains_key(who))
             .map(|(who, (t, o))| (*who, *t, *o))
             .collect();
+        // Requests out at the planner are kept only while their walk waits on the same order, or the walker's
+        // request is still out; without the batches' count none is kept (S8).
+        let batches = planned.and_then(|p| p.batches);
+        match batches {
+            Some(b) => {
+                let (asks, granted) = (&self.asks, &self.granted);
+                self.out_places.retain(|who, (o, _)| {
+                    !granted.contains_key(who) && asks.get(who).is_some_and(|(_, order)| order == o)
+                });
+                self.out_lines.retain(|_, (_, sent)| b.out(*sent));
+            }
+            None => {
+                self.out_places.clear();
+                self.out_lines.clear();
+            }
+        }
         for (who, target, order) in waiting {
             let Some(body) = self.controller.body(who).copied() else {
                 continue;
@@ -1209,19 +1285,38 @@ impl Runner {
                 match planned.places.get(&who) {
                     Some((o, Ok((p, legs, metrics)))) if *o == order => {
                         self.route_metrics.insert(who, (order, *metrics));
-                        self.granted.insert(who, *p);
+                        self.granted.insert(who, p.at);
+                        if p.overflow {
+                            self.overflow.insert(who);
+                        }
                         self.route(who, legs);
                     }
                     Some((o, Err(name))) if *o == order => self.end(who, named(name)),
-                    _ => wants.places.push((body, target, order)),
+                    // Asked again only once the batch it went in has been taken without its answer (S8).
+                    _ => match planned.batches {
+                        Some(b) => {
+                            if !self
+                                .out_places
+                                .get(&who)
+                                .is_some_and(|&(o, sent)| o == order && b.out(sent))
+                            {
+                                self.out_places.insert(who, (order, b.next));
+                                wants.places.push((body, target, order));
+                            }
+                        }
+                        None => wants.places.push((body, target, order)),
+                    },
                 }
                 continue;
             }
             match town.spot(who, &target) {
-                Some(Ok(p)) => match town.plan_with_metrics(&body, target.node, p) {
+                Some(Ok(p)) => match town.plan_with_metrics(&body, p.node, p.at) {
                     Ok((legs, metrics)) => {
                         self.route_metrics.insert(who, (order, metrics));
-                        self.granted.insert(who, p);
+                        self.granted.insert(who, p.at);
+                        if p.overflow {
+                            self.overflow.insert(who);
+                        }
                         self.route(who, &legs);
                     }
                     Err(e) => self.end(who, named(e.name)),
@@ -1254,6 +1349,21 @@ impl Runner {
             &mut self.units,
             &mut wants.lines,
         );
+        // A walker's line asked again only once the batch it went in has been taken without it (S8): until then it
+        // stands, as it does while its first request is out.
+        if let Some(b) = batches {
+            let out = &mut self.out_lines;
+            wants.lines.retain(|(body, to)| {
+                if out
+                    .get(&body.id)
+                    .is_some_and(|(t, sent)| t == to && b.out(*sent))
+                {
+                    return false;
+                }
+                out.insert(body.id, (*to, b.next));
+                true
+            });
+        }
         if planned.is_some() {
             wants.at = at;
             wants.marks = Some(marks);
@@ -1288,6 +1398,25 @@ impl Runner {
                 let _ = self.controller.release(*who, d);
             }
             self.route_metrics.remove(who);
+            // A walk that ended short of its granted spot, as near as the crowd allows, never stood on it: the spot is
+            // released (its ask goes), and the body is not settled (A2-4). One that arrived on an overflow point round
+            // a crowded target keeps it, and ends as near as the crowd allows too (A2-5).
+            let overflow = self.overflow.remove(who);
+            if matches!(p, Progress::Done) {
+                if self
+                    .fields
+                    .get(who)
+                    .is_some_and(|f| f.contains_key(&F_SHORT))
+                {
+                    self.asks.remove(who);
+                    self.granted.remove(who);
+                } else if overflow {
+                    self.fields
+                        .entry(*who)
+                        .or_default()
+                        .insert(F_SHORT, Value::Uint(1));
+                }
+            }
             self.ended.insert(*who, (self.now, p.clone()));
         }
         let surfaces = replica::kinds::sizes::Size::ALL.map(|size| town.surfaces_for(size));
