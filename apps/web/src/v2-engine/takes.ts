@@ -8,6 +8,7 @@
 // extrapolation), faces the way it moves (the old take's yaw: atan2(dz, dx)), and walks while it moves.
 
 import { heldAt, postureOf, type Held, type Seat } from './take-bodies.ts';
+import { gestureAt, type Gesture } from './take-gestures.ts';
 import { markOf, type Talk } from './take-speech.ts';
 
 /** Seconds a tick, as the old engine's takes. */
@@ -39,6 +40,8 @@ export type Body = {
   until?: number;
   /** What it holds, in time order (take-bodies.ts). */
   held?: Held[];
+  /** Its gesture moves (take-gestures.ts), in start order. */
+  gestures?: Gesture[];
   /** What it said, as talk lines in time order (take-speech.ts). */
   said?: Talk[];
   /** Its look as the old page records a body (BODY-v1, take-bodies.ts legacyBodyOf); absent: the default person. */
@@ -112,7 +115,8 @@ export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame)
       const seat = walking ? null : seatAt(b.samples, t), nextSeat = seat ? seat.height / POS_Q : null, nextProp = heldAt(b.held, t);
       if (k < TICKS && nextSeat !== (seatH ?? null)) { changes.push([k, b.entity, 'seatHeight', nextSeat]); seatH = nextSeat; }
       if (k < TICKS && nextProp !== prop && (nextProp !== null || prop !== undefined)) { changes.push([k, b.entity, 'prop', nextProp]); prop = nextProp; }
-      const nextActivity = walking ? 'walk' : postureOf(seat) ?? 'idle';
+      // A gesture plays where the body stands; seated or lying it keeps its posture (the old poses are standing ones).
+      const nextActivity = walking ? 'walk' : postureOf(seat) ?? gestureAt(b.gestures, t) ?? 'idle';
       if (nextActivity !== activity && k < TICKS) { changes.push([k, b.entity, 'activity', nextActivity]); activity = nextActivity; }
       const q = walking ? Math.round(m.speed * SPEED_Q) : null;
       if (k < TICKS && (q === null ? speedQ !== null : speedQ === null || Math.abs(q - speedQ) > 2)) { changes.push([k, b.entity, 'speed', q]); speedQ = q; }
