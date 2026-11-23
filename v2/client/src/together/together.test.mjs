@@ -9,7 +9,7 @@ import { KINDS, OFFERER, togetherIntents } from './together.mjs';
 const id = (n) => `${'ab'.repeat(16)}-${n}`;
 
 test('together offers a handshake, a hug or a high five to one body; accept and decline answer it', () => {
-  for (const touch of ['handshake', 'hug', 'high-five']) {
+  for (const touch of ['handshake', 'hug', 'high-five', 'hold-hands', 'follow']) {
     assert.deepEqual(togetherIntents({ do: 'offer', touch, to: id(3) }, { place: id(1) }),
       [{ verb: 'activity:offer', target: id(1), params: { 1: KINDS[touch], 2: OFFERER, 3: [id(3)] } }]);
   }
@@ -31,4 +31,13 @@ test('an offer of a touch reaches the other as a touch, not a conversation', () 
   const ev = { name: 'souls:offer', fields: { 1: id(9), 2: KINDS['high-five'], 3: [id(3)], 4: 60_000_000, 5: id(2) } };
   assert.deepEqual(offerNote(ev, id(3)), { kind: 'together', what: 'offered', touch: 'high-five', offer: id(9), from: id(2) });
   assert.equal(offerNote(ev, id(2)), null, 'its own offer');
+});
+
+test('a dance is offered to up to seven at once, from the command line too', () => {
+  const to = [3, 4, 5].map(id);
+  assert.deepEqual(togetherIntents({ do: 'offer', touch: 'dance', to }, { place: id(1) }),
+    [{ verb: 'activity:offer', target: id(1), params: { 1: KINDS.dance, 2: OFFERER, 3: to } }]);
+  assert.deepEqual(requestOf(['together', 'offer', 'dance', ...to]).req.to, to);
+  assert.equal(togetherIntents({ do: 'offer', touch: 'dance', to: [3, 4, 5, 6, 7, 8, 9, 10].map(id) }, { place: id(1) }).code, 'together-usage');
+  assert.equal(togetherIntents({ do: 'offer', touch: 'hug', to: [id(3), id(4)] }, { place: id(1) }).code, 'together-usage');
 });

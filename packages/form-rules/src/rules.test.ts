@@ -91,6 +91,24 @@ test('a need on a field a closed kind names reads the container\'s audience, not
   assert.equal(ask('peek', []).verdict, 'yes', 'a field the closed list does not name keeps its own audience');
 });
 
+test('a search of a closed container the asker cannot see into is unknown, naming only the container and its closed section', () => {
+  const stump = {
+    kind: 'test:stump',
+    closed: { audience: { rule: 'creator' as const }, fields: [] },
+    slots: { inside: { admits: 'thing', most: 3 } },
+    forms: { search: { who: 'anyone', starts: 'act', takes: { thing: { type: 'thing', select: { of: 'things', in: 'this', anchor: 'me', order: 'nearest', rank: 1 } } }, needs: [{ need: 'hand', free: true }] } },
+  };
+  const ask = (inside: string[]) => decide({
+    kinds: { 'test:stump': stump } as never,
+    act: { this: 's', form: 'search' },
+    state: { actor: 'me', nodes: { s: { kind: 'test:stump', slots: { inside } }, ...Object.fromEntries(inside.map((id) => [id, {}])), me: { hands: { right: null } } } },
+    asker: { sees: ['public'] },
+  });
+  const empty = ask([]), full = ask(['t1', 't2']);
+  assert.deepEqual(empty, { verdict: 'unknown', need: -1, node: 's', field: 'closed', read: [] });
+  assert.deepEqual(full, empty, 'the same answer whatever it holds: no slot, thing or count is named');
+});
+
 test('a state need\'s fix passes over a form that would itself be refused now', () => {
   const lamp = {
     kind: 'test:lamp',

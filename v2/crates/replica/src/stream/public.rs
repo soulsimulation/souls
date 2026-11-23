@@ -587,6 +587,11 @@ pub fn context_with(
 
 /// The index of `id`'s row in `rows`, a projection key's `[[id, value], ...]` in id order (#3799).
 fn row_index(rows: &[Value], id: Id) -> R<Option<usize>> {
+    Ok(row_position(rows, id)?.ok())
+}
+
+/// `Ok(index)` of `id`'s row in `rows`, or `Err(index)`: where a row for it would go (a node a cut makes).
+fn row_position(rows: &[Value], id: Id) -> R<Result<usize, usize>> {
     let (mut lo, mut hi) = (0, rows.len());
     while lo < hi {
         let mid = (lo + hi) / 2;
@@ -597,24 +602,33 @@ fn row_index(rows: &[Value], id: Id) -> R<Option<usize>> {
         match read_id(r)?.cmp(&id) {
             std::cmp::Ordering::Less => lo = mid + 1,
             std::cmp::Ordering::Greater => hi = mid,
-            std::cmp::Ordering::Equal => return Ok(Some(mid)),
+            std::cmp::Ordering::Equal => return Ok(Ok(mid)),
         }
     }
-    Ok(None)
+    Ok(Err(lo))
 }
 
-/// What a delta played in place swaps into the state (#3799): the version, node rows by index, and the timers and
-/// links whole. Swapped in, it holds what it replaced, so swapping it in again puts the state back.
+/// What a delta played in place swaps into the state (#3799): the version, node rows by index, the rows of the nodes
+/// it makes, and the timers and links whole. Swapped in, it holds what it replaced, so swapping it in again puts the
+/// state back.
 struct Plan {
     v1: Value,
     rows: Vec<(usize, Value)>,
+    /// The rows of the nodes the delta makes, each with the index of the old row it goes before, in id order.
+    added: Vec<(usize, Value)>,
+    /// Whether the rows made are in the state now.
+    added_in: bool,
     timers: Option<Value>,
     links: Option<Value>,
-    /// The nodes whose frame the delta changes, each with its new parent (#4192).
+    /// The nodes whose frame the delta changes or makes, each with its new parent (#4192).
     moved: Vec<(Id, Option<Id>)>,
 }
 
 impl Plan {
+    /// Where old row `i` is once the rows made are in the state.
+    fn index_after(&self, i: usize) -> usize {
+        i + self.added.iter().filter(|(at, _)| *at <= i).count()
+    }
     fn swap(&mut self, state: &mut Value) {
         let Value::Map(m) = state else {
             unreachable!("validated state")
@@ -623,9 +637,22 @@ impl Plan {
             std::mem::swap(v, &mut self.v1);
         }
         if let Some(Value::Array(nodes)) = m.get_mut(&2) {
+            // The rows replaced at their old indices: the rows made are taken out first, and put in after, the last
+            // first, so that each old index holds.
+            if self.added_in {
+                for (k, (at, _)) in self.added.iter().enumerate().rev() {
+                    nodes.remove(at + k);
+                }
+            }
             for (i, row) in &mut self.rows {
                 std::mem::swap(&mut nodes[*i], row);
             }
+            if !self.added_in {
+                for (at, row) in self.added.iter().rev() {
+                    nodes.insert(*at, row.clone());
+                }
+            }
+            self.added_in = !self.added_in;
         }
         if let (Some(t), Some(v)) = (self.timers.as_mut(), m.get_mut(&6)) {
             std::mem::swap(v, t);
@@ -706,7 +733,8 @@ impl Frames {
                 if !visited.insert(id) {
                     return false;
                 }
-                parent = if self.parent.contains_key(&id) {
+                // A node the delta makes is walked on too: it is in `moved`, not yet in `parent`.
+                parent = if self.parent.contains_key(&id) || moved.contains_key(&id) {
                     up(&id)
                 } else {
                     None
@@ -734,8 +762,9 @@ impl Frames {
 /// replacing a live node's row, each node valid alone, and a frame changed only where the frame walk of `validate`
 /// still passes for the node and everything under it; rows of key 3, links added, changed or removed, each added one
 /// public and owned by a live node; and rows of key 6, timers set, changed or cleared, each owned by a node of the
-/// state. No node comes or goes and no flight changes, so the whole-state checks read nothing that changes but these
-/// rows. Its plan; none when the delta is any other, or when it is unsure: the whole path then decides.
+/// state. A row of a node not in the state is a node made (T-late): checked as `validate` checks a node, its id in no
+/// other row, its frame walked as a moved node's. No node goes and no flight changes, so the whole-state checks read
+/// nothing that changes but these rows. Its plan; none when the delta is any other, or when it is unsure: the whole path then decides.
 fn in_place(
     header: &Header,
     state: &Value,
@@ -752,6 +781,7 @@ fn in_place(
     let m = map(state)?;
     let rows = arr(field(m, 2)?)?;
     let mut out = Vec::new();
+    let mut added: Vec<(usize, Id, Value)> = Vec::new();
     let mut ids = BTreeSet::new();
     let mut moved = BTreeMap::new();
     for row in delta.get(&2).map(arr).transpose()?.unwrap_or(&[]) {
@@ -763,15 +793,38 @@ fn in_place(
         if !ids.insert(id) {
             return Ok(None);
         }
-        let Some(i) = row_index(rows, id)? else {
-            return Ok(None);
+        let none = BTreeSet::new();
+        let i = match row_position(rows, id)? {
+            Ok(i) => i,
+            // A node the cut makes (T-late): a live row of its own, its id in no other row of the state (opaque or in
+            // a public flight), valid alone and pinned, and its frame walked like a moved node's. In id order, after
+            // any made before it.
+            Err(at) => {
+                let new = NodeState::read(&r[1])?;
+                if id == header.zone
+                    || !pinned(header, &none, &new.kind)
+                    || crate::kinds::defined::is_definition(new.kind.as_str())
+                    || added.last().is_some_and(|(_, last, _)| *last >= id)
+                    || row_index(arr(field(m, 8)?)?, id)?.is_some()
+                    || pairs(field(m, 4)?)?.values().any(|f| {
+                        map(f)
+                            .and_then(|f| pairs(field(f, 5)?))
+                            .map_or(true, |n| n.contains_key(&id))
+                    })
+                {
+                    return Ok(None);
+                }
+                validate_node(header, &none, id, &new)?;
+                moved.insert(id, new.parent);
+                added.push((at, id, Value::Array(vec![id.to_value(), r[1].clone()])));
+                continue;
+            }
         };
         let (old, new) = (
             NodeState::read(&arr(&rows[i])?[1])?,
             NodeState::read(&r[1])?,
         );
         // A kind the header does not pin, or a definition, is checked against the whole state (#3697).
-        let none = BTreeSet::new();
         if id == header.zone
             || !pinned(header, &none, &new.kind)
             || crate::kinds::defined::is_definition(old.kind.as_str())
@@ -784,6 +837,16 @@ fn in_place(
         }
         validate_node(header, &none, id, &new)?;
         out.push((i, Value::Array(vec![id.to_value(), r[1].clone()])));
+    }
+    let made: BTreeSet<Id> = added.iter().map(|(_, id, _)| *id).collect();
+    let live = |id: Id| -> R<bool> { Ok(made.contains(&id) || row_index(rows, id)?.is_some()) };
+    // A node made goes into a frame the state already holds (live or opaque) or one made with it: one made inside a
+    // private node made with it brings that node's opaque row too, which the whole path works out.
+    for (_, id, _) in &added {
+        match moved.get(id).copied().flatten() {
+            Some(p) if live(p)? || row_index(arr(field(m, 8)?)?, p)?.is_some() => {}
+            _ => return Ok(None),
+        }
     }
     if !moved.is_empty() {
         let mut f = frames.borrow_mut();
@@ -819,7 +882,7 @@ fn in_place(
                     return Ok(None);
                 };
                 if !public(link.audience)
-                    || row_index(rows, link.ends[usize::from(link.owner == End::Second)])?.is_none()
+                    || !live(link.ends[usize::from(link.owner == End::Second)])?
                 {
                     return Ok(None);
                 }
@@ -853,7 +916,7 @@ fn in_place(
                 let tm = map(&r[1])?;
                 let owner = read_id(field(tm, 1)?)?;
                 if tm.len() != 3
-                    || (row_index(rows, owner)?.is_none()
+                    || (!live(owner)?
                         && row_index(opaque, owner)?.is_none()
                         && !pairs(field(m, 4)?)?.values().any(|f| {
                             map(f)
@@ -875,6 +938,8 @@ fn in_place(
     Ok(Some(Plan {
         v1: v1.clone(),
         rows: out,
+        added: added.into_iter().map(|(at, _, row)| (at, row)).collect(),
+        added_in: false,
         timers,
         links,
         moved: moved.into_iter().collect(),
@@ -900,12 +965,21 @@ fn streamed_digest(state: &Value, enc: &[Vec<u8>], plan: Option<&Plan>) -> R<Vec
                 if rows.len() != enc.len() {
                     return bad("row encodings");
                 }
-                h.update(&head(4, rows.len() as u64));
+                // The rows a delta makes go before the old row whose index they carry (T-late).
+                let added: &[(usize, Value)] = plan.map_or(&[], |p| &p.added);
+                h.update(&head(4, (rows.len() + added.len()) as u64));
+                let mut made = added.iter().peekable();
                 for (i, e) in enc.iter().enumerate() {
+                    while let Some((_, row)) = made.next_if(|(at, _)| *at == i) {
+                        h.update(&encoded(row)?);
+                    }
                     match over.get(&i) {
                         Some(v) => h.update(&encoded(v)?),
                         None => h.update(e),
                     }
+                }
+                for (_, row) in made {
+                    h.update(&encoded(row)?);
                 }
             }
             (
@@ -984,14 +1058,18 @@ impl PublicPlayer {
     }
     /// The delta from the state to one at version `next` whose node rows `rows`, timers `timers` and links `links` (by
     /// id; `None`, gone) replace the live ones, those equal to the live ones left out (#3799, #4192): as [`context`]
-    /// works it out from the two whole states. None when it cannot be played in place (a new or gone node, a frame
-    /// walk `validate` would refuse, no new version); the caller then works it out whole.
+    /// works it out from the two whole states. A row of a node not live here is a node made (T-late) only when its id
+    /// is in `made`, the nodes the caller's cut made, with no links or timers on them; any other is a node that comes
+    /// back (out of a closed container, #3948) with rows this delta does not hold. None when it cannot be played in
+    /// place (such a row, a gone node, a frame walk `validate` would refuse, no new version); the caller then works it
+    /// out whole.
     pub fn row_delta(
         &self,
         next: u64,
         mut rows: Vec<(Id, Value)>,
         timers: Vec<(Id, Option<Value>)>,
         links: Vec<(Id, Option<Value>)>,
+        made: &BTreeSet<Id>,
     ) -> R<Option<Value>> {
         if next == self.version() {
             return Ok(None);
@@ -1000,10 +1078,12 @@ impl PublicPlayer {
         let live = arr(field(map(&self.state)?, 2)?)?;
         let mut changed = Vec::new();
         for (id, v) in rows {
-            let Some(i) = row_index(live, id)? else {
-                return Ok(None);
+            let changes = match row_index(live, id)? {
+                Some(i) => arr(&live[i])?[1] != v,
+                None if made.contains(&id) => true,
+                None => return Ok(None),
             };
-            if arr(&live[i])?[1] != v {
+            if changes {
                 changed.push(Value::Array(vec![id.to_value(), v]));
             }
         }
@@ -1201,11 +1281,20 @@ impl PublicPlayer {
                         let new: Vec<(usize, Vec<u8>)> = p
                             .rows
                             .iter()
-                            .map(|(i, _)| Ok((*i, encoded(&rows[*i])?)))
+                            .map(|(i, _)| Ok((*i, encoded(&rows[p.index_after(*i)])?)))
+                            .collect::<R<_>>()?;
+                        // The rows made (T-late), each at its old index, put in the last first as in the state.
+                        let made: Vec<(usize, Vec<u8>)> = p
+                            .added
+                            .iter()
+                            .map(|(at, row)| Ok((*at, encoded(row)?)))
                             .collect::<R<_>>()?;
                         if let Some(enc) = self.enc.as_mut() {
                             for (i, e) in new {
                                 enc[i] = e;
+                            }
+                            for (at, e) in made.into_iter().rev() {
+                                enc.insert(at, e);
                             }
                         }
                         if p.links.is_some() {
@@ -1334,12 +1423,21 @@ impl PublicPlayer {
                 return bad("missing changed node version");
             }
         }
-        for (i, old) in old.iter().flat_map(|p| &p.rows) {
-            let Value::Array(row) = &rows[*i] else {
-                return bad("expected an id/value pair");
-            };
-            if &rows[*i] != old && !changes.contains_key(&read_id(&row[0])?) {
-                return bad("missing changed node version");
+        if let Some(p) = old {
+            for (i, old) in &p.rows {
+                let at = p.index_after(*i);
+                let Value::Array(row) = &rows[at] else {
+                    return bad("expected an id/value pair");
+                };
+                if &rows[at] != old && !changes.contains_key(&read_id(&row[0])?) {
+                    return bad("missing changed node version");
+                }
+            }
+            // A node made (T-late) is a changed node.
+            for (_, row) in &p.added {
+                if !changes.contains_key(&read_id(&arr(row)?[0])?) {
+                    return bad("missing changed node version");
+                }
             }
         }
         Ok((next_digest, changes, part, version))

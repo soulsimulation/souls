@@ -1,0 +1,115 @@
+{
+ "format": "souls-entry/1",
+ "kind": "eden:fist_bump",
+ "owner": "thing",
+ "links": {
+  "one": {
+   "n": 1,
+   "from": "body",
+   "most": 1,
+   "audience": {
+    "rule": "everyone"
+   }
+  },
+  "other": {
+   "n": 2,
+   "from": "body",
+   "most": 1,
+   "audience": {
+    "rule": "everyone"
+   }
+  }
+ },
+ "points": {
+  "by_one": {
+   "role": "stand",
+   "at_mm": [
+    -300,
+    0,
+    0
+   ],
+   "yaw_mdeg": 90000
+  },
+  "by_other": {
+   "role": "stand",
+   "at_mm": [
+    300,
+    0,
+    0
+   ],
+   "yaw_mdeg": -90000
+  }
+ },
+ "slots": {
+  "one": {
+   "admits": "body",
+   "most": 1,
+   "at_mm": [
+    -300,
+    0,
+    0
+   ],
+   "stand": "by_one"
+  },
+  "other": {
+   "admits": "body",
+   "most": 1,
+   "at_mm": [
+    300,
+    0,
+    0
+   ],
+   "stand": "by_other"
+  }
+ },
+ "geometry": {
+  "bounds_mm": [
+   1000,
+   100,
+   600
+  ]
+ },
+ "forms": {},
+ "roles": {
+  "one": {
+   "need": "required",
+   "places": {
+    "in": "this",
+    "slots": [
+     "one"
+    ]
+   },
+   "move": "fist_bump"
+  },
+  "other": {
+   "need": "required",
+   "places": {
+    "in": "this",
+    "slots": [
+     "other"
+    ]
+   },
+   "move": "fist_bump"
+  }
+ },
+ "motion": {
+  "how": "fixed"
+ },
+ "loose": {
+  "ever": true
+ },
+ "text": {
+  "card": "A fist bump for two: offer it, and it starts when the other accepts.",
+  "greeting": "greeting",
+  "bump_fists": "bump fists",
+  "knuckles": "knuckles"
+ },
+ "card": {
+  "text": "card",
+  "category": "greeting",
+  "synonyms": [
+   "bump_fists",
+   "knuckles"
+  ]
+ }
+}
