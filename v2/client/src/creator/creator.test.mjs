@@ -937,6 +937,22 @@ test('#3697: a creator uploads a picture through the check and hold point; an al
   assert.equal((await god('upload', join(dir, 'notes.txt'))).code, 'usage');
 });
 
+test('R8b: describe <id> reads one thing from the copy: its frames, spot, fields and what is in it; an unknown id is refused', async () => {
+  await connected();
+  const place = (await god('describe')).nodes.find((x) => x.kind === 'souls:place');
+  const room = await god('place', 'room', '--in', place.id, '--at', '70000,0,70000');
+  const roomId = room.names['1'];
+  const lamp = await god('place', 'lamp', '--in', roomId, '--at', '1500,0,2500');
+  const lampId = lamp.names['1'];
+  const t = await god('describe', lampId);
+  assert.equal(t.ok, true, JSON.stringify(t));
+  assert.equal(t.id, lampId);
+  assert.deepEqual(t.in.map((f) => f.id), [roomId, place.id], 'its room, then the place');
+  assert.deepEqual(t.at, [1500, 0, 2500]);
+  assert.deepEqual((await god('describe', roomId)).holds.map((h) => h.id), [lampId], 'the room holds the lamp');
+  assert.equal((await god('describe', `${place.id.split('-')[0]}-99999`)).code, 'edit.node-missing');
+});
+
 test('R8a: a row and a grid are one edit each, all or none, centred on --at; a grid may face a compass point', async () => {
   await connected();
   const place = (await god('describe')).nodes.find((x) => x.kind === 'souls:place');
