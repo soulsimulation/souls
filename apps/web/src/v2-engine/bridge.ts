@@ -204,8 +204,10 @@ export class V2Bridge {
   private nodesChanged(nodes: NodeRec[], removed: string[], at: number, defer = false): NodeRec[] {
     const moved: NodeRec[] = [];
     for (const id of removed) { this.nodes.delete(id); const t = this.tracks.get(id); if (t) t.gone ??= at; this.letGo(id, at); }
+    // V5 (0.133): every record first, so a body listed before the seat or room it is in is placed in it (a history
+    // bundle's state lists a seated body before its bench: it was drawn nowhere for the whole bundle)
+    for (const n of nodes) this.nodes.set(n.id, n);
     for (const n of nodes) {
-      this.nodes.set(n.id, n);
       if (n.parent === null) this.view.world = n.id;
       if (!isBody(n)) {
         // A thing whose frame is a body is in its hand (souls:hold); put down, it is not.
