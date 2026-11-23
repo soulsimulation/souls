@@ -463,6 +463,35 @@ fn i4187_a_souls_own_new_act_preempts_its_run_walking_or_mid_move() {
         assert_eq!(e.how.as_str(), "done", "the new run runs to its end");
         b.clean();
     }
+
+    // The world's own conflicts keep their codes, and a refused new act leaves the Soul's run as it was: a thing
+    // another Soul's run holds is refused `thing-reserved`.
+    let mut b = Bench::new();
+    let (first, mine) = b.add(&entry, Vec3::new(0, 0, 3_000_000), Vec3::ZERO);
+    let (second, theirs) = b.add(&entry, Vec3::new(2_000_000, 0, 3_000_000), Vec3::ZERO);
+    b.start(first, mine, &entry, &form, Limits::default());
+    b.start(second, theirs, &entry, &form, Limits::default());
+    let r = b
+        .ask(
+            first,
+            theirs,
+            &entry,
+            &form,
+            Limits::default(),
+            intent(first, 1),
+        )
+        .expect_err("refused");
+    assert_eq!(r.name, "thing-reserved");
+    assert!(
+        b.forms.ended.is_empty(),
+        "nothing was left: {:?}",
+        b.forms.ended
+    );
+    assert_eq!(
+        b.forms.holder(mine),
+        Some(first),
+        "the Soul's own run goes on"
+    );
 }
 
 /// C20 (#3469): a run is due by its start plus its steps' span, its walk, its move and its pause each by its own
