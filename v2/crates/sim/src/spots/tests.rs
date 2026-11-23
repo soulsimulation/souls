@@ -522,9 +522,15 @@ fn a_thing_is_walkable_when_a_place_a_floor_to_stand_on_a_step_high_or_stood_on_
 }
 
 /// 0.133 A2-5: a thing's deck (node 1) with room for one body at its middle, on open ground (node 2) where none
-/// stands within 1 m of the middle (under the deck), or, `bare`, within 16 m of it. Every walk is straight.
+/// stands within 1 m of the middle (under the deck), or, `bare`, within 16 m of it, nor within 0.3 m of `hole`.
+/// Walks are straight, except: with `river`, none crosses x = 10 m; with `wall`, one that crosses x = 3 m goes 40 m
+/// round.
+#[derive(Default)]
 struct Deck {
     bare: bool,
+    river: bool,
+    wall: bool,
+    hole: Option<Vec3>,
 }
 
 fn deck() -> Id {
@@ -542,6 +548,7 @@ impl Ground for Deck {
             r < 400_000
         } else {
             r > if self.bare { 16_000_000 } else { 1_000_000 }
+                && self.hole.is_none_or(|h| flat(h, p) > 300_000)
         };
         ok.then_some((p, p))
     }
@@ -549,15 +556,32 @@ impl Ground for Deck {
         false
     }
     fn walk(&mut self, _: Id, a: Vec3, _: Id, b: Vec3) -> Option<i64> {
-        Some(flat(a, b))
+        let across = |x: i64| (a.x > x) != (b.x > x);
+        if self.river && across(10_000_000) {
+            return None;
+        }
+        Some(
+            flat(a, b)
+                + if self.wall && across(3_000_000) {
+                    40_000_000
+                } else {
+                    0
+                },
+        )
     }
     fn overflow_at(&self, n: Id, p: Vec3) -> Vec<(Id, Vec3)> {
         if n == deck() {
-            vec![(n, p), (open_ground(), p)]
+            vec![(open_ground(), p)]
         } else {
             Vec::new()
         }
     }
+}
+
+fn granted_all(spots: &Spots, asks: &[Ask]) -> Vec<Option<Granted>> {
+    asks.iter()
+        .map(|a| spots.granted(a.who, &a.target).and_then(Result::ok))
+        .collect()
 }
 
 fn deck_asks(n: u64) -> Vec<Ask> {
@@ -578,7 +602,7 @@ fn deck_asks(n: u64) -> Vec<Ask> {
 /// nearest first, each its own and a body's room apart; released like any place when their orders end.
 #[test]
 fn a2_5_a_full_place_overflows_onto_the_ground_round_it() {
-    let mut g = Deck { bare: false };
+    let mut g = Deck::default();
     let asks = deck_asks(8);
     let mut spots = Spots::new();
     spots.write(&mut g, &asks, 0).unwrap();
@@ -636,7 +660,10 @@ fn a2_5_a_full_place_overflows_onto_the_ground_round_it() {
 /// A2-5: with no standing point on the ground within `OVERFLOW` of the place, the overflow is refused, `spot-none-free`.
 #[test]
 fn a2_5_no_ground_round_a_full_place_is_refused() {
-    let mut g = Deck { bare: true };
+    let mut g = Deck {
+        bare: true,
+        ..Deck::default()
+    };
     let asks = deck_asks(2);
     let mut spots = Spots::new();
     spots.write(&mut g, &asks, 0).unwrap();
@@ -648,4 +675,102 @@ fn a2_5_no_ground_round_a_full_place_is_refused() {
         spots.granted(asks[1].who, &asks[1].target),
         Some(Err("spot-none-free"))
     );
+}
+
+/// A2-5 (review of #4399): a target the asker cannot reach at all is no crowd: refused `spot-none-free`, never granted
+/// an overflow point on its own side of the river.
+#[test]
+fn a2_5_an_unreachable_place_does_not_overflow() {
+    let mut g = Deck {
+        river: true,
+        ..Deck::default()
+    };
+    let asks = deck_asks(1);
+    let mut spots = Spots::new();
+    spots.write(&mut g, &asks, 0).unwrap();
+    assert_eq!(
+        spots.granted(asks[0].who, &asks[0].target),
+        Some(Err("spot-none-free"))
+    );
+}
+
+/// A2-5 (review of #4399): an overflow point is joined on foot to the place. With a wall at x = 3 m between the deck
+/// and the askers (who come round it), no point beyond the wall is granted, though the walk to one is shortest.
+#[test]
+fn a2_5_no_overflow_point_behind_a_wall() {
+    let mut g = Deck {
+        wall: true,
+        ..Deck::default()
+    };
+    let asks = deck_asks(30);
+    let mut spots = Spots::new();
+    spots.write(&mut g, &asks, 0).unwrap();
+    let got = granted_all(&spots, &asks);
+    let over: Vec<Granted> = got
+        .iter()
+        .flatten()
+        .filter(|g| g.overflow)
+        .copied()
+        .collect();
+    println!(
+        "A2-5 behind a wall: {} overflow points, x at most {:?}",
+        over.len(),
+        over.iter().map(|g| g.at.x).max()
+    );
+    assert_eq!(got.iter().flatten().count(), 30, "all granted");
+    assert!(
+        over.len() == 29 && over.iter().all(|g| g.at.x < 3_000_000),
+        "none behind the wall"
+    );
+}
+
+/// A2-5 (review of #4399): released on retarget (`spot-left`) like any place; across a change of the ground the
+/// holders keep their points, and one whose point the change took away is released, named to the runner, and granted
+/// another, never one a body holds.
+#[test]
+fn a2_5_overflow_points_are_released_on_retarget_and_kept_across_a_ground_change() {
+    let mut g = Deck::default();
+    let mut asks = deck_asks(8);
+    let mut spots = Spots::new();
+    spots.write(&mut g, &asks, 0).unwrap();
+    let before = granted_all(&spots, &asks);
+    assert!(before[3].is_some_and(|b| b.overflow));
+    // The ground changes under the fourth: its point is a hole now.
+    g.hole = Some(before[3].unwrap().at);
+    spots.invalidate_geometry();
+    spots.write(&mut g, &asks, 1).unwrap();
+    assert_eq!(
+        spots.revoked(),
+        vec![asks[3].who],
+        "the fourth is named to the runner"
+    );
+    let after = granted_all(&spots, &asks);
+    for k in (0..8).filter(|k| *k != 3) {
+        assert_eq!(after[k], before[k], "kept its point: {k}");
+    }
+    let new = after[3].expect("granted again");
+    assert!(new.overflow && new.at != before[3].unwrap().at);
+    assert!(
+        after.iter().flatten().filter(|g| g.at == new.at).count() == 1,
+        "a point no other body holds"
+    );
+    // A newcomer gets a point of its own too.
+    let mut more = deck_asks(9);
+    spots.write(&mut g, &more, 2).unwrap();
+    let all = granted_all(&spots, &more);
+    let n = all[8].expect("the newcomer is granted");
+    assert!(
+        all[..8]
+            .iter()
+            .flatten()
+            .all(|g| flat(g.at, n.at) >= 690_000)
+    );
+    // The second retargets: its overflow point is released, `spot-left`.
+    more[1].target = Target::new(open_ground(), Vec3::new(-30_000_000, 0, 0));
+    asks = more;
+    spots.write(&mut g, &asks, 3).unwrap();
+    assert!(spots.record.iter().any(|e| matches!(
+        e,
+        Entry::Release { who, why: "spot-left", .. } if *who == asks[1].who
+    )));
 }

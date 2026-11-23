@@ -30,11 +30,15 @@
 //!   deck) ends on it ([`within_footprint`], #4072).
 //!
 //! - **Overflow** (0.133 A2-5, a crowded meetup ends as near as the crowd allows, never refused). When every place
-//!   of a target is held or out of reach, the asker is granted the nearest free standing point on the walkable ground
-//!   around it ([`Ground::overflow_at`]: its own floor or the open ground first, then, for a target off the open
-//!   ground such as a bandstand's floor, the open ground round it), on rings [`PITCH`] apart out to [`OVERFLOW`], by
-//!   the same cost, none within half a pitch of the target's own places nor in another body's space. It is held and released like
-//!   any place; the walk there ends `done`, as near as the crowd allows ([`Granted::overflow`]).
+//!   of a target is held or kept for another's room, and one of those its walk reaches, the asker is granted the
+//!   nearest free standing point on the open ground round it ([`Ground::overflow_at`]), on rings [`PITCH`] apart out
+//!   to [`OVERFLOW`], by the same cost, none within half a pitch of the target's own places nor in another body's
+//!   space, and each joined on foot to the target's centre there (or, where no body stands at it, to the target's
+//!   own place nearest it) within [`DETOUR`] times their straight gap plus a pitch, so never behind a wall or in a
+//!   room. A target the asker cannot reach at all does not overflow: it is refused `spot-none-free` as before. It is held and released like
+//!   any place, and kept across a change of the ground while its point is still one; a holder whose place a change
+//!   took away is released (`ground-changed`) and named to the runner ([`Spots::revoked`]), which plans it again.
+//!   The walk there ends `done`, as near as the crowd allows ([`Granted::overflow`]).
 //!
 //! Refusals: `spot-none-near` (no walkable place on the rings), `spot-none-free` (every place held or out of reach,
 //! and no free standing point within [`OVERFLOW`] of the target either).
@@ -254,9 +258,23 @@ pub struct Spots {
     invalid_geometry: bool,
     /// Per asker: the target it was refused, and the refusal's name.
     refused: BTreeMap<Id, (Target, Size, &'static str)>,
-    /// Each crowded target's overflow points (A2-5), by class: for each ground round it, in the order tried, its
-    /// centre there and its table.
-    overflow: BTreeMap<(Size, Target), Vec<(Target, Table)>>,
+    /// Each crowded target's overflow points (A2-5), by class: for each ground round it, in the order tried, where
+    /// they lie and their table.
+    overflow: BTreeMap<(Size, Target), Vec<(Round, Table)>>,
+    /// The askers whose place a change of the ground took away (`ground-changed`), until the runner reads them: it
+    /// lets go of their old grant and plans each again ([`Spots::revoked`]).
+    revoked: Vec<Id>,
+}
+
+/// Where a crowded target's overflow points lie on one ground (A2-5): its centre there (the target's point in that
+/// node's frame) and in the ground's frame, and the anchor each point must be joined to on foot: the centre where a
+/// body may stand on it, else the target's own place nearest it.
+#[derive(Clone, Copy, Debug)]
+struct Round {
+    centre: Target,
+    centre_world: Vec3,
+    anchor: (Id, Vec3),
+    anchor_world: Vec3,
 }
 
 #[derive(Clone, Copy)]
@@ -320,7 +338,130 @@ impl Table {
         }
     }
 
-    /// The overflow points round a crowded target `t` (A2-5): on `node`'s walkable ground about `p`, rings [`PITCH`]
+    /// The grounds a crowded target `t` overflows onto ([`Ground::overflow_at`]), each with its points; `own` is the
+    /// target's own table. A ground with no anchor (no standing at its centre and no own place) gives none.
+    fn rounds(g: &dyn Ground, t: Target, own: &Table) -> Vec<(Round, Table)> {
+        g.overflow_at(t.node, t.point())
+            .into_iter()
+            .filter_map(|(node, p)| {
+                let worlds: Vec<Vec3> = own.places.iter().map(|q| q.world).collect();
+                let tb = Table::around(g, node, p, &worlds);
+                // The overflow lies on the open ground, whose frame is the ground's: its centre is `p` there.
+                let (anchor, anchor_world) = match g.stand(node, p) {
+                    Some((at, w)) if !g.passage(node, at) => ((node, at), w),
+                    _ => {
+                        let q = own
+                            .places
+                            .iter()
+                            .min_by_key(|q| (flat(q.world, p), q.ring, q.k))?;
+                        ((t.node, q.at), q.world)
+                    }
+                };
+                let centre_world = p;
+                Some((
+                    Round {
+                        centre: Target::new(node, p),
+                        centre_world,
+                        anchor,
+                        anchor_world,
+                    },
+                    tb,
+                ))
+            })
+            .collect()
+    }
+
+    /// The free overflow point of round `r` nearest `ask` (whose place on the ground's frame is `a`), by the cost of
+    /// [`Table::nearest`] measured to the centre, joined on foot to the anchor within [`DETOUR`] times their straight
+    /// gap plus a pitch, and clear of every body in `held` (the ground's frame, and how far each keeps others off).
+    fn nearest_round(
+        &mut self,
+        g: &mut dyn Ground,
+        ask: &Ask,
+        a: Vec3,
+        r: &Round,
+        held: &[(Vec3, i64)],
+    ) -> Option<(usize, i64)> {
+        let node = r.centre.node;
+        let gap = |p: &Place| flat(p.world, r.centre_world);
+        let mut order: Vec<(i64, u16, u16, usize)> = self
+            .places
+            .iter()
+            .enumerate()
+            .filter(|(_, p)| p.holder.is_none())
+            .map(|(i, p)| (flat(p.world, a) + WEIGHT * gap(p), p.ring, p.k, i))
+            .collect();
+        order.sort_unstable();
+        let mut best: Option<(i64, u16, u16, usize)> = None;
+        let mut misses = 0;
+        for (bound, ring, k, i) in order {
+            if best.is_some_and(|b| bound > b.0) {
+                break;
+            }
+            let (at, world) = (self.places[i].at, self.places[i].world);
+            if held
+                .iter()
+                .any(|(h, c)| (h.y - world.y).abs() < LEVEL && flat(*h, world) < *c)
+                || !g.may_reach(ask.node, ask.from, node, at)
+            {
+                continue;
+            }
+            let joined = *self.places[i].joined.get_or_insert_with(|| {
+                g.walk(node, at, r.anchor.0, r.anchor.1)
+                    .is_some_and(|w| w <= DETOUR * flat(world, r.anchor_world) + PITCH)
+            });
+            if !joined {
+                continue;
+            }
+            let Some(walk) = g.walk(ask.node, ask.from, node, at) else {
+                misses += 1;
+                if misses >= MISSES_MOST {
+                    break;
+                }
+                continue;
+            };
+            let key = (walk + WEIGHT * gap(&self.places[i]), ring, k, i);
+            if best.is_none_or(|b| key < b) {
+                best = Some(key);
+            }
+        }
+        best.map(|(cost, .., i)| (i, cost))
+    }
+
+    /// Whether the target's own places failed `ask` for the crowd alone (A2-5): one held by another, or kept from it
+    /// for another's room (`blocked`), is one its walk reaches (and, for a clear target, joined to it). A target the
+    /// asker cannot reach at all is no crowd: it does not overflow.
+    fn crowded(&mut self, g: &mut dyn Ground, ask: &Ask, blocked: &BTreeSet<usize>) -> bool {
+        let Some((_, a)) = g.stand(ask.node, ask.from) else {
+            return false;
+        };
+        let t = ask.target;
+        let mut taken: Vec<(i64, usize)> = self
+            .places
+            .iter()
+            .enumerate()
+            .filter(|(i, p)| p.holder.is_some() || blocked.contains(i))
+            .map(|(i, p)| (flat(p.world, a), i))
+            .collect();
+        taken.sort_unstable();
+        let mut misses = 0;
+        for (_, i) in taken {
+            let at = self.places[i].at;
+            if !g.may_reach(ask.node, ask.from, t.node, at) || self.clear && !self.joined(g, t, i) {
+                continue;
+            }
+            if g.walk(ask.node, ask.from, t.node, at).is_some() {
+                return true;
+            }
+            misses += 1;
+            if misses >= MISSES_MOST {
+                return false;
+            }
+        }
+        false
+    }
+
+    /// The overflow points round a crowded target (A2-5): on `node`'s walkable ground about `p`, rings [`PITCH`]
     /// apart out to [`OVERFLOW`], out of doorways and off stairs, none within half a pitch of `own` (the target's own
     /// places, the ground's frame).
     fn around(g: &dyn Ground, node: Id, p: Vec3, own: &[Vec3]) -> Table {
@@ -794,6 +935,12 @@ impl Spots {
         self.granted(who, target).map(|r| r.map(|g| g.at))
     }
 
+    /// The askers whose place a change of the ground took away since the last call (A2-5's review): each lets go of
+    /// its grant and is planned again from the place it is granted next.
+    pub fn revoked(&mut self) -> Vec<Id> {
+        std::mem::take(&mut self.revoked)
+    }
+
     /// As [`Spots::of`], with the node the place stands on and whether it is an overflow point (A2-5).
     pub fn granted(&self, who: Id, target: &Target) -> Option<Result<Granted, &'static str>> {
         if let Some(held) = self.held.get(&who)
@@ -834,18 +981,6 @@ impl Spots {
         if self.invalid_geometry {
             let holders: Vec<_> = self.held.iter().map(|(&id, &h)| (id, h)).collect();
             for (who, h) in holders {
-                // An overflow point is not kept across a change of the ground: released, it is asked again (A2-5).
-                if h.overflow.is_some() {
-                    self.held.remove(&who);
-                    self.record.push(Entry::Release {
-                        at,
-                        who,
-                        target: h.target,
-                        place: h.place,
-                        why: "ground-changed",
-                    });
-                    continue;
-                }
                 let selected = Selected {
                     ground: grounds,
                     size: h.size,
@@ -861,13 +996,37 @@ impl Spots {
                         .entry((h.size, h.target))
                         .or_insert_with(|| Table::new(&selected, h.target))
                 };
-                match table.places.iter().position(|p| p.at == h.at) {
-                    Some(index) => {
+                // An overflow point is kept as any place is: found again, on its node, in the rebuilt rounds (A2-5).
+                let kept = match h.overflow {
+                    None => table.places.iter().position(|p| p.at == h.at).map(|index| {
                         table.places[index].holder = Some(who);
-                        self.held.insert(who, Held { index, ..h });
+                        Held { index, ..h }
+                    }),
+                    Some(_) => {
+                        let rounds = self
+                            .overflow
+                            .entry((h.size, h.target))
+                            .or_insert_with(|| Table::rounds(&selected, h.target, table));
+                        rounds.iter_mut().enumerate().find_map(|(k, (r, tb))| {
+                            let index = tb.places.iter().position(|p| p.at == h.at)?;
+                            (r.centre.node == h.node).then(|| {
+                                tb.places[index].holder = Some(who);
+                                Held {
+                                    index,
+                                    overflow: Some(k),
+                                    ..h
+                                }
+                            })
+                        })
+                    }
+                };
+                match kept {
+                    Some(held) => {
+                        self.held.insert(who, held);
                     }
                     None => {
                         self.held.remove(&who);
+                        self.revoked.push(who);
                         self.record.push(Entry::Release {
                             at,
                             who,
@@ -985,38 +1144,26 @@ impl Spots {
             let mut found = tb
                 .nearest(&mut g, a, &blocked)
                 .map(|(i, cost)| (i, cost, None));
-            if found == Err("spot-none-free") {
-                let own: Vec<Vec3> = tb.places.iter().map(|p| p.world).collect();
-                let held = &self.held;
-                let tables = self.overflow.entry((*size, t)).or_insert_with(|| {
-                    g.overflow_at(t.node, t.point())
-                        .into_iter()
-                        .map(|(node, p)| (Target::new(node, p), Table::around(&g, node, p, &own)))
-                        .collect()
-                });
-                let r = (*size).radius_mm();
-                // Each ground round it in turn (its own floor first): the nearest free point a body's room from every
-                // body held a place, its cost measured to the overflow's own centre on that ground.
-                for (k, (centre, otb)) in tables.iter_mut().enumerate() {
-                    let blocked: BTreeSet<usize> = otb
-                        .places
-                        .iter()
-                        .enumerate()
-                        .filter(|(_, p)| {
-                            held.values().any(|h| {
-                                let c = (r + h.size.radius_mm() + 140) * 1000;
-                                (h.world.y - p.world.y).abs() < LEVEL && flat(h.world, p.world) < c
-                            })
-                        })
-                        .map(|(i, _)| i)
-                        .collect();
-                    let ask = Ask {
-                        target: *centre,
-                        ..*a
-                    };
-                    if let Ok((i, cost)) = otb.nearest(&mut g, &ask, &blocked) {
-                        found = Ok((i, cost, Some(k)));
-                        break;
+            if found == Err("spot-none-free") && tb.crowded(&mut g, a, &blocked) {
+                let rounds = self
+                    .overflow
+                    .entry((*size, t))
+                    .or_insert_with(|| Table::rounds(&g, t, tb));
+                if let Some((_, asker)) = g.stand(a.node, a.from) {
+                    let r = (*size).radius_mm();
+                    // Each ground round it in turn: the bodies holding a place near it, and how far each keeps others.
+                    for (k, (round, otb)) in rounds.iter_mut().enumerate() {
+                        let reach = OVERFLOW + 2 * PITCH;
+                        let held: Vec<(Vec3, i64)> = self
+                            .held
+                            .values()
+                            .filter(|h| flat(h.world, round.centre_world) <= reach)
+                            .map(|h| (h.world, (r + h.size.radius_mm() + 140) * 1000))
+                            .collect();
+                        if let Some((i, cost)) = otb.nearest_round(&mut g, a, asker, round, &held) {
+                            found = Ok((i, cost, Some(k)));
+                            break;
+                        }
                     }
                 }
             }
@@ -1024,11 +1171,11 @@ impl Spots {
                 Ok((i, cost, overflow)) => {
                     let (node, p) = match overflow {
                         Some(k) => {
-                            let (c, otb) = &mut self
+                            let (r, otb) = &mut self
                                 .overflow
                                 .get_mut(&(*size, t))
                                 .expect("the overflow tables")[k];
-                            (c.node, &mut otb.places[i])
+                            (r.centre.node, &mut otb.places[i])
                         }
                         None => {
                             let tb = if *size == Size::Standard {

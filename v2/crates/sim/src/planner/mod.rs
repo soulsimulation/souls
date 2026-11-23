@@ -192,6 +192,7 @@ impl Planner {
             if let Err(r) = result {
                 eprintln!("planner: the spot tables were not written: {}", r.name);
             }
+            out.revoked = self.town.revoked();
         }
         for (body, target, order) in &w.places {
             let r = match self.town.spot(body.id, target) {

@@ -731,6 +731,9 @@ pub struct Planned {
     pub map: Option<std::sync::Arc<crate::ground::Versions>>,
     /// Each walk given an answer: its order, then its place and legs, or a refusal's name.
     pub places: BTreeMap<Id, (Id, Placed)>,
+    /// The walks whose granted place a change of the ground took away in the planner's spot tables (A2-5): planned
+    /// again.
+    pub revoked: Vec<Id>,
     /// Each walker's line (#3167's, found by the planning call `View::search`) toward the leg's end it asked for, or
     /// the search's refusal.
     pub lines: Found,
@@ -780,6 +783,8 @@ impl Planned {
     /// Takes `later`'s answers over these. A different map cannot retain answers from its predecessor.
     pub fn merge(&mut self, later: Planned) {
         // Unstamped legacy answers cannot acquire a stamped cache's current identity.
+        // A revoked grant is let go whatever map it came with (A2-5).
+        self.revoked.extend(later.revoked);
         if self.map.is_some() && later.map.is_none() {
             self.searched += later.searched;
             return;
@@ -1237,6 +1242,16 @@ impl Runner {
             None => world.or(town.spots(&marks, at).err()),
             Some(_) => world,
         };
+        // A place a change of the ground took away: its grant is let go, and the walk is planned again from the place
+        // it is granted now (A2-5).
+        let revoked = match planned {
+            None => town.revoked(),
+            Some(p) => p.revoked.clone(),
+        };
+        for who in revoked {
+            self.granted.remove(&who);
+            self.overflow.remove(&who);
+        }
         // A walk sent to a point gets its route once its place is granted; a refusal ends it by name.
         let running = self.running_bodies();
         let waiting: Vec<(Id, Target, Id)> = self

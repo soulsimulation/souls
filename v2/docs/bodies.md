@@ -79,10 +79,11 @@ hatch (F8) is rule 11. The controller (B1) is summarised under [The controller](
    on its own body and is done short of it; the world writes its `souls:move-ended` as
    `done.as-near-as-the-crowd-allows` and takes the field off. A walk to its own granted spot ends so only when a
    body at rest stands on that spot, or once held there past a way round's ticks; its spot is then released. A
-   place whose own standing spots are all held overflows (A2-5): the next sent there is granted the nearest free
-   standing point round it, on its own floor or the open ground, out to 15 m, a body's room from every other; it walks
-   there, holds it like any spot, and its walk ends `done.as-near-as-the-crowd-allows`. Only with no such point within
-   15 m is it refused `spot-none-free`.
+   place whose own standing spots its walk reaches are all held overflows (A2-5): the next sent there is granted the
+   nearest free standing point round it on the open ground (never in a room), out to 15 m, a body's room from every
+   other and joined to the place on foot; it walks there, holds it like any spot (kept across a change of the ground
+   while it is still one), and its walk ends `done.as-near-as-the-crowd-allows`. A place the walker cannot reach at
+   all, or with no such point within 15 m, is refused `spot-none-free`.
 9. **What survives a restart is the log.** Nodes and links survive, so a joint activity and a moving group do. A
    skill in progress is not stored: on a restart each active intent is handed to its skill again, or ended with a
    named reason (K13 builds it).

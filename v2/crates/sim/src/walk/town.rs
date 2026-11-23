@@ -2230,25 +2230,22 @@ impl Ground for Grounds<'_> {
         }
     }
 
-    /// A crowded target overflows round its point on its own floor or the open ground first, then, off the open
-    /// ground (a bandstand's floor, a room), onto the open ground round it, its point taken into the ground's frame by
-    /// its node's own pieces (A2-5).
+    /// A crowded target overflows onto the open ground round its point, never into a room: on the open ground as it
+    /// is, and from a floor (a bandstand's, a room's) its point taken into the ground's frame by its node's own pieces
+    /// (A2-5). The routes carry no rule for who may enter a room, so a floor's own ground is not used.
     fn overflow_at(&self, node: Id, p: Vec3) -> Vec<(Id, Vec3)> {
-        let mut out = Vec::new();
-        if node == self.ground || self.buildings.iter().any(|b| b.floors.contains_key(&node)) {
-            out.push((node, p));
+        if node == self.ground {
+            return vec![(node, p)];
         }
         let m = self.map.get();
-        if node != self.ground
-            && let Some(s) = m.spot_near(node, p, OVERFLOW_FIND)
-        {
-            let w = m.world(s.piece, [p.x / 1000, p.y / 1000, p.z / 1000]);
-            out.push((
-                self.ground,
-                Vec3::new(w[0] * 1000, w[1] * 1000, w[2] * 1000),
-            ));
-        }
-        out
+        let Some(s) = m.spot_near(node, p, OVERFLOW_FIND) else {
+            return Vec::new();
+        };
+        let w = m.world(s.piece, [p.x / 1000, p.y / 1000, p.z / 1000]);
+        vec![(
+            self.ground,
+            Vec3::new(w[0] * 1000, w[1] * 1000, w[2] * 1000),
+        )]
     }
 }
 
@@ -2324,6 +2321,10 @@ impl World for Town {
 
     fn spot(&self, who: Id, target: &Target) -> Option<Result<Granted, &'static str>> {
         self.spots.granted(who, target)
+    }
+
+    fn revoked(&mut self) -> Vec<Id> {
+        self.spots.revoked()
     }
 
     fn turns(&mut self, marks: &[Mark], at: Micros) -> Result<(), Refusal> {

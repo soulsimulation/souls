@@ -361,6 +361,8 @@ fn main() {
     let mut overflow_um: Vec<i64> = Vec::new();
     // Where each walker's place is, on the open ground's frame.
     let mut goal_world: BTreeMap<Id, [i64; 2]> = BTreeMap::new();
+    // Each walker's goal as its walk has it: its node and point there (the place, or the spot granted round it).
+    let mut goal_at: BTreeMap<Id, (Id, Vec3)> = BTreeMap::new();
     // `--threads N` (N17b, #3255): threads stepping the walkers' skills; any count gives the same walks.
     let threads: usize = match args.iter().position(|a| a == "--threads") {
         Some(k) => {
@@ -604,6 +606,8 @@ fn main() {
                 ) {
                     Ok(()) => {
                         goal_world.insert(who, g.world);
+                        goal_at.insert(who, (g.node, g.at));
+                        overflowed.remove(&who);
                         break 'start;
                     }
                     Err(e) => {
@@ -761,6 +765,8 @@ fn main() {
     let mut short_um: Vec<i64> = Vec::new();
     // Of those, the ones whose goal a body at rest stood on (within 0.3 m).
     let mut short_taken = 0u64;
+    // Short ends on another node than their goal's (not measured).
+    let mut short_off_node = 0u64;
     let mut worst: (Micros, usize) = (0, 0);
     let mut next_moment = if arm == "event" {
         seed.within(45_000_000, 120_000_000)
@@ -895,6 +901,8 @@ fn main() {
                     ) {
                         Ok(()) => {
                             goal_world.insert(who, g.world);
+                            goal_at.insert(who, (g.node, g.at));
+                            overflowed.remove(&who);
                             placed = true;
                             break;
                         }
@@ -942,29 +950,6 @@ fn main() {
                     e.detail
                 );
             }
-            // `--sent`: a walk granted its spot this tick is kept by the ladder from now, its legs to the spot.
-            if !pending.is_empty() {
-                let granted: Vec<(Id, Id, sim::spots::Granted)> = pending
-                    .iter()
-                    .filter(|(who, _)| runner.granted.contains_key(*who))
-                    .filter_map(|(who, (o, t))| match w.spots.granted(*who, t) {
-                        Some(Ok(g)) => Some((*who, *o, g)),
-                        _ => None,
-                    })
-                    .collect();
-                for (who, order, g) in granted {
-                    pending.remove(&who);
-                    if g.overflow {
-                        overflowed.insert(who);
-                    }
-                    if let Some(b) = runner.controller.body(who).copied()
-                        && let Ok(legs) = w.plan(&b, g.node, g.at)
-                    {
-                        ladder.add(who, order, SPEED, g.node, g.at, legs);
-                    }
-                }
-                pending.retain(|who, _| runner.running(*who));
-            }
             let total = a0.elapsed().as_nanos() as i64;
             let s2 = w.spent.get();
             let ph = [
@@ -985,6 +970,33 @@ fn main() {
             ]);
 
             // Not timed: faults, rungs, ends, progress, the record and the trace.
+            // `--sent`: a walk granted its spot this tick is kept by the ladder from now, its legs to the spot.
+            if !pending.is_empty() {
+                let granted: Vec<(Id, Id, sim::spots::Granted)> = pending
+                    .iter()
+                    .filter(|(who, _)| runner.granted.contains_key(*who))
+                    .filter_map(|(who, (o, t))| match w.spots.granted(*who, t) {
+                        Some(Ok(g)) => Some((*who, *o, g)),
+                        _ => None,
+                    })
+                    .collect();
+                for (who, order, g) in granted {
+                    pending.remove(&who);
+                    goal_at.insert(who, (g.node, g.at));
+                    if g.overflow {
+                        overflowed.insert(who);
+                    }
+                    // Its legs as the runner planned them (the ladder keeps none from an earlier order).
+                    let legs = runner
+                        .controller
+                        .body(who)
+                        .copied()
+                        .and_then(|b| w.plan(&b, g.node, g.at).ok())
+                        .unwrap_or_default();
+                    ladder.add(who, order, SPEED, g.node, g.at, legs);
+                }
+                pending.retain(|who, _| runner.running(*who));
+            }
             let refused = std::mem::take(&mut runner.refused);
             for (who, e) in &refused {
                 faults += 1;
@@ -1033,13 +1045,15 @@ fn main() {
                 }
                 if !runner.running(who) {
                     p.live = false;
+                    // However it ended, its overflow point goes with its order.
+                    let was_over = overflowed.remove(&who);
                     match runner.ended.get(&who) {
                         Some((_, Progress::Done)) => {
                             finished += 1;
                             route_us.push(at - p.since);
                             // Ended on an overflow point round a crowded place, held still (A2-5): how far from the
                             // place, on the open ground's frame.
-                            let over = overflowed.remove(&who) && runner.granted.contains_key(&who);
+                            let over = was_over && runner.granted.contains_key(&who);
                             if over
                                 && let (Some(b), Some(gw)) =
                                     (runner.controller.body(who), goal_world.get(&who))
@@ -1053,21 +1067,25 @@ fn main() {
                                 .get(&who)
                                 .is_some_and(|f| f.contains_key(&replica::host::F_SHORT))
                                 && let Some(b) = runner.controller.body(who)
+                                && let Some(&(gn, to)) = goal_at.get(&who)
                             {
-                                // The leg it ended on, as the ladder keeps it (its last leg's end is the goal).
-                                let to = ladder.leg(who).map_or(p.to, |(_, l)| l.to);
+                                // Its goal as its walk had it, on the same node (else counted, not measured).
                                 let q = b.pose.position;
-                                let (dx, dz) = (i128::from(q.x - to.x), i128::from(q.z - to.z));
-                                short_um.push((dx * dx + dz * dz).isqrt() as i64);
-                                // Taken: a body at rest stood within 0.3 m of its goal; else the goal was free.
-                                let taken = runner.near(who, 3_500_000).iter().any(|n| {
-                                    n.velocity.x == 0
-                                        && n.velocity.z == 0
-                                        && (i128::from(n.position.x - to.x).pow(2)
-                                            + i128::from(n.position.z - to.z).pow(2))
-                                            < 300_000i128.pow(2)
-                                });
-                                short_taken += u64::from(taken);
+                                if node_of(b) != gn {
+                                    short_off_node += 1;
+                                } else {
+                                    let (dx, dz) = (i128::from(q.x - to.x), i128::from(q.z - to.z));
+                                    short_um.push((dx * dx + dz * dz).isqrt() as i64);
+                                    // Taken: a body at rest stood within 0.3 m of its goal; else the goal was free.
+                                    let taken = runner.near(who, 3_500_000).iter().any(|n| {
+                                        n.velocity.x == 0
+                                            && n.velocity.z == 0
+                                            && (i128::from(n.position.x - to.x).pow(2)
+                                                + i128::from(n.position.z - to.z).pow(2))
+                                                < 300_000i128.pow(2)
+                                    });
+                                    short_taken += u64::from(taken);
+                                }
                             }
                         }
                         Some((_, Progress::Failed(name))) => {
@@ -1350,7 +1368,7 @@ fn main() {
         overflow_um.last().copied().unwrap_or(0) / 1000
     );
     println!(
-        "walkers: walks {}; trips ended short (as near as the crowd allows) {}: goal taken {short_taken}, goal free {}; short of the goal median {} mm, max {} mm",
+        "walkers: walks {}; trips ended short (as near as the crowd allows) {}: goal taken {short_taken}, goal free {}, on another node {short_off_node}; short of the goal median {} mm, max {} mm",
         if sent {
             "sent to a point (N9)"
         } else {

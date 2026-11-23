@@ -72,6 +72,10 @@ pub trait World {
     fn spot(&self, _who: Id, _target: &Target) -> Option<Result<Granted, &'static str>> {
         None
     }
+    /// The walkers whose granted place a change of the ground took away since the last call (A2-5).
+    fn revoked(&mut self) -> Vec<Id> {
+        Vec::new()
+    }
 }
 
 /// The node a body stands on.
