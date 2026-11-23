@@ -90,8 +90,14 @@ const SIT: &str = include_str!("../../replica/fixtures/moves/sit.diag");
 const RISE: &str = include_str!("../../replica/fixtures/moves/rise.diag");
 const LIE: &str = include_str!("../../replica/fixtures/moves/lie.diag");
 
-/// A walk's speed, µm a second.
-pub const WALK: i64 = 1_400_000;
+/// A walk's speed, µm a second: `sim::gaits`' walk.
+pub const WALK: i64 = sim::gaits::WALK.speed;
+
+/// The speed of a walk at `gait` (0.135 G1): that gait's, or a walk's when it names none.
+pub fn speed(gait: Option<&str>) -> i64 {
+    gait.and_then(sim::gaits::Gait::named)
+        .map_or(WALK, |g| g.speed)
+}
 
 pub use replica::move_check::Ask;
 
@@ -998,7 +1004,7 @@ impl Bodies {
             Ask::Walk { .. } => {
                 let mut last = None;
                 for (rank, k) in list.iter().enumerate() {
-                    if let Ask::Walk { node, point } = k {
+                    if let Ask::Walk { node, point, .. } = k {
                         match self.goal(a.body, *node, *point) {
                             Ok(_) => return Ok((rank, (*k).clone())),
                             Err(r) => last = Some(r),
@@ -1041,10 +1047,10 @@ impl Bodies {
             }
             self.took.insert(id, (rank, ask.target()));
             match ask {
-                Ask::Walk { node, point } => {
+                Ask::Walk { node, point, gait } => {
                     let goal = self.goal(a.body, node, point);
                     self.replace(a.body);
-                    let walk = Box::new(Route::sent(WALK, self.runner.tick));
+                    let walk = Box::new(Route::sent(speed(gait), self.runner.tick));
                     let r = goal.and_then(|g| self.runner.send(a.body, walk, g, id));
                     if r.is_ok() {
                         self.live.insert(a.body, (id, Live::Walk));
@@ -1616,6 +1622,7 @@ impl Bodies {
                         Ask::Walk {
                             node,
                             point: Some(Vec3::new(x, 0, z)),
+                            gait: None,
                         },
                     );
                 }

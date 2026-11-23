@@ -4,8 +4,9 @@
 //!
 //! - **Read** ([`read`]): a form's verb named `walk`, `sit`, `lie` or `rise` (T10 rule 4 keeps `souls:` verbs for the
 //!   engine's own), its target and a walk's point, parameter 1 `[x, y, z]` µm. Refused by name: `move.no-target`,
-//!   `move.bad-point`. Its ranked fallbacks (T10 rule 6) are moves of the same form on other targets
-//!   (`move.fallback-not-alike` otherwise), tried in order by the world.
+//!   `move.bad-point`. A walk may name its gait, parameter 2 `gait:<name>`, one of [`GAITS`] (0.135 G1; the
+//!   speeds are `sim::gaits`'), else `move.unknown-gait`; with none it walks. Its ranked fallbacks (T10 rule 6) are
+//!   moves of the same form on other targets (`move.fallback-not-alike` otherwise), tried in order by the world.
 //! - **Checked** ([`check`]) on [`Seen`]: whether the target is known, whether the body is in a seat, whether a seat is
 //!   free. The world fills it from its own tables; a client from its copy and its own moves' receipts, with `None`
 //!   for what it does not hold. A `no` is given only from what is known, and is the name the world refuses by:
@@ -20,14 +21,18 @@ use crate::intents::{Intent, Target};
 use crate::pose::Vec3;
 use crate::rules::json;
 
+/// The gaits a walk may name (0.135 G1): `sim::gaits`' gaits on dry ground, slowest first.
+pub const GAITS: [&str; 3] = ["walk", "jog", "run"];
+
 /// What a move intent asks.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Ask {
     /// Walk to `point` (µm, the frame of `node`), or, with no point, to the stand point of `node`'s seat, or else to a
-    /// free standing spot in `node` (its middle, bound by N9).
+    /// free standing spot in `node` (its middle, bound by N9). `gait`, one of [`GAITS`], or none for a walk.
     Walk {
         node: Id,
         point: Option<Vec3>,
+        gait: Option<&'static str>,
     },
     /// Sit on the seat of `thing`.
     Sit {
@@ -76,17 +81,36 @@ fn int(v: &Value) -> Option<i64> {
     }
 }
 
-/// One move from its form, its target node and its point (`Err` for a point of the wrong shape).
+/// The gait of [`GAITS`] named `word`, or `move.unknown-gait`.
+pub fn gait(word: &str) -> Result<&'static str, &'static str> {
+    GAITS
+        .into_iter()
+        .find(|g| *g == word)
+        .ok_or("move.unknown-gait")
+}
+
+/// One move from its form, its target node, its point (`Err` for a point of the wrong shape) and a walk's gait
+/// (`Err` for one that is not a name).
 pub fn ask(
     form: &str,
     node: Option<Id>,
     point: Option<Result<Vec3, ()>>,
+    gait: Option<Result<&str, ()>>,
 ) -> Result<Ask, &'static str> {
     let node = node.ok_or("move.no-target");
     match form {
         "walk" => {
             let point = point.transpose().map_err(|()| "move.bad-point")?;
-            Ok(Ask::Walk { node: node?, point })
+            let gait = match gait {
+                None => None,
+                Some(Ok(w)) => Some(self::gait(w)?),
+                Some(Err(())) => return Err("move.unknown-gait"),
+            };
+            Ok(Ask::Walk {
+                node: node?,
+                point,
+                gait,
+            })
         }
         "sit" => Ok(Ask::Sit { thing: node? }),
         "lie" => Ok(Ask::Lie { thing: node? }),
@@ -111,7 +135,12 @@ fn one(
         },
         _ => Err(()),
     });
-    Some(ask(form, node, point))
+    // A word in an intent is a name (`gait:jog`), as a set-down's `place:here`.
+    let gait = parameters.get(&2).map(|v| match v {
+        Value::Text(w) => w.as_str().strip_prefix("gait:").ok_or(()),
+        _ => Err(()),
+    });
+    Some(ask(form, node, point, gait))
 }
 
 /// Reads a move intent: `None` when its verb is not a move, else its ranked list (the intent's own, then each
@@ -181,7 +210,8 @@ fn id_of(text: &str) -> Option<Id> {
     Id::new(Scope(s), c.parse().ok()?)
 }
 
-/// [`check`] as JSON, for a client (R8): `{"verb", "this"?, "point"?: [x, y, z], "has", "seated"?, "free"?}` in,
+/// [`check`] as JSON, for a client (R8): `{"verb", "this"?, "point"?: [x, y, z], "gait"?, "has", "seated"?, "free"?}`
+/// in,
 /// `{"verdict": "yes"}`, `{"verdict": "no", "reason"}` or `{"verdict": "unknown", "why"}` out.
 #[cfg_attr(
     all(target_arch = "wasm32", not(feature = "checker")),
@@ -215,6 +245,10 @@ pub fn move_check(input: &str) -> String {
             _ => Err(()),
         }),
     };
+    let gait = match v.get("gait") {
+        None | Some(json::Value::Null) => None,
+        Some(g) => Some(g.str().ok_or(())),
+    };
     let known = |k: &str| match v.get(k) {
         Some(json::Value::Bool(b)) => Some(*b),
         _ => None,
@@ -224,7 +258,7 @@ pub fn move_check(input: &str) -> String {
         seated: known("seated"),
         free: known("free"),
     };
-    match ask(form, node, point).map(|a| check(&a, &seen)) {
+    match ask(form, node, point, gait).map(|a| check(&a, &seen)) {
         Err(r) | Ok(Verdict::No(r)) => verdict("no", "reason", r),
         Ok(Verdict::Unknown(w)) => verdict("unknown", "why", w),
         Ok(Verdict::Yes) => json::Value::object([("verdict", json::Value::s("yes"))]).to_json(),
@@ -254,6 +288,18 @@ mod tests {
                 r#"{{"verb":"eden:walk","this":"{id}","has":true}}"#
             )),
             r#"{"verdict":"yes"}"#
+        );
+        assert_eq!(
+            c(&format!(
+                r#"{{"verb":"eden:walk","this":"{id}","gait":"run","has":true}}"#
+            )),
+            r#"{"verdict":"yes"}"#
+        );
+        assert_eq!(
+            c(&format!(
+                r#"{{"verb":"eden:walk","this":"{id}","gait":"sprint","has":true}}"#
+            )),
+            r#"{"verdict":"no","reason":"move.unknown-gait"}"#
         );
         assert_eq!(
             c(&format!(
