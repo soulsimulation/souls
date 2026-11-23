@@ -123,15 +123,19 @@
     ]
   },
   "forms": {
-    "turn_left_0": {
+    "set_dial": {
       "who": "anyone",
       "starts": "act",
       "needs": [
         {
           "need": "state",
-          "field": "left",
-          "is": 0,
-          "says": "wrong_phase"
+          "field": {
+            "arg": "dial"
+          },
+          "not": {
+            "arg": "position"
+          },
+          "says": "already_set"
         },
         {
           "need": "state",
@@ -146,191 +150,9 @@
         },
         {
           "need": "within_reach",
-          "point": "left"
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand_left"
-        },
-        {
-          "step": "move",
-          "move": "turn",
-          "at": "left"
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "left",
-          "to": 1,
-          "event": "dial_changed"
-        }
-      ]
-    },
-    "turn_left_1": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "left",
-          "is": 1,
-          "says": "wrong_phase"
-        },
-        {
-          "need": "state",
-          "field": "released",
-          "is": false,
-          "says": "close_first"
-        },
-        {
-          "need": "hand",
-          "free": true,
-          "says": "free_hand"
-        },
-        {
-          "need": "within_reach",
-          "point": "left"
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand_left"
-        },
-        {
-          "step": "move",
-          "move": "turn",
-          "at": "left"
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "left",
-          "to": 2,
-          "event": "dial_changed"
-        }
-      ]
-    },
-    "turn_left_2": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "left",
-          "is": 2,
-          "says": "wrong_phase"
-        },
-        {
-          "need": "state",
-          "field": "released",
-          "is": false,
-          "says": "close_first"
-        },
-        {
-          "need": "hand",
-          "free": true,
-          "says": "free_hand"
-        },
-        {
-          "need": "within_reach",
-          "point": "left"
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand_left"
-        },
-        {
-          "step": "move",
-          "move": "turn",
-          "at": "left"
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "left",
-          "to": 3,
-          "event": "dial_changed"
-        }
-      ]
-    },
-    "turn_left_3": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "left",
-          "is": 3,
-          "says": "wrong_phase"
-        },
-        {
-          "need": "state",
-          "field": "released",
-          "is": false,
-          "says": "close_first"
-        },
-        {
-          "need": "hand",
-          "free": true,
-          "says": "free_hand"
-        },
-        {
-          "need": "within_reach",
-          "point": "left"
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand_left"
-        },
-        {
-          "step": "move",
-          "move": "turn",
-          "at": "left"
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "left",
-          "to": 0,
-          "event": "dial_changed"
-        }
-      ]
-    },
-    "turn_middle_0": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "middle",
-          "is": 0,
-          "says": "wrong_phase"
-        },
-        {
-          "need": "state",
-          "field": "released",
-          "is": false,
-          "says": "close_first"
-        },
-        {
-          "need": "hand",
-          "free": true,
-          "says": "free_hand"
-        },
-        {
-          "need": "within_reach",
-          "point": "middle"
+          "point": {
+            "arg": "dial"
+          }
         }
       ],
       "steps": [
@@ -341,339 +163,42 @@
         {
           "step": "move",
           "move": "turn",
-          "at": "middle"
+          "at": {
+            "arg": "dial"
+          }
         }
       ],
       "effects": [
         {
           "change": "set",
-          "field": "middle",
-          "to": 1,
+          "field": {
+            "arg": "dial"
+          },
+          "to": {
+            "arg": "position"
+          },
           "event": "dial_changed"
         }
-      ]
-    },
-    "turn_middle_1": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "middle",
-          "is": 1,
-          "says": "wrong_phase"
-        },
-        {
-          "need": "state",
-          "field": "released",
-          "is": false,
-          "says": "close_first"
-        },
-        {
-          "need": "hand",
-          "free": true,
-          "says": "free_hand"
-        },
-        {
-          "need": "within_reach",
-          "point": "middle"
-        }
       ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand_middle"
+      "takes": {
+        "dial": {
+          "type": "field",
+          "of": [
+            "left",
+            "middle",
+            "right"
+          ]
         },
-        {
-          "step": "move",
-          "move": "turn",
-          "at": "middle"
+        "position": {
+          "type": "value",
+          "of": [
+            0,
+            1,
+            2,
+            3
+          ]
         }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "middle",
-          "to": 2,
-          "event": "dial_changed"
-        }
-      ]
-    },
-    "turn_middle_2": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "middle",
-          "is": 2,
-          "says": "wrong_phase"
-        },
-        {
-          "need": "state",
-          "field": "released",
-          "is": false,
-          "says": "close_first"
-        },
-        {
-          "need": "hand",
-          "free": true,
-          "says": "free_hand"
-        },
-        {
-          "need": "within_reach",
-          "point": "middle"
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand_middle"
-        },
-        {
-          "step": "move",
-          "move": "turn",
-          "at": "middle"
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "middle",
-          "to": 3,
-          "event": "dial_changed"
-        }
-      ]
-    },
-    "turn_middle_3": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "middle",
-          "is": 3,
-          "says": "wrong_phase"
-        },
-        {
-          "need": "state",
-          "field": "released",
-          "is": false,
-          "says": "close_first"
-        },
-        {
-          "need": "hand",
-          "free": true,
-          "says": "free_hand"
-        },
-        {
-          "need": "within_reach",
-          "point": "middle"
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand_middle"
-        },
-        {
-          "step": "move",
-          "move": "turn",
-          "at": "middle"
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "middle",
-          "to": 0,
-          "event": "dial_changed"
-        }
-      ]
-    },
-    "turn_right_0": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "right",
-          "is": 0,
-          "says": "wrong_phase"
-        },
-        {
-          "need": "state",
-          "field": "released",
-          "is": false,
-          "says": "close_first"
-        },
-        {
-          "need": "hand",
-          "free": true,
-          "says": "free_hand"
-        },
-        {
-          "need": "within_reach",
-          "point": "right"
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand_right"
-        },
-        {
-          "step": "move",
-          "move": "turn",
-          "at": "right"
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "right",
-          "to": 1,
-          "event": "dial_changed"
-        }
-      ]
-    },
-    "turn_right_1": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "right",
-          "is": 1,
-          "says": "wrong_phase"
-        },
-        {
-          "need": "state",
-          "field": "released",
-          "is": false,
-          "says": "close_first"
-        },
-        {
-          "need": "hand",
-          "free": true,
-          "says": "free_hand"
-        },
-        {
-          "need": "within_reach",
-          "point": "right"
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand_right"
-        },
-        {
-          "step": "move",
-          "move": "turn",
-          "at": "right"
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "right",
-          "to": 2,
-          "event": "dial_changed"
-        }
-      ]
-    },
-    "turn_right_2": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "right",
-          "is": 2,
-          "says": "wrong_phase"
-        },
-        {
-          "need": "state",
-          "field": "released",
-          "is": false,
-          "says": "close_first"
-        },
-        {
-          "need": "hand",
-          "free": true,
-          "says": "free_hand"
-        },
-        {
-          "need": "within_reach",
-          "point": "right"
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand_right"
-        },
-        {
-          "step": "move",
-          "move": "turn",
-          "at": "right"
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "right",
-          "to": 3,
-          "event": "dial_changed"
-        }
-      ]
-    },
-    "turn_right_3": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "right",
-          "is": 3,
-          "says": "wrong_phase"
-        },
-        {
-          "need": "state",
-          "field": "released",
-          "is": false,
-          "says": "close_first"
-        },
-        {
-          "need": "hand",
-          "free": true,
-          "says": "free_hand"
-        },
-        {
-          "need": "within_reach",
-          "point": "right"
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand_right"
-        },
-        {
-          "step": "move",
-          "move": "turn",
-          "at": "right"
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "right",
-          "to": 0,
-          "event": "dial_changed"
-        }
-      ]
+      }
     },
     "release": {
       "who": "anyone",
@@ -2131,7 +1656,8 @@
     "already_open": "The bolt is already released.",
     "already_closed": "The bolt is already latched.",
     "free_hand": "Put down an object so a hand is free to operate the exhibit.",
-    "howto_set": "Read the three gold target digits left to right:213. Each pale index points to fixed legends 0 above, 1 right, 2 below and 3 left. Use the clockwise offer for a dial current value; it advances one quarter turn. Dials turn only while the bolt is latched. Set left 2, middle 1, right 3, then release. Relatch preserves all three dial values. The public target is visible to everyone; this learning exhibit grants no door or container access, security, permission or custody. Its bolt and indices prescribe indexed graphic poses, without force, load, collision, continuous-spin or physical-contact simulation."
+    "howto_set": "Read the three gold target digits left to right:213. Each pale index points to fixed legends 0 above, 1 right, 2 below and 3 left. Use the clockwise offer for a dial current value; it advances one quarter turn. Dials turn only while the bolt is latched. Set left 2, middle 1, right 3, then release. Relatch preserves all three dial values. The public target is visible to everyone; this learning exhibit grants no door or container access, security, permission or custody. Its bolt and indices prescribe indexed graphic poses, without force, load, collision, continuous-spin or physical-contact simulation.",
+    "already_set": "That dial is already at the requested position; choose another position."
   },
   "card": {
     "text": "card",
@@ -2140,36 +1666,5 @@
       "latch",
       "combination"
     ]
-  },
-  "howtos": {
-    "set": {
-      "text": "howto_set",
-      "steps": [
-        {
-          "form": "turn_left_0"
-        },
-        {
-          "form": "turn_left_1"
-        },
-        {
-          "form": "turn_middle_0"
-        },
-        {
-          "form": "turn_right_0"
-        },
-        {
-          "form": "turn_right_1"
-        },
-        {
-          "form": "turn_right_2"
-        },
-        {
-          "form": "release"
-        },
-        {
-          "form": "relatch"
-        }
-      ]
-    }
   }
 }
