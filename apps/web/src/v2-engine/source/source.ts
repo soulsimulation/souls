@@ -33,6 +33,8 @@ export type NodeRec = {
   surfaces?: [number, number[][]][];
   /** Today's def ref of an imported thing (import-eden's field 2, `name@version`). */
   def?: string;
+  /** Its def's params (import-eden's field 19, W3), when it has any. */
+  params?: Record<string, unknown>;
   /** A path thing's or a river's line `[x, z]` mm, world (field 16), and its width mm (field 17). */
   line?: number[][];
   lineWidth?: number;
