@@ -1156,10 +1156,10 @@ impl Engine {
                     show(activity)
                 );
             }
-            if self.activities.members(activity).is_none() {
-                if let Some(s) = self.asm.as_mut() {
-                    s.ended(activity);
-                }
+            if self.activities.members(activity).is_none()
+                && let Some(s) = self.asm.as_mut()
+            {
+                s.ended(activity);
             }
         }
         self.activities
