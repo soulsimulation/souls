@@ -1,6 +1,6 @@
 // Actual native physical fixture with fake body/Soul associations. No owner DB,
 // station policy, cue, route, model, browser or server bootstrap installation.
-import { fileURLToPath } from 'node:url';
+import { isMain } from '../../../../../tools/lib/is-main.mjs';
 import { marsFactory } from '@souls/engine-mars';
 export async function generateNativeGatheringObservation() {
   const factory=await marsFactory(),engine=factory.create(factory.genesis('native-gathering-public-fixture'));
@@ -25,4 +25,4 @@ export async function generateNativeGatheringObservation() {
     reconstruction:{kind:'native-snapshot',observation:reconstructed,stateHash:snapshot.stateHash},
     unresolved:['station-policy-disposition','durable-cue-clock','anonymous-HTTP-WS','recorded-cue-lookup','two-listener-audio']};
 }
-if(process.argv[1]===fileURLToPath(import.meta.url))process.stdout.write(JSON.stringify(await generateNativeGatheringObservation(),null,2)+'\n');
+if(isMain(import.meta.url))process.stdout.write(JSON.stringify(await generateNativeGatheringObservation(),null,2)+'\n');

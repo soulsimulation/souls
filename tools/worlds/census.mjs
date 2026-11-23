@@ -11,6 +11,7 @@
 //   doors    placed things of the core door def (any version)
 //   slot     placed things whose def has at least one slot (a seat, bed, shelf or surface a body can use or fill)
 //   usable   placed things with an action or a slot; usable share = usable / placed
+import { isMain } from '../lib/is-main.mjs';
 import { readFileSync, existsSync } from 'node:fs';
 import { basename } from 'node:path';
 import { CORE_KIT } from '../../packages/world-compiler/src/core-kit.ts';
@@ -50,15 +51,18 @@ export function placedByDef(tpl) {
 
 /**
  * Checks a world's entry map (content/worlds/<world>/map.json) against its template and counts it: every placed def has
- * one row naming an entry or waiting, with the template's own count. Shares are in tenths of a percent (integers).
+ * one row naming an entry or waiting, with the template's own count. A row marked `live` (its reason) names a kind made on
+ * the live world, not in the template: counted in `live`, never in the shares. Shares are in tenths of a percent (integers).
  */
 export function mapCensus(map, tpl) {
   const placed = placedByDef(tpl), problems = [], seen = new Set();
-  const r = { placed: 0, kinds: Object.keys(placed).length, rows: 0, own: 0, base: 0, waiting: 0, kindsOwn: 0, kindsBase: 0, kindsWaiting: 0 };
+  const r = { placed: 0, kinds: Object.keys(placed).length, rows: 0, live: 0, own: 0, base: 0, waiting: 0, kindsOwn: 0, kindsBase: 0, kindsWaiting: 0 };
   for (const row of map.rows ?? []) {
     r.rows++;
     if (seen.has(row.def)) problems.push(`${row.def}: two rows`);
     seen.add(row.def);
+    // A live row (#3980) is a kind the world's god made on the live world: the template never places it.
+    if (row.live) { if (placed[row.def] !== undefined) problems.push(`${row.def}: a live row, but the template places it`); else r.live++; continue; }
     if (placed[row.def] === undefined) { problems.push(`${row.def}: not placed in the template`); continue; }
     if (row.placed !== placed[row.def]) problems.push(`${row.def}: row says ${row.placed}, template places ${placed[row.def]}`);
     const n = placed[row.def];
@@ -76,7 +80,7 @@ export function mapCensus(map, tpl) {
 
 const pct = (t) => `${Math.trunc(t / 10)}.${t % 10}%`;
 
-if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('census.mjs')) {
+if (isMain(import.meta.url) || process.argv[1]?.endsWith('census.mjs')) {
   const args = process.argv.slice(2), json = args.includes('--json');
   const mi = args.indexOf('--map');
   if (mi >= 0) {
@@ -85,7 +89,7 @@ if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith
     const c = mapCensus(map, JSON.parse(readFileSync(new URL(map.template, root), 'utf8')));
     if (json) console.log(JSON.stringify(c, null, 2));
     else {
-      console.log(`${map.world}: ${c.placed} placed in ${c.kinds} kinds, ${c.rows} rows`);
+      console.log(`${map.world}: ${c.placed} placed in ${c.kinds} kinds, ${c.rows} rows${c.live ? ` (${c.live} for live-only kinds)` : ''}`);
       console.log(`  entry with forms of its own: ${c.own} placed (${c.kindsOwn} kinds) = ${pct(c.ownTenths)}`);
       console.log(`  entry with a card and the base forms only: ${c.base} placed (${c.kindsBase} kinds)`);
       console.log(`  mapped to an entry: ${c.own + c.base} = ${pct(c.entryTenths)}; waiting: ${c.waiting} placed (${c.kindsWaiting} kinds)`);

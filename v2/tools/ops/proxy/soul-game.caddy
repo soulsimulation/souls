@@ -5,7 +5,7 @@
 #
 # @@PRODUCTION_PORT@@ is a placeholder, never a real value in this repository: today's launcher's loopback port, as in
 # today's file. The new system's loopback addresses are the install's (v2/docs/runbook/install.md): the directory on
-# 7310, the viewers' origin on 7320, the page's files in /usr/local/lib/souls/web.
+# 7310, the viewers' origin on 7320, the agents' relay on 7330, the page's files in /usr/local/lib/souls/web.
 #
 # - A slug routes by a map made from the directory and trusted activation metadata: routes.mjs (beside this file,
 #   run each minute by souls-routes.timer) keeps one file per explicitly canonical trusted mapping in
@@ -26,6 +26,9 @@
 # - /sitemap.xml is routes.mjs's: today's sitemap plus the directory's worlds; robots.txt stays today's.
 # - When an origin cannot answer, a page a browser asked for gets today's poster ("back in a moment"), as before.
 # Canonical and preview pages use identical static assets, bootstrap and native gateway routing.
+# - A world's agent paths (v2/ws, v2/creator-token, v2/entries) go to the agents' relay (v2/tools/origin/agents.mjs,
+#   #4152), never through the viewers' origin, so a viewer join wave that saturates or restarts the origin drops no
+#   agent. The relay applies the origin's own world rules (world-routes.mjs); the paths are unchanged.
 # - A world's models (/w/<slug>/models/: models.json and worlds/models/<hash>.glb, baked by
 #   v2/tools/import-eden/bake/bake.ts) are files in /var/lib/souls/models/<slug>, outside the page's mirrored folder, so
 #   an install never removes them. A model is named by its hash and never changes (immutable); models.json is revalidated.
@@ -35,7 +38,8 @@
 	@files path_regexp files ^/(?:preview/)?w/[^/]+(/assets/.+)$
 	@models path_regexp models ^/(?:preview/)?w/([a-z0-9][a-z0-9-]{0,62})/models(/.+)$
 	@panel path_regexp ^/(?:preview/)?w/[^/]+/src/panel/(index\.html)?$
-	@native path_regexp ^/(?:preview/)?w/[^/]+/(v1/bootstrap|views/world\.json|v2/ws|v2/creator-token|v2/entries)$
+	@native path_regexp ^/(?:preview/)?w/[^/]+/(v1/bootstrap|views/world\.json)$
+	@agents path_regexp ^/(?:preview/)?w/[^/]+/v2/(ws|creator-token|entries)$
 	@client path_regexp client ^/(?:preview/)?w/([^/]+)/(eden\.mjs|skill\.md|creator\.md|instructions\.md|safety\.md|llms\.txt|replica\.js|replica_bg\.wasm|v1/config)$
 	handle @page {
 		header X-Souls-System v2
@@ -68,6 +72,12 @@
 	handle @native {
 		header X-Souls-System v2
 		reverse_proxy localhost:7320 {
+			header_up X-Forwarded-For {client_ip}
+		}
+	}
+	handle @agents {
+		header X-Souls-System v2
+		reverse_proxy localhost:7330 {
 			header_up X-Forwarded-For {client_ip}
 		}
 	}

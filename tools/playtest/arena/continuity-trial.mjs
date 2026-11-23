@@ -1,12 +1,13 @@
 #!/usr/bin/env node
 // Common mechanical trial lifetime. This is not a scorer or a qualification
 // certificate. No continuation prompts, world writes, or cross-Soul relay.
+import { isMain } from '../../lib/is-main.mjs';
 import {spawn,execFileSync} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {StringDecoder} from 'node:string_decoder';
 import {mkdirSync,readFileSync,writeFileSync,appendFileSync,lstatSync,renameSync} from 'node:fs';
 import {resolve,join,basename,isAbsolute} from 'node:path';
-import {fileURLToPath,pathToFileURL} from 'node:url';
+import { fileURLToPath } from 'node:url';
 import {createWorldClient} from '../../soul-runtime/world-client.mjs';
 import {abortableSleep} from '../../soul-runtime/receiver.mjs';
 import {probeSessions,verifyOwnedProbeExit,probeArchivalStatus} from './probe-sessions.mjs';
@@ -506,7 +507,7 @@ export async function runContinuityTrial(config,deps={}){
  return {...summary,archived};
 }
 
-if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
  const stop=new AbortController(),abort=()=>stop.abort();process.once('SIGINT',abort);process.once('SIGTERM',abort);
  runContinuityTrial({...JSON.parse(readFileSync(resolve(process.argv[2]),'utf8')),signal:stop.signal}).then(result=>{console.log(JSON.stringify({arm:result.arm,endReason:result.endReason,failureCode:result.failureCode,qualification:result.qualification}));if(result.failureCode||result.archival?.status==='incomplete')process.exitCode=1;}).catch(error=>{console.error(JSON.stringify({code:code(error)}));process.exitCode=1;}).finally(()=>{process.removeListener('SIGINT',abort);process.removeListener('SIGTERM',abort);});
 }

@@ -22,6 +22,7 @@
 //        [--warm-sec 20] [--measure-sec 60] [--settle-sec 60] [--profile-sec 10] [--out dir] [--port 18990] [--short]
 // Writes <out>/results.json, <out>/REPORT.md and one screenshot per size, tier and camera (first repeat).
 // Never point it at a live world: it boots its own, with fake minds, under <out>.
+import { isMain } from '../lib/is-main.mjs';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { availableParallelism, loadavg } from 'node:os';
 import { join, resolve } from 'node:path';
@@ -265,4 +266,4 @@ async function main() {
   log(`done: ${join(out, 'REPORT.md')}`);
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) main().then(() => process.exit(0), (e) => { console.error(String(e?.stack ?? e)); process.exit(1); });   // an agent's pending sleep must not hold the process
+if (isMain(import.meta.url)) main().then(() => process.exit(0), (e) => { console.error(String(e?.stack ?? e)); process.exit(1); });   // an agent's pending sleep must not hold the process

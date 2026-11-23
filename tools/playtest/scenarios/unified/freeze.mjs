@@ -1,8 +1,9 @@
 #!/usr/bin/env node
 // Freeze reviewed physical fixtures before any inference. No process or provider launches.
+import { isMain } from '../../../lib/is-main.mjs';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {resolve,dirname} from 'node:path';
-import {fileURLToPath,pathToFileURL} from 'node:url';
+import { fileURLToPath } from 'node:url';
 import {physicalGenesisSha256,physicalSnapshotSha256} from '../../lib/physical-fixture.mjs';
 import {bindJourneyFixtures} from '../../arena/fixture-bindings.mjs';
 import {validateJourney} from '../../review/journey-oracles.mjs';
@@ -44,4 +45,4 @@ export function freeze({world,genesis,snapshot,baselineSnapshot,seedSnapshot,out
  for(const e of scenario.director.script){e.expect.journey.readiness='ready';e.expect.journey.source=`physical:${scenario.freeze.physicalSha256};poses:${parity.sha256}`;}
  mkdirSync(dirname(resolve(output)),{recursive:true});writeFileSync(output,JSON.stringify(scenario,null,2)+'\n');return{output:resolve(output),world,freeze:scenario.freeze};
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){const args=process.argv.slice(2),flags={};for(let i=0;i<args.length;i+=2)flags[args[i].replace(/^--/,'')]=args[i+1];console.log(JSON.stringify(freeze({world:flags.world,genesis:flags.genesis,snapshot:flags.snapshot,baselineSnapshot:flags['baseline-snapshot'],seedSnapshot:flags['seed-snapshot'],output:flags.out}),null,2));}
+if(isMain(import.meta.url)){const args=process.argv.slice(2),flags={};for(let i=0;i<args.length;i+=2)flags[args[i].replace(/^--/,'')]=args[i+1];console.log(JSON.stringify(freeze({world:flags.world,genesis:flags.genesis,snapshot:flags.snapshot,baselineSnapshot:flags['baseline-snapshot'],seedSnapshot:flags['seed-snapshot'],output:flags.out}),null,2));}

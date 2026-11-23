@@ -101,6 +101,7 @@ pub fn exit_name(result: &str, code: &str, status: &str) -> Option<String> {
         ("exited", Some(EXIT_BUILD_MISSING)) => "build.missing",
         ("exited", Some(EXIT_BUILD_MISMATCH)) => "build.mismatch",
         ("exited", Some(86)) => "tick-stalled",
+        ("exited", Some(87)) => "disk-failed",
         _ => result,
     };
     Some(format!("{named} ({code} {status})"))
@@ -225,6 +226,14 @@ mod tests {
         assert_eq!(
             exit_name("oom-kill", "killed", "KILL").as_deref(),
             Some("oom-kill (killed KILL)")
+        );
+        assert_eq!(
+            exit_name("exit-code", "exited", "87").as_deref(),
+            Some("disk-failed (exited 87)")
+        );
+        assert_eq!(
+            exit_name("exit-code", "exited", "86").as_deref(),
+            Some("tick-stalled (exited 86)")
         );
     }
 }

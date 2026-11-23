@@ -15,6 +15,7 @@
 // raw bytes and on gzip -9 bytes. A key is an offender when it grew by >= THRESHOLD_PCT and by more than SLACK_BYTES (so a
 // 2 KB chunk gaining 300 bytes is noise, not a failure); the total has no slack. A key absent from the baseline fails only
 // at >= NEW_CHUNK_BYTES raw; smaller new keys and removed keys are reported, never failed.
+import { isMain } from '../../lib/is-main.mjs';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync, writeFileSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
@@ -156,6 +157,6 @@ export function main(argv = process.argv.slice(2), log = console.log) {
   return rc;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   try { process.exitCode = main(); } catch (e) { console.error(`budget: ${e.message}`); process.exitCode = 2; }
 }

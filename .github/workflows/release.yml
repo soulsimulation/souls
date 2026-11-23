@@ -89,6 +89,11 @@ on:
         description: The receipts release also holds accepted-exceptions.json (docs/release.md#accepted-exceptions); the gate may be blocked only by what it accepts, exactly
         type: boolean
         default: false
+      gate:
+        description: 'report (default) ships without requiring the Modal gate receipt; it is reported when present (Gene, 22 Nov 2026: zero users, the gate never blocks a ship). required restores the receipt check'
+        type: choice
+        options: [report, required]
+        default: report
       receipts_only:
         description: Check the receipts (and accepted exceptions) for this head and stop. No production environment, no secret, no ssh, nothing staged; any branch
         type: boolean
@@ -232,7 +237,7 @@ jobs:
   # exactly (root-release.mjs accepted; docs/release.md#accepted-exceptions). Real ships and receipts_only; no secret.
   receipts:
     needs: preflight
-    if: ${{ needs.preflight.outputs.stamped != '1' && !inputs.feed_only && !inputs.eyes_only && (!inputs.dry_run || inputs.receipts_only) }}
+    if: ${{ needs.preflight.outputs.stamped != '1' && !inputs.feed_only && !inputs.eyes_only && (inputs.receipts_only || (!inputs.dry_run && inputs.gate != 'report')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 5
     permissions:
@@ -274,7 +279,7 @@ jobs:
     needs: [preflight, receipts]
     # a dispatch that stamped the client ends at its pull request (#1969); receipts_only ends at the receipts (#2262); a real
     # ship needs them clean, a dry run (no-switch) does not check them first
-    if: ${{ !cancelled() && !inputs.receipts_only && !inputs.feed_only && !inputs.eyes_only && needs.preflight.result == 'success' && needs.preflight.outputs.stamped != '1' && (needs.receipts.result == 'success' || (inputs.dry_run && needs.receipts.result == 'skipped')) }}
+    if: ${{ !cancelled() && !inputs.receipts_only && !inputs.feed_only && !inputs.eyes_only && needs.preflight.result == 'success' && needs.preflight.outputs.stamped != '1' && (needs.receipts.result == 'success' || ((inputs.dry_run || inputs.gate == 'report') && needs.receipts.result == 'skipped')) }}
     runs-on: ubuntu-latest
     timeout-minutes: 240   # setup + the 20-min eyes wait + ship.sh + the 45-min verdict wait + margin, so the verdict and its rollback line always print
     environment: production
@@ -333,7 +338,7 @@ jobs:
           echo "MARS_WEB_SRC=$web" >> "$GITHUB_ENV"
           if [ -n "$(git status --porcelain --untracked-files=no)" ]; then echo "::error::the build changed tracked files; ship.sh ships exactly HEAD"; git status --short; exit 1; fi
       - name: Receipts
-        if: ${{ !inputs.dry_run }}
+        if: ${{ !inputs.dry_run && inputs.gate != 'report' }}
         env:
           GH_TOKEN: ${{ github.token }}
           TAG: ${{ inputs.receipts || format('receipts-v{0}', inputs.version) }}
@@ -410,6 +415,7 @@ jobs:
           fi
       - name: ship.sh
         env:
+          SHIP_GATE: ${{ inputs.gate }}
           SIM_DEPLOY_HOST: ${{ vars.SIM_DEPLOY_HOST || secrets.SIM_DEPLOY_HOST }}
           SIM_DEPLOY_USER: ${{ vars.SIM_DEPLOY_USER || secrets.SIM_DEPLOY_USER }}
           SIM_DEPLOY_ENV: /nonexistent
@@ -550,7 +556,7 @@ jobs:
   # build, from any ref, with no environment and no secret. A hardware GL renderer or nothing: no SwiftShader.
   eyes:
     needs: [preflight, receipts]
-    if: ${{ !cancelled() && needs.preflight.result == 'success' && (inputs.eyes_only || (inputs.eyes == 'gpu-runner' && !inputs.receipts_only && !inputs.feed_only && needs.preflight.outputs.stamped != '1' && (needs.receipts.result == 'success' || (inputs.dry_run && needs.receipts.result == 'skipped')))) }}
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && (inputs.eyes_only || (inputs.eyes == 'gpu-runner' && !inputs.receipts_only && !inputs.feed_only && needs.preflight.outputs.stamped != '1' && (needs.receipts.result == 'success' || ((inputs.dry_run || inputs.gate == 'report') && needs.receipts.result == 'skipped')))) }}
     runs-on: [self-hosted, souls-timed]
     timeout-minutes: 150   # setup, up to 45 min for the ship job's handover, the 60-min release window, the checks
     # SIM_PROBE_GOD_JSON is a production-environment secret, which reaches only a job in that environment (main only).
