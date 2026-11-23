@@ -18,7 +18,7 @@ sends to these programs once the owner places its site file. Routing between the
 | The directory's arguments, written once, never overwritten | `/etc/souls/directory.args` | root:souls, 640 |
 | Secrets, `KEY=value`, written once (empty), never overwritten | `/etc/souls/secrets.env` | root, 600 |
 | What the install made (its record; see below) | `/etc/souls/install.state` | root, 644 |
-| Units | `souls.slice`, `worldd@.service` (O1) and its drop-in `worldd@.service.d/10-install.conf`, `souls-gateway@.service`, `souls-directory.service`, `souls-origin.service` | root, 644 |
+| Units | `souls.slice`, `worldd@.service` (O1) and its drop-in `worldd@.service.d/10-install.conf`, `souls-gateway@.service`, `souls-directory.service`, `souls-origin.service`, `souls-agents.service` | root, 644 |
 
 The view tier runs inside each world's process (`worldd`), so it has no unit of its own. Every program runs as
 `souls` in `souls.slice`, whose `MemoryMax` is 12 GB: the largest world's cap (Eden's 8 GB) and 4 GB for the rest.
@@ -29,8 +29,11 @@ a gateway 512 MB, the directory 256 MB, the origin 1 GB for all its processes (6
 and `IOWeight` are 20 against the default 100, so when both systems are busy the new one gets a fifth of what today's
 gets, and all of it when today's is idle; neither system's world time is throttled. `TasksMax` is 4,096. Every unit
 runs with `NoNewPrivileges`, `ProtectSystem=strict` (writing only under `/var/lib/souls`), `ProtectHome` and
-`PrivateTmp`. Units read the secrets file as root before they drop to `souls`. The directory
-and the origin listen on loopback only (ports 7310 and 7320); each world's gateway gets its port from its own
+`PrivateTmp`. Units read the secrets file as root before they drop to `souls`. The directory,
+the origin and the agents' relay listen on loopback only (ports 7310, 7320 and 7330). The relay
+(`v2/tools/origin/agents.mjs`, #4152) carries every world's agent paths (`/w/<slug>/v2/ws`, `v2/creator-token`,
+`v2/entries`) to the world's gateway in a process apart from the viewers' origin, so a viewer join wave that saturates
+or restarts the origin drops no agent; its gauge is `/run/souls-agents/stats.json` (open agent sockets); each world's gateway gets its port from its own
 `/etc/souls/gateway-<world>.env`, written when the world is placed (X5). That file also names the world's kind
 entries (`--entries <world>/entries`), which the gateway serves to the world's paired clients at `/v2/entries` (#3760);
 a gateway whose entries folder is missing or empty refuses to start.
@@ -167,7 +170,9 @@ owner. Rules: `v2/crates/directoryd/src/worlds/list/register.rs`.
    }
    ```
 
-4. Start units by name when a world is placed (X5): `systemctl start souls-origin souls-directory`.
+4. Start units by name when a world is placed (X5): `systemctl start souls-origin souls-agents souls-directory`.
+   `souls-agents` must be running before any Caddy reload whose `soul-game.caddy` routes agents to 7330 (#4152),
+   or agents get 502 until it starts; the cut-over's `check` refuses while it is not active.
 
 ## A world's models
 

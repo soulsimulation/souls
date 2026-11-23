@@ -18,6 +18,7 @@ import { openLauncher } from '../../../../tools/world-launcher/launcher.mjs';
 import { migrateRegistry } from '../../../../tools/world-launcher/reslug.mjs';
 import { clerkKeys, ISSUER, PUBLISHABLE_KEY } from '../../../../apps/server/test/clerk-fixture.ts';
 import { testPort } from '../../../../apps/server/test/test-port.ts';
+import { createAgents } from '../../origin/agents.mjs';
 import { createOrigin } from '../../origin/origin.mjs';
 import { build } from '../../../client/served/build.mjs';
 import { frontCheck, POINTS } from '../front-check.mjs';
@@ -28,8 +29,8 @@ const a = process.argv.slice(2), opt = (k, d) => { const i = a.indexOf(k); retur
 const web = resolve(opt('--web', join(repo, 'v2/web/dist'))), todayWeb = resolve(opt('--today-web', join(repo, 'apps/web/dist')));
 mkdirSync(join(repo, '.local'), { recursive: true });
 const dir = mkdtempSync(join(repo, '.local', 'front-door-'));
-const P0 = await testPort(16);
-const port = { launcher: P0 + 9, directory: P0 + 10, origin: P0 + 11, admin: P0 + 12, public: P0 + 13, primary: P0 + 14, old: P0 + 15 };
+const P0 = await testPort(17);
+const port = { launcher: P0 + 9, directory: P0 + 10, origin: P0 + 11, admin: P0 + 12, public: P0 + 13, primary: P0 + 14, old: P0 + 15, agents: P0 + 16 };
 const at = (p) => `http://127.0.0.1:${p}`;
 const PUBLIC = 'https://soul.game', PRIMARY = 'https://sim.eden.art', OLD = 'https://souls.game';
 const stops = [];
@@ -78,7 +79,8 @@ build({ out: client, version: '0.0.0' });
 const worldRoutes = join(dir, 'world-routes.json');
 writeFileSync(worldRoutes, JSON.stringify({ schema: 'souls/world-routes/1', worlds: Object.fromEntries(listed.worlds.map(w => [w.name, { gateway: at(port.directory), stream: '/s/standin/', canonical: true }])) }));
 const origin = createOrigin(streams, { web, data: news, client, worldRoutes }).server.listen(port.origin, '127.0.0.1');
-stops.push(() => directory.close(), () => origin.close());
+const agents = createAgents(worldRoutes).server.listen(port.agents, '127.0.0.1'); // the agents' relay (#4152)
+stops.push(() => directory.close(), () => origin.close(), () => agents.close());
 
 // the scratch host: /etc, the live release and the map under the scratch folder
 const etc = join(dir, 'etc'), release = join(dir, 'release'), routes = join(dir, 'routes'), shims = join(dir, 'bin');
@@ -88,7 +90,7 @@ const names = (text) => text
   .replace(/^https:\/\/soul\.game \{/m, `http://127.0.0.1:${port.public} {`)
   .replace(/^https:\/\/sim\.eden\.art \{/m, `http://127.0.0.1:${port.primary} {`)
   .replace(/^https:\/\/souls\.game \{/m, `http://127.0.0.1:${port.old} {`)
-  .replaceAll('localhost:7310', `localhost:${port.directory}`).replaceAll('localhost:7320', `localhost:${port.origin}`)
+  .replaceAll('localhost:7310', `localhost:${port.directory}`).replaceAll('localhost:7320', `localhost:${port.origin}`).replaceAll('localhost:7330', `localhost:${port.agents}`)
   .replaceAll('/usr/local/lib/souls/web', web).replaceAll('/var/lib/souls/models', join(dir, 'models')).replaceAll('/var/lib/souls-routes', routes).replaceAll('/usr/bin/node', process.execPath)
   .replaceAll('/srv/sim-worlds/production/tools/world-launcher/deploy/caddy', today).replaceAll('/srv/sim-worlds/production', release);
 for (const f of ['soul-game.caddy', 'souls-game.caddy', 'souls-routes.service', 'souls-routes.timer']) writeFileSync(join(src, f), names(readFileSync(join(here, f), 'utf8')));
