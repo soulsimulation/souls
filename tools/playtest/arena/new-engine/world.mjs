@@ -3,10 +3,11 @@
 // gatewayd, directoryd with the dev sign-in, the origin and the front door, all on loopback). Nothing starts
 // apps/server. The old dev world (../provision.mjs) stays as it is until the old world is retired.
 //
-//   startWorld({ template, dir, port }) → { kind: 'v2', base, page, world, directory, gateway, dir, pid, facts }
+//   startWorld({ template, dir, port, history }) → { kind: 'v2', base, page, world, directory, gateway, dir, pid, facts }
 //   stopWorld(world) stops run.sh, which stops everything it started.
 import { spawn, execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, openSync, readFileSync } from 'node:fs';
+import { existsSync, mkdirSync, openSync, readFileSync, symlinkSync, unlinkSync } from 'node:fs';
+import { randomBytes } from 'node:crypto';
 import { createServer } from 'node:net';
 import { join, resolve } from 'node:path';
 import { REPO_ROOT } from '../../../lib/paths.mjs';
@@ -48,7 +49,7 @@ export const runArgs = ({ dir, port, facts }) => ['--port', String(port), '--dir
 
 /** Starts run.sh and waits for its `ready` line. The world's folder is `dir` (run.sh's --dir, under an ignored .local/).
  *  `template` names the genesis; `facts` an already exported one; neither seeds N2's test world. */
-export async function startWorld({ template = null, facts = null, dir, port = null, readyMs = 900_000, log = null, env = {} } = {}) {
+export async function startWorld({ template = null, facts = null, dir, port = null, readyMs = 900_000, log = null, env = {}, history = false } = {}) {
   if (!dir) throw new Error('startWorld: dir is required');
   dir = resolve(dir);
   mkdirSync(dir, { recursive: true });
@@ -57,8 +58,16 @@ export async function startWorld({ template = null, facts = null, dir, port = nu
   port ??= await freePorts();
   const at = addresses(port);
   const out = openSync(log ?? join(dir, 'run.log'), 'a');
+  // `history`: the world ships its records to a folder store beside it (`WORLDD_STORE`, O9's `folder:`), so it writes
+  // its public history (`history/`: the header, bundles and indices the page plays a past moment from)
+  if (history) { mkdirSync(join(dir, 'store'), { recursive: true }); env = { WORLDD_STORE: `folder:${join(dir, 'store')}`, ...env }; }
+  // A world's sockets live in its folder, and a socket's path is at most 104 bytes (macOS): a deep folder is run through
+  // a short link to it in /tmp (run.sh keeps the link's path), and its data stays where it was asked to be.
+  let runDir = dir, link = null;
+  if (dir.length > 48) { link = join('/tmp', `souls-w-${randomBytes(4).toString('hex')}`); symlinkSync(dir, link); runDir = link; }
   // run.sh in its own process group: stopWorld signals the group, so nothing it started outlives the run.
-  const child = spawn('bash', [RUN_SH, ...runArgs({ dir, port, facts })], { cwd: REPO_ROOT, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', out], detached: true });
+  const child = spawn('bash', [RUN_SH, ...runArgs({ dir: runDir, port, facts })], { cwd: REPO_ROOT, env: { ...process.env, ...env }, stdio: ['ignore', 'pipe', out], detached: true });
+  if (link) child.on('exit', () => { try { unlinkSync(link); } catch { /* gone */ } });
   let text = '';
   child.stdout.on('data', (d) => { text += d; });
   const t0 = Date.now();

@@ -1,0 +1,19 @@
+{
+  "name": "hamlet-stroll",
+  "seconds": 22,
+  "hour": "17:30",
+  "world": {
+    "template": "worlds/templates/hello-hamlet.json",
+    "add": [
+      { "op": "place", "def": "core/bench@1", "name": "meadow-bench", "p": [24, 0, -2], "r": 1.2 }
+    ]
+  },
+  "souls": [{ "id": "ada" }, { "id": "bo" }],
+  "setup": [{ "souls": "*", "do": ["act", "?bench", "--wait"] }],
+  "beats": [
+    { "at": 1, "souls": ["ada"], "do": ["say", "What a lovely evening."] },
+    { "at": 3, "souls": ["bo"], "do": ["act", "?meadow-bench"] },
+    { "at": 5, "souls": ["ada"], "do": ["act", "?meadow-bench"] }
+  ],
+  "camera": { "follow": "ada" }
+}
