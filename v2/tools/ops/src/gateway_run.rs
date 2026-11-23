@@ -513,7 +513,7 @@ fn event_row(
 async fn main() {
     let a: Vec<String> = std::env::args().collect();
     let get = |n: &str| a.iter().position(|x| x == n).and_then(|k| a.get(k + 1));
-    let usage = "usage: o16-run --dir <empty folder> --schedule <loads.mjs file> [--upgrade-at 20] [--kill-at 40] [--unit <script> --listen <addr:port>]";
+    let usage = "usage: o16-run --dir <empty folder> --schedule <loads.mjs file> [--upgrade-at 20] [--kill-at 40] [--agents <n>] [--unit <script> --listen <addr:port>]";
     let dir = PathBuf::from(get("--dir").unwrap_or_else(|| fail(usage)));
     let schedule = std::fs::read_to_string(get("--schedule").unwrap_or_else(|| fail(usage)))
         .unwrap_or_else(|e| fail(format!("the schedule: {e}")));
@@ -545,7 +545,13 @@ async fn main() {
             _ => fail(format!("the schedule: `{line}`")),
         }
     }
-    let agents = acts.iter().map(|(_, k)| k + 1).max().unwrap_or(0);
+    // `--agents`: the schedule's agents, those with no act among them (they connect, lose their socket and come back).
+    let agents = acts
+        .iter()
+        .map(|(_, k)| k + 1)
+        .max()
+        .unwrap_or(0)
+        .max(get("--agents").map_or(0, |v| v.parse().unwrap_or_else(|_| fail(usage))));
 
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap_or_else(|e| fail(e));

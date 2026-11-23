@@ -40,7 +40,7 @@ mkdir -p "$ROOT"
 ROOT=$(cd "$ROOT" && pwd)
 node tools/driver/loads.mjs target --agents "$AGENTS" --seconds 60 --seed 1 --out "$ROOT/schedule.txt"
 if [[ "${1:-}" != --systemd ]]; then
-  exec target/release/o16-run --dir "$ROOT/run" --schedule "$ROOT/schedule.txt"
+  exec target/release/o16-run --dir "$ROOT/run" --schedule "$ROOT/schedule.txt" --agents "$AGENTS"
 fi
 
 export O16_SYSTEMD=${O16_SYSTEMD:-user} O16_UNIT_ROOT=$ROOT
@@ -77,5 +77,5 @@ RestartSec=1s
 LimitNOFILE=8192
 EOF
 "${sctl[@]}" daemon-reload
-target/release/o16-run --dir "$ROOT/run" --schedule "$ROOT/schedule.txt" --unit "$HERE/o16-run.sh" \
-  --listen "127.0.0.1:$port"
+target/release/o16-run --dir "$ROOT/run" --schedule "$ROOT/schedule.txt" --agents "$AGENTS" \
+  --unit "$HERE/o16-run.sh" --listen "127.0.0.1:$port"
