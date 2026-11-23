@@ -82,7 +82,7 @@ const names = (text) => text
   .replace(/^https:\/\/soul\.game \{/m, `http://127.0.0.1:${port.public} {`)
   .replace(/^https:\/\/sim\.eden\.art \{/m, `http://127.0.0.1:${port.primary} {`)
   .replace(/^https:\/\/souls\.game \{/m, `http://127.0.0.1:${port.public + 100} {`)
-  .replaceAll('localhost:7310', `localhost:${port.directory}`).replaceAll('localhost:7320', `localhost:${port.origin}`)
+  .replaceAll('localhost:7310', `localhost:${port.directory}`).replaceAll('localhost:7320', `localhost:${port.origin}`).replaceAll('localhost:7330', `localhost:${port.origin}`)
   .replaceAll('/usr/local/lib/souls/web', web).replaceAll('/var/lib/souls/models', join(R, 'var/lib/souls/models')).replaceAll('/var/lib/souls-routes', join(R, 'var/lib/souls-routes')).replaceAll('/usr/bin/node', process.execPath)
   .replaceAll('/srv/sim-worlds/production/tools/world-launcher/deploy/caddy', today).replaceAll('/srv/sim-worlds/production', release);
 for (const f of ['soul-game.caddy', 'souls-game.caddy', 'souls-routes.service', 'souls-routes.timer']) writeFileSync(join(src, f), names(readFileSync(join(ops, 'proxy', f), 'utf8')));
@@ -119,6 +119,9 @@ const someoneJoins = () => {   // a person who signs up and makes a Soul while E
 // systemctl on the scratch host: a world's units are the scratch machine's; a reload is the scratch Caddy's; a start
 // runs the unit's ExecStart; the rest does nothing.
 const caddyfile = join(R, 'etc/caddy/Caddyfile');
+// The agents' relay (#4152) counts as running on the scratch host (cutover.sh check asks); the rehearsal sends no agent.
+mkdirSync(join(machine, 'units'), { recursive: true });
+writeFileSync(join(machine, 'units', 'souls-agents.pid'), String(process.pid));
 writeFileSync(join(shims, 'systemctl'), `#!/bin/bash
 u=; for x in "$@"; do case $x in *.service) u=\${x%.service} ;; esac; done
 case "$*" in
