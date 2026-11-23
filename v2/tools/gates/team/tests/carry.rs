@@ -12,6 +12,9 @@
 //! log's effects replayed onto the world as built give the state hash its last part holds. A blocked set-down is not
 //! built yet: it prints "not reached", which is not a failure.
 
+// The scene times how long each leave's answer takes (rung 2): a measure, never in the world's log.
+#![allow(clippy::disallowed_methods)]
+
 use std::collections::{BTreeMap, BTreeSet};
 use std::os::unix::net::UnixListener;
 use std::path::PathBuf;
