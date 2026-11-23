@@ -41,6 +41,8 @@ export type Body = {
   held?: Held[];
   /** What it said, as talk lines in time order (take-speech.ts). */
   said?: Talk[];
+  /** Its look as the old page records a body (BODY-v1, take-bodies.ts legacyBodyOf); absent: the default person. */
+  look?: Record<string, unknown>;
 };
 
 export type RecordedChunk = { fromTick: number; toTick: number; take: Record<string, unknown> };
@@ -106,7 +108,7 @@ export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame)
       heading = m.heading;
       const walking = m.speed >= WALKING;
       track.push([k, Math.round(p[0]), Math.round(p[1]), Math.round(p[2]), Math.round(heading * ANG_Q)]);
-      if (k === 0) { changes.push([0, b.entity, 'present', true], [0, b.entity, 'level', 0]); }
+      if (k === 0) { changes.push([0, b.entity, 'present', true], [0, b.entity, 'level', 0]); if (b.look) changes.push([0, b.entity, 'body', b.look]); }
       const seat = walking ? null : seatAt(b.samples, t), nextSeat = seat ? seat.height / POS_Q : null, nextProp = heldAt(b.held, t);
       if (k < TICKS && nextSeat !== (seatH ?? null)) { changes.push([k, b.entity, 'seatHeight', nextSeat]); seatH = nextSeat; }
       if (k < TICKS && nextProp !== prop && (nextProp !== null || prop !== undefined)) { changes.push([k, b.entity, 'prop', nextProp]); prop = nextProp; }
@@ -118,7 +120,7 @@ export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame)
     tracks[b.entity] = thin(track);
     for (const l of b.said ?? []) if (l.tick >= fromTick && l.tick < fromTick + TICKS) events.push(markOf(l, fromTick));
     entities[b.entity] = {
-      id: b.entity, def: 'human', kind: 'human', label: b.name,
+      id: b.entity, def: 'human', kind: 'human', label: b.name, ...(b.look ? { body: b.look } : {}),
       pose: { p: [p[0] / POS_Q, p[1] / POS_Q, p[2] / POS_Q], yaw: heading },
       provenance: { origin: 'simulation', confidence: 'hypothetical' },
       human: { activity: activity || 'idle', level: 0, soul: b.soul, ...(speedQ !== null && speedQ >= 0 ? { speed: speedQ / SPEED_Q } : {}),

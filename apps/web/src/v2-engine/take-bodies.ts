@@ -40,3 +40,32 @@ export function heldAt(held: readonly Held[] | undefined, t: number): string | n
   for (const h of held ?? []) { if (h.at > t) break; prop = h.prop; }
   return prop;
 }
+
+/** Both pages' default people, in the same order (v2/web/src/crowd/bodies.ts BODIES; people-light.ts PEOPLE). */
+export const LOOKS = ['casual', 'punk', 'woman'] as const;
+/** The v2 page's id hash (crowd/bodies.ts: FNV-1a) and the old page's (people-light.ts hashId). */
+const fnv = (s: string) => { let h = 2166136261; for (let i = 0; i < s.length; i++) h = Math.imul(h ^ s.charCodeAt(i), 16777619); return h >>> 0; };
+const legacyHash = (s: string) => { let h = 0; for (const c of s) h = (h * 31 + c.charCodeAt(0)) >>> 0; return h; };
+
+/** The default look the v2 page gives body node `id` (no body-kind hash): one of LOOKS by its id. */
+export const defaultLookOf = (id: string) => LOOKS[fnv(id) % LOOKS.length];
+
+/** The take entity id for body node `id` whose old-page look is `look`: the old page picks a default person by the
+ *  entity id's hash, so `base` gets one letter that makes that pick `look` (h·31 + c, mod 3: a, b and c cover all three). */
+export function entityWithLook(base: string, look: string): string {
+  const want = LOOKS.indexOf(look as (typeof LOOKS)[number]);
+  if (want < 0) return base;
+  for (const c of 'abc') if (legacyHash(`${base}_${c}`) % LOOKS.length === want) return `${base}_${c}`;
+  return base;
+}
+
+/** One body of the v2 catalogue (`souls/bodies/1`, v2/tools/import-body/presets.ts Entry): its hash and the old page's
+ *  record of the same body (`legacy[0]`, a BODY-v1 RenderBody). */
+export type CatalogueBody = { hash: string; legacy?: unknown[] };
+
+/** The old page's body record for a v2 body-kind hash, from the catalogue; null when it has none (drawn by default). */
+export function legacyBodyOf(hash: string | undefined, catalogue: ReadonlyMap<string, CatalogueBody> | null): Record<string, unknown> | null {
+  const b = hash ? catalogue?.get(hash)?.legacy?.[0] : null;
+  return b && typeof b === 'object' && !Array.isArray(b) && ((b as { family?: unknown }).family === 'humanoid' || (b as { family?: unknown }).family === 'floater')
+    ? (b as Record<string, unknown>) : null;
+}

@@ -3,14 +3,16 @@
 // public nodes and body samples it hands on, and keeps the page's `takes` and Souls list as the old socket would: the
 // last chunks of every Soul's body (takes.ts) and one PublicSoul a body. Nothing here draws or decides; LiveWorld does.
 import { chunkEnd, chunkOf, TICKS, TICK_US, type Body, type Frame, type RecordedChunk, type WorldSample } from './takes.ts';
-import { propOf, seatOf, type Held, type Seat } from './take-bodies.ts';
+import { defaultLookOf, entityWithLook, legacyBodyOf, propOf, seatOf, type CatalogueBody, type Held, type Seat } from './take-bodies.ts';
 import { isPublic, saidKey, talkOf, type Said, type Talk } from './take-speech.ts';
 
 /** What the reader's worker posts (v2/web/src/source/source.ts: NodeRec, PartRec, Pointer; only the fields read here). */
 type NodeRec = { id: string; kind: string; parent: string | null; slot: number | null; pos: [number, number, number]; rot: [number, number, number, number];
   at: number | null; origin?: string; soul?: string | null; name?: string | null; sky?: Record<number, unknown>;
   /** Slots `[n, x, y, z, yaw mdeg, capacity]`, mm in its own frame. */
-  slots?: number[][] };
+  slots?: number[][];
+  /** Exact recorded body-kind hash (field 32); absent is the stated default. */
+  body?: string };
 type SampleRec = [string, string, number | null, number, number, number, number];
 type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; said?: Said[] };
 type Pointer = { newest: number | null; newestTo: number | null; period: number; anchorWorld: number; anchorWallMs: number; quietUntil: number | null };
@@ -61,6 +63,8 @@ export class V2Bridge {
   private readonly saidSeen = new Set<string>();
   private pendingSaid: Said[] = [];
   private talkId = 1;
+  /** The v2 body catalogue by hash (`souls/bodies/1`), once given (`looks`): a body-kind hash's old-page look. */
+  private catalogue: Map<string, CatalogueBody> | null = null;
   private readonly built = new Map<number, RecordedChunk>();
   private worker: Worker | null = null;
   /** World time of the first part played live: before it the reader caught up without samples, so no chunk is made. */
@@ -77,6 +81,9 @@ export class V2Bridge {
     this.worker.onerror = (e) => { this.view.error = e.message || 'the v2 reader stopped'; };
     this.worker.postMessage({ stream: new URL(stream, location.href).href });
   }
+
+  /** The world's body catalogue (its `bodies` rows), so each body is drawn in the look the v2 world gives it. */
+  looks(bodies: readonly CatalogueBody[]): void { this.catalogue = new Map(bodies.map((b) => [b.hash, b])); }
 
   stop(): void { this.worker?.terminate(); this.worker = null; }
 
@@ -174,8 +181,10 @@ export class V2Bridge {
       const w = this.nodes.has(id) ? this.world(id) : null;
       // The node's turn about +y as the old take's heading (the old model faces +x: heading = -rotation.y).
       const heading = w ? -2 * Math.atan2(w.q[2], w.q[0]) : 0;
-      out.push({ entity: entityOf(id), soul: soulIdOf(n.soul ?? id), name: n.name ?? `Soul ${id.split('.').pop()}`, samples: t.samples, heading, held: t.held, said: t.said,
-        ...(t.gone !== null ? { until: t.gone } : {}) });
+      // The look the v2 page gives it: its body kind's, else the default person its id picks (on both pages alike).
+      const look = legacyBodyOf(n.body, this.catalogue), entity = n.body ? entityOf(id) : entityWithLook(entityOf(id), defaultLookOf(id));
+      out.push({ entity, soul: soulIdOf(n.soul ?? id), name: n.name ?? `Soul ${id.split('.').pop()}`, samples: t.samples, heading, held: t.held, said: t.said,
+        ...(look ? { look } : {}), ...(t.gone !== null ? { until: t.gone } : {}) });
     }
     return out;
   }

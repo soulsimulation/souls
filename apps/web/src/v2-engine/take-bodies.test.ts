@@ -3,9 +3,13 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { sampleTake } from '../../../../mars/viewer/engine/take/replay.ts';
 import type { Take } from '../../../../mars/viewer/engine/take/types.ts';
-import { V2Bridge } from './bridge.ts';
+import { PEOPLE, templateNameFor } from '../../../../mars/viewer/app/engine-view/people-light.ts';
+import { readFileSync } from 'node:fs';
+import { entityOf, V2Bridge } from './bridge.ts';
 import { TICK_US } from './takes.ts';
-import { heldAt, postureOf, propOf, seatOf } from './take-bodies.ts';
+import { defaultLookOf, entityWithLook, heldAt, legacyBodyOf, LOOKS, postureOf, propOf, seatOf } from './take-bodies.ts';
+
+const E = entityWithLook('v2_b_7', defaultLookOf('b.7'));
 
 const Q = 2 ** 30, T0 = 1_000_000_000_000;
 const node = (id: string, kind: string, parent: string | null, pos: [number, number, number], extra: object = {}) =>
@@ -20,7 +24,7 @@ const part = (n: number, nodes: object[] = [], samples: [string, string, number 
   ({ t: 'part' as const, p: { number: n, from: T0 + n * 500_000, to: T0 + (n + 1) * 500_000, nodes, removed: [], samples } as never });
 const on = (b: V2Bridge, s: number) => {
   const tick = T0 / TICK_US + Math.round(s / 0.05), c = b.view.takes.chunks.find((x) => x.fromTick <= tick && tick < x.toTick)!;
-  return sampleTake(c.take as unknown as Take, (tick - c.fromTick) * 0.05).entities.v2_b_7;
+  return sampleTake(c.take as unknown as Take, (tick - c.fromTick) * 0.05).entities[E];
 };
 
 test('a body in a chair\'s slot is drawn sitting at the seat\'s height, feet on the floor, and stands when it leaves', () => {
@@ -77,4 +81,34 @@ test('the pure parts: seats, postures, props and what is held when', () => {
   assert.equal(propOf('eden:crate@1'), 'tool');
   const held = [{ at: 10, prop: 'cup' }, { at: 20, prop: null }];
   assert.deepEqual([5, 10, 15, 20, 25].map((t) => heldAt(held, t)), [null, 'cup', 'cup', null, null]);
+});
+
+test('a body with no body kind is the same default person on both pages', () => {
+  // the v2 page's BODIES (crowd/bodies.ts, which needs three to import), read as text: its people in its order
+  const src = readFileSync(new URL('../../../../v2/web/src/crowd/bodies.ts', import.meta.url), 'utf8');
+  const v2Bodies = [...src.matchAll(/^  \['([a-z]+)', 'animated-/gm)].map((m) => m[1]);
+  // and its id hash (FNV-1a), which picks a default person by `hash(id) % defaults`
+  assert.ok(src.includes('let h = 2166136261;') && src.includes('h = Math.imul(h ^ s.charCodeAt(i), 16777619);') && src.includes('hash(id) % this.defaults'));
+  const v2Hash = (x: string) => { let h = 2166136261; for (let i = 0; i < x.length; i++) h = Math.imul(h ^ x.charCodeAt(i), 16777619); return h >>> 0; };
+  assert.deepEqual([...LOOKS], v2Bodies, 'the v2 page\'s people, in its order');
+  assert.deepEqual([...LOOKS], [...PEOPLE], 'the old page\'s people, in the same order');
+  for (let i = 0; i < 300; i++) {
+    const id = `${(i * 7919).toString(16)}.${i}`, v2Look = v2Bodies[v2Hash(id) % v2Bodies.length];
+    assert.equal(defaultLookOf(id), v2Look);
+    assert.equal(templateNameFor(entityWithLook(entityOf(id), v2Look), PEOPLE), v2Look, `body ${id}`);
+  }
+});
+
+test('a body kind is drawn in the old page\'s record of the same body, from the world\'s catalogue', () => {
+  const pip = { family: 'floater', type: 'ceramic', model: 'pip', modelUrl: '/world-assets/pip.glb', radius: 0.35, hoverHeight: 1.45 };
+  const h = 'ab'.repeat(32), catalogue = [{ hash: h, legacy: [pip] }, { hash: 'cd'.repeat(32), legacy: [null] }];
+  assert.deepEqual(legacyBodyOf(h, new Map(catalogue.map((c) => [c.hash, c]))), pip);
+  assert.equal(legacyBodyOf('cd'.repeat(32), new Map(catalogue.map((c) => [c.hash, c]))), null, 'a default body stays the default person');
+  const b = new V2Bridge({ rulesVersion: 'test/1' });
+  b.looks(catalogue);
+  b.receive({ t: 'snapshot', s: { nodes: [world, { ...body, body: h }], removed: [] } as never });
+  for (let n = 0; n < 10; n++) b.receive(part(n));
+  const take = b.view.takes.chunks[0].take as unknown as Take & { finalState: { entities: Record<string, { body?: unknown }> } };
+  assert.deepEqual(take.finalState.entities[entityOf('b.7')].body, pip);
+  assert.deepEqual(sampleTake(take, 0.5).entities[entityOf('b.7')].state.body, pip, 'and in its state, which the page reads first');
 });
