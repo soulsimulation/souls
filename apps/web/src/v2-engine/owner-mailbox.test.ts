@@ -56,6 +56,17 @@ test('a refused put throws and is not shown as sent', async () => {
   assert.equal((await mb.read()).latest, null);
 });
 
+test('a put the mailbox never answers fails visibly, and a late answer does not show it as sent', async () => {
+  const sock = fakeSocket(() => null);
+  const box = new OwnerBox();
+  const mb = new V2OwnerMailbox(async (self) => self.attach(box, sock, GRANT));
+  await assert.rejects(mb.send('hello', 20), /did not answer/);
+  assert.equal((await mb.read()).latest, null);
+  sock.onText!(JSON.stringify({ sent: { id: 'late' } }));
+  assert.equal((await mb.read()).latest, null);
+  assert.equal(box.messages[0].state, 'refused');
+});
+
 test('a failed close reads as "Could not do it"', () => {
   const box = new OwnerBox();
   box.put(GRANT, 'sit');

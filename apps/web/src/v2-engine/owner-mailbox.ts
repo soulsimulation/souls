@@ -181,7 +181,11 @@ export class V2OwnerMailbox {
     if (!this.sock!.sendText(frame)) box.text(JSON.stringify({ sent: { refused: 'not-connected' } }));
     await taken;
     if (m.state === 'refused') throw new Error(`Message could not be sent (${m.outcome ?? 'refused'}). Try again.`);
-    if (m.state === 'sending') throw new Error('The mailbox did not answer. Try again.');
+    if (m.state === 'sending') {
+      // failed, as the old box shows a failed send: an error and no receipt; a late answer then binds to nothing
+      m.state = 'refused'; m.outcome = 'no-answer';
+      throw new Error('The mailbox did not answer. Try again.');
+    }
     return inboxOf(box.messages, this.sentAt, true);
   }
 
