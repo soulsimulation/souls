@@ -22,6 +22,15 @@
 //!   arrive under one transfer id, in one part with the frame's first or last sample. Setting down puts the board, at
 //!   rest, on the node it is in (the floor both carriers stand on, or the open ground), in that node's frame.
 //!
+//! - **A load from its own entry (0.135 C2).** A load whose kind has an entry is carried as the entry states it
+//!   ([`Load::of`]): its longest side is carried lengthways, its width on the plan is the larger of its other two
+//!   sides, its two outermost grips along its length are where its carriers hold it, each carrier standing [`REACH`]
+//!   beyond its grip, and its `hold_crew` is how many must carry it. Before the lift ([`Load::check`]) a crew smaller
+//!   than that is refused `carry-crew-too-small`, a carrier more than [`GRIP_REACH`] from its grip
+//!   `carry-grip-out-of-reach`, and, when the lift names where the front goes, a load whose outline would meet fixed
+//!   geometry on the straight way there `carry-board-clips` ([`sweep_load`]); nothing is written. A load whose kind
+//!   has no entry is B9's 2 m board, as before.
+//!
 //! Not here, proposed as tasks: a search over turning poses and corners (B14); stairs; three carriers; a blocked
 //! set-down; walking on after a restart; the gathering walk to the ends (the carriers start at their places); moving
 //! the group's node to the floor's frame as one transfer when it crosses the door (E23 rule 9: it stays a child of the
@@ -36,6 +45,7 @@ use replica::effects::{Body as EffectBody, Change, ChangeRec, Header, Refusal, R
 use replica::group::{Belonging, Group, Leave, Member, Outline};
 use replica::ids::Id;
 use replica::pose::{Frame, HandOff, Owner, Pose, Quat, Support, Vec3};
+use replica::rules::json::Value as Json;
 use replica::time::Micros;
 use replica::tree::{Handle, Tree};
 use replica::world_model::{Audience, plain};
@@ -67,6 +77,147 @@ pub const HEIGHT: i64 = 900_000;
 pub const SWEEP_STEP: i64 = 50_000;
 /// The activity kind's slot the board rides in.
 pub const SLOT: u64 = 1;
+/// The farthest a carrier may stand from its grip on the plan at the lift, µm: a touch's reach (0.134).
+pub const GRIP_REACH: i64 = 700_000;
+
+/// A load as its kind's entry states it (0.135 C2), µm along and across the carry.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub struct Load {
+    /// Half its longest side, carried lengthways.
+    pub half_length: i64,
+    /// Half its width on the plan while carried: the larger of its other two sides.
+    pub half_width: i64,
+    /// Its two outermost grips along its length, from its middle: the back's, then the front's.
+    pub grips: [i64; 2],
+    /// How many must carry it (`state.hold_crew`'s default; two when it says none).
+    pub crew: u64,
+}
+
+impl Load {
+    /// B9's 2 m board, held at its ends: a load whose kind has no entry.
+    pub fn board() -> Load {
+        Load {
+            half_length: HALF_LENGTH,
+            half_width: HALF_WIDTH,
+            grips: [-HALF_LENGTH, HALF_LENGTH],
+            crew: 2,
+        }
+    }
+
+    /// A load from its kind's entry (`souls-entry/1`): `geometry.bounds_mm`, the `grip` points and
+    /// `state.hold_crew`. An entry with no bounds, or fewer than two grips apart along its length, is not a load.
+    pub fn of(entry: &Json) -> Result<Load, String> {
+        let bounds: Vec<i64> = entry
+            .get("geometry")
+            .and_then(|g| g.get("bounds_mm"))
+            .and_then(Json::arr)
+            .ok_or("a load states geometry.bounds_mm")?
+            .iter()
+            .map(|v| match v {
+                Json::Int(n) => i64::try_from(*n).map_err(|_| "a side in mm"),
+                _ => Err("a side in mm"),
+            })
+            .collect::<Result<_, _>>()?;
+        let [w, h, d] = bounds[..] else {
+            return Err("bounds_mm are three sides".into());
+        };
+        let sides = [w, h, d];
+        let axis = (0..3).max_by_key(|i| (sides[*i], 3 - *i)).unwrap_or(2);
+        let across = (0..3)
+            .filter(|i| *i != axis)
+            .map(|i| sides[i])
+            .max()
+            .unwrap_or(0);
+        // The entry's frame: x and z centred, y from the floor up (entry-format.md, section 5).
+        let middle = if axis == 1 { h / 2 } else { 0 };
+        let mut along: Vec<i64> = entry
+            .get("points")
+            .and_then(Json::obj)
+            .unwrap_or(&[])
+            .iter()
+            .filter(|(_, p)| p.get("role").and_then(Json::str) == Some("grip"))
+            .filter_map(
+                |(_, p)| match p.get("at_mm").and_then(Json::arr)?.get(axis)? {
+                    Json::Int(n) => i64::try_from(*n).ok(),
+                    _ => None,
+                },
+            )
+            .map(|c| (c - middle) * 1000)
+            .collect();
+        along.sort_unstable();
+        let (Some(&back), Some(&front)) = (along.first(), along.last()) else {
+            return Err("a load names its grips".into());
+        };
+        if front <= back {
+            return Err("a load's grips are apart along its length".into());
+        }
+        let crew = match entry
+            .get("state")
+            .and_then(|s| s.get("hold_crew"))
+            .and_then(|c| c.get("default"))
+        {
+            Some(Json::Int(n)) => u64::try_from(*n).map_err(|_| "hold_crew is a count")?,
+            _ => 2,
+        };
+        Ok(Load {
+            half_length: sides[axis] * 500,
+            half_width: across * 500,
+            grips: [back, front],
+            crew,
+        })
+    }
+
+    /// Where its back and front carriers stand along the carry, from its middle: [`REACH`] beyond each grip.
+    pub fn places(&self) -> [i64; 2] {
+        [self.grips[0] - REACH, self.grips[1] + REACH]
+    }
+
+    /// The checks before the lift (see the module's notes): `crew` carriers, the front at `front` and the back at
+    /// `back`, the load's middle at `middle` (each the open ground's plan, µm); and, if the lift names one, the front's
+    /// destination `to` and the fixed geometry on the way. `carry-crew-too-small`, `carry-grip-out-of-reach`,
+    /// `carry-board-clips`, `carry-route-too-short`.
+    pub fn check(
+        &self,
+        crew: usize,
+        front: Xz,
+        back: Xz,
+        middle: Xz,
+        to: Option<(Xz, &Fixed)>,
+    ) -> R<()> {
+        if (crew as u64) < self.crew {
+            return refuse(
+                "carry-crew-too-small",
+                format!("{crew} carrying; it takes {}", self.crew),
+            );
+        }
+        let d = [front[0] - back[0], front[1] - back[1]];
+        let l = len(d);
+        for (who, at, along) in [
+            ("front", front, self.grips[1]),
+            ("back", back, self.grips[0]),
+        ] {
+            let u = scale(d, along, l);
+            let grip = [middle[0] + u[0], middle[1] + u[1]];
+            let off = len([at[0] - grip[0], at[1] - grip[1]]);
+            if off > GRIP_REACH {
+                return refuse(
+                    "carry-grip-out-of-reach",
+                    format!(
+                        "the {who} stands {} mm from its grip at ({}, {}) mm; at most {} mm",
+                        off / 1000,
+                        grip[0] / 1000,
+                        grip[1] / 1000,
+                        GRIP_REACH / 1000
+                    ),
+                );
+            }
+        }
+        if let Some((to, fixed)) = to {
+            sweep_load(&[back, front, to], fixed, self, l)?;
+        }
+        Ok(())
+    }
+}
 
 /// The carry as E23's group (`v2/docs/moving-group.md`, the `carried-load` fixture with this carry's ids): the board
 /// rides `activity`'s node, `leader` walks in front and steers, `follower` walks behind.
@@ -115,11 +266,17 @@ fn scale(d: Xz, by: i64, of: i64) -> Xz {
 /// The board between a leader standing at `front` and a follower at `back`: centred between them, along the line
 /// from one to the other.
 pub fn board(front: Xz, back: Xz) -> Quad {
+    outline(front, back, &Load::board())
+}
+
+/// `load`'s outline between a leader at `front` and a follower at `back`, centred between them, along the line from
+/// one to the other.
+pub fn outline(front: Xz, back: Xz, load: &Load) -> Quad {
     let c = [(front[0] + back[0]) / 2, (front[1] + back[1]) / 2];
     let d = [front[0] - back[0], front[1] - back[1]];
     let l = len(d);
-    let u = scale(d, HALF_LENGTH, l);
-    let n = scale([-d[1], d[0]], HALF_WIDTH, l);
+    let u = scale(d, load.half_length, l);
+    let n = scale([-d[1], d[0]], load.half_width, l);
     [
         [c[0] + u[0] + n[0], c[1] + u[1] + n[1]],
         [c[0] + u[0] - n[0], c[1] + u[1] - n[1]],
@@ -282,13 +439,13 @@ fn at(path: &[Xz], along: i64) -> Xz {
 
 /// Where the follower is on the trail when the leader is `along` µm from its start: the point behind it, on the
 /// path, [`SPAN`] away (to within a millimetre).
-fn trail(path: &[Xz], along: i64) -> Xz {
+fn trail(path: &[Xz], along: i64, span: i64) -> Xz {
     let lead = at(path, along);
     let (mut lo, mut hi) = (0, along);
     while hi - lo > 1_000 {
         let mid = (lo + hi) / 2;
         let p = at(path, mid);
-        if len([lead[0] - p[0], lead[1] - p[1]]) > SPAN {
+        if len([lead[0] - p[0], lead[1] - p[1]]) > span {
             lo = mid;
         } else {
             hi = mid;
@@ -301,24 +458,29 @@ fn trail(path: &[Xz], along: i64) -> Xz {
 /// [`SPAN`] along it, the leader walking on to its end and the follower keeping to its trail. Refused before the lift
 /// as `carry-board-clips` at the first pose whose board overlaps fixed geometry: how far along, and where.
 pub fn sweep(path: &[Xz], fixed: &Fixed) -> R<u64> {
+    sweep_load(path, fixed, &Load::board(), SPAN)
+}
+
+/// [`sweep`] for `load`, its carriers `span` µm apart (0.135 C2).
+pub fn sweep_load(path: &[Xz], fixed: &Fixed, load: &Load, span: i64) -> R<u64> {
     let total: i64 = path
         .windows(2)
         .map(|w| len([w[1][0] - w[0][0], w[1][1] - w[0][1]]))
         .sum();
-    if total < SPAN {
+    if total < span {
         return refuse("carry-route-too-short", format!("{total} µm"));
     }
     let mut poses = 0;
-    let mut along = SPAN;
+    let mut along = span;
     loop {
         let lead = at(path, along);
-        let q = board(lead, trail(path, along));
+        let q = outline(lead, trail(path, along, span), load);
         if let Some(f) = fixed.hit(&q) {
             return refuse(
                 "carry-board-clips",
                 format!(
                     "{} mm along the route, the board between ({}, {}) and ({}, {}) mm meets the box at ({}, {}) mm",
-                    (along - SPAN) / 1000,
+                    (along - span) / 1000,
                     q[0][0] / 1000,
                     q[0][1] / 1000,
                     q[2][0] / 1000,
