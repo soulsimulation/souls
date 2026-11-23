@@ -1111,9 +1111,11 @@ fn motion_history_is_bit_identical_to_its_pinned_hash() {
 /// [`motion_history_is_bit_identical_to_its_pinned_hash`]'s effect hash. Re-pinned by W11 (#4087): a walk's
 /// `souls:act-deadline` now counts from the tick its route is planned, not from the move's start. Same 810 records and
 /// 1,543 motion samples; with only that rule put back the run writes the previous pin (b18f5b81...), so the deadline
-/// values are the whole difference.
+/// values are the whole difference. Re-pinned by #4216: a birth skips an entry spot a body holds, so the Souls start
+/// on other spots and walk other paths (812 records, 1,580 motion samples); with only main's birth rule put back the
+/// run writes the previous pin (6a52c87d...), so the birth places are the whole difference.
 const PINNED_MOTION_HISTORY: &str =
-    "6a52c87d4b5129e91fe73a81329b978b0aea1242369b08a4117b81bad3c8655d";
+    "3d64aca712d3f0ec511053e1d99770ebc4e7dc7ca65763a0321209f6e79fee64";
 
 /// R21: private membership is checked against the joined actor's authoritative body, not its principal id.
 #[test]

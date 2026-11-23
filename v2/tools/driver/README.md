@@ -35,7 +35,9 @@ target/release/driver --schedule <run folder>/schedule.txt --dir <run folder> [-
   (`unanswered`, below; `socket-closed`, `send-failed`, a gateway's own word such as `token.refused`). An act
   answered accepted (kind 3: a walk or a form whose run started, W11 #4087) is timed then and kept until its receipt
   or refusal; a sit's acceptance does not seat the Soul, its receipt does. One accepted and not ended when the drain
-  runs out is counted in `unfinished`, not as an error.
+  runs out is counted in `unfinished`, not as an error. A `claim-taken` on an act the same agent's later act already
+  replaced is the open loop's own doing, not the world refusing a Soul: it is counted as `replacedByOwnAct`, not as a
+  refusal, and `--trace` writes it as `claim-taken replaced-by <sequence>` (#4171).
 
 ## A served world (X7, #4015)
 
@@ -69,11 +71,14 @@ run's start in Unix milliseconds, past any an earlier run sent; every intent goe
 the report), and the driver reads the world's ids the way a client does: the first agent syncs its copy over its own socket (R5b's compare and descend:
 its scope's hashes, then every record they reach, each checked against its hash), and the driver fetches the world's
 kind entries (`GET /v2/entries`, which gatewayd serves with `--entries`, as every placed world's unit does). The line
-`targets:` and the report's `targets` say what it found. Then each act of the schedule goes as:
+`targets:` and the report's `targets` say what it found. Targets are reachable (#4193): only things standing on the
+ground most bodies stand on (the same frame), not things inside a building or on a table. Each Soul gets its own
+four nearest walk, sit, take and thing targets, nearest its body (positions in micrometres, each frame's turn
+applied), taking a farther one where three Souls already have one; the report's `sameTarget` says how many Souls were
+sent to one place over the run (the most, and the places sent more than three). Then each act of the schedule goes as:
 
-- **walk**: `<ns>:walk` to a thing of the copy with a seat (its stand point), spread over them by agent and act;
-- **sit**: `<ns>:sit` on a thing with a seat of posture `sit`, agent k on the k-th (mod their count), so Souls spread
-  over the seats; once a sit's receipt has come, the Soul's next walk or sit goes as `<ns>:rise`, as an agent would
+- **walk**: `<ns>:walk` to one of the Soul's own targets with a seat (its stand point), in turn by act;
+- **sit**: `<ns>:sit` on one of the Soul's own targets with a seat of posture `sit`; once a sit's receipt has come, the Soul's next walk or sit goes as `<ns>:rise`, as an agent would
   (a walk while seated is refused, `resource-held`), while a sit still on its way is replaced by the next walk;
 - **gesture, sit-ground, read, eat, play-music**: the first form of `FORMS` an entry offers (`wave`; `sit_down`;
   `read`; `eat`, `bite` or `drink`; `play_music` or `play`), on the things of that kind, or on the Soul's own body
@@ -108,6 +113,40 @@ target/release/driver --schedule <folder>/schedule.txt --dir <folder>/run --toke
 CI's `driver-served` step (`v2/tools/ci.sh`, client leg) runs a 60 s `ladder-10-uneven` with `--speech` against N2's
 test world (no entries: walks go to any node of the copy, and the other kinds stand in as walks) under `worldd serve`
 and its own gatewayd.
+
+## What a viewer sees, stuck Souls and the real mix (stage 2a, #4154)
+
+- **`--stream <http://host:port/path/>`**: the world's public stream as the viewers' origin serves it (the folder
+  `views/world.json`'s `stream` names). A thread of its own reads it as the page's worker does: the pointer every
+  250 ms, then each new part in order, over HTTP; parts written before the run are not read. Each receipt or
+  acceptance names its intent's id (field 4), and each effect in a part names the intent that caused it, so the
+  report's `visible` is every act the world took joined with the first part that shows something it caused: `seen`
+  of `taken`, send to accepted (the world's first answer taking the act) p50/p95/p99 over the same acts, act wait from
+  the send to the first visible move p50/p95/p99 (ms), `within100Ms` and `within300Ms`, the same per verb, the
+  stream's lag at the reader (each part's arrival against the wall time its world-time end fell at) and the writer's
+  own lag (the newest part's end against the wall when the pointer is read). The stream cuts a part
+  every 0.5 s of world time and writes it 0.25 s after (`worldd::view_out`, rules 3 and 11), so a viewer's wait has
+  that floor whatever the load.
+- **`stuck`** in the report, per agent from its own socket: `stuck` counts agents that had an act unanswered for 60 s
+  or more with no answer of any kind meanwhile (and `accuracy`: 15 s after the last act the first agent reads its copy
+  again and each agent's last act naming a place is checked by where its body is: within 4 m of the place, positions
+  in micrometres composed with each frame's turn, or seated in it (#4193; #4154 read micrometres as millimetres)); `refusedOnly` those that acted for 60 s or more with nothing but
+  refusals back; `stallMaxMs` and the last answer's age at the end of the schedule.
+- **The mix** (`loads.mjs`, `mix-<n>-<even|uneven>-<every4|burst|gene17>`, n of the ladder's counts, 20 for the
+  position check's rung, or `5000x500`): every act's kind is
+  drawn from `MIX` (say 22 %, walk 14, gesture 10, take 10, go_to 8, sit 8, look_at 7, point 6, touch 6, lean_on 5,
+  wait_by 4). `every4` is each agent every 4 s (125 acts a second at 500), `burst` every 1.5 s; even is `uniform`,
+  uneven the `event` shape with every agent present, its time scaled to intend as many acts. The driver sends a
+  gesture as the body family's argument-free forms in turn (wave, clap, cheer, bow, shrug, stretch, jump, dance,
+  look_around), the one-thing forms on the Soul's body with a thing of the copy as their argument (C2's
+  `[[name, id]]`), and take as the thing's own `take`, the next one putting it down (`hands:set-down`) once the take's
+  receipt has come. A seeded world's bodies are `souls:body`, which names no entry: their forms are the family
+  entry's (`"owner": "family"`).
+
+`v2/tools/bench/stage2a/` runs it on Eden: `rung.sh` one rung (world processes on a CPU set, the driver apart),
+`ladder.sh` the counts, rates, arms and repeats, `analyze.mjs` the summary and tables against the bar, `camera.sh`
+the whole local stack at a load for filming, and `box.sh` all of it on a fresh Linux box in one command (its head says
+what the box needs; Eden's facts file is copied to it).
 
 ## Faults (X10, #4019)
 
