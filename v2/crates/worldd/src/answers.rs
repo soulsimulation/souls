@@ -5356,7 +5356,7 @@ pub fn start<S: Storage + 'static>(
                 Engine::new(engine_header, rules, kinds, engine_scope)
                     .with_loads(&engine_entries)
                     // 0.135 A2: crews seat parts by the joined-part rule of the world's entries.
-                    .with_structure(sim::structure::Structure::from_entries(&engine_entries))
+                    .with_structure(&engine_entries)
             }),
         engine_acts: Vec::new(),
         engine_done: Vec::new(),

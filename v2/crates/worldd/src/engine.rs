@@ -143,6 +143,8 @@ pub struct Engine {
     asm: Option<crate::assembly::Assembly>,
     /// Each take waiting for its commit: the crew's ground, its node's pose and its audience, to start its carry.
     taking: BTreeMap<Id, (Id, Vec3, replica::pose::Quat)>,
+    /// The entries the joined-part rule was read from, to read it again for the activities after a restart.
+    joining: Option<Json>,
 }
 
 /// Where bodies stand, read from the controller before a move needs them (0.134 T1): a move one member of an activity
@@ -272,6 +274,7 @@ impl Engine {
             loads: BTreeMap::new(),
             asm: None,
             taking: BTreeMap::new(),
+            joining: None,
             library: crate::moves::library().unwrap_or_else(|r| {
                 eprintln!("worldd: no moves for activities: {r}");
                 Vec::new()
@@ -302,10 +305,20 @@ impl Engine {
     }
 
     /// The engine seating parts by the joined-part rule `structure` (0.135 A2), when the world's kinds join any.
-    pub fn with_structure(mut self, structure: sim::structure::Structure) -> Engine {
-        let asm =
-            crate::assembly::Assembly::new(self.header.clone(), self.rules.clone(), structure);
-        self.asm = asm.any().then_some(asm);
+    /// The joined-part rule of the world's `entries` (B18) also guards the activities' own writes (0.135 A3): a holder
+    /// leaving a part that would then hang is refused `support.none`, as it is after a restart.
+    pub fn with_structure(mut self, entries: &Json) -> Engine {
+        let structure = sim::structure::Structure::from_entries;
+        let asm = crate::assembly::Assembly::new(
+            self.header.clone(),
+            self.rules.clone(),
+            structure(entries),
+        );
+        if asm.any() {
+            self.activities.structure = structure(entries);
+            self.asm = Some(asm);
+            self.joining = Some(entries.clone());
+        }
         self
     }
 
@@ -316,6 +329,9 @@ impl Engine {
         let kinds = self.kinds.clone();
         self.activities =
             Activities::restore(self.header.clone(), self.rules.clone(), kinds, live, c)?;
+        if let Some(e) = &self.joining {
+            self.activities.structure = sim::structure::Structure::from_entries(e);
+        }
         self.steered = crate::carrier::restore(live, slots)?;
         Ok(())
     }
