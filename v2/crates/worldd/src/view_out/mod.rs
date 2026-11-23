@@ -267,13 +267,15 @@ pub fn capture_checkpoint(path: &Path, expected: &sim::checkpoint::Root) -> R<Ve
     Ok(bytes)
 }
 
-/// Writes `bytes` to `path` under a temporary name, then renames it (rule 4).
+/// Writes `bytes` to `path` under a temporary name, synced, then renames it (rule 4).
 pub fn write_whole(path: &Path, bytes: &[u8]) -> R<()> {
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
     let tmp = PathBuf::from(tmp);
     let mut f = fs::File::create(&tmp).map_err(io)?;
     f.write_all(bytes).map_err(io)?;
+    // Synced before the rename (B1-7): after a power cut the name holds the old bytes or the new, never a short file.
+    f.sync_all().map_err(io)?;
     drop(f);
     fs::rename(&tmp, path).map_err(io)
 }

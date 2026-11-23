@@ -4053,3 +4053,16 @@ fn an_immutable_file_killed_mid_write_leaves_only_its_tmp_and_the_next_write_com
     );
     fs::remove_dir_all(&dir).unwrap();
 }
+
+/// B1-7: `write_whole` (the pointer, `world.json`) leaves the whole new file under its name, synced, and no temporary.
+#[test]
+fn write_whole_leaves_the_whole_file_and_no_temporary() {
+    let dir = scratch("write-whole");
+    let path = dir.join("world.json");
+    fs::write(&path, b"old").unwrap();
+    let new = b"{\"stream\":\"views/a/\",\"history\":\"h\"}\n".repeat(200);
+    write_whole(&path, &new).unwrap();
+    assert_eq!(fs::read(&path).unwrap(), new);
+    assert!(!dir.join("world.json.tmp").exists());
+    fs::remove_dir_all(&dir).unwrap();
+}
