@@ -61,7 +61,7 @@ use replica::time::Micros;
 use replica::tree::{Handle, Tree};
 use replica::world_model::{Audience, plain};
 
-use crate::ground::scene::{FLOOR, Scene, Xz, xform_to};
+use crate::ground::scene::{FLOOR, Scene, Terrain, Xz, xform_to};
 use crate::ground::{BODY_HIGH, BODY_LOW};
 use crate::slots::hands::{Entry, Log};
 
@@ -412,10 +412,16 @@ impl Fixed {
     /// The fixed geometry of the open ground `ground` and the lowest floor of each building standing on it.
     pub fn of(tree: &Tree, ground: Id) -> Result<Fixed, String> {
         let gh = tree.handle(ground).ok_or("no such ground")?;
-        let mut quads: Vec<Quad> = Scene::of(tree, ground)?
+        // On the open ground a box is read against the ground's height under it (its terrain's, raised or sloped).
+        let scene = Scene::of(tree, ground)?;
+        let t = scene.terrain.as_ref();
+        let mut quads: Vec<Quad> = scene
             .solids
             .iter()
-            .filter(|s| spans(s.y0, s.y1, 0))
+            .filter(|s| {
+                let c = s.ring.iter().fold([0, 0], |a, p| [a[0] + p[0] / 4, a[1] + p[1] / 4]);
+                spans(s.y0, s.y1, Terrain::ground(t, c[0], c[1], s.y0))
+            })
             .map(|s| s.ring)
             .collect();
         // The lowest floor of each building: by parent, the floor whose frame stands lowest on the ground.

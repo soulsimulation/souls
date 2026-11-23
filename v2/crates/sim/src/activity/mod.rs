@@ -641,6 +641,32 @@ impl Activities {
         why: &'static str,
         by: (Micros, Actor, Cause),
     ) -> R<()> {
+        self.load_word(tree, activity, load, "souls:carry-set-down", why, by)
+    }
+
+    /// The world's word that `load`, held by `activity`, was kept as it stands, and `why` (0.135 A2: its last holder
+    /// left and setting it down would leave a joined part hanging): `souls:hold-kept`, `{1: activity, 2: load, 3: why}`,
+    /// as [`Activities::carry_set_down`] says it.
+    pub fn hold_kept(
+        &mut self,
+        tree: &mut Tree,
+        activity: Id,
+        load: Id,
+        why: &'static str,
+        by: (Micros, Actor, Cause),
+    ) -> R<()> {
+        self.load_word(tree, activity, load, "souls:hold-kept", why, by)
+    }
+
+    fn load_word(
+        &mut self,
+        tree: &mut Tree,
+        activity: Id,
+        load: Id,
+        event: &'static str,
+        why: &'static str,
+        by: (Micros, Actor, Cause),
+    ) -> R<()> {
         let audience = self
             .live
             .get(&activity)
@@ -655,15 +681,7 @@ impl Activities {
         } else {
             load
         };
-        self.emit(
-            tree,
-            node,
-            audience,
-            by,
-            "souls:carry-set-down",
-            fields,
-            Vec::new(),
-        )
+        self.emit(tree, node, audience, by, event, fields, Vec::new())
     }
 
     /// The bodies of the activities started since [`Activities::begin_moves`] last ran: whom their moves reach.
