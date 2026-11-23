@@ -3,18 +3,30 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { sampleTake } from '../../../../mars/viewer/engine/take/replay.ts';
 import type { Take } from '../../../../mars/viewer/engine/take/types.ts';
-import { ACTIVITY_OVERLAYS } from '../../../../mars/viewer/app/engine-view/activity-poses.ts';
+import { readFileSync } from 'node:fs';
+import { ACTIVITY_OVERLAYS, CYCLES, FACE_DOWN, LYING } from '../../../../mars/viewer/app/engine-view/activity-poses.ts';
 import { cut, gestureAt, gestureFrom, gestureOf } from './take-gestures.ts';
 import { chunkOf, TICK_US, type Body } from './takes.ts';
 
 const FROM = 2000, t0 = FROM * TICK_US, frame = { rulesVersion: 'test/1', datetime: null };
 
-test('each gesture move names an old pose; other moves draw nothing', () => {
-  for (const [move, want] of [['eden:wave', 'wave'], ['souls:nod@1', 'nod'], ['clap', 'clap'], ['point', 'point'], ['shake_head', 'shake-head'], ['bow', 'bow'], ['cheer', 'cheer']])
+test('every move a body form runs plays a pose of its own, never another move\'s; object moves draw nothing', () => {
+  // The moves the humanoid's forms run (content/kinds/body/humanoid.json), as a body offers them.
+  const humanoid = JSON.parse(readFileSync(new URL('../../../../content/kinds/body/humanoid.json', import.meta.url), 'utf8'));
+  const moves = [...new Set(Object.values(humanoid.forms as Record<string, { steps: { step: string; move?: string }[] }>)
+    .flatMap((f) => f.steps.filter((s) => s.step === 'move').map((s) => s.move!)))];
+  assert.ok(moves.length >= 24, `the humanoid runs ${moves.length} moves`);
+  const known = new Set([...ACTIVITY_OVERLAYS, ...CYCLES, ...LYING, ...FACE_DOWN]);
+  const poses = new Map<string, string>();
+  for (const move of moves) {
+    const pose = gestureOf(`eden:${move}`);
+    assert.ok(pose && known.has(pose), `${move} plays an old pose (${pose})`);
+    assert.ok(!poses.has(pose!), `${move} and ${poses.get(pose!)} would share ${pose}`);
+    poses.set(pose!, move);
+  }
+  for (const [move, want] of [['souls:nod@1', 'nod'], ['shake_head', 'shake-head'], ['shrug', 'shrug'], ['look_around', 'look-around'], ['slump', 'slump']])
     assert.equal(gestureOf(move), want, move);
-  for (const move of ['wave', 'nod', 'clap', 'point', 'shake_head', 'bow', 'cheer', 'shrug', 'look_around', 'slump'])
-    assert.ok(ACTIVITY_OVERLAYS.has(gestureOf(move)!) || ['dance', 'jump', 'stretch', 'listen'].includes(gestureOf(move)!), `${move} is an old pose`);
-  for (const move of ['consume', 'pour', 'press', 'look', 'souls:walk']) assert.equal(gestureOf(move), null, move);
+  for (const move of ['consume', 'pour', 'souls:walk', 'hold_hand']) assert.equal(gestureOf(move), null, move);
 });
 
 test('a standing body plays the gesture from the move start to its end, then stands idle; a cancel ends it early', () => {
@@ -36,6 +48,32 @@ test('a seated body keeps sitting through a gesture', () => {
     samples: [{ at: t0 - 1_000_000, p: [0, 0, 0], seat: { height: 450, lie: false } }] };
   const take = chunkOf([body], FROM, frame).take as unknown as Take;
   assert.equal(sampleTake(take, 0.5).entities.v2_a_2.activity, 'sit');
+});
+
+test('0.134 B4: a handshake aimed at another body faces it and names it the partner; a held hand is a hand hold', () => {
+  const a = (target: string, name: string, end: number) => gestureFrom({ name, start: t0, ends: [t0 + 600_000, end], target })!;
+  // A stands at (0, 0) facing +x (heading 0); B stands 0.6 m away along +z.
+  const A: Body = { entity: 'v2_a', node: 'n-a', soul: 's-a', name: 'Ada', heading: 0, samples: [{ at: t0 - 1_000_000, p: [0, 0, 0] }], gestures: [a('n-b', 'eden:handshake', t0 + 800_000)] };
+  const B: Body = { entity: 'v2_b', node: 'n-b', soul: 's-b', name: 'Bo', heading: Math.PI, samples: [{ at: t0 - 1_000_000, p: [0, 0, 600] }],
+    gestures: [a('n-a', 'eden:hold_hand', Number.MAX_SAFE_INTEGER)] };
+  const take = chunkOf([A, B], FROM, frame).take as unknown as Take;
+  const at = (s: number) => sampleTake(take, s).entities;
+  assert.equal(at(0.5).v2_a.activity, 'handshake');
+  assert.ok(Math.abs(at(0.5).v2_a.yaw - Math.PI / 2) < 0.01, `A faces B: ${at(0.5).v2_a.yaw}`);
+  assert.equal(at(0.5).v2_a.state.partner, 'v2_b', 'B is the partner the paired pose meets');
+  assert.equal(at(0.95).v2_a.state.partner, null, 'no partner once the handshake ends');
+  assert.equal(at(0.5).v2_b.activity, 'idle', 'a hold is not a pose');
+  assert.deepEqual(at(0.5).v2_b.state.handHold, { with: 'v2_a', hand: 'right' }, 'B holds A\'s hand');
+  assert.ok(Math.abs(Math.abs(at(0.5).v2_b.yaw) - Math.PI / 2) < 0.01, 'B faces A');
+});
+
+test('0.134 B4: a gesture at the body itself (a wave where it stands) names no partner', () => {
+  const g = gestureFrom({ name: 'eden:wave', start: t0, ends: [t0 + 800_000], target: 'n-c' })!;
+  const C: Body = { entity: 'v2_c', node: 'n-c', soul: 's-c', name: 'Cy', heading: 0, samples: [{ at: t0 - 1_000_000, p: [0, 0, 0] }], gestures: [g] };
+  const e = sampleTake(chunkOf([C], FROM, frame).take as unknown as Take, 0.5).entities.v2_c;
+  assert.equal(e.activity, 'wave');
+  assert.equal(e.state.partner ?? null, null, 'not its own partner');
+  assert.ok(Math.abs(e.yaw) < 0.01, 'it does not turn');
 });
 
 test('an aimed gesture (0.134 B1) turns the standing body toward its target while it plays, then back', () => {
