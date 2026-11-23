@@ -2544,8 +2544,9 @@ fn v3(x: i64, y: i64, z: i64) -> Vec3 {
 ///   frame is still on its way in, is refused `slot.occupied` at its track's end: frame B stays in its crew's slot and
 ///   goes back along a track to where its set-in started; its carriers having walked off meanwhile, its carry breaks
 ///   off there and it is set down (never pulled after them). Taken up again, from 3 m it may not be put
-///   (`part.out-of-reach`); from beside `upright_b` it is. Left its lone holder, unbraced, Soul 4 may not let go
-///   (`support.none`) but lays it down beside the bay and leaves; a crew puts it back.
+///   (`part.out-of-reach`); from beside `upright_b` it is. Its other carrier leaving the world (which leaves crew B
+///   too), Soul 4, alone between the frames with frame B unbraced, may not let go (`support.none`) but lays it down:
+///   not into the bay, not into a wall the creator put outside it, but on a side. It leaves; a crew puts frame B back.
 /// - Refused before anything moves: a take by a conversation (`part.not-a-crew`), its lift (`not-a-carry`, C4), a
 ///   take of a frame riding another crew
 ///   (`part.held-by-another`), of a beam 25 m away (`part.out-of-reach`), of a beam in a Soul's hand (`part.in-a-hand`),
@@ -2562,9 +2563,30 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     let d = scratch("a2seat");
     let (facts, slots) = yard_world(&d);
     let w = seed_entries(&d, &facts, 4, (36, -20), Some(&d.join("entries")));
+    let (creator_id, creator_actor) = creator(0xa2);
+    static_creator(&w, creator_id);
     let socket = d.join("s");
     let s = serve_with(&w, &socket, None);
     s.line("listening ", 120);
+    // The world's creator's edits, on a connection of its own, each planned on the newest version it has seen.
+    let mut world = connect_socket(&socket);
+    world
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .unwrap();
+    let (mut edits, mut planned) = (0, 0);
+    let mut creator_edit = |op: Op| loop {
+        edits += 1;
+        let bytes = edit_intent(&w, creator_actor, edits, planned, op.clone());
+        world
+            .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+            .unwrap();
+        world.write_all(&bytes).unwrap();
+        let got = socket_answer(&mut world);
+        planned = planned.max(got.version);
+        if got.reason != "edit.stale" {
+            return got;
+        }
+    };
     let im = import_eden::load(&facts).unwrap();
     let (bay, fa, fb, b1, b2) = (
         im.nodes["site-bay"],
@@ -2749,27 +2771,47 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     println!("crew B, its carry going on, puts frame B in upright_b: {got:?}");
     assert_eq!(got.kind, 1, "frame B in");
     assert_eq!(where_is(&w, fb).0, Some(bay));
-    // Soul 3 lets go: Soul 4, alone, holds frame B, unbraced. It may not leave it hanging, so it lays it down beside
-    // the bay (a lone holder's unseat), and may then leave.
-    assert_eq!(
-        leave(&mut hands, 2, crew_b).kind,
-        1,
-        "Soul 3 lets go of frame B"
-    );
+    // Soul 3 leaves the world, and with it crew B (a retire leaves every activity). Soul 4, alone between the two
+    // frames, holds frame B unbraced: it may not let go, so it lays frame B down (a lone holder's unseat). Out of the bay
+    // is blocked by a wall the creator puts there, and into the bay is never taken: it lies on a side, clear of both.
+    hands[2].send_to(answers::LEAVE, None, BTreeMap::new());
+    let got = socket_end(&mut hands[2].s);
+    assert_eq!(got.kind, 1, "Soul 3 leaves the world: {got:?}");
     one(
         &mut hands,
         3,
-        v3(ub.x, 0, ub.z + 4_500_000),
-        "Soul 4 steps back",
+        v3(ub.x, 0, ub.z - 1_200_000),
+        "Soul 4 between the frames",
     );
+    let wall_at = v3(ub.x, 0, ub.z + 2_200_000);
+    let got = creator_edit(wall(&w, wall_at.x, wall_at.z));
+    println!("the creator puts a wall outside frame B: {got:?}");
+    assert_eq!(got.kind, 1, "a wall");
+    let wall_id = got.names[&1];
     let got = leave(&mut hands, 3, crew_b);
     refused(&got, "support.none", "Soul 4, alone, lets go of frame B");
     let got = hands[3].act("part:unseat", crew_b, part(fb));
     println!("Soul 4 lays frame B down beside the bay: {got:?}");
     assert_eq!(got.kind, 1, "frame B laid down");
     let (parent, _, laid) = where_is(&w, fb);
+    println!(
+        "frame B lies at ({}, {}) mm, its slot at ({}, {})",
+        laid.x / 1000,
+        laid.z / 1000,
+        ub.x / 1000,
+        ub.z / 1000
+    );
     assert_eq!(parent, Some(g), "frame B on the ground");
+    assert!(
+        // Its foot is where it lies from: half its height off its middle, which is level with its slot.
+        (laid.z - ub.z).abs() < 1_300_000 && (laid.x - ub.x).abs() > 1_500_000,
+        "frame B on a side of its slot: not into the bay, not into the wall"
+    );
     assert_eq!(leave(&mut hands, 3, crew_b).kind, 1, "Soul 4 leaves");
+    let got = creator_edit(Op::Remove {
+        node: Ref::Node(wall_id),
+    });
+    assert_eq!(got.kind, 1, "the wall taken away: {got:?}");
     // Crew B again (Souls 3, 4) takes it up and puts it back; Soul 3 lets go, Soul 4 holds it.
     let (p, q) = ends(laid, 0);
     both(&mut hands, (2, 3), p, q, "Souls 3 and 4 to frame B");

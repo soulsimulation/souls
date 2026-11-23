@@ -3335,12 +3335,24 @@ impl Clock {
         // The entry is the body's own (T6 rule 6: it writes its own node and link).
         let mut node = self.replica.header().zone;
         let mut held = Vec::new();
+        let mut leaving = Vec::new();
         if let Some(body) = self.life.as_ref().and_then(|l| l.life.body_of(soul)) {
             node = body;
             held = self.held(body);
             // A form's run on the body is left first, while the body is still the controller's.
             self.forms
                 .leave(self.replica.tree(), self.bodies.as_mut(), body, None, now);
+            // And every activity it is in, as a leave (0.135 A2): its partners are not left holding with a ghost.
+            if let (Some(e), Some(b)) = (self.engine.as_mut(), self.bodies.as_mut()) {
+                leaving = e.retiring(
+                    self.replica.tree(),
+                    &mut b.runner.controller,
+                    body,
+                    id,
+                    soul,
+                    now,
+                );
+            }
         }
         let retired = match (self.life.as_mut(), self.bodies.as_mut()) {
             (Some(l), Some(b)) => b.retire(&mut l.life, soul, now),
@@ -3366,7 +3378,7 @@ impl Clock {
         // What it held is set down where it stood (a leave of its hand and an arrive on the ground, in the same part),
         // before the node goes: a leave never takes a thing out of the world with the body.
         let header = self.replica.header().clone();
-        let mut effects = Vec::new();
+        let mut effects = leaving;
         for (thing, pose) in held {
             let Some(transfer) = self.life.as_mut().and_then(|l| l.mint.mint().ok()) else {
                 continue;
