@@ -114,6 +114,10 @@ test('D1: act --wait returns the final phase, the refusal, or after its window a
   const daemon = (answers) => async (r) => ({ ok: true, receipt: { sequence: r.sequence, answers: answers() }, ...(r.quiet ? {} : { at: 'v9', changed: { n: 1 } }) });
   let polls = 0;
   const done = await actEnd(daemon(() => (++polls < 3 ? [{ answer: 'accepted' }] : [{ answer: 'accepted' }, { answer: 'receipt' }])), sent, { sleep: async () => {} });
+  // D7: the seat a fallback took, named on the answer as the receipt names it.
+  const held = { rank: 1, verb: 'eden:sit', id: 'ab-2', name: 'sage armchair', fallback: true };
+  const seated = await actEnd(async (r) => ({ ok: true, receipt: { sequence: 7, answers: [{ answer: 'receipt' }], ...(r.quiet ? {} : { held }) } }), sent, { sleep: async () => {} });
+  assert.deepEqual(seated.held, held);
   assert.deepEqual([done.ok, done.phase, done.sequence, done.at, done.changed], [true, 'done', 7, 'v9', { n: 1 }], 'what changed comes with the last answer');
   const refused = await actEnd(daemon(() => [{ answer: 'refused', reason: 'seat.taken' }]), sent, { sleep: async () => {} });
   assert.deepEqual([refused.ok, refused.phase, refused.code, refused.reason], [false, 'refused', 'seat.taken', 'seat.taken']);

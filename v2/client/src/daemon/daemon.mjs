@@ -136,7 +136,7 @@ import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { atSocket, readSeat, runtimeOf } from '../home/home.mjs';
-import { QUOTED_NOTE, brief, changedBlock } from '../brief/brief.mjs';
+import { QUOTED_NOTE, brief, changedBlock, heldBy } from '../brief/brief.mjs';
 import { changedBetween, decode, posesOf, rememberPublicNames, rowsOf, sequenceOf, rememberPublicWords } from '../brief/copy.mjs';
 import { find } from '../find/find.mjs';
 import { publicNameHydration } from '../find/public-names.mjs';
@@ -1434,7 +1434,11 @@ async function answer(req) {
       if (!r) return { ok: false, code: 'receipt-not-found', detail: which === undefined ? 'no intent sent since the daemon started' : `no intent ${which} among the last ${RECEIPTS_KEPT} this daemon sent`, ...ageNow() };
       // D1: `act --wait` asks `quiet` while it waits, so what changed is kept for its last answer, not spent on a poll.
       const got = { ok: true, receipt: { ...r, going: going.includes(r.sequence) } };
-      return req.quiet ? { ...got, ...ageNow() } : closing(got, null, { now: true });
+      if (req.quiet) return { ...got, ...ageNow() };
+      // D7: an act that ended with its receipt names which of its ranked targets now holds this Soul's body (a seat a
+      // fallback took), read from the copy brought current.
+      const done = r.answers.at(-1)?.answer === 'receipt';
+      return closing(got, done ? (rows) => { const h = heldBy(rows, ME, r); return h ? { receipt: { ...got.receipt, held: h } } : {}; } : null, { now: !done });
     }
     case 'events': {
       // #3705: the events after cursor `since` (0: every one kept), without taking them: `wait` still hands them.
