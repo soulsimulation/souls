@@ -7,10 +7,10 @@
 //!   the marks of the last tick (T1, `v2/docs/TRUNK.md`), as [`Facts`], and writes its grants.
 //! - **A grant.** One walker at a time, the waiting one nearest the end the link lets in, and only when the far end
 //!   has room to step out into, every body inside going the same way is at least [`SPACING`] along, and no grant is
-//!   outstanding. At a crowded wide link the grants are fair (0.133 A2-4): a waiter passed over [`PASSED`] times by
-//!   ones that came to wait after it goes first, the longest waiting of those first, so no waiter is out-gapped for
-//!   ever. A narrow link keeps nearest first: its waiters stand in a queue, and a grant to one behind it would wait on
-//!   the queue stepping aside.
+//!   outstanding. Grants are fair (0.133 A2-4): a waiter passed over [`PASSED`] times at a crowded wide link, or
+//!   [`PASSED_NARROW`] times at a narrow one, by ones that came to wait after it goes first, the longest waiting of
+//!   those first, so no waiter is out-gapped for ever. A narrow link's waiters stand in a queue, and a grant to one
+//!   behind it waits on the queue stepping aside: it comes later there.
 //! - **A turn.** The direction changes when the link is empty and the other side waits, or, while the other side
 //!   waits, after [`RUN`] walkers or [`RUN_TIME`] in one direction (then no more are let in, and it changes once the
 //!   link is empty).
@@ -43,15 +43,17 @@ pub const RUN: u32 = 8;
 /// At a crowded wide link, a waiter passed over this many times by walkers that came to wait after it is let in next
 /// (A2-4).
 pub const PASSED: u32 = 2;
+/// At a narrow link, a waiter passed over this many times by walkers that came to wait after it is let in next (A2-4).
+pub const PASSED_NARROW: u32 = 6;
 /// Time one direction may run before the other side, waiting, gets its turn, µs.
 pub const RUN_TIME: Micros = 10_000_000;
 
-/// The waiter at one end let in next: at a wide link, one passed over [`PASSED`] times, the longest waiting of those
-/// (then nearest, then id); else the nearest (then id).
+/// The waiter at one end let in next: one passed over [`PASSED`] times ([`PASSED_NARROW`] at a narrow link), the
+/// longest waiting of those (then nearest, then id); else the nearest (then id).
 fn next(s: &State, end: &[(i64, Id)], narrow: bool) -> Option<Id> {
     let since = |w: Id| s.waits.get(&w).copied().unwrap_or_default();
     end.iter()
-        .filter(|&&(_, w)| !narrow && since(w).1 >= PASSED)
+        .filter(|&&(_, w)| since(w).1 >= if narrow { PASSED_NARROW } else { PASSED })
         .min_by_key(|&&(g, w)| (since(w).0, g, w))
         .or_else(|| end.iter().min())
         .map(|&(_, w)| w)

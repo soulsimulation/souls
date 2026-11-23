@@ -74,8 +74,8 @@ hatch (F8) is rule 11. The controller (B1) is summarised under [The controller](
    granted spot. Ending a walk by name is the world's: it ends the run. Field 48 is the queue spot the world assigns
    a body (B7, `[x, y, z]` in its floor's frame). **Crowds (0.133 A2-4).** A wide link is taken in turns too while
    its mouth is crowded: a walker near it that sees three bodies within 1.5 m of its end marks itself waiting
-   (field 41), and the link shows field 42 until none waits and none is inside on its turn. Grants are fair: a waiter
-   passed over twice by later ones goes next. A walk held near its goal by a body at rest nearer it sets field 49 (1)
+   (field 41), and the link shows field 42 until none waits and none is inside on its turn. Grants are fair, at any link
+   taken in turns: a waiter passed over by later ones twice (six times at a narrow link) goes next. A walk held near its goal by a body at rest nearer it sets field 49 (1)
    on its own body and is done short of it; the world writes its `souls:move-ended` as
    `done.as-near-as-the-crowd-allows` and takes the field off. A walk to its own granted spot ends so only when a
    body at rest stands on that spot, or once held there past a way round's ticks; its spot is then released.
