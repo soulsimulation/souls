@@ -453,6 +453,11 @@ impl Client {
     /// The next answer: a receipt's entries, or a refusal's reason. A progress answer (C20, sent as a run starts) is
     /// read past.
     fn answer(&mut self) -> Result<Vec<u64>, String> {
+        self.answer_of().1
+    }
+
+    /// The next answer, with the sequence of the intent it answers.
+    fn answer_of(&mut self) -> (u64, Result<Vec<u64>, String>) {
         let frame = loop {
             let mut len = [0u8; 4];
             self.0.read_exact(&mut len).expect("an answer");
@@ -468,7 +473,10 @@ impl Client {
         let Some(Value::Map(a)) = m.get(&2) else {
             panic!("an answer")
         };
-        match (a.get(&3), a.get(&5)) {
+        let Some(Value::Uint(sequence)) = a.get(&2) else {
+            panic!("an answer's sequence: {a:?}")
+        };
+        let r = match (a.get(&3), a.get(&5)) {
             (Some(Value::Uint(1)), Some(Value::Array(e))) => Ok(e
                 .iter()
                 .map(|v| match v {
@@ -481,7 +489,8 @@ impl Client {
                 other => panic!("a refusal: {other:?}"),
             },
             other => panic!("an answer: {other:?}"),
-        }
+        };
+        (*sequence, r)
     }
 
     /// One act and its one answer.
@@ -985,5 +994,72 @@ fn w10_a_take_with_no_walk_needs_the_thing_in_reach() {
     assert!(!near.expect("within reach: taken").is_empty());
     assert_eq!(parent(&r, near_can()).0, Some(w1()), "in the body's hand");
     assert_eq!(at(&r, w1()), before, "taken where the body stands");
+    run.stop();
+}
+
+/// A walk's point, `{1: [x, y, z]}` in µm in its target's frame.
+fn point(v: Vec3) -> BTreeMap<u64, Value> {
+    let i =
+        |n: i64| u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint);
+    p(&[(1, Value::Array(vec![i(v.x), i(v.y), i(v.z)]))])
+}
+
+/// #4187, the trace: a Soul's take is running (its run open, its press under way) when its own controller sends a
+/// walk. The walk is a move, which the bodies take, not the form runner. Today the walk replaces the run: its claim on
+/// the body ends the take's press, the take is refused `claim-taken` with nothing taken, and the walk is done where it
+/// was sent.
+#[test]
+fn i4187_a_walk_sent_during_an_open_form_run() {
+    let (run, mut a, _) = serve("i4187w");
+    a.send("test:take", Some(vessel()), BTreeMap::new());
+    std::thread::sleep(Duration::from_millis(150));
+    a.send("test:walk", Some(ground()), point(south(3_000_000)));
+    let first = a.answer_of();
+    let second = a.answer_of();
+    println!("#4187 trace: take then walk answered {first:?} then {second:?}");
+    let r = run.replay();
+    println!(
+        "#4187 trace: body at {:?}, vessel parent {:?}",
+        at(&r, w1()),
+        parent(&r, vessel())
+    );
+    assert_eq!(
+        first,
+        (1, Err("claim-taken".to_owned())),
+        "the take is replaced"
+    );
+    assert!(
+        matches!(second, (2, Ok(_))),
+        "the walk is accepted and done"
+    );
+    assert_eq!(
+        at(&r, w1()),
+        south(3_000_000),
+        "walked to where it was sent"
+    );
+    assert_eq!(
+        parent(&r, vessel()),
+        (Some(ground()), None),
+        "nothing taken"
+    );
+    run.stop();
+}
+
+/// #4187, the trace: a second form act from the Soul's own controller while its first run is open.
+#[test]
+fn i4187_a_form_act_sent_during_an_open_form_run() {
+    let (run, mut a, _) = serve("i4187f");
+    a.send("test:take", Some(vessel()), BTreeMap::new());
+    std::thread::sleep(Duration::from_millis(150));
+    a.send("test:take", Some(near_can()), BTreeMap::new());
+    let first = a.answer_of();
+    let second = a.answer_of();
+    println!("#4187 trace: take then take answered {first:?} then {second:?}");
+    let r = run.replay();
+    println!(
+        "#4187 trace: vessel parent {:?}, can parent {:?}",
+        parent(&r, vessel()),
+        parent(&r, near_can())
+    );
     run.stop();
 }
