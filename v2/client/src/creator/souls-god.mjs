@@ -24,6 +24,12 @@
 //   souls-god.mjs land water <id> --level m | --by m      the land and its water, as today's `land` (terrain/land.mjs):
 //                                                one edit; what rests on changed ground moves with it, and a Soul
 //                                                standing there refuses it (edit.terrain-under-soul)
+//   souls-god.mjs define <record.json>          a kind of your own (#3697): a souls-entry/1 record (the format of
+//                                                content/kinds), kept in the world under the full name it answers
+//                                                (`defines`); a changed record is a new revision, and old things keep
+//                                                theirs. Your own namespace only (not souls: or eden:)
+//   souls-god.mjs define-kit <kit.json> [--ns <namespace>]   today's kit (a name and shapes in metres) as a record
+//                                                with geometry.parts (kit.mjs), then defined; namespace `kit` unless given
 //   souls-god.mjs check <any of these, or batch> ...   the same, checked on the copy only; nothing is sent
 //   place <kind> --in <id> --beside <id> [--dir n|ne|e|se|s|sw|w|nw] [--dist mm]   beside another (default e, 1000)
 //   place <kind> --on <id>                       in or on another: its first free slot for a thing, if it has one
@@ -94,6 +100,7 @@ import { DEFAULT_PKG, call } from '../daemon/client.mjs';
 import { findHome, readSeat, soulsWithTokens, worldsOf } from '../home/home.mjs';
 import { answer as libraryAnswer, libraryOf } from './catalog.mjs';
 import { worldOf } from '../cli/souls.mjs';
+import { kitEntry } from './kit.mjs';
 import { F_HOURS, hoursRows } from '../schedule/hours.mjs';
 import { parseShoot, runShoot } from '../shoot/shoot.mjs';
 import { parseSpace, runSpace } from './space.mjs';
@@ -108,6 +115,8 @@ export const VERBS = [
   'catalog',
   'check',
   'clear',
+  'define',
+  'define-kit',
   'describe',
   'event',
   'find',
@@ -151,7 +160,16 @@ const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
 /** What to do about each refusal, by its name: the world's (G1, G2) and the command's own. */
 export const FIX = {
   'edit.not-the-creator': 'this token is not the world\'s creator\'s: pair with --creator <its creator grant>',
-  'edit.kind-unknown': 'use a kind describe lists under kinds',
+  'edit.kind-unknown': 'use a kind describe lists under kinds (your own kinds too, once defined)',
+  'kind.invalid': 'a souls-entry/1 record as content/kinds holds them: whole numbers, sections it can hold (no roles), its kind loads',
+  'kind.too-large': 'a record is at most 64 KiB and its bounds_mm at most 1 km: fewer parts, a shorter text or smaller bounds',
+  'kind.effects': 'a form creates only a kind describe lists (its full name) into a slot that admits it, and timers that start each other wait 50 ms or more',
+  'kind.audience': 'define a kind for everyone (no audience)',
+  'kind.namespace': 'name it in your own namespace (not souls: or eden:, nor one the world\'s own kinds use)',
+  'kind.collision': 'that kind is defined already: place it by the full name describe lists',
+  'kind.in-use': 'remove the things of that kind first, and change or remove a kind whose form creates it, or do it in the same batch',
+  'kit.invalid': 'a kit is {"name", "shapes": [{"kind", "at": [x,y,z] m, ...}]}, as today\'s define-kit',
+  'kit.program': 'write each shape out: repeat, radial, mirror and $params are not carried',
   'edit.child-not-admitted': 'put it in something whose kind admits it: describe shows each kind\'s admits',
   'edit.node-missing': 'that id is not there now: describe again and use an id it lists',
   'edit.name-unknown': 'a later op names an earlier place by that place\'s "name" number',
@@ -268,7 +286,22 @@ export function opsOf(verb, words, { related = false } = {}) {
     if (!args[0]) throw usage('remove <id>');
     return [{ op: 'remove', node: node(args[0]) }];
   }
+  if (verb === 'define' || verb === 'define-kit') return [{ op: 'define', name: 1, entry: definitionOf(verb, args).entry }];
   throw usage(`one of ${VERBS.join(', ')}`);
+}
+
+/** #3697: the record a define or define-kit sends, read from its file, and what a kit did not carry. */
+export function definitionOf(verb, words) {
+  const args = [...words];
+  const ns = takeOpt(args, '--ns');
+  if (args.length !== 1) throw usage(verb === 'define' ? 'define <record.json>' : 'define-kit <kit.json> [--ns <namespace>]');
+  let text;
+  try { text = readFileSync(args[0], 'utf8'); } catch (e) { throw Object.assign(new Error(`${args[0]}: ${e.code ?? e.message}`), { code: 'file-unreadable' }); }
+  let json;
+  try { json = JSON.parse(text); } catch { throw Object.assign(new Error(`${args[0]} is not JSON`), { code: verb === 'define' ? 'kind.invalid' : 'kit.invalid' }); }
+  if (verb === 'define') return { entry: text };
+  const { entry, not_carried } = kitEntry(json, ns ? { ns } : {});
+  return { entry: JSON.stringify(entry), ...(not_carried.length ? { not_carried } : {}) };
 }
 
 /** A calendar entry's kind and its fields (start, end in world µs; words): `content/kinds/calendar/entry.json`. */
@@ -398,6 +431,10 @@ export function requestOf(argv) {
   if (verb === 'undo') { const build = takeOpt(rest, '--build'); return { req: { op: 'undo', ...(build !== undefined ? { build } : {}) }, creator }; }
   if (verb === 'check' && WORLD_VERBS.includes(rest[0])) return { req: { op: 'check', world: worldVerbOf(rest[0], rest.slice(1)), ...under }, creator };
   if (WORLD_VERBS.includes(verb)) return { req: { op: 'edit', world: worldVerbOf(verb, rest), ...under }, creator };
+  if (verb === 'define-kit') {
+    const { not_carried } = definitionOf(verb, rest);
+    return { req: { op: 'edit', ops: opsOf(verb, rest), ...under }, creator, ...(not_carried ? { say: { not_carried } } : {}) };
+  }
   const build = takeOpt(rest, '--build'), step = takeOpt(rest, '--step');
   if ((build === undefined) !== (step === undefined)) throw usage('a build\'s step names both: --build <name> --step <name>');
   const named = build !== undefined ? { build, step } : {};
@@ -821,7 +858,7 @@ if (isMain(import.meta.url)) {
     const scoped = helperClaim(home);
     if (scoped && req && (req.op === 'edit' || req.op === 'check') && req.claim === undefined) req = { ...req, claim: scoped };
     const answer = asked.build ? await runBuild(asked.build, ask, (minutes, claim) => mintHelper(home, creator, minutes, claim)) : asked.layer ? await runLayer(asked.layer, ask) : await ask(req);
-    out(withFix(answer));
+    out(withFix({ ...answer, ...(asked.say ?? {}) }));
     if (answer.ok === false) process.exitCode = 1;
   } catch (e) {
     out(withFix({ ok: false, code: e.code ?? 'failed', detail: String(e.message ?? e).slice(0, 200) }));

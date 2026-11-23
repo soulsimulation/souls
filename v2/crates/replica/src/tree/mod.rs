@@ -1217,7 +1217,8 @@ impl Tree {
                 own.check(pose.frame.node)?;
                 own.audience(*audience, *node)?;
                 self.fresh(*node)?;
-                if !header.kinds.contains(kind) {
+                // A creator's kind is pinned by its `souls:kind` node at the root, not the header (#3697).
+                if !header.kinds.contains(kind) && !crate::kinds::defined::defines(self, kind) {
                     return refuse("kind-not-in-header", kind.as_str());
                 }
                 let parent = self
