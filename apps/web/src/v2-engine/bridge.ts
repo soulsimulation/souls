@@ -151,7 +151,7 @@ export class V2Bridge {
       // B2-4: a world already still when the page opens plays no part (the reader posts a quiet time only once it has
       // played every part there is): its first quiet time makes the current chunk from the snapshot, once, so its Souls
       // and things are drawn where they are, not when something next moves
-      if (this.liveFrom === null) { if (!this.nodes.size) return; this.liveFrom = (chunkEnd(q - BEHIND_US) - TICKS) * TICK_US; }
+      if (this.liveFrom === null) { if (!this.nodes.size) return; this.liveFrom = (chunkEnd(q - BEHIND_US, this.chunk) - this.chunk) * TICK_US; }
       this.view.newestTo = q;
       this.publish();
       return;
