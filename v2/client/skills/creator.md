@@ -142,7 +142,16 @@ the root, which `describe` shows), and from then on you place it like any other 
   What the world already holds (the same id and kind, the world itself and its open ground) keeps its id and only its
   changed fields are set; everything else is placed, and then each doorway and stair it lacks is linked again (the
   `link` operation), so Souls walk in through the doors and up the stairs. The answer counts the edits, what was
-  placed, set and linked, and anything not brought over. A refusal stops it and says how far it got.
+  placed, set and linked, and anything not brought over. A refusal stops it and says how far it got. When the file's
+  ground is larger than the world's, its tiles are set first, so the world grows before anything is placed on it.
+
+## Growing the world
+
+- `node souls-god.mjs expand <m>` grows the world's ground to a square `m` metres a side, centred on the middle.
+- `node souls-god.mjs land extend --toward n|s|e|w|ne|nw|se|sw --metres <m>` grows it one way, or
+  `--bounds x0,z0,x1,z1` (metres) to cover a box.
+- The new ground is flat, level with the old ground's edge, and Souls walk on it. The world only grows. The whole
+  ground goes in one edit, so a refusal `expand.too-large` names the largest size one edit carries.
 
 ## Your own models and pictures
 

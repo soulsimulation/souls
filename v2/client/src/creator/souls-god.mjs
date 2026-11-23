@@ -26,6 +26,9 @@
 //   souls-god.mjs land water <id> --level m | --by m      the land and its water, as today's `land` (terrain/land.mjs):
 //                                                one edit; what rests on changed ground moves with it, and a Soul
 //                                                standing there refuses it (edit.terrain-under-soul)
+//   souls-god.mjs land extend --toward n|s|e|w|ne|nw|se|sw --metres m | --bounds x0,z0,x1,z1
+//   souls-god.mjs expand <m>                     the world's ground grows (that way, or to a centred square m a side),
+//                                                flat from its edge; it only grows
 //   souls-god.mjs define <record.json>          a kind of your own (#3697): a souls-entry/1 record (the format of
 //                                                content/kinds), kept in the world under the full name it answers
 //                                                (`defines`); a changed record is a new revision, and old things keep
@@ -137,6 +140,7 @@ export const VERBS = [
   'define-kit',
   'describe',
   'event',
+  'expand',
   'export',
   'find',
   'free',
@@ -174,7 +178,7 @@ export const VERBS = [
   'zone-suggest',
 ];
 /** The world's verbs (#3695): the daemon makes their sets on the world node from its copy (`world.mjs`). */
-export const WORLD_VERBS = ['weather', 'sky', 'strike', 'land', 'time'];
+export const WORLD_VERBS = ['weather', 'sky', 'strike', 'land', 'time', 'expand'];
 /** The verbs answered from the home's library of kinds, on this machine (#3696). */
 export const LIBRARY = new Set(['catalog', 'find', 'recommend', 'taxonomy']);
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
@@ -241,6 +245,8 @@ export const FIX = {
   'land.nothing': 'shape the land on the world\'s ground',
   'land.smooth': 'use flatten',
   'land.unavailable': 'use Node 22.18 or later, and the client a world serves (it carries the ground model) or a checkout with packages/ground and zod installed',
+  'expand.nothing': 'the world already reaches that far: give a larger size',
+  'expand.too-large': 'grow it less: one edit carries the whole ground',
   'strike.off-the-ground': 'strike somewhere on the world\'s ground',
   'import.file': 'import <file>: a file export wrote, readable here',
   'import.format': 'import a souls-world/1 file, as export writes it',
@@ -400,13 +406,18 @@ export function worldVerbOf(verb, words) {
   const args = [...words], out = { verb };
   const flags = {
     weather: ['kind', 'clouds', 'rain', 'wind', 'minutes'], sky: ['palette', 'sun'], strike: ['at'], time: ['speed'],
-    land: ['at', 'radius', 'amount', 'level', 'height', 'peak', 'path', 'area', 'rect', 'circle', 'edge', 'step', 'depth', 'width', 'side', 'face', 'steps', 'by'],
+    land: ['at', 'radius', 'amount', 'level', 'height', 'peak', 'path', 'area', 'rect', 'circle', 'edge', 'step', 'depth', 'width', 'side', 'face', 'steps', 'by', 'toward', 'metres', 'bounds'],
+    expand: [],
   }[verb];
   for (const f of flags) { const v = takeOpt(args, `--${f}`); if (v !== undefined) out[f] = v; }
   if (verb === 'strike' && out.at === undefined && args[0] !== undefined) out.at = args.shift();
   if (verb === 'time') {
     for (const f of ['--pause', '--resume']) { const k = args.indexOf(f); if (k >= 0) { args.splice(k, 1); out.pause = true; } }
     if (args[0] !== undefined) out.hour = args.shift();
+  }
+  if (verb === 'expand') {
+    if (args[0] === undefined) throw usage('expand <metres>: the side of the centred square the world grows to');
+    out.extent = args.shift();
   }
   if (verb === 'land') {
     if (!args[0]) throw usage('land <raise|lower|flatten|knoll|hill|mountain|plateau|terrace|valley|ditch|cliff|pond|lake|water> [flags]');
@@ -903,7 +914,7 @@ if (isMain(import.meta.url)) {
       if (!asked.req) { out(withFix(when)); process.exit(1); }
     }
     const pkg = process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG;
-    const ask = (req, ms = 60_000) => call(home, creator, req, { pkg, ms: req.op === 'import' ? 3_600_000 : req.op === 'export' ? 120_000 : req.world?.verb === 'land' ? 130_000 : ms });
+    const ask = (req, ms = 60_000) => call(home, creator, req, { pkg, ms: req.op === 'import' ? 3_600_000 : req.op === 'export' ? 120_000 : ['land', 'expand'].includes(req.world?.verb) ? 130_000 : ms });
     // A relation is resolved on the daemon's copy: describe first, then the batch with its places filled in.
     let req = asked.relation ? resolve(asked.req, asked.relation, await ask({ op: 'describe' }, 15_000)) : asked.req;
     // A helper's home sends every edit under its claim (#3727).
