@@ -117,6 +117,8 @@ pub(crate) struct Walk {
     watch: Watch,
     /// The leg's end last seen on the walk's line.
     leg: Option<[i64; 2]>,
+    /// Still bodies were stepped aside for it once (0.132 A2-3): a second stall ends it.
+    made_way: bool,
 }
 
 /// A gateway walk's time once its route is planned: the route at walking speed, plus half again for bends and yielding
@@ -144,7 +146,24 @@ impl Walk {
             planned: false,
             watch: Watch::new(),
             leg: None,
+            made_way: false,
         }
+    }
+
+    /// The walking body.
+    pub(crate) fn body(&self) -> Id {
+        self.body
+    }
+
+    /// Whether still bodies may be stepped aside for this walk's stall: once a walk (0.132 A2-3). Marks it done, and
+    /// watches the walk again from now.
+    pub(crate) fn make_way_once(&mut self) -> bool {
+        if self.made_way {
+            return false;
+        }
+        self.made_way = true;
+        self.watch = Watch::new();
+        true
     }
 
     /// A newly planned deadline, and whether the walk stalled. Neither changes the mover's path or authority.

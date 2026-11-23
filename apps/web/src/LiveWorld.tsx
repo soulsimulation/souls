@@ -4,6 +4,7 @@ import {WorldContextViews} from './WorldContextViews.ts';
 import { whenAssetsSettled } from './gen-mesh/gltf-assets.ts';
 import {ALL_OPTIONAL_APPEARANCE_PROFILES,type OptionalAppearanceProfiles} from './optional-appearance-profiles-all.ts';
 import {historyTakePath,historyTakePage} from './WorldTakeTransport.ts';
+import { v2History } from './v2-engine/history.ts';
 import {WorldAuthoredBoundaries} from './WorldAuthoredBoundaries.ts';
 import {WorldTouchFree} from './touch/WorldTouchFree.ts';
 import {SoulSwipe,swipeStep,soulRing,interestScores} from './touch/soul-swipe.ts';
@@ -167,6 +168,8 @@ type Label = { obj: CSS2DObject; head: THREE.Vector3; name: HTMLElement; line: H
   shown: number; emphasis: boolean; occluded: boolean; checkedAt: number };  // obj sits under the body (C2); head is where speech anchors
 
 async function fetchChunks(from: number, to: number, limit: number, signal: AbortSignal): Promise<Chunk[]> {
+  const v2 = v2History(); // R2: a world the new engine runs answers its past from its history export
+  if (v2) return validChunks(await v2.chunks(from, to, Math.min(MAX_PAST_CHUNKS, limit), signal) as Chunk[]);
   let out: Chunk[] = [], cursor = from;
   for (let page = 0; page < 4 && out.length < limit; page++) {
     const res = await fetch(apiPath(historyTakePath(cursor,to,limit-out.length)), { signal });

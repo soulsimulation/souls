@@ -1273,6 +1273,73 @@ impl Bodies {
         std::mem::take(&mut self.ended)
     }
 
+    /// The only way is blocked (0.132 A2-3, Gene's decision: no Soul is left stuck): walker `walker`'s walk stalled,
+    /// and each still body on its line within [`sim::unstick::NEAR`] of it (no walk, no move, no seat, no order to stay,
+    /// not carried) is stepped aside by the world, by the smallest step that clears the line to the corner it aims at
+    /// (`sim::unstick::aside`), at walking speed in a straight line. Returns each body stepped aside, from where to
+    /// where; none when nothing could be.
+    pub fn make_way(&mut self, walker: Id) -> Vec<(Id, Vec3, Vec3)> {
+        let Some(me) = self.runner.controller.body(walker).copied() else {
+            return Vec::new();
+        };
+        let node = sim::walk::node_of(&me);
+        let Some((_, aim, _)) = self
+            .town
+            .next_corner_toward(walker)
+            .filter(|(n, _, _)| *n == node)
+        else {
+            return Vec::new();
+        };
+        let here = me.pose.position;
+        let line = (here, Vec3::new(aim[0], here.y, aim[1]));
+        let c = &self.runner.controller;
+        let still: Vec<(Id, Vec3)> = c
+            .bodies()
+            .filter(|b| {
+                b.id != walker
+                    && sim::walk::node_of(b) == node
+                    && b.pose.support != Support::Slot
+                    && !self.runner.running(b.id)
+                    && !self.runner.staying.contains(&b.id)
+                    && !c.carried(b.id)
+                    && !self.live.contains_key(&b.id)
+                    && self.slots.held_by(b.id).is_none()
+                    && c.claims(b.id).is_some_and(|k| k.running().is_empty())
+            })
+            .map(|b| (b.id, b.pose.position))
+            .filter(|(_, at)| {
+                let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+                (d(at.x, here.x) + d(at.z, here.z)).isqrt() < i128::from(sim::unstick::NEAR)
+            })
+            .collect();
+        let mut moved: Vec<(Id, Vec3, Vec3)> = Vec::new();
+        for (s, from) in still {
+            let taken: Vec<Vec3> = self
+                .runner
+                .controller
+                .bodies()
+                .filter(|b| b.id != s && sim::walk::node_of(b) == node)
+                .map(|b| b.pose.position)
+                .chain(moved.iter().map(|&(_, _, to)| to))
+                .collect();
+            let Some(to) = sim::unstick::aside(&self.town, node, from, line, &taken) else {
+                continue;
+            };
+            let track = sim::controller::Track {
+                link: None,
+                line: vec![to],
+                speed: WALK,
+                to: node,
+                arrive: None,
+                hold: false,
+            };
+            if self.runner.controller.carry(s, track).is_ok() {
+                moved.push((s, from, to));
+            }
+        }
+        moved
+    }
+
     /// Intent `id` ended (its deadline passed): its walk stops where the body is, now ([`Cut::Stopped`]). A sit, a lie
     /// or a rise is short and runs to its end, so a seat is never left half taken ([`Cut::Finishing`]): the world
     /// ends the act when its move ends. `None`: no move is going for it.
