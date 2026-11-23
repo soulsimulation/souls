@@ -186,6 +186,10 @@ test('the verbs make G1 batches, and a refusal names its usage', () => {
   assert.throws(() => requestOf(['expand']), /expand <metres>/);
   // Its edit goes to the world's claims judge as any edit does: under a claim when one is named (#3701).
   assert.equal(requestOf(['expand', '1200', '--claim', 'k1a2b3c4d']).req.claim, 'c:k1a2b3c4d');
+  // #3728: a road or an area is a place by its shape, made on the daemon's copy (which knows the open ground).
+  assert.deepEqual(requestOf(['place', 'eden:footpath', '--path', '[[0,0],[9,0]]', '--width', '2']).req, { op: 'edit', world: { verb: 'place', path: '[[0,0],[9,0]]', width: '2', kind: 'eden:footpath' } });
+  assert.deepEqual(requestOf(['check', 'place', 'eden:place', '--rect', '1,2,3,4', '--field', '15=eden:plaza']).req, { op: 'check', world: { verb: 'place', rect: '1,2,3,4', fields: { 15: 'eden:plaza' }, kind: 'eden:place' } });
+  assert.equal(requestOf(['place', 'eden:bench', '--in', 'aa-1']).req.ops[0].op, 'place');
   assert.deepEqual(requestOf(['furnish', 'aa-3', '--style', 'cottage']).req, { op: 'edit', world: { verb: 'furnish', ref: 'aa-3', style: 'cottage' } });
   // #3728: move --by and clone are made on the daemon's copy; move --at stays G1's move.
   assert.deepEqual(requestOf(['move', 'aa-3', 'aa-4', '--by', '-2,3', '--yaw', '1.5']).req, { op: 'edit', world: { verb: 'move', by: '-2,3', yaw: '1.5', refs: ['aa-3', 'aa-4'] } });
@@ -484,6 +488,23 @@ test('#3701: a creator records a district plan, claims its first chapter, builds
   assert.deepEqual((await god('build', 'claims')).claims, []);
   assert.equal((await god('remove', inside.names['1'])).ok, true);
   assert.equal((await god('build', 'release', c)).code, 'claim.unknown');
+});
+
+test('#3728: a place by its shape goes to the claims judge as any edit: refused edit.claimed in a claim it is not under', async () => {
+  await connected();
+  const place = (await god('describe')).nodes.find((n) => n.kind === 'souls:place');
+  const made = await god('place', 'room', '--in', place.id, '--at', '81000,0,81000');
+  assert.equal(made.ok, true, JSON.stringify(made));
+  const room = made.names['1'];
+  const claimed = await god('build', 'claim', 'lawn', '--area', '80000,80000,84000,84000');
+  assert.equal(claimed.ok, true, JSON.stringify(claimed));
+  const c = claimed.claim.id;
+  // The world judges a place at its spot: a shape stands at its parent's origin, here the claimed room's.
+  const into = await god('place', 'souls:item', '--path', '[[0,0],[1,1]]', '--in', room);
+  assert.deepEqual([into.ok, into.code], [false, 'edit.claimed'], JSON.stringify(into));
+  const under = await god('place', 'souls:item', '--rect', '0,0,2,2', '--in', room, '--claim', c);
+  assert.equal(under.ok, true, JSON.stringify(under));
+  assert.equal((await god('build', 'release', c)).ok, true);
 });
 
 test('#3728: move --by and clone go to the claims judge as any edit: refused by name in a claim they are not under', async () => {
