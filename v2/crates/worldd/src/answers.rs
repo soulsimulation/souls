@@ -727,6 +727,48 @@ impl Config {
     }
 }
 
+/// Whether the world is still and when its next change is due (O2, #2731; 0.133 S3b): the clock writes it after
+/// each run of ticks, and `worldd serve`'s sleep watch reads it (`supervisor::sleep::may_sleep`).
+#[derive(Debug)]
+pub struct Quiet {
+    still: std::sync::atomic::AtomicBool,
+    /// The earliest due time over the world's due lists (world time, µs), `i64::MAX` for none.
+    next: std::sync::atomic::AtomicI64,
+    /// Log records written: what must be durable before the world sleeps.
+    records: std::sync::atomic::AtomicU64,
+}
+
+impl Default for Quiet {
+    fn default() -> Quiet {
+        Quiet {
+            still: std::sync::atomic::AtomicBool::new(false),
+            next: std::sync::atomic::AtomicI64::new(i64::MAX),
+            records: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+}
+
+impl Quiet {
+    fn set(&self, still: bool, next: Option<Micros>, records: u64) {
+        use std::sync::atomic::Ordering::SeqCst;
+        self.records.store(records, SeqCst);
+        self.next.store(next.unwrap_or(i64::MAX), SeqCst);
+        self.still.store(still, SeqCst);
+    }
+
+    /// Still, the next due time (none: nothing is due) and the log records written.
+    pub fn read(&self) -> (bool, Option<Micros>, u64) {
+        use std::sync::atomic::Ordering::SeqCst;
+        let still = self.still.load(SeqCst);
+        let next = self.next.load(SeqCst);
+        (
+            still,
+            (next != i64::MAX).then_some(next),
+            self.records.load(SeqCst),
+        )
+    }
+}
+
 /// The running world: send it [`Event`]s; [`World::stop`] ends it once the answers already due are sent.
 pub struct World {
     pub events: Sender<Event>,
@@ -741,6 +783,8 @@ pub struct World {
     pub restart: Restart,
     /// The log's durable mark: a tier of the caller's own waits on it (C1).
     pub durable: Durable,
+    /// Still and next due, for sleep (O2).
+    pub quiet: Arc<Quiet>,
     clock: Option<JoinHandle<()>>,
 }
 
@@ -3578,13 +3622,25 @@ impl Clock {
         let orders = std::mem::take(&mut b.orders.log);
         let wind = std::mem::take(&mut b.wind_log);
         let mut deadlines = Vec::new();
+        let mut made_way = Vec::new();
         for (id, walk) in &mut self.walks {
             let (due, blocked) = walk.step(b, now);
             if let Some(due) = due {
                 deadlines.push((*id, due));
             }
-            if blocked && b.cancel(*id) == Some(Cut::Stopped) {
-                ended.push((*id, Err(acts::BLOCKED.to_owned())));
+            // The only way is blocked (0.132 A2-3): the still bodies on it are stepped aside once, by the world, and
+            // the walk goes on; a walk that stalls again, or that nothing could be stepped aside for, ends blocked.
+            if blocked {
+                let aside = if walk.make_way_once() {
+                    b.make_way(walk.body())
+                } else {
+                    Vec::new()
+                };
+                if !aside.is_empty() {
+                    made_way.push((walk.body(), aside));
+                } else if b.cancel(*id) == Some(Cut::Stopped) {
+                    ended.push((*id, Err(acts::BLOCKED.to_owned())));
+                }
             }
         }
         // Where the planner's answers came back late (K18b), for the recorder: a replay takes them at the same tick.
@@ -3604,6 +3660,13 @@ impl Clock {
         for (speaker, said, at) in heard {
             let e = speech::entry(Clock::own(speaker, at), speaker, &said);
             self.write_own(vec![e], "an utterance");
+        }
+        for (walker, aside) in made_way {
+            let made: Vec<Effect> = aside
+                .into_iter()
+                .map(|(body, from, to)| made_way_entry(now, walker, body, from, to))
+                .collect();
+            self.write_own(made, "a still body stepped aside");
         }
         for (id, due) in deadlines {
             self.run_started(id, due, now);
@@ -4172,6 +4235,36 @@ impl Clock {
 
     /// K5's checkpoint, when due and the log is on the disk up to every record handed to it (K18c, #3176): the
     /// tree, where the log resumes (K4b) and what a restart needs besides the tree ([`Carry`], in the root's seed).
+    /// Nothing in hand (O2, 0.133 S3b): no intent queued or open, no act forming or checking, no body moving for one.
+    /// A form's own timers outlive no act, so an open act covers them.
+    fn still(&self) -> bool {
+        self.pending.is_empty()
+            && self.scheduled.is_empty()
+            && self.outstanding == 0
+            && self.open.is_empty()
+            && self.in_flight.is_empty()
+            && self.moving.is_empty()
+            && self.walks.is_empty()
+            && self.forming.is_empty()
+            && self.engine_acts.is_empty()
+            && self.inputs.is_empty()
+            && self.bodies.as_ref().is_none_or(Bodies::still)
+    }
+
+    /// The earliest due time over the world's due lists (O2): the sky's, the bodies' (moves and the wind-down), the
+    /// activities' and the loose things' ends.
+    fn next_due(&self) -> Option<Micros> {
+        [
+            self.sky.as_ref().and_then(|h| h.due.next_due()),
+            self.bodies.as_ref().and_then(Bodies::next_due),
+            self.engine.as_ref().and_then(Engine::next_due),
+            self.loose.next_due(),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+    }
+
     fn checkpoint(&mut self) {
         let Some(c) = self.checkpoints.as_mut() else {
             return;
@@ -5025,6 +5118,8 @@ pub fn start<S: Storage + 'static>(
     };
     let lockstep = cfg.lockstep;
     let thread_beat = Arc::clone(&beat);
+    let quiet = Arc::new(Quiet::default());
+    let thread_quiet = Arc::clone(&quiet);
     let clock_syncs = syncs.clone();
     let clock = thread::Builder::new()
         .name("clock".into())
@@ -5227,6 +5322,7 @@ pub fn start<S: Storage + 'static>(
                     eprintln!("worldd: {}", e.name());
                     break;
                 }
+                thread_quiet.set(c.still(), c.next_due(), c.records);
                 let Ok(due) = ticker.due() else { break };
                 let wait = due - pace.now();
                 if wait <= 0 {
@@ -5255,6 +5351,7 @@ pub fn start<S: Storage + 'static>(
         measures,
         restart,
         durable: world_durable,
+        quiet,
         clock: Some(clock),
     })
 }
@@ -7250,6 +7347,76 @@ mod tests {
             Mapping::from_fields(root.fields()),
             Some(second),
             "A3: the same on replay"
+        );
+    }
+}
+
+/// The world's entry for a still body it stepped aside for a walker whose only way it blocked (0.132 A2-3): the
+/// world is its actor, on the body moved, with a `souls:made-way` event naming the body (1), the walker (2), and
+/// where it stood and where it is going (3, 4: `[x, y, z]` µm, its node's frame). The steps are its motion.
+fn made_way_entry(at: Micros, walker: Id, body: Id, from: Vec3, to: Vec3) -> Effect {
+    let point = |p: Vec3| {
+        let i = |n: i64| {
+            u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint)
+        };
+        Value::Array(vec![i(p.x), i(p.y), i(p.z)])
+    };
+    Effect {
+        envelope: Clock::own(body, at),
+        body: Body::Changes(Vec::new()),
+        events: Some(vec![Named {
+            name: name(MADE_WAY),
+            fields: BTreeMap::from([
+                (1, body.to_value()),
+                (2, walker.to_value()),
+                (3, point(from)),
+                (4, point(to)),
+            ]),
+            changes: Vec::new(),
+            rest: Rest::new(),
+        }]),
+        rest: Rest::new(),
+    }
+}
+
+/// The event of a still body the world stepped aside ([`made_way_entry`]).
+pub const MADE_WAY: &str = "souls:made-way";
+
+#[cfg(test)]
+mod made_way_tests {
+    use super::*;
+
+    /// 0.132 A2-3: the entry for a body the world stepped aside names the world as its actor and cause, is on the
+    /// body moved, and its event names the body, the walker it made way for, and where it stood and goes.
+    #[test]
+    fn a_body_stepped_aside_is_the_worlds_entry() {
+        let (walker, body) = (
+            Id::new(Scope([0x4a; 16]), 1).unwrap(),
+            Id::new(Scope([0x4a; 16]), 2).unwrap(),
+        );
+        let e = made_way_entry(
+            7_000_000,
+            walker,
+            body,
+            Vec3::new(1_000_000, 0, -500_000),
+            Vec3::new(1_000_000, 0, 160_000),
+        );
+        assert_eq!(e.envelope.actor, Actor::World);
+        assert_eq!(e.envelope.cause, Cause::World);
+        assert_eq!((e.envelope.node, e.envelope.at), (body, 7_000_000));
+        let [ev] = e.events.as_deref().expect("an event") else {
+            panic!("one event")
+        };
+        assert_eq!(ev.name.as_str(), MADE_WAY);
+        assert_eq!(ev.fields[&1], body.to_value());
+        assert_eq!(ev.fields[&2], walker.to_value());
+        assert_eq!(
+            ev.fields[&3],
+            Value::Array(vec![
+                Value::Uint(1_000_000),
+                Value::Uint(0),
+                Value::Nint(499_999)
+            ])
         );
     }
 }

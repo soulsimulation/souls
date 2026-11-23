@@ -2979,15 +2979,16 @@ fn a_still_world_is_not_projected_again_and_a_world_change_is_never_passed_by_qu
             .quiet_until
     };
     let projections = || tests::IDLE_PROJECTIONS.get();
-    // Still: the first idle projects once; the next ones only move the quiet time on.
+    // Still: the cut has just published the world's state, so no idle projects it again; they only move the quiet
+    // time on (C4).
     let before = projections();
     out.idle(real + 2_000_000).unwrap();
     out.idle(real + 3_000_000).unwrap();
     out.idle(real + 4_000_000).unwrap();
     assert_eq!(
         projections() - before,
-        1,
-        "one projection while nothing changes"
+        0,
+        "no projection while nothing changes"
     );
     assert_eq!(quiet(&out), Some(4_000_000 - SETTLE_US));
     // The world sets a field on the thing by itself at 5 s: no Soul, no intent.
@@ -3027,10 +3028,7 @@ fn a_still_world_is_not_projected_again_and_a_world_change_is_never_passed_by_qu
     let after = projections();
     out.idle(real + 8_000_000).unwrap();
     out.idle(real + 9_000_000).unwrap();
-    assert!(
-        projections() - after <= 1,
-        "still again: at most one projection"
-    );
+    assert_eq!(projections() - after, 0, "still again: no projection");
     assert_eq!(quiet(&out), Some(9_000_000 - SETTLE_US));
     let mut reader = PublicPlayer::start(h.stored(), &out.baseline).unwrap();
     for n in 0..2 {
@@ -4030,4 +4028,149 @@ fn s4_a_sleeping_worlds_pointer_says_it_is_still_until_its_next_due_change() {
     let (p, asleep) = pointer(&out);
     assert_eq!(p.quiet_until, Some(7_000_000 - SETTLE_US));
     assert_eq!(asleep, None);
+}
+
+/// C5: a creator defining a kind never stops the public stream. A `souls:kind` node the header does not pin is public,
+/// and so is a thing of the kind it defines; a thing of a kind only a private definition names (which a public reader
+/// cannot check) is left out, logged by name, and the stream goes on, touched or not.
+#[test]
+fn c5_a_kind_defined_in_the_world_never_stops_the_public_stream() {
+    let h = header();
+    let definition = Name::new(&replica::kinds::defined::kind().0).unwrap();
+    assert!(
+        !h.kinds.contains(&definition),
+        "the header does not pin souls:kind"
+    );
+    let d = scratch("c5-defined");
+    let store = directoryd::directory::store::Memory::default();
+    let mut actual = Replica::start(h.stored()).unwrap();
+    let mut out = PublicWriter::open(
+        PublicStart {
+            root: &d.join("views"),
+            header: &h,
+            key: key(&h),
+            initial: actual.frozen(),
+            record: 0,
+            checkpoint: None,
+            text: None,
+            names: None,
+            clock_seed: None,
+            history: None,
+        },
+        &store,
+    )
+    .unwrap();
+    let id = |n| Id::new(Scope([0xc5; 16]), n).unwrap();
+    let (def, boxed, secret_def, secret, owner) = (id(1), id(2), id(3), id(4), id(5));
+    let kind = |k: &str| Name::new(&format!("c5:{k}@1220{}", "ab".repeat(32))).unwrap();
+    // A node of `kind` under the zone's root, of `audience`, with `fields`.
+    let made = |seq: u64, node: Id, k: Name, audience: Audience, fields: BTreeMap<u64, Value>| {
+        let mut e = w3e_create(&h, seq, node, h.zone, audience);
+        if let Body::Changes(cs) = &mut e.body
+            && let Change::Create {
+                kind: kk,
+                fields: f,
+                ..
+            } = &mut cs[0].change
+        {
+            *kk = k;
+            *f = fields;
+        }
+        e
+    };
+    let named = |k: &Name| BTreeMap::from([(1, Value::Text(k.clone()))]);
+    let (shown_kind, hidden_kind) = (kind("box"), kind("secret"));
+    let records = vec![
+        vec![made(
+            0,
+            def,
+            definition.clone(),
+            Audience::Everyone,
+            named(&shown_kind),
+        )],
+        vec![made(
+            1,
+            boxed,
+            shown_kind,
+            Audience::Everyone,
+            BTreeMap::new(),
+        )],
+        vec![made(
+            2,
+            secret_def,
+            definition,
+            Audience::Of(owner),
+            named(&hidden_kind),
+        )],
+        vec![made(
+            3,
+            secret,
+            hidden_kind,
+            Audience::Everyone,
+            BTreeMap::new(),
+        )],
+        vec![i3948_set(4, secret, 1), i3948_set(5, boxed, 2)],
+    ];
+    // The private definition changes nothing public: no part for it.
+    for (n, (effects, parts)) in records.into_iter().zip([1, 2, 2, 3, 4]).enumerate() {
+        let p = w3e_packet(&h, effects);
+        actual.apply_bytes(&p).unwrap();
+        out.push(n as u64, &p).unwrap();
+        out.flush().unwrap();
+        assert_eq!(out.player.next(), parts, "after record {n}");
+    }
+    assert!(i3948_holds(&out.player, def) && i3948_holds(&out.player, boxed));
+    assert!(
+        !i3948_holds(&out.player, secret),
+        "left out: its kind is not public"
+    );
+    assert!(
+        !i3948_holds(&out.player, secret_def),
+        "a private definition is private"
+    );
+    // A reader that plays the parts from the baseline holds the same state.
+    let mut reader = PublicPlayer::start(h.stored(), &out.baseline).unwrap();
+    for n in 0..4 {
+        reader
+            .play(&fs::read(out.generation_dir().join(n.to_string())).unwrap())
+            .unwrap();
+    }
+    assert_eq!(reader.state(), out.player.state());
+}
+
+/// B1-5: a writer killed mid-write leaves its `.tmp`, never a short or zero-filled file under the final name, so the
+/// next start writes the name whole instead of refusing `stream-immutable` for ever (a world that could not restart).
+#[test]
+fn an_immutable_file_killed_mid_write_leaves_only_its_tmp_and_the_next_write_completes_it() {
+    let dir = scratch("immutable-tmp");
+    let path = dir.join("g").join("baseline");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    // What a kill between create and write left before: a torn temporary, and no final name.
+    fs::write(dir.join("g").join("baseline.tmp"), [0u8; 3]).unwrap();
+    immutable(&path, b"the whole baseline").unwrap();
+    assert_eq!(fs::read(&path).unwrap(), b"the whole baseline");
+    assert!(
+        !dir.join("g").join("baseline.tmp").exists(),
+        "no temporary is left"
+    );
+    // The same bytes again are fine; other bytes under a written name are still refused.
+    immutable(&path, b"the whole baseline").unwrap();
+    assert_eq!(
+        immutable(&path, b"other bytes").unwrap_err().name,
+        "stream-immutable"
+    );
+    fs::remove_dir_all(&dir).unwrap();
+}
+
+/// B1-7: `write_whole` (the pointer, `world.json`) leaves the whole new file under its name, synced, and no temporary.
+#[test]
+fn write_whole_leaves_the_whole_file_and_no_temporary() {
+    let dir = scratch("write-whole");
+    let path = dir.join("world.json");
+    fs::write(&path, b"old").unwrap();
+    let new = b"{\"stream\":\"views/a/\",\"history\":\"h\"}\n".repeat(200);
+    write_whole(&path, &new).unwrap();
+    assert_eq!(fs::read(&path).unwrap(), new);
+    assert!(!dir.join("world.json.tmp").exists());
+    fs::remove_dir_all(&dir).unwrap();
 }

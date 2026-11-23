@@ -177,3 +177,60 @@ test('#4177: a rollback removes the published views, and a re-route whose snapsh
   assert.deepEqual(readdirSync(staticDir), [], 'a failed publish leaves nothing to serve');
   assert.equal(served(), null, 'the snapshot falls through to the live old view');
 });
+
+test('W1: one binding file, two worlds: each switches and turns back alone, its page names its own stream and static folder', async t => {
+  const dir = mkdtempSync(new URL('w1-two-worlds-', scratch)), data = join(dir, 'data'), file = join(dir, 'binding.json'), routes = join(dir, 'routes.json');
+  const client = join(dir, 'client'), bodies = join(dir, 'bodies');
+  for (const d of [data, client, bodies]) mkdirSync(d, { recursive: true });
+  const described = (name, text) => { const bytes = Buffer.from(text); writeFileSync(join(client, name), bytes); return { name, bytes: bytes.length, sha256: createHash('sha256').update(bytes).digest('hex') }; };
+  const files = [described('replica.js', 'test module'), described('replica_bg.wasm', 'test wasm')];
+  writeFileSync(join(client, 'soul-client.json'), JSON.stringify({ ...described('eden.mjs', 'client'), contract: 'souls-v2/1', version: '3.0.0', skill: described('skill.md', 'skill'), files }));
+  writeFileSync(join(bodies, 'bodies.json'), '{"format":"souls/bodies/1","bodies":[]}');
+  const worlds = ['eden', 'mars'].map(slug => ({ slug, name: slug, template: 'empty', createdAt: 1, owner: 'synthetic-owner' }));
+  writeFileSync(join(data, 'worlds.json'), JSON.stringify({ schema: 'world-launcher-registry/1', legacyBases: [], worlds }));
+  const staticOf = (slug) => join(dir, `origin/s/${slug}/static`);
+  // Eden's binding file as installed today: one world, read unchanged
+  const { v2Switch } = await import('./v2-switch.mjs');
+  v2Switch({ binding: file, slug: 'eden', stream: '/s/eden/', routes, client, staticDir: staticOf('eden'), bodies });
+  const edenOnly = JSON.parse(readFileSync(file, 'utf8'));
+  assert.equal(edenOnly.canonicalSlug, 'eden', 'one world bound: the file stays one world\'s'); assert.equal(Object.hasOwn(edenOnly, 'worlds'), false);
+  const P = await testPort(3), base = `http://127.0.0.1:${P}`, fake = new URL('./fake-world.mjs', import.meta.url).pathname;
+  const launcher = await openLauncher({ port: P, range: [P + 1, P + 2], dataDir: data, eager: 0, base: '/', log: () => {}, cutoverBindingFile: file,
+    command: (w, port) => ({ cmd: process.execPath, args: [fake], env: { ...process.env, WORLD_KEY: w.slug, PORT: String(port), FAKE_ACT: '1' } }) });
+  t.after(async () => { await launcher.close(); rmSync(dir, { recursive: true, force: true }); });
+  const page = async (slug) => JSON.parse(/<script>window\.__simConfig=(\{.*?\})<\/script>/.exec(await (await fetch(`${base}/w/${slug}/`, { headers: { accept: 'text/html' } })).text())[1]);
+  const act = (slug) => fetch(`${base}/w/${slug}/v1/edge/act`, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer sim_s_soul1_secret' }, body: '{}' });
+  const published = async (slug) => { for (let i = 0; i < 100 && !existsSync(join(staticOf(slug), 'manifest.json')); i++) await new Promise(r => setTimeout(r, 20)); return JSON.parse(readFileSync(join(staticOf(slug), 'manifest.json'))); };
+  const settle = () => new Promise(r => setTimeout(r, 1100)); // the launcher looks at the binding file once a second
+
+  assert.equal((await page('eden')).v2Stream, '/s/eden/', 'Eden switched'); assert.equal((await published('eden')).stream, '/s/eden/');
+  assert.equal(Object.hasOwn(await page('mars'), 'v2Stream'), false, 'Mars not bound: its page names no stream');
+  assert.equal((await act('mars')).status, 200, 'Mars still acts on the old engine');
+  assert.equal((await act('eden')).status, 409, 'Eden refuses old acts');
+
+  // a second world is added: it shares the routes, client and bodies folders, never Eden's static folder
+  assert.throws(() => v2Switch({ binding: file, slug: 'mars', stream: '/s/mars/', staticDir: staticOf('eden') }), /cutover.binding-invalid/, 'one static folder per world');
+  v2Switch({ binding: file, slug: 'mars', stream: '/s/mars/', staticDir: staticOf('mars') });
+  const both = JSON.parse(readFileSync(file, 'utf8'));
+  assert.equal(both.schema, 'souls/cutover-binding/2'); assert.deepEqual(both.worlds.map(b => [b.canonicalSlug, b.oldWorldId, b.routesFile === routes]), [['eden', 'eden-1', true], ['mars', 'mars-1', true]]);
+  await settle();
+  const mars = await page('mars');
+  assert.equal(mars.v2Stream, '/s/mars/', 'Mars names its own stream'); assert.equal(mars.v2Bodies, '/w/mars/v2/bodies/');
+  const marsManifest = await published('mars');
+  assert.equal(marsManifest.stream, '/s/mars/'); assert.equal(marsManifest.world, 'mars', 'Mars publishes into its own static folder');
+  assert.equal((await page('eden')).v2Stream, '/s/eden/', 'Eden unchanged'); assert.equal((await published('eden')).world, 'eden');
+  assert.equal((await act('mars')).status, 409);
+  assert.equal((await (await fetch(`${base}/__sim/op/cutover`)).json()).worlds.map(w => [w.canonicalSlug, w.active]).join(), 'eden,true,mars,true');
+
+  // --back for one world returns that one only
+  assert.throws(() => v2Switch({ binding: file, back: true }), /v2-switch.slug-needed/, 'two bound: the slug is needed');
+  v2Switch({ binding: file, back: true, slug: 'eden' });
+  const edenBack = await page('eden');
+  assert.equal(Object.hasOwn(edenBack, 'v2Stream'), false, 'Eden back on the old engine');
+  assert.equal(existsSync(join(staticOf('eden'), 'manifest.json')), false, 'Eden\'s published views removed');
+  assert.equal((await act('eden')).status, 200, 'Eden acts on the old engine again');
+  assert.equal((await page('mars')).v2Stream, '/s/mars/', 'Mars still switched'); assert.equal(existsSync(join(staticOf('mars'), 'manifest.json')), true, 'Mars\'s views kept');
+  assert.equal((await act('mars')).status, 409);
+  const table = JSON.parse(readFileSync(routes, 'utf8')).worlds;
+  assert.deepEqual([table.eden.canonical, table.mars.canonical], [false, true]);
+});

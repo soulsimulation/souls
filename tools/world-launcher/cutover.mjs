@@ -69,7 +69,10 @@ export const bindingId = ({ oldWorldId, canonicalSlug, routesFile, clientDir }) 
 const BODY_FILE = /^(?:[a-z][a-z0-9_]*\.(?:json|diag)|[a-z0-9-]+\.mesh\.glb|clips-[a-z0-9-]+\.glb|models\/[a-f0-9]{64}\.(?:glb|json|mesh)|decoder\/draco_[a-z_]+\.(?:js|wasm))$/;
 const bodyType = (name) => ({ json: 'application/json', glb: 'model/gltf-binary', wasm: 'application/wasm', js: 'text/javascript; charset=utf-8' })[name.split('.').pop()] ?? 'application/octet-stream';
 
-/** The launcher's fence. Given `binding`, that binding; otherwise the binding file (`SOULS_CUTOVER_BINDING`, else
+/** The launcher's fence. A binding is one world's (`{oldWorldId, canonicalSlug, routesFile, clientDir, …}`, Eden's file
+ *  as installed) or, W1 (0.133), a list of them (`{schema: 'souls/cutover-binding/2', worlds: [one world's, …]}`), each
+ *  with its own route, static folder and published views; the launcher passes each request's world and the fence answers
+ *  for that world's own binding. Given `binding`, that binding; otherwise the binding file (`SOULS_CUTOVER_BINDING`, else
  *  /etc/souls/cutover-binding.json), read again when it changes (looked at once a second), so the switch command
  *  (v2-switch.mjs) takes effect without a restart. No file: an ordinary old launcher until one is written. An invalid
  *  file refuses startup; written invalid later, the last valid binding stays and `log` says so. */
@@ -99,7 +102,29 @@ export function cutoverFence({ binding, file = process.env.SOULS_CUTOVER_BINDING
   };
 }
 
+export const BINDINGS = 'souls/cutover-binding/2';
+/** The bindings a binding file holds: a list's worlds, or the one world of a single binding. */
+export const bindingsOf = (binding) => (Array.isArray(binding?.worlds) ? binding.worlds : [binding]);
+
 function fenceOf(binding) {
+  if (!binding || typeof binding !== 'object' || (binding.worlds === undefined && binding.schema === undefined)) return oneFence(binding);
+  if (binding.schema !== BINDINGS || !Array.isArray(binding.worlds) || !binding.worlds.length) throw Error('cutover.binding-invalid');
+  const fences = binding.worlds.map(oneFence);
+  const distinct = (key) => { const v = binding.worlds.map((b) => b[key]).filter((x) => x !== undefined); return new Set(v).size === v.length; };
+  // one entry per world, and never two worlds publishing into one static folder (each clears its own on rollback)
+  if (!distinct('canonicalSlug') || !distinct('oldWorldId') || !distinct('staticDir')) throw Error('cutover.binding-invalid');
+  const of = (w) => fences.find((f) => f.bound(w));
+  return {
+    inspect: (registry) => ({ configured: true, worlds: fences.map((f) => f.inspect(registry)) }),
+    v2Stream: (w) => of(w)?.v2Stream(w) ?? null,
+    v2Bodies: (w) => of(w)?.v2Bodies(w) ?? null,
+    v2Fields: (w) => of(w)?.v2Fields(w) ?? null,
+    publish: (w, read) => of(w)?.publish(w, read) ?? Promise.resolve(null),
+    handle: (req, res, w, url) => of(w)?.handle(req, res, w, url) ?? false,
+  };
+}
+
+function oneFence(binding) {
   if (!binding || typeof binding.oldWorldId !== 'string' || !binding.oldWorldId.length || binding.oldWorldId.length > 256 || /[\x00-\x1f\x7f]/.test(binding.oldWorldId) || !/^[a-z0-9][a-z0-9-]{0,62}$/.test(binding.canonicalSlug)
       || !isAbsolute(binding.routesFile ?? '') || !isAbsolute(binding.clientDir ?? '') || (binding.staticDir !== undefined && !isAbsolute(binding.staticDir)) || (binding.v2Bodies !== undefined && !sameOriginDir(binding.v2Bodies)) || (binding.bodiesDir !== undefined && !isAbsolute(binding.bodiesDir))
       || (binding.v2Gateway !== undefined && !samePath(binding.v2Gateway)) || (binding.v2Directory !== undefined && binding.v2Directory !== '/')) throw Error('cutover.binding-invalid');
@@ -130,6 +155,7 @@ function fenceOf(binding) {
   const active = () => route().canonical === true;
   const bound = (w) => !!w && worldIdOf(w) === oldWorldId;
   return {
+    bound,
     inspect(registry) {
       const w = registry.worlds.find(bound);
       if (!w) throw Error('cutover.binding-world-missing');
@@ -161,7 +187,10 @@ function fenceOf(binding) {
      *  front door's paths: `/w/<world>/v2/ws` and `/`). */
     v2Fields(w) {
       if (!this.v2Stream(w)) return null;
-      return { ...(v2Bodies ? { v2Bodies } : {}), v2Gateway: binding.v2Gateway ?? `/w/${canonicalSlug}/v2/ws`, v2Directory: binding.v2Directory ?? '/' };
+      // R2 (0.133): the world's public history export (its route's `history`, `/s/…/`), for the page's past time
+      let history = null;
+      try { const r = route(); history = publicStream(r.history) ? r.history : null; } catch { /* none */ }
+      return { ...(v2Bodies ? { v2Bodies } : {}), v2Gateway: binding.v2Gateway ?? `/w/${canonicalSlug}/v2/ws`, v2Directory: binding.v2Directory ?? '/', ...(history ? { v2History: history } : {}) };
     },
     /** #4177: at route time, the old world's static views (`read(path)` -> `{ status, body }` from its process) written
      *  into staticDir, each file whole (`.tmp`, then renamed; the origin never serves a `.tmp`), the manifest last. Once

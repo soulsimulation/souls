@@ -82,6 +82,11 @@ impl Ends {
         self.lives.is_empty() && self.loose.is_empty()
     }
 
+    /// The earliest pending end (O2: when a sleeping world must be up).
+    pub fn next_due(&self) -> Option<Micros> {
+        self.due.next_due()
+    }
+
     /// Things with an end pending.
     pub fn pending(&self) -> usize {
         self.loose.len()

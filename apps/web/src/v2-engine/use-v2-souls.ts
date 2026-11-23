@@ -11,6 +11,7 @@ import type { Souls } from '../useSouls.ts';
 import type { V2Bridge } from './bridge.ts';
 import { streamNotice } from './stream-health.ts';
 import { appendEdge, WorldState, type LayerLike } from './world-state.ts';
+import { historyBase, setV2History, V2History } from './history.ts';
 
 const STREAM = /^\/s\/[A-Za-z0-9._/-]+\/$/;
 /** The v2 stream this world's page reads, when its inline config names one; else null (the old socket). */
@@ -45,11 +46,15 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
     void (async () => {
      try {
       const scene = await fetch(apiPath('/v1/scene')).then((r) => (r.ok ? r.json() : null)).catch(() => null) as { renderSceneRef?: { rulesVersion?: string } } | null;
-      const [{ V2Bridge }, { makeReader }] = await Promise.all([import('./bridge.ts'), import('./reader.ts')]);
+      const [{ V2Bridge }, { makeReader, makeHistoryReader }] = await Promise.all([import('./bridge.ts'), import('./reader.ts')]);
       if (stopped) return;
       // `hour=HH:MM`, as on the v2 page: the light of the picture only, the world's clock unchanged
       const hour = /^([01]\d|2[0-3]):[0-5]\d$/.exec(new URLSearchParams(location.search).get('hour') ?? '')?.[0];
-      bridge = new V2Bridge({ rulesVersion: scene?.renderSceneRef?.rulesVersion ?? 'souls-v2/1', ...(scene?.renderSceneRef ? { renderSceneRef: scene.renderSceneRef } : {}) }, hour);
+      const frame = { rulesVersion: scene?.renderSceneRef?.rulesVersion ?? 'souls-v2/1', ...(scene?.renderSceneRef ? { renderSceneRef: scene.renderSceneRef } : {}) };
+      bridge = new V2Bridge(frame, hour);
+      // R2: the old page's rewind reads this world's past from its history export (history.ts)
+      const past = historyBase(stream, (window as unknown as { __simConfig?: unknown }).__simConfig);
+      if (past) setV2History(new V2History(past, () => makeHistoryReader(new URL(apiPath('/replica.js'), location.href).href), frame));
       bridge.start(stream, () => world.watch(makeReader(new URL(apiPath('/replica.js'), location.href).href)));
       // read-only, for checks and proof: what the stream gave (parts played, newest time, the reader's last error)
       (window as unknown as { __soulsV2?: unknown }).__soulsV2 = bridge.view;
@@ -69,6 +74,8 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
         const v = bridge.view;
         st.takes = v.takes;
         st.edge = v.speech; // what the Souls said aloud (take-speech.ts): the speech layer and dialogue dock read it as public
+        if (v.conversations.length) st.edge = [...st.edge, ...v.conversations] as typeof st.edge; // R3: private turns, words withheld
+        st.ticker = v.ticker; // R3: what the Souls did (take-talk.ts)
         conn.replica.tick = v.takes.serverTick;
         // the replica's entities as the old socket keeps them: who is in the world now (search and follow read them)
         const newest = v.takes.chunks.at(-1)?.take as { finalState?: { entities?: Record<string, unknown> } } | undefined;
@@ -92,7 +99,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
       st.streamNotice = streamNotice({ failed, error: bridge?.view.error ?? null, errorAtParts, parts: seenParts, startedAt, lastPartAt, now: performance.now() });
       force((n) => n + 1);
     }, 200);
-    return () => { stopped = true; clearInterval(t); bridge?.stop(); };
+    return () => { stopped = true; clearInterval(t); bridge?.stop(); setV2History(null); };
   }, [stream]);
   return s.current;
 }

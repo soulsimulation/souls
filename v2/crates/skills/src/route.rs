@@ -3,18 +3,26 @@
 //! world to carry it. It touches the world through `Host` alone, so it runs on any family with locomotion.
 //!
 //! - **A tick.** Aim at the next corner toward the leg's end (`Ask::Toward`), add a push away from every body within
-//!   [`RANGE`] (`Ask::Near`: ids, positions and velocities as of the last tick), leaning right when one comes
-//!   head-on, and hand the velocity on (`Host::control`). The push is resolved on the walker's own axes: forward, never
-//!   below a tenth of free speed, and sideways; the sum never exceeds free speed.
+//!   [`RANGE`] ahead of it, or beside or behind it within two spaces (`Ask::Near`: ids, positions and velocities as of
+//!   the last tick; a body a [`LEVEL`] above or below is left out), leaning right when one comes head-on, and hand the
+//!   velocity on (`Host::control`). The push is resolved on the walker's own axes: forward, never below a tenth of free
+//!   speed, and sideways; the sum never exceeds free speed.
+//! - **Its own space** (#4215). Under the push, a hard guard: over a tick a walker closes on each body near it by at
+//!   most half the gap beyond two radii ([`ROOM`] each), and not at all when already inside; the other keeps its own
+//!   half, so no step ends inside another body's space. A step the guard holds is a wait, never a jump.
 //! - **Crossing.** At a link's near end it asks the world to carry it (`Host::cross`); a shut door is opened for it by
 //!   the world. While carried its body shows [`F_CROSSING`]; once that is gone, the next leg starts.
 //! - **Turns at a narrow place** (N8, T9b A3). The link reads [`F_TURNS`] when it is taken in turns, and
 //!   [`F_GRANTED`] names the body its owner lets in. Without leave the walker marks itself waiting, [`F_WAITING`] on
 //!   its own body (`[link, distance µm]`), within [`MARK`] of the near end, and stands within [`QUEUE`] of it or
-//!   behind a body waiting for the same link within [`BEHIND`] and nearer. Those waiting push only each other.
-//! - **Along an edge.** The mover cuts a step at the ground's edge and does not slide. A step that left the body where
-//!   it was is tried next tick turned by 45 and then 70 degrees, either way (N7 tried them in the same tick on a copy;
-//!   through the host the skill sees each result a tick later, T1).
+//!   behind a body waiting for the same link within [`BEHIND`] and nearer. Those waiting push only each other. A
+//!   standing waiter steps aside, square to the line between them, for a walker let into a narrow place near it (for
+//!   its own link, one farther from the end) and for a walker not waiting that touches it, so a queue never stands in
+//!   a mouth or walls a walker in.
+//! - **Along an edge.** The mover slides the part of a step past the ground's edge along it. A step that left the body
+//!   where it was is tried next tick turned by 45 and then 70 degrees, either way (N7 tried them in the same tick on a
+//!   copy; through the host the skill sees each result a tick later, T1). A slide is not guarded: it may close a little
+//!   on a body beside the edge, which [`SLACK`] covers in part (#4215).
 //! - **N10's ladder** (T9c #3127) reaches the walk by fields the world sets on its body: [`F_SHOULDER`] (no body
 //!   pushes it), [`F_ROUTE`] (a new route, walked from its first leg) and [`F_HELD`] (the world walks it out to legal
 //!   ground: it stands and clears its mark). Ending the walk by name is the world's: the run is ended. A route taken,
@@ -57,6 +65,21 @@ pub const BEHIND: i64 = 700_000;
 pub const AT_SPOT: i64 = 50_000;
 /// Within this of its granted standing spot, µm, no body pushes a walker (N9).
 pub const CALM: i64 = 1_000_000;
+/// A body's own space, µm: its personal radius, until the body def carries one (#4215). No step ends within two of
+/// them (and [`SLACK`]) of another body, closer than it began.
+pub const ROOM: i64 = 150_000;
+/// Kept on top of two radii, µm: for the mover's rounding and for the part of a step it slides along a ground edge,
+/// which the guard does not see (#4215).
+pub const SLACK: i64 = 15_000;
+/// A walker whose step the guard cut to under a quarter for this many ticks in a row yields (#4215).
+pub const HOLD: u32 = 10;
+/// A walker held this near its goal, µm, by a body at rest nearer the goal has arrived: the crowd there is as
+/// near as it gets (#4215).
+pub const CROWDED: i64 = 3_000_000;
+/// A body this much above or below a walker, µm, stands on another level: it neither pushes nor holds it (#4215).
+pub const LEVEL: i64 = 1_000_000;
+/// A yielding walker stands this many ticks while the lower id holding it is near.
+pub const BACK: u32 = 10;
 
 /// The turns a stalled step is tried at, in order: none, then 45 degrees either way, then 70 either way (cosine and
 /// sine in thousandths).
@@ -92,8 +115,17 @@ pub struct Route {
     crossing: Option<Crossing>,
     /// The mark last set on the body.
     waiting: Option<(Id, i64)>,
-    /// Last tick's position, velocity wanted and turn tried, for a step cut at an edge.
+    /// Last tick's position, guarded step and turn tried, for a step the mover cut at an edge.
     last: Option<(Vec3, [i64; 2], usize)>,
+    /// Its personal radius, µm (#4215).
+    pub room: i64,
+    /// Ticks into the window its progress is judged over, and where the window began.
+    held: u32,
+    window: Option<Vec3>,
+    /// Yielding: the body it stands for and the ticks left.
+    yielding: Option<(Id, u32)>,
+    /// Standing aside while waiting: where it stood last tick and the side it steps to.
+    aside: Option<(Vec3, i64)>,
 }
 
 impl Route {
@@ -108,6 +140,11 @@ impl Route {
             crossing: None,
             waiting: None,
             last: None,
+            room: ROOM,
+            held: 0,
+            window: None,
+            yielding: None,
+            aside: None,
         }
     }
 
@@ -191,6 +228,7 @@ fn wanted(
     speed: i64,
     dt: Micros,
     near: &[(Near, i64)],
+    lane: i64,
 ) -> [i64; 2] {
     let d = [i128::from(aim[0] - p[0]), i128::from(aim[1] - p[1])];
     let l = (d[0] * d[0] + d[1] * d[1]).isqrt();
@@ -219,6 +257,13 @@ fn wanted(
         let toward = i128::from(n.velocity.x) * d[0] + i128::from(n.velocity.z) * d[1] < 0;
         if ahead && toward {
             g += push * i128::from(LEAN) / 4;
+        } else if ahead && (o[0] * r[0] + o[1] * r[1]).abs() < i128::from(lane) * l {
+            // A body ahead in its lane, not coming at it (standing, or going its way): it steps aside, on the side
+            // it is already on, the lower id to its right when exactly behind (#4215).
+            let side = o[0] * r[0] + o[1] * r[1];
+            let right = side > 0 || (side == 0 && me < n.id);
+            let lean = push * i128::from(LEAN) / 4;
+            g += if right { lean } else { -lean };
         }
     }
     let floor = (speed / 10).min(s);
@@ -236,6 +281,54 @@ fn wanted(
 fn turned(v: [i64; 2], (c, s): (i64, i64)) -> [i64; 2] {
     let r = [(v[0] * c - v[1] * s) / 1000, (v[0] * s + v[1] * c) / 1000];
     [r[0] * c / 1000, r[1] * c / 1000]
+}
+
+/// The velocity `v` of a walker at `p`, cut so that over a tick of `dt` it closes on each body `near` (as of the last
+/// tick) by at most half the gap beyond `room` (two radii and slack), and not at all when inside it (#4215). The
+/// other body keeps its own half from the same snapshot, so no pair ends a tick nearer than `room` that was not; one
+/// already inside never gets nearer. Each cut takes only the excess toward that body (a slide, its side step kept);
+/// a velocity still over a bound after three passes is a wait.
+fn guard(p: [i64; 2], v: [i64; 2], dt: Micros, near: &[Near], room: i64) -> [i64; 2] {
+    let dt = i128::from(dt.max(1));
+    let bounds: Vec<([i128; 2], i128, i128)> = near
+        .iter()
+        .filter_map(|n| {
+            let u = [
+                i128::from(n.position.x - p[0]),
+                i128::from(n.position.z - p[1]),
+            ];
+            let gap = (u[0] * u[0] + u[1] * u[1]).isqrt();
+            // At one point there is no way toward it: any step is apart.
+            (gap > 0).then(|| (u, gap, (gap - i128::from(room)).max(0) / 2 * 1_000_000 / dt))
+        })
+        .collect();
+    let mut v = [i128::from(v[0]), i128::from(v[1])];
+    let over = |v: [i128; 2], (u, gap, most): &([i128; 2], i128, i128)| {
+        v[0] * u[0] + v[1] * u[1] - most * gap
+    };
+    for _ in 0..3 {
+        let mut cut = false;
+        for b in &bounds {
+            let e = over(v, b);
+            if e > 0 {
+                // Less e / gap² of u, rounded up: the speed toward it falls to its bound.
+                let g2 = b.1 * b.1;
+                v = [
+                    v[0] - (e * b.0[0]).div_euclid(g2) - b.0[0].signum(),
+                    v[1] - (e * b.0[1]).div_euclid(g2) - b.0[1].signum(),
+                ];
+                cut = true;
+            }
+        }
+        if !cut {
+            break;
+        }
+    }
+    if bounds.iter().any(|b| over(v, b) > 0) {
+        return [0, 0];
+    }
+    let fit = |v: i128| i64::try_from(v).unwrap_or(0);
+    [fit(v[0]), fit(v[1])]
 }
 
 fn walk(host: &mut dyn Host, v: [i64; 2]) {
@@ -364,8 +457,12 @@ impl Skill for Route {
             Some(l) if narrow && gap <= MARK => Some((l, gap)),
             _ => None,
         };
-        let near = match host.ask(&Ask::Near { radius: RANGE }) {
-            Some(Answer::Near(n)) => n,
+        // A body a level above or below (on a stair over it) is not in its way (#4215).
+        let near: Vec<Near> = match host.ask(&Ask::Near { radius: RANGE }) {
+            Some(Answer::Near(n)) => n
+                .into_iter()
+                .filter(|n| (n.position.y - p.y).abs() < LEVEL)
+                .collect(),
             _ => Vec::new(),
         };
         let dist = |n: &Near| len([p.x - n.position.x, p.z - n.position.z]);
@@ -376,7 +473,54 @@ impl Skill for Route {
                 .filter(|n| dist(n) < BEHIND)
                 .any(|n| mark_of(host, n.id).is_some_and(|(l, g)| Some(l) == leg.link && g < gap));
             if gap <= QUEUE || (gap <= MARK && behind) {
-                walk(host, [0, 0]);
+                // A walker let into its own narrow place close by: it stands aside, square to the line between
+                // them, so it never stands in the mouth that walker goes to (#4215, N8).
+                let reach = 2 * (2 * self.room + SLACK);
+                // For its own link, only one farther from the end than itself: one nearer it is not held by it.
+                // A walker not waiting that it touches (within two spaces and two steps): it stands aside from that
+                // one too, so a queue never walls a walker in (#4215).
+                let touch = 2 * self.room + SLACK + 2 * self.speed * self.tick / 1_000_000;
+                let by =
+                    near.iter()
+                        .filter(|n| dist(n) <= reach)
+                        .find(|n| match mark_of(host, n.id) {
+                            Some((l, g)) => {
+                                (Some(l) != leg.link || g > gap)
+                                    && host.read(l).and_then(|s| {
+                                        s.fields.get(&F_GRANTED).and_then(|v| read_id(v).ok())
+                                    }) == Some(n.id)
+                            }
+                            None => dist(n) <= touch,
+                        });
+                let Some(n) = by else {
+                    self.aside = None;
+                    walk(host, [0, 0]);
+                    return Progress::Going;
+                };
+                let o = [p.x - n.position.x, p.z - n.position.z];
+                let o = if o == [0, 0] {
+                    if body < n.id { [1, 0] } else { [-1, 0] }
+                } else {
+                    o
+                };
+                // The side kept while it moves; turned over when the last step left it where it was (an edge).
+                let side = match self.aside {
+                    Some((q, s)) if q == p => -s,
+                    Some((_, s)) => s,
+                    None => {
+                        if body < n.id {
+                            1
+                        } else {
+                            -1
+                        }
+                    }
+                };
+                let l = len(o).max(1);
+                let half = self.speed / 2;
+                let want = [-o[1] * side * half / l, o[0] * side * half / l];
+                let step = guard([p.x, p.z], want, self.tick, &near, 2 * self.room + SLACK);
+                self.aside = Some((p, side));
+                walk(host, step);
                 return Progress::Going;
             }
         }
@@ -411,7 +555,14 @@ impl Skill for Route {
         if !shoulder && !calm {
             for n in &near {
                 let settled = self.spot && host.field(n.id, F_SETTLED).is_some();
-                if (wait || mark_of(host, n.id).is_none()) && !settled {
+                // A body ahead pushes; one beside or behind only when within two spaces: from farther it would
+                // press the walker into an edge (#4215).
+                let ahead =
+                    (n.position.x - p.x) * (aim.x - p.x) + (n.position.z - p.z) * (aim.z - p.z) > 0;
+                if (ahead || (!wait && dist(n) <= 2 * (2 * self.room + SLACK)))
+                    && (wait || mark_of(host, n.id).is_none())
+                    && !settled
+                {
                     pushers.push((*n, dist(n)));
                 }
             }
@@ -423,14 +574,71 @@ impl Skill for Route {
             self.speed,
             self.tick,
             &pushers,
+            2 * self.room + SLACK,
         );
-        // A step cut to nothing last tick is tried turned this tick.
+        // A step the mover cut to nothing last tick is tried turned this tick. The step kept is the guarded one: a
+        // wait for another body's space is no edge, and is not turned (#4215).
         let turn = match self.last {
             Some((q, w, t)) if q == p && w != [0, 0] && v != [0, 0] => (t + 1) % TURNS.len(),
             _ => 0,
         };
-        self.last = Some((p, v, turn));
-        walk(host, turned(v, TURNS[turn]));
+        // The hard rule under the push: no step into another body's space (#4215).
+        let room = 2 * self.room + SLACK;
+        let mut want = turned(v, TURNS[turn]);
+        // Yielding: held by a lower id, it stands a while, so the lowest id of a knot goes first.
+        if let Some((from, left)) = self.yielding {
+            if left > 0 && near.iter().any(|n| n.id == from) {
+                want = [0, 0];
+                self.yielding = Some((from, left - 1));
+            } else {
+                self.yielding = None;
+            }
+        }
+        let step = guard([p.x, p.z], want, self.tick, &near, room);
+        // Judged over a window of HOLD ticks: a walker that got under a quarter of its free way, while a lower id
+        // stands near it ahead, yields to that one (one behind does not hold it).
+        self.held += 1;
+        let start = *self.window.get_or_insert(p);
+        if self.held >= HOLD {
+            let moved = len([p.x - start.x, p.z - start.z]);
+            let could = self.speed * self.tick * i64::from(HOLD) / 1_000_000;
+            if self.yielding.is_none() && moved * 4 < could {
+                let reach = 2 * room;
+                let by = near
+                    .iter()
+                    .filter(|n| {
+                        n.id < body
+                            && dist(n) <= reach
+                            && (n.position.x - p.x) * (aim.x - p.x)
+                                + (n.position.z - p.z) * (aim.z - p.z)
+                                > 0
+                    })
+                    .min_by_key(|n| (dist(n), n.id));
+                if let Some(n) = by {
+                    self.yielding = Some((n.id, BACK));
+                }
+            }
+            (self.held, self.window) = (0, None);
+        }
+        // Held near its goal by a body at rest nearer it: as near as the crowd allows, it has arrived.
+        let last = leg.link.is_none() && self.leg + 1 == self.legs.len() && !self.spot;
+        if last && gap <= CROWDED && len(step) * 4 < len(want) {
+            let reach = room + self.speed * self.tick / 1_000_000;
+            let to_goal = |q: Vec3| len([leg.to.x - q.x, leg.to.z - q.z]);
+            let held = near.iter().any(|n| {
+                n.velocity.x == 0
+                    && n.velocity.z == 0
+                    && dist(n) <= reach
+                    && to_goal(n.position) < gap
+                    && mark_of(host, n.id).is_none()
+            });
+            if held {
+                walk(host, [0, 0]);
+                return Progress::Done;
+            }
+        }
+        self.last = Some((p, step, turn));
+        walk(host, step);
         Progress::Going
     }
 }
