@@ -1,0 +1,48 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:drying_line",
+  "owner": "thing",
+  "points": {
+    "stand": { "role": "stand", "at_mm": [0, 0, 600], "yaw_mdeg": 180000 }
+  },
+  "slots": {
+    "line": { "admits": "thing", "kinds": ["eden:camp_linen"], "most": 3, "at_mm": [0, 1500, 0], "fits_mm": [400, 400, 300], "stand": "stand" }
+  },
+  "geometry": { "bounds_mm": [3000, 1800, 200] },
+  "forms": {
+    "hang": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "linen": { "type": "thing" } },
+      "needs": [
+        { "need": "held_by_actor", "thing": { "arg": "linen" } },
+        { "need": "slot_free", "slot": "line" }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "put", "slot": "line" }
+      ],
+      "effects": [{ "change": "reparent", "what": { "arg": "linen" }, "into": "line", "event": "hung_up" }]
+    },
+    "take_down": {
+      "who": "anyone",
+      "starts": "act",
+      "takes": { "linen": { "type": "thing", "select": { "of": "things", "in": "this", "anchor": "me", "order": "nearest", "rank": 1 } } },
+      "needs": [{ "need": "hand", "free": true }],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "take", "slot": "line" }
+      ],
+      "effects": [{ "change": "reparent", "what": { "arg": "linen" }, "into": "actor_hand", "event": "taken_down" }]
+    }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "text": {
+    "card": "A drying line between two posts: hang up to three linens on it, take one down.",
+    "laundry": "laundry",
+    "washing_line": "washing line",
+    "clothesline": "clothesline"
+  },
+  "card": { "text": "card", "category": "laundry", "synonyms": ["washing_line", "clothesline"] }
+}
