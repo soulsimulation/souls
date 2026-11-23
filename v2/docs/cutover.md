@@ -128,6 +128,53 @@ What they change: the proxy's site files, the front door's map and its timer, th
 Nothing else: no DNS record, no world, no store, no unit of either system. Both systems run throughout; the switch
 decides only which of them the public name sends Eden's page to.
 
+## Switching Eden's old page, step by step (0.134 F5-ready)
+
+The switch as it is now (#4210, #4249, #4248, #4250, #4252): the front door already sends streams, a switched world's
+gateway and pairing to the new system, and the launcher keeps serving the old page; the switch is one file the launcher
+reads (the binding) and one flag (the route's `canonical`). Accounts and Souls are not carried over (pre-release, zero
+users): they are saved to one file, then wiped, and owners pair again. Run as root on the production host, in this
+order, with Gene's yes. Set once, from the host:
+
+```sh
+P=/srv/sim-worlds/production                          # the live release
+WORLD=<the new Eden's world name>                     # as place-world.sh placed it (/etc/souls/cutover.env's WORLD)
+STREAM=/s/$(node -e "console.log(JSON.parse(require('fs').readFileSync('/var/lib/souls/worlds/worlds/$WORLD/views/world.json','utf8')).stream.replace(/^\//,''))")
+STATIC=<a folder the launcher's user can write>       # where the launcher publishes old Eden's static views
+LAUNCHER_PORT=<today's launcher port>
+```
+
+| Step | Command | Rehearsed |
+|---|---|---:|
+| 1. Stop the directory (it holds its stores) | `systemctl stop souls-directory` | 0.0 s |
+| 2. Save who owns what to one file | `node $P/v2/tools/ops/cutover/souls-state.mjs save --world /var/lib/souls/worlds/worlds/$WORLD --out /var/lib/souls/saved/eden-owners-$(date -u +%Y%m%dT%H%MZ).tar` | 0.1 s |
+| 3. Wipe them (refused unless step 2's file holds them as they are) | `node $P/v2/tools/ops/cutover/souls-state.mjs wipe --saved /var/lib/souls/saved/eden-owners-<that time>.tar` | 0.1 s |
+| 4. Start the directory on fresh stores | `systemctl start souls-directory` | 0.1 s |
+| 5. Switch Eden's old page | `node $P/tools/world-launcher/v2-switch.mjs --binding /etc/souls/cutover-binding.json --slug eden --stream $STREAM --routes /var/lib/souls/routes/worlds.json --client /usr/local/lib/souls/client --static $STATIC --port $LAUNCHER_PORT` | 1.4 s |
+| 6. Look in a real browser | open `https://soul.game/w/eden/`: the page draws Eden and reads `$STREAM` (the toolbar shows "Link to this moment") | 6.8 s |
+| 7. Switch back, on a stop condition | `node $P/tools/world-launcher/v2-switch.mjs --binding /etc/souls/cutover-binding.json --back --slug eden --port $LAUNCHER_PORT` | 1.5 s |
+| 8. The old page is back | open `https://soul.game/w/eden/` again: no `v2Stream`, the old world answers its reads and draws | 7 s after step 7 |
+
+Then copy the saved file to the private state folder on the release owner's machine (it holds tokens; mode 0600, never
+committed or attached): `scp <production host>:/var/lib/souls/saved/eden-owners-<that time>.tar .local/project/cutover/`.
+
+- **What `save` keeps** (`v2/tools/ops/cutover/souls-state.mjs`): the directory's account and pairing stores, copied whole
+  by SQLite; the gateway's tokens file; the world's `world.json`, `tokens`, `souls.tokens` and `births.json`; and a
+  `manifest.json` with each file's SHA-256 and the counts (accounts, Souls paired, the world's Souls). The paths come
+  from `/etc/souls/directory.args` (`--store`, `--pairing`, `--gateway-tokens`); `--args` names another file.
+- **What `wipe` does:** it checks the saved file holds the stores' rows and the tokens file as they are now, then renames
+  each aside (`<file>.wiped-<time>`) and leaves an empty tokens file; the directory makes fresh stores when it starts
+  and writes the tokens file again from them. Nothing is deleted, and the world is not touched: its Souls' bodies stay.
+  Undoing it is renaming the files back with the directory stopped.
+- **Several worlds** (W1): step 5 with another `--slug`, `--stream` and its own `--static` adds that world to the same
+  binding; step 7's `--back --slug` turns back only that world.
+
+**The rehearsal.** `node v2/tools/ops/cutover/rehearse-switch.mjs --bin <worldd, gatewayd, directoryd> --pkg <replica pkg>
+[--facts <eden facts>]` runs steps 1 to 8 as written on a fresh folder under `.local/`, behind the local front door
+(`soul-game.caddy`, as `tools/release/check-0132.mjs` places it), with fake owners (two accounts and a paired Soul) and
+a real browser, and prints the table above. Its last run: every step passed, and the old page was back 7 s after
+the switch back.
+
 ## One writer
 
 - **In the directory.** The new Eden is one world with one claim (its epoch) in the store, made when it was first
