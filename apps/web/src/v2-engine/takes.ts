@@ -86,25 +86,25 @@ function lastHeading(s: readonly WorldSample[], upTo: number, t: number, fallbac
 }
 
 /** The last whole chunk's end tick at or before world time `t` µs. */
-export const chunkEnd = (t: number) => Math.floor(t / TICK_US / TICKS) * TICKS;
+export const chunkEnd = (t: number, ticks = TICKS) => Math.floor(t / TICK_US / ticks) * ticks;
 
 /** The static part of every chunk's final state: the world clock and anything else the page reads beside entities. */
 export type Frame = { rulesVersion: string; datetime: string | null; renderSceneRef?: unknown };
 
 /**
- * The recorded chunk [fromTick, fromTick + TICKS] for these bodies, in the shape the old server streams (mars-take/4).
+ * The recorded chunk [fromTick, fromTick + ticks] (TICKS unless given) for these bodies, in the shape the old server streams (mars-take/4).
  * A body with no sample at or before the chunk's end is not in it, nor one the copy stopped placing before it began.
  */
-export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame): RecordedChunk {
+export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame, ticks = TICKS): RecordedChunk {
   const tracks: Record<string, number[][]> = {}, changes: [number, string, string, unknown][] = [], entities: Record<string, unknown> = {};
   const events: ReturnType<typeof markOf>[] = [];
-  const endUs = (fromTick + TICKS) * TICK_US;
+  const endUs = (fromTick + ticks) * TICK_US;
   for (const b of bodies) {
     if (!b.samples.length || b.samples[0].at > endUs || (b.until !== undefined && fromTick * TICK_US >= b.until)) continue;
     const track: number[][] = [];
     let activity = '', speedQ: number | null = -1, heading = b.heading, p: [number, number, number] = b.samples[0].p;
     let seatH: number | null | undefined, prop: string | null | undefined;
-    for (let k = 0; k <= TICKS; k++) {
+    for (let k = 0; k <= ticks; k++) {
       const t = (fromTick + k) * TICK_US;
       p = positionAt(b.samples, t)!;
       const m = motionAt(b.samples, t, heading);
@@ -113,16 +113,16 @@ export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame)
       track.push([k, Math.round(p[0]), Math.round(p[1]), Math.round(p[2]), Math.round(heading * ANG_Q)]);
       if (k === 0) { changes.push([0, b.entity, 'present', true], [0, b.entity, 'level', 0]); if (b.look) changes.push([0, b.entity, 'body', b.look]); }
       const seat = walking ? null : seatAt(b.samples, t), nextSeat = seat ? seat.height / POS_Q : null, nextProp = heldAt(b.held, t);
-      if (k < TICKS && nextSeat !== (seatH ?? null)) { changes.push([k, b.entity, 'seatHeight', nextSeat]); seatH = nextSeat; }
-      if (k < TICKS && nextProp !== prop && (nextProp !== null || prop !== undefined)) { changes.push([k, b.entity, 'prop', nextProp]); prop = nextProp; }
+      if (k < ticks && nextSeat !== (seatH ?? null)) { changes.push([k, b.entity, 'seatHeight', nextSeat]); seatH = nextSeat; }
+      if (k < ticks && nextProp !== prop && (nextProp !== null || prop !== undefined)) { changes.push([k, b.entity, 'prop', nextProp]); prop = nextProp; }
       // A gesture plays where the body stands; seated or lying it keeps its posture (the old poses are standing ones).
       const nextActivity = walking ? 'walk' : postureOf(seat) ?? gestureAt(b.gestures, t) ?? 'idle';
-      if (nextActivity !== activity && k < TICKS) { changes.push([k, b.entity, 'activity', nextActivity]); activity = nextActivity; }
+      if (nextActivity !== activity && k < ticks) { changes.push([k, b.entity, 'activity', nextActivity]); activity = nextActivity; }
       const q = walking ? Math.round(m.speed * SPEED_Q) : null;
-      if (k < TICKS && (q === null ? speedQ !== null : speedQ === null || Math.abs(q - speedQ) > 2)) { changes.push([k, b.entity, 'speed', q]); speedQ = q; }
+      if (k < ticks && (q === null ? speedQ !== null : speedQ === null || Math.abs(q - speedQ) > 2)) { changes.push([k, b.entity, 'speed', q]); speedQ = q; }
     }
     tracks[b.entity] = thin(track);
-    for (const l of b.said ?? []) if (l.tick >= fromTick && l.tick < fromTick + TICKS) events.push(markOf(l, fromTick));
+    for (const l of b.said ?? []) if (l.tick >= fromTick && l.tick < fromTick + ticks) events.push(markOf(l, fromTick));
     entities[b.entity] = {
       id: b.entity, def: 'human', kind: 'human', label: b.name, ...(b.look ? { body: b.look } : {}),
       pose: { p: [p[0] / POS_Q, p[1] / POS_Q, p[2] / POS_Q], yaw: heading },
@@ -135,13 +135,13 @@ export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame)
   events.sort((a, b) => a.t - b.t);
   const id = `v2-${fromTick}`;
   return {
-    fromTick, toTick: fromTick + TICKS,
+    fromTick, toTick: fromTick + ticks,
     take: {
-      schema: 'mars-take/4', id, baselineStateHash: `v2-state-${fromTick}`, finalStateHash: `v2-state-${fromTick + TICKS}`,
+      schema: 'mars-take/4', id, baselineStateHash: `v2-state-${fromTick}`, finalStateHash: `v2-state-${fromTick + ticks}`,
       rulesVersion: frame.rulesVersion, ...(frame.renderSceneRef ? { renderSceneRef: frame.renderSceneRef } : {}),
-      dt: DT, startTick: fromTick, ticks: TICKS, keyframeEvery: TICKS,
+      dt: DT, startTick: fromTick, ticks: ticks, keyframeEvery: ticks,
       tracks, changes, events, removed: [], entities0: {},
-      finalState: { tick: fromTick + TICKS, entities, regions: {}, env: { datetime: frame.datetime } },
+      finalState: { tick: fromTick + ticks, entities, regions: {}, env: { datetime: frame.datetime } },
     },
   };
 }

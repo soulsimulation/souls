@@ -790,6 +790,28 @@ test('R8c: history reaches the daemon\'s history answer; a world that advertises
   assert.equal((await god('history', '--at', 'a', '--thing', 'b')).code, 'usage');
 });
 
+test('R8e: a build session carries its name and step on every edit, shows its steps with their edits, and closes', async () => {
+  await connected();
+  const started = await god('build', 'start', 'pavilion', '--steps', 'shell,lamp', '--brief', 'a little pavilion');
+  assert.equal(started.ok, true, JSON.stringify(started));
+  const place = (await god('describe')).nodes.find((x) => x.kind === 'souls:place');
+  const room = await god('place', 'room', '--in', place.id, '--at', '90000,0,30000');
+  assert.equal(room.ok, true, JSON.stringify(room));
+  assert.deepEqual([room.build, room.step], ['pavilion', 'shell'], 'the edit went under the session');
+  assert.equal((await god('build', 'step', 'lamp')).step, 'lamp');
+  const lamp = await god('place', 'lamp', '--in', room.names['1'], '--at', '500,0,500');
+  assert.deepEqual([lamp.ok, lamp.step], [true, 'lamp']);
+  const shown = await god('build', 'show');
+  assert.deepEqual(shown.steps.map((x) => [x.step, x.status, x.edits]), [['shell', 'done', 1], ['lamp', 'open', 1]]);
+  // the world kept them as the build's steps: undo --build takes the lamp step back, then the shell
+  const undone = await god('undo', '--build', 'pavilion');
+  assert.equal(undone.ok, true, JSON.stringify(undone));
+  assert.ok(!(await god('describe')).nodes.some((x) => x.id === lamp.names['1']), 'the lamp step undone');
+  assert.ok((await god('build', 'done')).closed);
+  const after = await god('place', 'lamp', '--in', room.names['1'], '--at', '900,0,900');
+  assert.equal(after.build, undefined, 'closed: edits are as written again');
+});
+
 test('K3: a kind whose look is an uploaded model names an allowed upload; any other hash is refused by name and nothing is sent', async () => {
   await connected();
   const file = join(dir, 'k3-model.png');

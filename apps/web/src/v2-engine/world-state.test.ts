@@ -2,8 +2,8 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { setWeatherInForce } from '@souls/world-compiler/weather-rules';
-import { V2Bridge } from './bridge.ts';
-import { TICK_US, TICKS } from './takes.ts';
+import { CHUNK, V2Bridge } from './bridge.ts';
+import { TICK_US } from './takes.ts';
 import { appendEdge, thingState, weatherOf, WorldState, type LayerLike, type WorldDiff } from './world-state.ts';
 
 const node = (id: string, kind: string, origin: string, fields: Record<number, unknown>) => ({ id, kind, parent: 'w.1', origin, fields });
@@ -96,7 +96,7 @@ test('the sky\'s clock follows v2\'s calendar fields 60-61 in the chunks', () =>
   b.receive({ t: 'part', p: { number: 2, from: 500_000, to: 600 * 1_000_000, nodes: [], removed: [], samples: [] } } as never);
   const last = b.view.takes.chunks.at(-1)!, end = last.toTick;
   const env = (last.take as { finalState: { env: { datetime: string } } }).finalState.env;
-  assert.equal(end % TICKS, 0);
+  assert.equal(end % CHUNK, 0);
   // the chunks' clock is the newest chunk end's civil time: origin + t · 86,400 / day
   const want = new Date(Date.UTC(2026, 5, 1) + Math.floor((b.view.takes.serverTick * TICK_US * 86_400) / day) / 1000).toISOString();
   assert.equal(env.datetime, want);
