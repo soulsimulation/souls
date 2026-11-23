@@ -208,6 +208,11 @@ impl Assembly {
         }
     }
 
+    /// Whether `kind` is a part B18 reads.
+    pub fn is_part(&self, kind: &str) -> bool {
+        self.seating.structure.is_part(kind)
+    }
+
     /// Whether `kind` is a bay (B18's reading).
     pub fn is_bay(&self, kind: &str) -> bool {
         self.seating.structure.is_bay(kind)
