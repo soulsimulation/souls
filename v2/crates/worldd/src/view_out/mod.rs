@@ -2869,8 +2869,12 @@ impl<S: ObjectStore> PublicWriter<S> {
                                 replica::effects::Change::Motion(h) => {
                                     self.touched.insert(h.node);
                                 }
+                                // A node made touches only its own row (T-late: a take that makes the thing it
+                                // takes, a Soul arriving), and so does the source's Create of a private node, which the
+                                // rows leave out.
                                 replica::effects::Change::Set { node, .. }
-                                | replica::effects::Change::Reparent { node, .. } => {
+                                | replica::effects::Change::Reparent { node, .. }
+                                | replica::effects::Change::Create { node, .. } => {
                                     self.touched.insert(*node);
                                 }
                                 replica::effects::Change::Link { link, .. }
@@ -2879,7 +2883,6 @@ impl<S: ObjectStore> PublicWriter<S> {
                                 }
                                 c => {
                                     prof::cause(match c {
-                                        replica::effects::Change::Create { .. } => "create",
                                         replica::effects::Change::Remove { .. } => "remove",
                                         _ => "other-change",
                                     });
