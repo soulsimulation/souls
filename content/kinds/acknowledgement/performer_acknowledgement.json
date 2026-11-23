@@ -28,7 +28,7 @@
         0,
         -1200
       ],
-      "yaw_mdeg": 0
+      "yaw_mdeg": 270000
     },
     "by_a1": {
       "role": "stand",
@@ -37,7 +37,7 @@
         0,
         900
       ],
-      "yaw_mdeg": 150255
+      "yaw_mdeg": 60255
     },
     "by_a2": {
       "role": "stand",
@@ -46,7 +46,7 @@
         0,
         900
       ],
-      "yaw_mdeg": 169216
+      "yaw_mdeg": 79216
     },
     "by_a3": {
       "role": "stand",
@@ -55,7 +55,7 @@
         0,
         900
       ],
-      "yaw_mdeg": 190784
+      "yaw_mdeg": 100784
     },
     "by_a4": {
       "role": "stand",
@@ -64,7 +64,7 @@
         0,
         900
       ],
-      "yaw_mdeg": 209745
+      "yaw_mdeg": 119745
     },
     "by_a5": {
       "role": "stand",
@@ -73,7 +73,7 @@
         0,
         1700
       ],
-      "yaw_mdeg": 164578
+      "yaw_mdeg": 74578
     },
     "by_a6": {
       "role": "stand",
@@ -82,7 +82,7 @@
         0,
         1700
       ],
-      "yaw_mdeg": 180000
+      "yaw_mdeg": 90000
     },
     "by_a7": {
       "role": "stand",
@@ -91,7 +91,7 @@
         0,
         1700
       ],
-      "yaw_mdeg": 195422
+      "yaw_mdeg": 105422
     }
   },
   "slots": {
