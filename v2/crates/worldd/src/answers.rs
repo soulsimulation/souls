@@ -23,8 +23,8 @@
 //! (`claim-taken`, `resource-held`, `out-of-reach`, ...). A gateway walk (C29) gets its planned route's time at walking
 //! speed, plus a margin and crossings, from the tick its route is planned, with no total cap and never beyond the
 //! intent's expiry. Its deadline is written as C20's entry and it receives C20's one progress answer in that tick
-//! (W11, #4087). C21's watch ends a stalled walk `walk.blocked`; waiting at a link and being carried do not count as
-//! stalled walking.
+//! (W11, #4087). A walk that makes no progress is the never-stuck ladder's (0.133 N1, `crate::unstick`): routed again,
+//! still bodies stepped aside, a shoulder turn, then its order ended `goal-unreachable` at 15 s.
 //! No move outlives its act: a walk still going at its act's deadline stops in that tick and ends `act.timed-out`; a
 //! sit, a lie or a rise runs to its end (a seat is never left half taken) and ends so then; a walk a new move
 //! replaces ends `claim-taken` in the tick the new move starts.
