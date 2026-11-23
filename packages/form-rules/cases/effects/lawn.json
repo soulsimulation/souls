@@ -1,0 +1,75 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "eden:lawn (0.135 E1): wander, nap and watch the sky change nothing on the lawn.",
+ "cases": [
+  {
+   "name": "lawn_wander_nap_stargaze",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "l1"
+      ]
+     },
+     "l1": {
+      "kind": "eden:lawn"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "l1",
+      "form": "wander"
+     },
+     "receipt": "rl1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [],
+      "events": [],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "l1",
+      "form": "nap"
+     },
+     "receipt": "rl2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [],
+      "events": [],
+      "timers": []
+     }
+    },
+    {
+     "act": {
+      "this": "l1",
+      "form": "stargaze"
+     },
+     "receipt": "rl3",
+     "expect": {
+      "verdict": "yes",
+      "changes": [],
+      "events": [],
+      "timers": []
+     }
+    }
+   ],
+   "after": {
+    "l1": {
+     "kind": "eden:lawn"
+    }
+   }
+  }
+ ]
+}
