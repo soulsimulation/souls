@@ -2170,3 +2170,63 @@ async fn b20_a_running_world_refuses_a_part_left_hanging() {
     println!("a Soul's act stands an upright alone in the bay: {got:?}");
     assert_eq!((got.kind, got.reason.as_str()), (2, "support.none"));
 }
+
+/// #3956: a batch whose fields would outgrow what one log record holds is refused by name (`edit.too-large`) before
+/// it reaches the world, and the world keeps answering: the edit after it commits. The field is set to 7 MB (under
+/// the bulk limit, sent on the world's socket as the gateway hands on a bulk edit); each rows operation writes the
+/// whole field again, so three of them in one batch come to 21 MB, over `replica::edit::WRITTEN_MOST`.
+#[test]
+fn an_oversize_rows_edit_is_refused_by_name_and_the_world_keeps_answering() {
+    let d = scratch("rows-big");
+    let w = seed(&d, &testworld::generate(1, 0).unwrap().text, 1, (-40, 30));
+    let (id, actor) = creator(0xc3);
+    static_creator(&w, id);
+    let socket = d.join("s");
+    let s = serve_with(&w, &socket, None);
+    s.line("listening ", 60);
+    let mut world = connect_socket(&socket);
+    const FIELD: u64 = 90;
+    let row = |k: u64, len: usize| {
+        Value::Array(vec![
+            Value::Uint(k),
+            Value::Uint(0),
+            Value::Bytes(vec![k as u8; len]),
+        ])
+    };
+    let rows = |rows: Vec<Value>| Op::Rows {
+        node: Ref::Node(w.ground),
+        field: FIELD,
+        rows,
+    };
+    // Each batch planned against the newest version it has seen: the ground's own changes make an older plan stale.
+    let (mut sequence, mut planned) = (0, 0);
+    let mut edit = |ops: Vec<Op>| loop {
+        sequence += 1;
+        let bytes = edit_batch_intent(&w, actor, sequence, planned, ops.clone());
+        world
+            .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+            .unwrap();
+        world.write_all(&bytes).unwrap();
+        let got = socket_answer(&mut world);
+        planned = planned.max(got.version);
+        if got.reason != "edit.stale" {
+            return got;
+        }
+    };
+    let got = edit(vec![Op::Set {
+        node: Ref::Node(w.ground),
+        field: FIELD,
+        to: Value::Array(vec![row(0, 7 << 20)]),
+    }]);
+    assert_eq!(got.kind, 1, "a 7 MB field of rows: {got:?}");
+    let got = edit(vec![rows(Vec::new())]);
+    assert_eq!((got.kind, got.reason.as_str()), (2, "edit.rows"), "no rows");
+    let got = edit((1..4).map(|k| rows(vec![row(k, 64)])).collect());
+    assert_eq!(
+        (got.kind, got.reason.as_str()),
+        (2, "edit.too-large"),
+        "three writes of a 7 MB field in one batch"
+    );
+    let got = edit(vec![wall(&w, -30 * M, 30 * M)]);
+    assert_eq!(got.kind, 1, "the world still answers and edits: {got:?}");
+}

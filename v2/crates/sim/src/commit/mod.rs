@@ -14,6 +14,11 @@
 //! An act's life around the commit (repeats, receipts, deadlines, expiry) is [`acts`] (I4, #2687). A slot's ranked
 //! fallbacks, named slots and selectors a checker resolved, are bound in rank order by [`bind`] (I5, #2690); a
 //! described spot by [`spot`] (E2, #2709).
+//!
+//! **Size.** Every write is refused `part.too-large`, before anything applies, when its part's bytes exceed
+//! [`PART_MOST`] or the room left in the calling thread's tick ([`open_room`]): a tick's parts go into one log
+//! record, which holds at most [`crate::log::MAX_RECORD`] bytes, and a record the log refuses would leave the live
+//! world ahead of its disk. The world opens a tick's room on its clock thread; elsewhere only [`PART_MOST`] binds.
 
 pub mod acts;
 pub mod bind;
@@ -188,12 +193,46 @@ pub fn write_guarded(
     })?;
     let part = Part::read(&bytes)?;
     structure.check(live.tree(), &part.effects)?;
-    live.apply(&part)?;
+    let room = ROOM.get();
+    take_room(bytes.len())?;
+    if let Err(r) = live.apply(&part) {
+        ROOM.set(room);
+        return Err(r);
+    }
     Ok(Arc::new(part))
 }
 
+/// The most bytes one part holds: half a log record, so a part and the rest of its tick fit in one.
+pub const PART_MOST: usize = crate::log::MAX_RECORD / 2;
+/// The bytes a tick's parts may hold together, leaving room in its record for its answers, bodies and state.
+pub const TICK_PARTS_MOST: usize = crate::log::MAX_RECORD - (8 << 20);
+
 thread_local! {
     static CLOCK: Cell<bool> = const { Cell::new(false) };
+    /// The bytes the calling thread's tick still has room for, once [`open_room`] has opened one.
+    static ROOM: Cell<Option<usize>> = const { Cell::new(None) };
+}
+
+/// Opens a new tick's room on the calling thread: from now its writes together hold at most `most` bytes (the world
+/// gives [`TICK_PARTS_MOST`]), until the next call. The world calls it each time it hands a tick's record to the log.
+pub fn open_room(most: usize) {
+    ROOM.set(Some(most));
+}
+
+/// `part.too-large` when `len` bytes exceed [`PART_MOST`] or the calling thread's room; else takes them from it.
+fn take_room(len: usize) -> Result<(), Refusal> {
+    let room = ROOM.get();
+    let most = room.map_or(PART_MOST, |r| r.min(PART_MOST));
+    if len > most {
+        return Err(Refusal {
+            name: "part.too-large",
+            detail: format!("{len} bytes, over the {most} this tick has room for"),
+        });
+    }
+    if let Some(r) = room {
+        ROOM.set(Some(r - len));
+    }
+    Ok(())
 }
 
 static ON_CLOCK: AtomicU64 = AtomicU64::new(0);
