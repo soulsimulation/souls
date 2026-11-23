@@ -20,7 +20,7 @@ export const CANCELS_ON = Object.freeze(['claim_taken', 'out_of_reach']);
 export const EFFECTORS = Object.freeze(['hand', 'held_point']);
 export const PHASES = Object.freeze(['start_up_us', 'slide_us', 'pour_us', 'consume_us', 'strike_us', 'pump_us', 'recovery_us']);
 export const REACH_MAX_MM = 700;
-const KEYS = ['format', 'move', 'claims', 'blocks', 'cancels_on', 'effector', 'reach_mm', 'phases'];
+const KEYS = ['format', 'move', 'claims', 'blocks', 'cancels_on', 'effector', 'reach_mm', 'contact', 'phases'];
 const IDENT = /^[a-z][a-z0-9_]*$/;
 const TICK = /(?:^|[_\W])[Tt]icks?(?:$|[_\W])|[a-z]Ticks?\b/;
 const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -50,6 +50,9 @@ export function validateMove(m) {
   if (!Array.isArray(m.cancels_on)) err('cancels_on', 'a list');
   else m.cancels_on.forEach((c, i) => { if (!CANCELS_ON.includes(c)) err(`cancels_on.${i}`, `one of ${CANCELS_ON.join(', ')}`); });
   if (!EFFECTORS.includes(m.effector)) err('effector', `one of ${EFFECTORS.join(', ')}`);
+  // `contact` (optional): the named point of the thing or body it reaches, fixed by the move (a handshake reaches the
+  // other's right hand); with none, the form's step names it (`at`).
+  if (m.contact !== undefined && (typeof m.contact !== 'string' || !IDENT.test(m.contact))) err('contact', 'a lower_snake_case point name');
   if (!(Number.isSafeInteger(m.reach_mm) && m.reach_mm > 0 && m.reach_mm <= REACH_MAX_MM)) err('reach_mm', `whole millimetres, 1 to ${REACH_MAX_MM} (under a full arm)`);
   if (!isObj(m.phases)) err('phases', 'a table of phase lengths in microseconds');
   else {

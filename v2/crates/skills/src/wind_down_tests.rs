@@ -227,6 +227,98 @@ fn records_rebuild_the_rule_after_a_restart() {
     assert_eq!(woke.next(), Some(66 * S + SHORT.wander));
 }
 
+/// S6 (0.133): a restart from a checkpoint mid-countdown, with no record of the rule since: the carried states rebuild
+/// it, and every body's due time is the one it had. Without them a body that never acted was taken as new at the
+/// restart and its countdown began again.
+#[test]
+fn a_restart_from_a_checkpoint_mid_countdown_keeps_every_due_time() {
+    let (owned, wandering, asleep) = (soul(21), soul(22), soul(23));
+    let t = Town::default();
+    let mut w = WindDown::new(SHORT);
+    t.at.borrow_mut().insert(asleep, [30 * M, 0]);
+    w.add(asleep, 0);
+    run(&mut w, &t, 0, 50 * S);
+    t.at.borrow_mut().insert(wandering, [40 * M, 0]);
+    w.add(wandering, 50 * S);
+    run(&mut w, &t, 50 * S, 61 * S);
+    t.at.borrow_mut().insert(owned, [50 * M, 0]);
+    w.add(owned, 61 * S);
+    run(&mut w, &t, 61 * S, 62 * S);
+    assert_eq!(
+        [owned, wandering, asleep].map(|b| w.word(b)),
+        [Some(Word::Awake), Some(Word::Idle), Some(Word::Asleep)]
+    );
+    // The checkpoint, mid-countdown: one Owned (due at 71 s), one wandering, one asleep (on no list).
+    let carried = w.carried();
+    let before: Vec<_> = [owned, wandering, asleep]
+        .iter()
+        .map(|b| (w.state(*b).copied(), w.word(*b)))
+        .collect();
+    let due = w.next();
+    assert!(due.is_some());
+    // Restarted at 63 s from the checkpoint alone.
+    let mut again = WindDown::new(SHORT);
+    again.resume(&carried, |_| None, [owned, wandering, asleep], 63 * S);
+    let after: Vec<_> = [owned, wandering, asleep]
+        .iter()
+        .map(|b| (again.state(*b).copied(), again.word(*b)))
+        .collect();
+    assert_eq!(after, before);
+    assert_eq!(again.next(), due);
+    // Without the carry the owned body's hour began again at the restart.
+    let mut lost = WindDown::new(SHORT);
+    lost.resume(&[], |_| None, [owned], 63 * S);
+    assert_eq!(lost.next(), Some(63 * S + SHORT.wander));
+}
+
+/// S6: a restart counts a body no record names from when the world first counted it (`since`, earlier than now), or
+/// from its birth when that came later, never from the restart.
+#[test]
+fn a_body_no_record_names_is_counted_from_the_first_start_or_its_later_birth() {
+    let (old, newborn, early) = (soul(31), soul(32), soul(33));
+    let (since, now) = (100 * S, 105 * S);
+    let born = BTreeMap::from([(newborn, 103 * S), (early, 50 * S)]);
+    let mut w = WindDown::new(SHORT);
+    w.resume_since(&[], |_| None, [old, newborn, early], now, since, &born);
+    assert_eq!(w.state(old).map(|s| s.last), Some(since));
+    assert_eq!(
+        w.state(newborn).map(|s| s.last),
+        Some(103 * S),
+        "born after the first start"
+    );
+    assert_eq!(
+        w.state(early).map(|s| s.last),
+        Some(since),
+        "born before it: from the first start"
+    );
+    assert_eq!(w.next(), Some(since + SHORT.wander));
+    // The record a start's checkpoint carries for the newborn rebuilds the same state.
+    let mut again = WindDown::new(SHORT);
+    again.resume_since(
+        &[WindDown::born(newborn, 103 * S)],
+        |_| None,
+        [newborn],
+        now,
+        since,
+        &BTreeMap::new(),
+    );
+    assert_eq!(again.state(newborn), w.state(newborn));
+    // Restarted long after: the hour passed while down, so it is wandering from its hour, not from the restart.
+    let mut late = WindDown::new(SHORT);
+    late.resume_since(
+        &[],
+        |_| None,
+        [old],
+        since + 3 * SHORT.wander,
+        since,
+        &BTreeMap::new(),
+    );
+    assert_eq!(
+        late.state(old).and_then(|s| s.wander),
+        Some(since + SHORT.wander)
+    );
+}
+
 #[test]
 fn choices_are_the_same_every_run_and_spots_keep_apart() {
     let go = || {
