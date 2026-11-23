@@ -1,0 +1,2722 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "Every14 neighbor forms accepts its exact source setting and refuses each unmet need, including bounded endpoint wrong-phase attempts.",
+  "cases": [
+    {
+      "name": "narrow_00_accepted",
+      "act": {
+        "this": "c1",
+        "form": "narrow_00"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 0,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "narrow_00_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "narrow_00"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 1,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "narrow_00_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "narrow_00"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 0,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "narrow_00_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "narrow_00"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 0,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "narrow_01_accepted",
+      "act": {
+        "this": "c1",
+        "form": "narrow_01"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 1,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "narrow_01_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "narrow_01"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 2,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "narrow_01_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "narrow_01"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 1,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "narrow_01_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "narrow_01"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 1,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "narrow_02_accepted",
+      "act": {
+        "this": "c1",
+        "form": "narrow_02"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 2,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "narrow_02_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "narrow_02"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 3,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "narrow_02_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "narrow_02"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 2,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "narrow_02_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "narrow_02"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 2,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "narrow_03_accepted",
+      "act": {
+        "this": "c1",
+        "form": "narrow_03"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 3,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "narrow_03_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "narrow_03"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 4,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "narrow_03_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "narrow_03"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 3,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "narrow_03_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "narrow_03"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 3,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "narrow_04_accepted",
+      "act": {
+        "this": "c1",
+        "form": "narrow_04"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 4,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "narrow_04_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "narrow_04"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 5,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "narrow_04_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "narrow_04"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 4,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "narrow_04_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "narrow_04"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 4,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "narrow_05_accepted",
+      "act": {
+        "this": "c1",
+        "form": "narrow_05"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 5,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "narrow_05_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "narrow_05"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 6,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "narrow_05_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "narrow_05"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 5,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "narrow_05_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "narrow_05"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 5,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "narrow_06_accepted",
+      "act": {
+        "this": "c1",
+        "form": "narrow_06"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 6,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "narrow_06_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "narrow_06"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 7,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "narrow_06_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "narrow_06"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 6,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "narrow_06_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "narrow_06"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 6,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "widen_01_accepted",
+      "act": {
+        "this": "c1",
+        "form": "widen_01"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 1,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "widen_01_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "widen_01"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 2,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "widen_01_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "widen_01"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 1,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "widen_01_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "widen_01"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 1,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "widen_02_accepted",
+      "act": {
+        "this": "c1",
+        "form": "widen_02"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 2,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "widen_02_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "widen_02"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 3,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "widen_02_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "widen_02"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 2,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "widen_02_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "widen_02"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 2,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "widen_03_accepted",
+      "act": {
+        "this": "c1",
+        "form": "widen_03"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 3,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "widen_03_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "widen_03"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 4,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "widen_03_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "widen_03"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 3,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "widen_03_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "widen_03"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 3,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "widen_04_accepted",
+      "act": {
+        "this": "c1",
+        "form": "widen_04"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 4,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "widen_04_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "widen_04"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 5,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "widen_04_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "widen_04"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 4,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "widen_04_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "widen_04"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 4,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "widen_05_accepted",
+      "act": {
+        "this": "c1",
+        "form": "widen_05"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 5,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "widen_05_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "widen_05"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 6,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "widen_05_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "widen_05"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 5,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "widen_05_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "widen_05"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 5,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "widen_06_accepted",
+      "act": {
+        "this": "c1",
+        "form": "widen_06"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 6,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "widen_06_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "widen_06"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 7,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "widen_06_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "widen_06"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 6,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "widen_06_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "widen_06"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 6,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "widen_07_accepted",
+      "act": {
+        "this": "c1",
+        "form": "widen_07"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 7,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "widen_07_refuses_field_differs",
+      "act": {
+        "this": "c1",
+        "form": "widen_07"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 0,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "widen_07_refuses_no_free_hand",
+      "act": {
+        "this": "c1",
+        "form": "widen_07"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 7,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "left_prop",
+              "right": "right_prop"
+            },
+            "effector_mm": [
+              460,
+              1100,
+              300
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 1
+      }
+    },
+    {
+      "name": "widen_07_refuses_out_of_reach",
+      "act": {
+        "this": "c1",
+        "form": "widen_07"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:mechanical-iris",
+            "fields": {
+              "phase": 7,
+              "untouched": 73
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              5000,
+              5000,
+              5000
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    }
+  ]
+}

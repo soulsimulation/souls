@@ -1,0 +1,3924 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:mechanical-iris",
+  "owner": "thing",
+  "state": {
+    "phase": {
+      "n": 28,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 7,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        520,
+        0,
+        750
+      ],
+      "yaw_mdeg": 180000
+    },
+    "rim": {
+      "role": "contact",
+      "at_mm": [
+        460,
+        1000,
+        100
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1460,
+      1690,
+      360
+    ]
+  },
+  "forms": {
+    "narrow_00": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 0,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "rim"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "rim"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 1,
+          "event": "indexed"
+        }
+      ]
+    },
+    "narrow_01": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 1,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "rim"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "rim"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 2,
+          "event": "indexed"
+        }
+      ]
+    },
+    "narrow_02": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 2,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "rim"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "rim"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 3,
+          "event": "indexed"
+        }
+      ]
+    },
+    "narrow_03": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 3,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "rim"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "rim"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 4,
+          "event": "indexed"
+        }
+      ]
+    },
+    "narrow_04": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 4,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "rim"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "rim"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 5,
+          "event": "indexed"
+        }
+      ]
+    },
+    "narrow_05": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 5,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "rim"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "rim"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 6,
+          "event": "indexed"
+        }
+      ]
+    },
+    "narrow_06": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 6,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "rim"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "rim"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 7,
+          "event": "indexed"
+        }
+      ]
+    },
+    "widen_01": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 1,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "rim"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "rim"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 0,
+          "event": "indexed"
+        }
+      ]
+    },
+    "widen_02": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 2,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "rim"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "rim"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 1,
+          "event": "indexed"
+        }
+      ]
+    },
+    "widen_03": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 3,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "rim"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "rim"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 2,
+          "event": "indexed"
+        }
+      ]
+    },
+    "widen_04": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 4,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "rim"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "rim"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 3,
+          "event": "indexed"
+        }
+      ]
+    },
+    "widen_05": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 5,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "rim"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "rim"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 4,
+          "event": "indexed"
+        }
+      ]
+    },
+    "widen_06": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 6,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "rim"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "rim"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 5,
+          "event": "indexed"
+        }
+      ]
+    },
+    "widen_07": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "phase",
+          "is": 7,
+          "says": "wrong_phase"
+        },
+        {
+          "need": "hand",
+          "free": true,
+          "says": "free_hand"
+        },
+        {
+          "need": "within_reach",
+          "point": "rim"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "turn",
+          "at": "rim"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "phase",
+          "to": 6,
+          "event": "indexed"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:mechanical-iris",
+    "table": [
+      {
+        "part": "ring",
+        "field": "phase",
+        "do": "rotate",
+        "axis": "z",
+        "at": {
+          "0": 0,
+          "1": 2143,
+          "2": 4286,
+          "3": 6429,
+          "4": 8571,
+          "5": 10714,
+          "6": 12857,
+          "7": 15000
+        }
+      },
+      {
+        "part": "blade0",
+        "field": "phase",
+        "do": "rotate",
+        "axis": "z",
+        "at": {
+          "0": 0,
+          "1": 7507,
+          "2": 15054,
+          "3": 22685,
+          "4": 30446,
+          "5": 38409,
+          "6": 46657,
+          "7": 55319
+        }
+      },
+      {
+        "part": "blade1",
+        "field": "phase",
+        "do": "rotate",
+        "axis": "z",
+        "at": {
+          "0": 120000,
+          "1": 127507,
+          "2": 135054,
+          "3": 142685,
+          "4": 150446,
+          "5": 158409,
+          "6": 166657,
+          "7": 175319
+        }
+      },
+      {
+        "part": "blade2",
+        "field": "phase",
+        "do": "rotate",
+        "axis": "z",
+        "at": {
+          "0": 240000,
+          "1": 247507,
+          "2": 255054,
+          "3": 262685,
+          "4": 270446,
+          "5": 278409,
+          "6": 286657,
+          "7": 295319
+        }
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "tint": "blade0",
+          "role": "blade0",
+          "pivot": [
+            300,
+            1000,
+            0
+          ],
+          "kind": "extrude",
+          "at": [
+            300,
+            1000,
+            6
+          ],
+          "polygon": [
+            [
+              -100,
+              -105
+            ],
+            [
+              -98,
+              -105
+            ],
+            [
+              31,
+              118
+            ],
+            [
+              57,
+              217
+            ],
+            [
+              57,
+              277
+            ],
+            [
+              42,
+              335
+            ],
+            [
+              12,
+              387
+            ],
+            [
+              -31,
+              429
+            ],
+            [
+              -81,
+              458
+            ],
+            [
+              -99,
+              463
+            ],
+            [
+              -100,
+              463
+            ]
+          ],
+          "h": 6,
+          "pitch": -90000
+        },
+        {
+          "tint": "blade0",
+          "role": "blade0",
+          "pivot": [
+            300,
+            1000,
+            0
+          ],
+          "kind": "extrude",
+          "at": [
+            300,
+            1000,
+            6
+          ],
+          "polygon": [
+            [
+              -85,
+              -10
+            ],
+            [
+              -18,
+              -10
+            ],
+            [
+              -18,
+              10
+            ],
+            [
+              -85,
+              10
+            ]
+          ],
+          "h": 6,
+          "pitch": -90000
+        },
+        {
+          "tint": "blade0",
+          "role": "blade0",
+          "pivot": [
+            300,
+            1000,
+            0
+          ],
+          "kind": "lathe",
+          "at": [
+            300,
+            1000,
+            3
+          ],
+          "profile": [
+            [
+              14,
+              -3
+            ],
+            [
+              24,
+              -3
+            ],
+            [
+              24,
+              3
+            ],
+            [
+              14,
+              3
+            ],
+            [
+              14,
+              -3
+            ]
+          ],
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "blade0",
+          "role": "blade0",
+          "pivot": [
+            300,
+            1000,
+            0
+          ],
+          "kind": "extrude",
+          "at": [
+            300,
+            1000,
+            6
+          ],
+          "polygon": [
+            [
+              18,
+              -10
+            ],
+            [
+              126,
+              -10
+            ],
+            [
+              126,
+              10
+            ],
+            [
+              18,
+              10
+            ]
+          ],
+          "h": 6,
+          "pitch": -90000
+        },
+        {
+          "tint": "blade0",
+          "role": "blade0",
+          "pivot": [
+            300,
+            1000,
+            0
+          ],
+          "kind": "cyl",
+          "at": [
+            420,
+            1000,
+            3
+          ],
+          "r": 16,
+          "h": 6,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "blade0",
+          "role": "blade0",
+          "pivot": [
+            300,
+            1000,
+            0
+          ],
+          "kind": "cyl",
+          "at": [
+            420,
+            1000,
+            59
+          ],
+          "r": 8,
+          "h": 114,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "index",
+          "role": "blade0",
+          "pivot": [
+            300,
+            1000,
+            0
+          ],
+          "kind": "cyl",
+          "at": [
+            420,
+            1000,
+            119
+          ],
+          "r": 16,
+          "h": 10,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "frame",
+          "kind": "cyl",
+          "at": [
+            300,
+            1000,
+            -9
+          ],
+          "r": 8,
+          "h": 42,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "blade0",
+          "kind": "cyl",
+          "at": [
+            300,
+            1000,
+            14
+          ],
+          "r": 18,
+          "h": 8,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "blade1",
+          "role": "blade1",
+          "pivot": [
+            -150,
+            1260,
+            0
+          ],
+          "kind": "extrude",
+          "at": [
+            -150,
+            1260,
+            26
+          ],
+          "polygon": [
+            [
+              -100,
+              -105
+            ],
+            [
+              -98,
+              -105
+            ],
+            [
+              31,
+              118
+            ],
+            [
+              57,
+              217
+            ],
+            [
+              57,
+              277
+            ],
+            [
+              42,
+              335
+            ],
+            [
+              12,
+              387
+            ],
+            [
+              -31,
+              429
+            ],
+            [
+              -81,
+              458
+            ],
+            [
+              -99,
+              463
+            ],
+            [
+              -100,
+              463
+            ]
+          ],
+          "h": 6,
+          "pitch": -90000
+        },
+        {
+          "tint": "blade1",
+          "role": "blade1",
+          "pivot": [
+            -150,
+            1260,
+            0
+          ],
+          "kind": "extrude",
+          "at": [
+            -150,
+            1260,
+            26
+          ],
+          "polygon": [
+            [
+              -85,
+              -10
+            ],
+            [
+              -18,
+              -10
+            ],
+            [
+              -18,
+              10
+            ],
+            [
+              -85,
+              10
+            ]
+          ],
+          "h": 6,
+          "pitch": -90000
+        },
+        {
+          "tint": "blade1",
+          "role": "blade1",
+          "pivot": [
+            -150,
+            1260,
+            0
+          ],
+          "kind": "lathe",
+          "at": [
+            -150,
+            1260,
+            23
+          ],
+          "profile": [
+            [
+              14,
+              -3
+            ],
+            [
+              24,
+              -3
+            ],
+            [
+              24,
+              3
+            ],
+            [
+              14,
+              3
+            ],
+            [
+              14,
+              -3
+            ]
+          ],
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "blade1",
+          "role": "blade1",
+          "pivot": [
+            -150,
+            1260,
+            0
+          ],
+          "kind": "extrude",
+          "at": [
+            -150,
+            1260,
+            26
+          ],
+          "polygon": [
+            [
+              18,
+              -10
+            ],
+            [
+              126,
+              -10
+            ],
+            [
+              126,
+              10
+            ],
+            [
+              18,
+              10
+            ]
+          ],
+          "h": 6,
+          "pitch": -90000
+        },
+        {
+          "tint": "blade1",
+          "role": "blade1",
+          "pivot": [
+            -150,
+            1260,
+            0
+          ],
+          "kind": "cyl",
+          "at": [
+            -30,
+            1260,
+            23
+          ],
+          "r": 16,
+          "h": 6,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "blade1",
+          "role": "blade1",
+          "pivot": [
+            -150,
+            1260,
+            0
+          ],
+          "kind": "cyl",
+          "at": [
+            -30,
+            1260,
+            69
+          ],
+          "r": 8,
+          "h": 94,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "index",
+          "role": "blade1",
+          "pivot": [
+            -150,
+            1260,
+            0
+          ],
+          "kind": "cyl",
+          "at": [
+            -30,
+            1260,
+            119
+          ],
+          "r": 16,
+          "h": 10,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "frame",
+          "kind": "cyl",
+          "at": [
+            -150,
+            1260,
+            1
+          ],
+          "r": 8,
+          "h": 62,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "blade1",
+          "kind": "cyl",
+          "at": [
+            -150,
+            1260,
+            34
+          ],
+          "r": 18,
+          "h": 8,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "blade2",
+          "role": "blade2",
+          "pivot": [
+            -150,
+            740,
+            0
+          ],
+          "kind": "extrude",
+          "at": [
+            -150,
+            740,
+            46
+          ],
+          "polygon": [
+            [
+              -100,
+              -105
+            ],
+            [
+              -98,
+              -105
+            ],
+            [
+              31,
+              118
+            ],
+            [
+              57,
+              217
+            ],
+            [
+              57,
+              277
+            ],
+            [
+              42,
+              335
+            ],
+            [
+              12,
+              387
+            ],
+            [
+              -31,
+              429
+            ],
+            [
+              -81,
+              458
+            ],
+            [
+              -99,
+              463
+            ],
+            [
+              -100,
+              463
+            ]
+          ],
+          "h": 6,
+          "pitch": -90000
+        },
+        {
+          "tint": "blade2",
+          "role": "blade2",
+          "pivot": [
+            -150,
+            740,
+            0
+          ],
+          "kind": "extrude",
+          "at": [
+            -150,
+            740,
+            46
+          ],
+          "polygon": [
+            [
+              -85,
+              -10
+            ],
+            [
+              -18,
+              -10
+            ],
+            [
+              -18,
+              10
+            ],
+            [
+              -85,
+              10
+            ]
+          ],
+          "h": 6,
+          "pitch": -90000
+        },
+        {
+          "tint": "blade2",
+          "role": "blade2",
+          "pivot": [
+            -150,
+            740,
+            0
+          ],
+          "kind": "lathe",
+          "at": [
+            -150,
+            740,
+            43
+          ],
+          "profile": [
+            [
+              14,
+              -3
+            ],
+            [
+              24,
+              -3
+            ],
+            [
+              24,
+              3
+            ],
+            [
+              14,
+              3
+            ],
+            [
+              14,
+              -3
+            ]
+          ],
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "blade2",
+          "role": "blade2",
+          "pivot": [
+            -150,
+            740,
+            0
+          ],
+          "kind": "extrude",
+          "at": [
+            -150,
+            740,
+            46
+          ],
+          "polygon": [
+            [
+              18,
+              -10
+            ],
+            [
+              126,
+              -10
+            ],
+            [
+              126,
+              10
+            ],
+            [
+              18,
+              10
+            ]
+          ],
+          "h": 6,
+          "pitch": -90000
+        },
+        {
+          "tint": "blade2",
+          "role": "blade2",
+          "pivot": [
+            -150,
+            740,
+            0
+          ],
+          "kind": "cyl",
+          "at": [
+            -30,
+            740,
+            43
+          ],
+          "r": 16,
+          "h": 6,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "blade2",
+          "role": "blade2",
+          "pivot": [
+            -150,
+            740,
+            0
+          ],
+          "kind": "cyl",
+          "at": [
+            -30,
+            740,
+            79
+          ],
+          "r": 8,
+          "h": 74,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "index",
+          "role": "blade2",
+          "pivot": [
+            -150,
+            740,
+            0
+          ],
+          "kind": "cyl",
+          "at": [
+            -30,
+            740,
+            119
+          ],
+          "r": 16,
+          "h": 10,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "frame",
+          "kind": "cyl",
+          "at": [
+            -150,
+            740,
+            11
+          ],
+          "r": 8,
+          "h": 82,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "blade2",
+          "kind": "cyl",
+          "at": [
+            -150,
+            740,
+            54
+          ],
+          "r": 18,
+          "h": 8,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "ring",
+          "role": "ring",
+          "pivot": [
+            0,
+            1000,
+            0
+          ],
+          "kind": "lathe",
+          "at": [
+            0,
+            1000,
+            90
+          ],
+          "profile": [
+            [
+              440,
+              -10
+            ],
+            [
+              480,
+              -10
+            ],
+            [
+              480,
+              10
+            ],
+            [
+              440,
+              10
+            ],
+            [
+              440,
+              -10
+            ]
+          ],
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "ring",
+          "role": "ring",
+          "pivot": [
+            0,
+            1000,
+            0
+          ],
+          "kind": "extrude",
+          "at": [
+            0,
+            1000,
+            100
+          ],
+          "polygon": [
+            [
+              350,
+              12
+            ],
+            [
+              349,
+              27
+            ],
+            [
+              348,
+              41
+            ],
+            [
+              345,
+              56
+            ],
+            [
+              343,
+              71
+            ],
+            [
+              340,
+              85
+            ],
+            [
+              336,
+              99
+            ],
+            [
+              331,
+              113
+            ],
+            [
+              326,
+              127
+            ],
+            [
+              320,
+              141
+            ],
+            [
+              314,
+              154
+            ],
+            [
+              307,
+              167
+            ],
+            [
+              300,
+              180
+            ],
+            [
+              292,
+              193
+            ],
+            [
+              284,
+              205
+            ],
+            [
+              275,
+              217
+            ],
+            [
+              266,
+              228
+            ],
+            [
+              256,
+              239
+            ],
+            [
+              245,
+              250
+            ],
+            [
+              235,
+              260
+            ],
+            [
+              223,
+              269
+            ],
+            [
+              212,
+              279
+            ],
+            [
+              200,
+              287
+            ],
+            [
+              188,
+              295
+            ],
+            [
+              175,
+              303
+            ],
+            [
+              162,
+              310
+            ],
+            [
+              149,
+              317
+            ],
+            [
+              135,
+              323
+            ],
+            [
+              122,
+              328
+            ],
+            [
+              108,
+              333
+            ],
+            [
+              93,
+              337
+            ],
+            [
+              79,
+              341
+            ],
+            [
+              65,
+              344
+            ],
+            [
+              50,
+              346
+            ],
+            [
+              35,
+              348
+            ],
+            [
+              21,
+              349
+            ],
+            [
+              6,
+              350
+            ],
+            [
+              -9,
+              350
+            ],
+            [
+              -24,
+              349
+            ],
+            [
+              -38,
+              348
+            ],
+            [
+              -53,
+              346
+            ],
+            [
+              -67,
+              343
+            ],
+            [
+              -82,
+              340
+            ],
+            [
+              -96,
+              337
+            ],
+            [
+              -110,
+              332
+            ],
+            [
+              -124,
+              327
+            ],
+            [
+              -138,
+              322
+            ],
+            [
+              -151,
+              316
+            ],
+            [
+              -165,
+              309
+            ],
+            [
+              -215,
+              396
+            ],
+            [
+              -198,
+              404
+            ],
+            [
+              -180,
+              412
+            ],
+            [
+              -162,
+              420
+            ],
+            [
+              -144,
+              426
+            ],
+            [
+              -126,
+              432
+            ],
+            [
+              -108,
+              437
+            ],
+            [
+              -89,
+              441
+            ],
+            [
+              -70,
+              444
+            ],
+            [
+              -51,
+              447
+            ],
+            [
+              -32,
+              449
+            ],
+            [
+              -13,
+              450
+            ],
+            [
+              6,
+              450
+            ],
+            [
+              25,
+              449
+            ],
+            [
+              44,
+              448
+            ],
+            [
+              63,
+              446
+            ],
+            [
+              82,
+              442
+            ],
+            [
+              101,
+              439
+            ],
+            [
+              119,
+              434
+            ],
+            [
+              138,
+              428
+            ],
+            [
+              156,
+              422
+            ],
+            [
+              174,
+              415
+            ],
+            [
+              191,
+              407
+            ],
+            [
+              208,
+              399
+            ],
+            [
+              225,
+              390
+            ],
+            [
+              241,
+              380
+            ],
+            [
+              257,
+              369
+            ],
+            [
+              273,
+              358
+            ],
+            [
+              288,
+              346
+            ],
+            [
+              302,
+              333
+            ],
+            [
+              316,
+              320
+            ],
+            [
+              329,
+              307
+            ],
+            [
+              342,
+              292
+            ],
+            [
+              354,
+              277
+            ],
+            [
+              366,
+              262
+            ],
+            [
+              377,
+              246
+            ],
+            [
+              387,
+              230
+            ],
+            [
+              396,
+              214
+            ],
+            [
+              405,
+              196
+            ],
+            [
+              413,
+              179
+            ],
+            [
+              420,
+              161
+            ],
+            [
+              427,
+              143
+            ],
+            [
+              432,
+              125
+            ],
+            [
+              437,
+              107
+            ],
+            [
+              441,
+              88
+            ],
+            [
+              445,
+              69
+            ],
+            [
+              447,
+              50
+            ],
+            [
+              449,
+              31
+            ],
+            [
+              450,
+              12
+            ]
+          ],
+          "h": 20,
+          "pitch": -90000
+        },
+        {
+          "tint": "ring",
+          "role": "ring",
+          "pivot": [
+            0,
+            1000,
+            0
+          ],
+          "kind": "extrude",
+          "at": [
+            0,
+            1000,
+            100
+          ],
+          "polygon": [
+            [
+              -185,
+              297
+            ],
+            [
+              -198,
+              289
+            ],
+            [
+              -210,
+              280
+            ],
+            [
+              -221,
+              271
+            ],
+            [
+              -233,
+              262
+            ],
+            [
+              -243,
+              252
+            ],
+            [
+              -254,
+              241
+            ],
+            [
+              -264,
+              230
+            ],
+            [
+              -273,
+              219
+            ],
+            [
+              -282,
+              207
+            ],
+            [
+              -291,
+              195
+            ],
+            [
+              -299,
+              183
+            ],
+            [
+              -306,
+              170
+            ],
+            [
+              -313,
+              157
+            ],
+            [
+              -319,
+              143
+            ],
+            [
+              -325,
+              130
+            ],
+            [
+              -330,
+              116
+            ],
+            [
+              -335,
+              102
+            ],
+            [
+              -339,
+              88
+            ],
+            [
+              -342,
+              73
+            ],
+            [
+              -345,
+              59
+            ],
+            [
+              -347,
+              44
+            ],
+            [
+              -349,
+              30
+            ],
+            [
+              -350,
+              15
+            ],
+            [
+              -350,
+              0
+            ],
+            [
+              -350,
+              -15
+            ],
+            [
+              -349,
+              -30
+            ],
+            [
+              -347,
+              -44
+            ],
+            [
+              -345,
+              -59
+            ],
+            [
+              -342,
+              -73
+            ],
+            [
+              -339,
+              -88
+            ],
+            [
+              -335,
+              -102
+            ],
+            [
+              -330,
+              -116
+            ],
+            [
+              -325,
+              -130
+            ],
+            [
+              -319,
+              -143
+            ],
+            [
+              -313,
+              -157
+            ],
+            [
+              -306,
+              -170
+            ],
+            [
+              -299,
+              -183
+            ],
+            [
+              -291,
+              -195
+            ],
+            [
+              -282,
+              -207
+            ],
+            [
+              -273,
+              -219
+            ],
+            [
+              -264,
+              -230
+            ],
+            [
+              -254,
+              -241
+            ],
+            [
+              -243,
+              -252
+            ],
+            [
+              -233,
+              -262
+            ],
+            [
+              -221,
+              -271
+            ],
+            [
+              -210,
+              -280
+            ],
+            [
+              -198,
+              -289
+            ],
+            [
+              -185,
+              -297
+            ],
+            [
+              -235,
+              -384
+            ],
+            [
+              -251,
+              -373
+            ],
+            [
+              -267,
+              -362
+            ],
+            [
+              -282,
+              -351
+            ],
+            [
+              -297,
+              -338
+            ],
+            [
+              -311,
+              -325
+            ],
+            [
+              -324,
+              -312
+            ],
+            [
+              -337,
+              -298
+            ],
+            [
+              -350,
+              -283
+            ],
+            [
+              -362,
+              -268
+            ],
+            [
+              -373,
+              -252
+            ],
+            [
+              -383,
+              -236
+            ],
+            [
+              -393,
+              -220
+            ],
+            [
+              -402,
+              -203
+            ],
+            [
+              -410,
+              -186
+            ],
+            [
+              -417,
+              -168
+            ],
+            [
+              -424,
+              -150
+            ],
+            [
+              -430,
+              -132
+            ],
+            [
+              -435,
+              -114
+            ],
+            [
+              -440,
+              -95
+            ],
+            [
+              -444,
+              -76
+            ],
+            [
+              -446,
+              -57
+            ],
+            [
+              -448,
+              -38
+            ],
+            [
+              -450,
+              -19
+            ],
+            [
+              -450,
+              0
+            ],
+            [
+              -450,
+              19
+            ],
+            [
+              -448,
+              38
+            ],
+            [
+              -446,
+              57
+            ],
+            [
+              -444,
+              76
+            ],
+            [
+              -440,
+              95
+            ],
+            [
+              -435,
+              114
+            ],
+            [
+              -430,
+              132
+            ],
+            [
+              -424,
+              150
+            ],
+            [
+              -417,
+              168
+            ],
+            [
+              -410,
+              186
+            ],
+            [
+              -402,
+              203
+            ],
+            [
+              -393,
+              220
+            ],
+            [
+              -383,
+              236
+            ],
+            [
+              -373,
+              252
+            ],
+            [
+              -362,
+              268
+            ],
+            [
+              -350,
+              283
+            ],
+            [
+              -337,
+              298
+            ],
+            [
+              -324,
+              312
+            ],
+            [
+              -311,
+              325
+            ],
+            [
+              -297,
+              338
+            ],
+            [
+              -282,
+              351
+            ],
+            [
+              -267,
+              362
+            ],
+            [
+              -251,
+              373
+            ],
+            [
+              -235,
+              384
+            ]
+          ],
+          "h": 20,
+          "pitch": -90000
+        },
+        {
+          "tint": "ring",
+          "role": "ring",
+          "pivot": [
+            0,
+            1000,
+            0
+          ],
+          "kind": "extrude",
+          "at": [
+            0,
+            1000,
+            100
+          ],
+          "polygon": [
+            [
+              -165,
+              -309
+            ],
+            [
+              -151,
+              -316
+            ],
+            [
+              -138,
+              -322
+            ],
+            [
+              -124,
+              -327
+            ],
+            [
+              -110,
+              -332
+            ],
+            [
+              -96,
+              -337
+            ],
+            [
+              -82,
+              -340
+            ],
+            [
+              -67,
+              -343
+            ],
+            [
+              -53,
+              -346
+            ],
+            [
+              -38,
+              -348
+            ],
+            [
+              -24,
+              -349
+            ],
+            [
+              -9,
+              -350
+            ],
+            [
+              6,
+              -350
+            ],
+            [
+              21,
+              -349
+            ],
+            [
+              35,
+              -348
+            ],
+            [
+              50,
+              -346
+            ],
+            [
+              65,
+              -344
+            ],
+            [
+              79,
+              -341
+            ],
+            [
+              93,
+              -337
+            ],
+            [
+              108,
+              -333
+            ],
+            [
+              122,
+              -328
+            ],
+            [
+              135,
+              -323
+            ],
+            [
+              149,
+              -317
+            ],
+            [
+              162,
+              -310
+            ],
+            [
+              175,
+              -303
+            ],
+            [
+              188,
+              -295
+            ],
+            [
+              200,
+              -287
+            ],
+            [
+              212,
+              -279
+            ],
+            [
+              223,
+              -269
+            ],
+            [
+              235,
+              -260
+            ],
+            [
+              245,
+              -250
+            ],
+            [
+              256,
+              -239
+            ],
+            [
+              266,
+              -228
+            ],
+            [
+              275,
+              -217
+            ],
+            [
+              284,
+              -205
+            ],
+            [
+              292,
+              -193
+            ],
+            [
+              300,
+              -180
+            ],
+            [
+              307,
+              -167
+            ],
+            [
+              314,
+              -154
+            ],
+            [
+              320,
+              -141
+            ],
+            [
+              326,
+              -127
+            ],
+            [
+              331,
+              -113
+            ],
+            [
+              336,
+              -99
+            ],
+            [
+              340,
+              -85
+            ],
+            [
+              343,
+              -71
+            ],
+            [
+              345,
+              -56
+            ],
+            [
+              348,
+              -41
+            ],
+            [
+              349,
+              -27
+            ],
+            [
+              350,
+              -12
+            ],
+            [
+              450,
+              -12
+            ],
+            [
+              449,
+              -31
+            ],
+            [
+              447,
+              -50
+            ],
+            [
+              445,
+              -69
+            ],
+            [
+              441,
+              -88
+            ],
+            [
+              437,
+              -107
+            ],
+            [
+              432,
+              -125
+            ],
+            [
+              427,
+              -143
+            ],
+            [
+              420,
+              -161
+            ],
+            [
+              413,
+              -179
+            ],
+            [
+              405,
+              -196
+            ],
+            [
+              396,
+              -214
+            ],
+            [
+              387,
+              -230
+            ],
+            [
+              377,
+              -246
+            ],
+            [
+              366,
+              -262
+            ],
+            [
+              354,
+              -277
+            ],
+            [
+              342,
+              -292
+            ],
+            [
+              329,
+              -307
+            ],
+            [
+              316,
+              -320
+            ],
+            [
+              302,
+              -333
+            ],
+            [
+              288,
+              -346
+            ],
+            [
+              273,
+              -358
+            ],
+            [
+              257,
+              -369
+            ],
+            [
+              241,
+              -380
+            ],
+            [
+              225,
+              -390
+            ],
+            [
+              208,
+              -399
+            ],
+            [
+              191,
+              -407
+            ],
+            [
+              174,
+              -415
+            ],
+            [
+              156,
+              -422
+            ],
+            [
+              138,
+              -428
+            ],
+            [
+              119,
+              -434
+            ],
+            [
+              101,
+              -439
+            ],
+            [
+              82,
+              -442
+            ],
+            [
+              63,
+              -446
+            ],
+            [
+              44,
+              -448
+            ],
+            [
+              25,
+              -449
+            ],
+            [
+              6,
+              -450
+            ],
+            [
+              -13,
+              -450
+            ],
+            [
+              -32,
+              -449
+            ],
+            [
+              -51,
+              -447
+            ],
+            [
+              -70,
+              -444
+            ],
+            [
+              -89,
+              -441
+            ],
+            [
+              -108,
+              -437
+            ],
+            [
+              -126,
+              -432
+            ],
+            [
+              -144,
+              -426
+            ],
+            [
+              -162,
+              -420
+            ],
+            [
+              -180,
+              -412
+            ],
+            [
+              -198,
+              -404
+            ],
+            [
+              -215,
+              -396
+            ]
+          ],
+          "h": 20,
+          "pitch": -90000
+        },
+        {
+          "tint": "index",
+          "role": "ring",
+          "pivot": [
+            0,
+            1000,
+            0
+          ],
+          "kind": "cyl",
+          "at": [
+            460,
+            1000,
+            102
+          ],
+          "r": 8,
+          "h": 6,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "mask",
+          "kind": "lathe",
+          "at": [
+            0,
+            1000,
+            -30
+          ],
+          "profile": [
+            [
+              220,
+              -10
+            ],
+            [
+              650,
+              -10
+            ],
+            [
+              650,
+              10
+            ],
+            [
+              220,
+              10
+            ],
+            [
+              220,
+              -10
+            ]
+          ],
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "bearing",
+          "kind": "lathe",
+          "at": [
+            0,
+            1000,
+            71
+          ],
+          "profile": [
+            [
+              474,
+              -5
+            ],
+            [
+              560,
+              -5
+            ],
+            [
+              560,
+              5
+            ],
+            [
+              474,
+              5
+            ],
+            [
+              474,
+              -5
+            ]
+          ],
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "bearing",
+          "kind": "lathe",
+          "at": [
+            0,
+            1000,
+            91
+          ],
+          "profile": [
+            [
+              484,
+              -17
+            ],
+            [
+              560,
+              -17
+            ],
+            [
+              560,
+              17
+            ],
+            [
+              484,
+              17
+            ],
+            [
+              484,
+              -17
+            ]
+          ],
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "bearing",
+          "kind": "lathe",
+          "at": [
+            0,
+            1000,
+            111
+          ],
+          "profile": [
+            [
+              474,
+              -5
+            ],
+            [
+              560,
+              -5
+            ],
+            [
+              560,
+              5
+            ],
+            [
+              474,
+              5
+            ],
+            [
+              474,
+              -5
+            ]
+          ],
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "frame",
+          "kind": "cyl",
+          "at": [
+            540,
+            1000,
+            40
+          ],
+          "r": 12,
+          "h": 140,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "frame",
+          "kind": "cyl",
+          "at": [
+            -270,
+            1468,
+            40
+          ],
+          "r": 12,
+          "h": 140,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "frame",
+          "kind": "cyl",
+          "at": [
+            -270,
+            532,
+            40
+          ],
+          "r": 12,
+          "h": 140,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "frame",
+          "kind": "extrude",
+          "at": [
+            0,
+            1000,
+            180
+          ],
+          "polygon": [
+            [
+              -730,
+              -1000
+            ],
+            [
+              730,
+              -1000
+            ],
+            [
+              730,
+              -900
+            ],
+            [
+              -730,
+              -900
+            ]
+          ],
+          "h": 360,
+          "pitch": -90000
+        },
+        {
+          "tint": "frame",
+          "kind": "extrude",
+          "at": [
+            0,
+            1000,
+            -20
+          ],
+          "polygon": [
+            [
+              -690,
+              -940
+            ],
+            [
+              -610,
+              -940
+            ],
+            [
+              -610,
+              640
+            ],
+            [
+              -690,
+              640
+            ]
+          ],
+          "h": 80,
+          "pitch": -90000
+        },
+        {
+          "tint": "frame",
+          "kind": "extrude",
+          "at": [
+            0,
+            1000,
+            -20
+          ],
+          "polygon": [
+            [
+              610,
+              -940
+            ],
+            [
+              690,
+              -940
+            ],
+            [
+              690,
+              640
+            ],
+            [
+              610,
+              640
+            ]
+          ],
+          "h": 80,
+          "pitch": -90000
+        },
+        {
+          "tint": "frame",
+          "kind": "extrude",
+          "at": [
+            0,
+            1000,
+            -20
+          ],
+          "polygon": [
+            [
+              -730,
+              610
+            ],
+            [
+              730,
+              610
+            ],
+            [
+              730,
+              690
+            ],
+            [
+              -730,
+              690
+            ]
+          ],
+          "h": 80,
+          "pitch": -90000
+        },
+        {
+          "tint": "frame",
+          "kind": "cyl",
+          "at": [
+            300,
+            1000,
+            -40
+          ],
+          "r": 12,
+          "h": 12,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "frame",
+          "kind": "cyl",
+          "at": [
+            -150,
+            1260,
+            -40
+          ],
+          "r": 12,
+          "h": 12,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "frame",
+          "kind": "cyl",
+          "at": [
+            -150,
+            740,
+            -40
+          ],
+          "r": 12,
+          "h": 12,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "reference",
+          "kind": "cyl",
+          "at": [
+            520,
+            1000,
+            116
+          ],
+          "r": 6,
+          "h": 8,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "reference",
+          "kind": "cyl",
+          "at": [
+            520,
+            1019,
+            116
+          ],
+          "r": 6,
+          "h": 8,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "reference",
+          "kind": "cyl",
+          "at": [
+            519,
+            1039,
+            116
+          ],
+          "r": 6,
+          "h": 8,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "reference",
+          "kind": "cyl",
+          "at": [
+            517,
+            1058,
+            116
+          ],
+          "r": 6,
+          "h": 8,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "reference",
+          "kind": "cyl",
+          "at": [
+            514,
+            1077,
+            116
+          ],
+          "r": 6,
+          "h": 8,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "reference",
+          "kind": "cyl",
+          "at": [
+            511,
+            1097,
+            116
+          ],
+          "r": 6,
+          "h": 8,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "reference",
+          "kind": "cyl",
+          "at": [
+            507,
+            1116,
+            116
+          ],
+          "r": 6,
+          "h": 8,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "reference",
+          "kind": "cyl",
+          "at": [
+            502,
+            1135,
+            116
+          ],
+          "r": 6,
+          "h": 8,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "frame",
+          "kind": "cyl",
+          "at": [
+            300,
+            1000,
+            -5
+          ],
+          "r": 18,
+          "h": 6,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "frame",
+          "kind": "cyl",
+          "at": [
+            -150,
+            1260,
+            15
+          ],
+          "r": 18,
+          "h": 6,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "frame",
+          "kind": "cyl",
+          "at": [
+            -150,
+            740,
+            35
+          ],
+          "r": 18,
+          "h": 6,
+          "segments": 32,
+          "pitch": 90000
+        },
+        {
+          "tint": "reference",
+          "kind": "extrude",
+          "at": [
+            0,
+            1000,
+            -10
+          ],
+          "polygon": [
+            [
+              -183,
+              625
+            ],
+            [
+              -177,
+              625
+            ],
+            [
+              -177,
+              675
+            ],
+            [
+              -183,
+              675
+            ]
+          ],
+          "h": 12,
+          "pitch": -90000
+        },
+        {
+          "tint": "reference",
+          "kind": "extrude",
+          "at": [
+            0,
+            1000,
+            -10
+          ],
+          "polygon": [
+            [
+              -198,
+              678
+            ],
+            [
+              -198,
+              672
+            ],
+            [
+              -162,
+              672
+            ],
+            [
+              -162,
+              678
+            ]
+          ],
+          "h": 12,
+          "pitch": -90000
+        },
+        {
+          "tint": "reference",
+          "kind": "extrude",
+          "at": [
+            0,
+            1000,
+            -10
+          ],
+          "polygon": [
+            [
+              -198,
+              628
+            ],
+            [
+              -198,
+              622
+            ],
+            [
+              -162,
+              622
+            ],
+            [
+              -162,
+              628
+            ]
+          ],
+          "h": 12,
+          "pitch": -90000
+        },
+        {
+          "tint": "reference",
+          "kind": "extrude",
+          "at": [
+            0,
+            1000,
+            -10
+          ],
+          "polygon": [
+            [
+              -81,
+              625
+            ],
+            [
+              -75,
+              625
+            ],
+            [
+              -75,
+              675
+            ],
+            [
+              -81,
+              675
+            ]
+          ],
+          "h": 12,
+          "pitch": -90000
+        },
+        {
+          "tint": "reference",
+          "kind": "extrude",
+          "at": [
+            0,
+            1000,
+            -10
+          ],
+          "polygon": [
+            [
+              -78,
+              678
+            ],
+            [
+              -78,
+              672
+            ],
+            [
+              -48,
+              672
+            ],
+            [
+              -48,
+              678
+            ]
+          ],
+          "h": 12,
+          "pitch": -90000
+        },
+        {
+          "tint": "reference",
+          "kind": "extrude",
+          "at": [
+            0,
+            1000,
+            -10
+          ],
+          "polygon": [
+            [
+              -78,
+              653
+            ],
+            [
+              -78,
+              647
+            ],
+            [
+              -48,
+              647
+            ],
+            [
+              -48,
+              653
+            ]
+          ],
+          "h": 12,
+          "pitch": -90000
+        },
+        {
+          "tint": "reference",
+          "kind": "extrude",
+          "at": [
+            0,
+            1000,
+            -10
+          ],
+          "polygon": [
+            [
+              -51,
+              650
+            ],
+            [
+              -45,
+              650
+            ],
+            [
+              -45,
+              675
+            ],
+            [
+              -51,
+              675
+            ]
+          ],
+          "h": 12,
+          "pitch": -90000
+        },
+        {
+          "tint": "reference",
+          "kind": "extrude",
+          "at": [
+            0,
+            1000,
+            -10
+          ],
+          "polygon": [
+            [
+              -62,
+              652
+            ],
+            [
+              -66,
+              648
+            ],
+            [
+              -44,
+              623
+            ],
+            [
+              -40,
+              627
+            ]
+          ],
+          "h": 12,
+          "pitch": -90000
+        },
+        {
+          "tint": "reference",
+          "kind": "extrude",
+          "at": [
+            0,
+            1000,
+            -10
+          ],
+          "polygon": [
+            [
+              57,
+              625
+            ],
+            [
+              63,
+              625
+            ],
+            [
+              63,
+              675
+            ],
+            [
+              57,
+              675
+            ]
+          ],
+          "h": 12,
+          "pitch": -90000
+        },
+        {
+          "tint": "reference",
+          "kind": "extrude",
+          "at": [
+            0,
+            1000,
+            -10
+          ],
+          "polygon": [
+            [
+              42,
+              678
+            ],
+            [
+              42,
+              672
+            ],
+            [
+              78,
+              672
+            ],
+            [
+              78,
+              678
+            ]
+          ],
+          "h": 12,
+          "pitch": -90000
+        },
+        {
+          "tint": "reference",
+          "kind": "extrude",
+          "at": [
+            0,
+            1000,
+            -10
+          ],
+          "polygon": [
+            [
+              42,
+              628
+            ],
+            [
+              42,
+              622
+            ],
+            [
+              78,
+              622
+            ],
+            [
+              78,
+              628
+            ]
+          ],
+          "h": 12,
+          "pitch": -90000
+        },
+        {
+          "tint": "reference",
+          "kind": "extrude",
+          "at": [
+            0,
+            1000,
+            -10
+          ],
+          "polygon": [
+            [
+              162,
+              678
+            ],
+            [
+              162,
+              672
+            ],
+            [
+              198,
+              672
+            ],
+            [
+              198,
+              678
+            ]
+          ],
+          "h": 12,
+          "pitch": -90000
+        },
+        {
+          "tint": "reference",
+          "kind": "extrude",
+          "at": [
+            0,
+            1000,
+            -10
+          ],
+          "polygon": [
+            [
+              162,
+              653
+            ],
+            [
+              162,
+              647
+            ],
+            [
+              198,
+              647
+            ],
+            [
+              198,
+              653
+            ]
+          ],
+          "h": 12,
+          "pitch": -90000
+        },
+        {
+          "tint": "reference",
+          "kind": "extrude",
+          "at": [
+            0,
+            1000,
+            -10
+          ],
+          "polygon": [
+            [
+              162,
+              628
+            ],
+            [
+              162,
+              622
+            ],
+            [
+              198,
+              622
+            ],
+            [
+              198,
+              628
+            ]
+          ],
+          "h": 12,
+          "pitch": -90000
+        },
+        {
+          "tint": "reference",
+          "kind": "extrude",
+          "at": [
+            0,
+            1000,
+            -10
+          ],
+          "polygon": [
+            [
+              159,
+              650
+            ],
+            [
+              165,
+              650
+            ],
+            [
+              165,
+              675
+            ],
+            [
+              159,
+              675
+            ]
+          ],
+          "h": 12,
+          "pitch": -90000
+        },
+        {
+          "tint": "reference",
+          "kind": "extrude",
+          "at": [
+            0,
+            1000,
+            -10
+          ],
+          "polygon": [
+            [
+              195,
+              625
+            ],
+            [
+              201,
+              625
+            ],
+            [
+              201,
+              650
+            ],
+            [
+              195,
+              650
+            ]
+          ],
+          "h": 12,
+          "pitch": -90000
+        },
+        {
+          "tint": "reference",
+          "kind": "extrude",
+          "at": [
+            0,
+            1000,
+            124
+          ],
+          "polygon": [
+            [
+              505,
+              -21
+            ],
+            [
+              501,
+              -23
+            ],
+            [
+              507,
+              -43
+            ],
+            [
+              511,
+              -41
+            ]
+          ],
+          "h": 10,
+          "pitch": -90000
+        },
+        {
+          "tint": "reference",
+          "kind": "extrude",
+          "at": [
+            0,
+            1000,
+            124
+          ],
+          "polygon": [
+            [
+              507,
+              -41
+            ],
+            [
+              511,
+              -43
+            ],
+            [
+              517,
+              -29
+            ],
+            [
+              513,
+              -27
+            ]
+          ],
+          "h": 10,
+          "pitch": -90000
+        },
+        {
+          "tint": "reference",
+          "kind": "extrude",
+          "at": [
+            0,
+            1000,
+            124
+          ],
+          "polygon": [
+            [
+              517,
+              -27
+            ],
+            [
+              513,
+              -29
+            ],
+            [
+              519,
+              -43
+            ],
+            [
+              523,
+              -41
+            ]
+          ],
+          "h": 10,
+          "pitch": -90000
+        },
+        {
+          "tint": "reference",
+          "kind": "extrude",
+          "at": [
+            0,
+            1000,
+            124
+          ],
+          "polygon": [
+            [
+              519,
+              -41
+            ],
+            [
+              523,
+              -43
+            ],
+            [
+              529,
+              -23
+            ],
+            [
+              525,
+              -21
+            ]
+          ],
+          "h": 10,
+          "pitch": -90000
+        },
+        {
+          "tint": "reference",
+          "kind": "extrude",
+          "at": [
+            0,
+            1000,
+            124
+          ],
+          "polygon": [
+            [
+              489,
+              158
+            ],
+            [
+              493,
+              158
+            ],
+            [
+              493,
+              182
+            ],
+            [
+              489,
+              182
+            ]
+          ],
+          "h": 10,
+          "pitch": -90000
+        },
+        {
+          "tint": "reference",
+          "kind": "extrude",
+          "at": [
+            0,
+            1000,
+            124
+          ],
+          "polygon": [
+            [
+              507,
+              158
+            ],
+            [
+              511,
+              158
+            ],
+            [
+              511,
+              182
+            ],
+            [
+              507,
+              182
+            ]
+          ],
+          "h": 10,
+          "pitch": -90000
+        },
+        {
+          "tint": "reference",
+          "kind": "extrude",
+          "at": [
+            0,
+            1000,
+            124
+          ],
+          "polygon": [
+            [
+              493,
+              183
+            ],
+            [
+              489,
+              181
+            ],
+            [
+              507,
+              157
+            ],
+            [
+              511,
+              159
+            ]
+          ],
+          "h": 10,
+          "pitch": -90000
+        }
+      ],
+      "palette": {
+        "frame": "#35434e",
+        "mask": "#253541",
+        "bearing": "#657580",
+        "ring": "#b7a467",
+        "blade0": "#35a8d8",
+        "blade1": "#e29b45",
+        "blade2": "#72bd8b",
+        "index": "#f5df84",
+        "reference": "#ecf3f7"
+      },
+      "tags": [
+        "tool",
+        "machine",
+        "exhibit"
+      ]
+    }
+  },
+  "text": {
+    "work": "work",
+    "card": "Widen and narrow a real polygonal opening with three original coupled blades.",
+    "iris": "mechanical iris",
+    "aperture": "adjustable aperture",
+    "wrong_phase": "Choose the neighboring setting matching the current phase; the wide and narrow ends do not wrap.",
+    "free_hand": "Free a hand to turn the iris ring rim.",
+    "howto_turn": "Use a free hand on the right-hand ring rim to narrow or widen this mounted three-blade iris one indexed setting at a time. The white ring index and W and N references mark the wide and narrow ends. The same three colored rigid blades pivot on their fixed original axes; each original drive stud travels inside a genuine open radial channel in the same adjusting ring. Continuous axles, hollow receiver bores, rear collars and retaining heads keep the original blades and ring captured on the connected frame. The through-opening is formed by the actual union of the three straight inner edges inside the fixed open mask. Its projected area decreases through eight settings from about144132 to26021 square millimetres, remains open at the narrow end and widens back without a wrap or reset. It is a polygonal aperture, not a circular camera diaphragm. Nominal300 millimetre pivot radius and rigid120 millimetre stud spacing give alpha=phi+asin(2.5sin(phi)); the ring ranges from0 to15 degrees, with whole-millidegree tables and rounded fixed pivots retaining positive geometric clearances. Each whole blade rotates by120*j+alpha about its own fixed pivot; no member scales or changes its original vertices. Inspect the assembled layers from an oblique view. Stored pictures select endpoints: a separately verified analytic geometric path does not imply interpolated browser motion, physical force or friction, a motion solver, elastic blade contact, a mechanical hardstop, complete closure, nested screen regions, light or exposure simulation, optical performance, photography, or loose-item custody."
+  },
+  "card": {
+    "text": "card",
+    "category": "work",
+    "synonyms": [
+      "iris",
+      "aperture"
+    ]
+  },
+  "howtos": {
+    "turn": {
+      "text": "howto_turn",
+      "steps": [
+        {
+          "form": "narrow_00"
+        },
+        {
+          "form": "widen_01"
+        }
+      ]
+    }
+  }
+}
