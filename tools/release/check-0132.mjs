@@ -200,19 +200,23 @@ if (ONLY.has('2')) {
   const step = async (name, send, shown) => {
     const b = soul ? await probe(page, soul) : null, t0 = Date.now(), sent = send();
     let seenMs = null;
-    while (Date.now() - t0 < 6000) {
+    while (Date.now() - t0 < (soul ? 6000 : 30_000)) { // a Soul not on the page yet: wait longer, to say when it came
       if (!soul) {
         soul = (await page.evaluate(() => [...(window.__soulsV2?.souls.keys() ?? [])])).find((s) => !before.has(s)) ?? null;
+        if (soul) report.lines[2].appearedMs = Date.now() - t0;
         // the clip follows it: its card by the page's own link, then Follow
         if (soul) { await page.evaluate((id) => { location.hash = `soul/${id}`; }, soul); await page.getByRole('button', { name: /^Follow$/ }).first().click({ timeout: 3000 }).catch(() => {}); }
       }
       const s = soul ? await probe(page, soul) : null;
       if (s && shown(s, b ?? s)) { seenMs = Date.now() - t0; break; }
+      if (soul && !s && Date.now() - t0 > 6000) break;
       await sleep(100);
     }
     const pass = sent?.ok !== false && seenMs !== null && seenMs <= 2000;
     // what the world answered so far (its receipt's phases or refusal, by name) and what the page showed last
-    const answers = sent?.sequence ? (cli('receipt', String(sent.sequence)).receipt?.answers ?? []).map((a) => a.reason ?? a.answer).join(' > ') : '';
+    // each answer with how long after the send the world gave it (the client's own receipt: sentAt and each answer's at)
+    const rc = sent?.sequence ? cli('receipt', String(sent.sequence)).receipt : null;
+    const answers = (rc?.answers ?? []).map((a) => `${a.reason ?? a.answer}${rc.sentAt && a.at ? ` at ${Date.parse(a.at) - Date.parse(rc.sentAt)} ms` : ''}`).join(' > ');
     const last = soul ? await probe(page, soul) : null;
     report.lines[2].steps.push({ name, answer: sent?.ok === false ? sent : { ok: true, sequence: sent?.sequence }, answers, seenMs, page: last });
     row(2, name, pass, `${sent?.ok === false ? `refused: ${JSON.stringify(sent).slice(0, 160)}` : `world: ${answers || 'no answer yet'}`}; on the page ${seenMs === null ? `not within 6 s (it shows ${last ? `${last.doing ?? '?'}, ${last.activity ?? '?'}${last.prop ? `, holding ${last.prop}` : ''}` : 'no such Soul'})` : `after ${seenMs} ms`}`);
