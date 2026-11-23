@@ -10,7 +10,7 @@ import { apiPath } from '../world-path.ts';
 import type { Souls } from '../useSouls.ts';
 import type { V2Bridge } from './bridge.ts';
 import { streamNotice } from './stream-health.ts';
-import { appendEdge, WorldState, type LayerLike } from './world-state.ts';
+import { EdgeLog, WorldState, type LayerLike } from './world-state.ts';
 import { historyBase, setV2History, V2History } from './history.ts';
 
 const STREAM = /^\/s\/[A-Za-z0-9._/-]+\/$/;
@@ -40,7 +40,8 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
     let bridge: V2Bridge | null = null, failed = false, stopped = false, lastSouls: unknown = null, lastError: string | null = null, lastEntities: unknown = null;
     const startedAt = performance.now();
     // #4176: doors, lamps and the weather as v2 has them, brought to the page's entity layer by its own world diffs
-    const world = new WorldState();
+    const world = new WorldState(), edges = new EdgeLog();
+    let said: readonly unknown[] = [], seenSpeech: unknown = null, seenTurns: unknown = null;
     let seenParts = 0, lastPartAt: number | null = null, errorAtParts: number | null = null, seenTo: number | null = null;
     // The scenery the page binds is the world's own (/v1/scene, published with the world); takes carry its rules version.
     void (async () => {
@@ -73,8 +74,8 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
       if (bridge) {
         const v = bridge.view;
         st.takes = v.takes;
-        st.edge = v.speech; // what the Souls said aloud (take-speech.ts): the speech layer and dialogue dock read it as public
-        if (v.conversations.length) st.edge = [...st.edge, ...v.conversations] as typeof st.edge; // R3: private turns, words withheld
+        // what the Souls said aloud, and (R3) private turns with their words withheld: one list while neither changes
+        if (v.speech !== seenSpeech || v.conversations !== seenTurns) { seenSpeech = v.speech; seenTurns = v.conversations; said = v.conversations.length ? [...v.speech, ...v.conversations] : v.speech; }
         st.ticker = v.ticker; // R3: what the Souls did (take-talk.ts)
         conn.replica.tick = v.takes.serverTick;
         // the replica's entities as the old socket keeps them: who is in the world now (search and follow read them)
@@ -91,9 +92,11 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
         if (v.error && v.error !== lastError) { lastError = v.error; errorAtParts = v.parts; console.warn('v2 stream:', v.error); }
         if (v.parts !== seenParts) { seenParts = v.parts; lastPartAt = performance.now(); }
         // B2-3: a still world's pointer moving its time on is the stream alive, not silent
-        if (v.newestTo !== seenTo) { seenTo = v.newestTo; if (seenParts) lastPartAt = performance.now(); }
+        if (v.newestTo !== seenTo) { seenTo = v.newestTo; if (seenTo !== null) lastPartAt = performance.now(); }
         const diff = world.next((window as unknown as { __soulsEntity?: { layer?: LayerLike } }).__soulsEntity?.layer, Date.now());
-        if (diff) st.edge = appendEdge(st.edge, diff);
+        // what the Souls said aloud (take-speech.ts; the speech layer and dialogue dock read it as public) and the world
+        // diffs, in one log: a diff is never dropped when the speech changes
+        st.edge = edges.step(said, diff) as typeof st.edge;
       }
       // one visible state for every way the stream can fail or stall: the page's own status line (LiveWorld, ViewerFrame)
       st.streamNotice = streamNotice({ failed, error: bridge?.view.error ?? null, errorAtParts, parts: seenParts, startedAt, lastPartAt, now: performance.now() });
