@@ -4,7 +4,7 @@ use super::{Played, StreamPart, int, read_map, refuse};
 use crate::effects::{
     Body, Change, Header, LinkState, NodeState, Part, Refusal, State, TransferRec, read_id,
 };
-use crate::encode::{Value, encode};
+use crate::encode::{Name, Value, encode};
 use crate::ids::{Hash, Id, Purpose, Sha256, sha256};
 use crate::pose::{HandOff, Pose};
 use crate::time::{Tempo, TickRate, TimeEffect, Timeline};
@@ -190,8 +190,42 @@ pub fn project(header: &Header, state: &State) -> R<Value> {
     Ok(value)
 }
 
-fn validate_node(header: &Header, id: Id, n: &NodeState) -> R<()> {
-    if !public(n.audience) || !header.kinds.contains(&n.kind) {
+/// The kinds a world's creator defined that a public observation can check (#3697): each named by a public
+/// `souls:kind` node at the zone's root among `nodes`.
+fn defined_kinds<'a>(zone: Id, nodes: impl Iterator<Item = &'a NodeState>) -> BTreeSet<String> {
+    use crate::kinds::defined::{is_definition, named};
+    nodes
+        .filter(|n| n.parent == Some(zone) && public(n.audience) && is_definition(n.kind.as_str()))
+        .filter_map(|n| named(&n.fields).map(str::to_owned))
+        .collect()
+}
+
+/// Whether a node's kind is pinned: by the header, as `souls:kind` itself, or by a `souls:kind` node in `defined`.
+fn pinned(header: &Header, defined: &BTreeSet<String>, kind: &Name) -> bool {
+    header.kinds.contains(kind)
+        || crate::kinds::defined::is_definition(kind.as_str())
+        || defined.contains(kind.as_str())
+}
+
+/// Each public live node of `state` a public observation cannot hold (#3697's defined kinds aside, a kind it cannot
+/// check, a frame or pose it cannot read), with the refusal: what a producer leaves out rather than stop.
+pub fn unplaceable(header: &Header, state: &State) -> Vec<(Id, Refusal)> {
+    let live = || state.nodes.values().filter(|n| public(n.audience));
+    let defined = defined_kinds(header.zone, live());
+    state
+        .nodes
+        .iter()
+        .filter(|(_, n)| public(n.audience))
+        .filter_map(|(id, n)| {
+            validate_node(header, &defined, *id, n)
+                .err()
+                .map(|e| (*id, e))
+        })
+        .collect()
+}
+
+fn validate_node(header: &Header, defined: &BTreeSet<String>, id: Id, n: &NodeState) -> R<()> {
+    if !public(n.audience) || !pinned(header, defined, &n.kind) {
         return bad("node audience or pinned kind");
     }
     if id == header.zone {
@@ -249,14 +283,16 @@ fn validate(header: &Header, value: &Value) -> R<()> {
     }
     let mut all = BTreeMap::new();
     for (id, v) in &nodes {
-        let n = NodeState::read(v)?;
-        validate_node(header, *id, &n)?;
-        all.insert(*id, n);
+        all.insert(*id, NodeState::read(v)?);
+    }
+    let defined = defined_kinds(header.zone, all.values());
+    for (id, n) in &all {
+        validate_node(header, &defined, *id, n)?;
     }
     let opaque = pairs(field(m, 8)?)?;
     for (id, v) in &opaque {
         let n = NodeState::read(v)?;
-        validate_node(header, *id, &n)?;
+        validate_node(header, &defined, *id, &n)?;
         if all.insert(*id, n).is_some() {
             return bad("duplicate live/flying node");
         }
@@ -282,7 +318,7 @@ fn validate(header: &Header, value: &Value) -> R<()> {
         };
         for (id, v) in &ns {
             let n = NodeState::read(v)?;
-            validate_node(header, *id, &n)?;
+            validate_node(header, &defined, *id, &n)?;
             if all.insert(*id, n).is_some() {
                 return bad("duplicate flight node");
             }
@@ -734,13 +770,19 @@ fn in_place(
             NodeState::read(&arr(&rows[i])?[1])?,
             NodeState::read(&r[1])?,
         );
-        if id == header.zone {
+        // A kind the header does not pin, or a definition, is checked against the whole state (#3697).
+        let none = BTreeSet::new();
+        if id == header.zone
+            || !pinned(header, &none, &new.kind)
+            || crate::kinds::defined::is_definition(old.kind.as_str())
+            || crate::kinds::defined::is_definition(new.kind.as_str())
+        {
             return Ok(None);
         }
         if old.parent != new.parent || old.slot != new.slot {
             moved.insert(id, new.parent);
         }
-        validate_node(header, id, &new)?;
+        validate_node(header, &none, id, &new)?;
         out.push((i, Value::Array(vec![id.to_value(), r[1].clone()])));
     }
     if !moved.is_empty() {
@@ -1003,7 +1045,12 @@ impl PublicPlayer {
                 delta.insert(3, Value::Array(l));
             }
         }
-        if in_place(&self.header, &self.state, &delta, &self.frames)?.is_none() {
+        // A row the in-place checks refuse is left to the whole cut, which decides (#3697: a producer then leaves out
+        // what it cannot place).
+        if !matches!(
+            in_place(&self.header, &self.state, &delta, &self.frames),
+            Ok(Some(_))
+        ) {
             return Ok(None);
         }
         Ok(Some(Value::Map(delta)))

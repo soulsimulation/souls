@@ -158,9 +158,23 @@ pub fn record(root: &Path, world: &str, now: i64, event: Event) -> std::io::Resu
 }
 
 fn write_whole(path: &Path, text: &str) -> std::io::Result<()> {
+    write_synced(path, text.as_bytes())
+}
+
+/// Writes `bytes` whole under `<path>.new`, syncs it, renames it to `path` and syncs the folder, so a crash or a power
+/// cut leaves the old file or the new one, never a short one (B1-7).
+pub(crate) fn write_synced(path: &Path, bytes: &[u8]) -> std::io::Result<()> {
+    use std::io::Write as _;
     let tmp = path.with_extension("new");
-    std::fs::write(&tmp, text)?;
-    std::fs::rename(&tmp, path)
+    let mut f = std::fs::File::create(&tmp)?;
+    f.write_all(bytes)?;
+    f.sync_all()?;
+    drop(f);
+    std::fs::rename(&tmp, path)?;
+    if let Some(dir) = path.parent().filter(|d| !d.as_os_str().is_empty()) {
+        std::fs::File::open(dir)?.sync_all()?;
+    }
+    Ok(())
 }
 
 /// The health record as one line of JSON.
@@ -183,6 +197,21 @@ pub fn to_json(world: &str, at: i64, h: &Health) -> String {
 
 #[cfg(test)]
 mod tests {
+    /// B1-7: the synced write leaves the whole new file under its name and no temporary.
+    #[test]
+    fn a_synced_write_leaves_the_whole_file_and_no_temporary() {
+        let dir = std::env::temp_dir().join(format!("supervisor-synced-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).unwrap();
+        let path = dir.join("world.json");
+        std::fs::write(&path, "old").unwrap();
+        let new = "{\"world\":\"w\"}\n".repeat(500);
+        super::write_synced(&path, new.as_bytes()).unwrap();
+        assert_eq!(std::fs::read_to_string(&path).unwrap(), new);
+        assert!(!path.with_extension("new").exists());
+        std::fs::remove_dir_all(&dir).unwrap();
+    }
+
     use super::*;
 
     #[test]

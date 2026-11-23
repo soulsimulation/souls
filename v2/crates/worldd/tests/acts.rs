@@ -417,6 +417,34 @@ fn bodies() -> Result<Bodies, replica::effects::Refusal> {
     Ok(b)
 }
 
+/// An answer frame's sequence and its receipt's entries, or its refusal's reason.
+fn answer_in(frame: &[u8]) -> (u64, Result<Vec<u64>, String>) {
+    let Value::Map(m) = decode(frame).unwrap().value else {
+        panic!("a frame")
+    };
+    let Some(Value::Map(a)) = m.get(&2) else {
+        panic!("an answer")
+    };
+    let Some(Value::Uint(sequence)) = a.get(&2) else {
+        panic!("an answer's sequence: {a:?}")
+    };
+    let r = match (a.get(&3), a.get(&5)) {
+        (Some(Value::Uint(1)), Some(Value::Array(e))) => Ok(e
+            .iter()
+            .map(|v| match v {
+                Value::Uint(n) => *n,
+                _ => panic!("an entry"),
+            })
+            .collect()),
+        (Some(Value::Uint(2)), _) => match a.get(&4) {
+            Some(Value::Text(t)) => Err(t.as_str().to_owned()),
+            other => panic!("a refusal: {other:?}"),
+        },
+        other => panic!("an answer: {other:?}"),
+    };
+    (*sequence, r)
+}
+
 /// A scripted client on the world's socket, one per Soul.
 struct Client(UnixStream, Id, u64);
 
@@ -467,30 +495,7 @@ impl Client {
                 break frame;
             }
         };
-        let Value::Map(m) = decode(&frame).unwrap().value else {
-            panic!("a frame")
-        };
-        let Some(Value::Map(a)) = m.get(&2) else {
-            panic!("an answer")
-        };
-        let Some(Value::Uint(sequence)) = a.get(&2) else {
-            panic!("an answer's sequence: {a:?}")
-        };
-        let r = match (a.get(&3), a.get(&5)) {
-            (Some(Value::Uint(1)), Some(Value::Array(e))) => Ok(e
-                .iter()
-                .map(|v| match v {
-                    Value::Uint(n) => *n,
-                    _ => panic!("an entry"),
-                })
-                .collect()),
-            (Some(Value::Uint(2)), _) => match a.get(&4) {
-                Some(Value::Text(t)) => Err(t.as_str().to_owned()),
-                other => panic!("a refusal: {other:?}"),
-            },
-            other => panic!("an answer: {other:?}"),
-        };
-        (*sequence, r)
+        answer_in(&frame)
     }
 
     /// Waits for the progress answer of the act just sent (C20: sent in the tick its run starts).
@@ -1016,15 +1021,45 @@ fn point(v: Vec3) -> BTreeMap<u64, Value> {
 /// #4187, the trace: a Soul's take is running (its run open, its press under way) when its own controller sends a
 /// walk. The walk is a move, which the bodies take, not the form runner. Today the walk replaces the run: its claim on
 /// the body ends the take's press, the take is refused `claim-taken` with nothing taken, and the walk is done where it
-/// was sent.
+/// was sent. In lockstep, the walk arriving at a fixed tick: the take starts at tick 1 and is in its approach at ticks 2
+/// and 3, which the walk's claim on the legs ends. From tick 4 the take is in its press, a hand move a walk does not
+/// end: the take is done and the body walks. On a served clock a slow machine let the walk arrive then (#4206's flake).
 #[test]
 fn i4187_a_walk_sent_during_an_open_form_run() {
-    let (run, mut a, _) = serve("i4187w");
-    a.send("test:take", Some(vessel()), BTreeMap::new());
-    a.started();
-    a.send("test:walk", Some(ground()), point(south(3_000_000)));
-    let first = a.answer_of();
-    let second = a.answer_of();
+    let run = lockstep();
+    let (take, walk) = (std::sync::mpsc::channel(), std::sync::mpsc::channel());
+    let arrive = |tick, sequence, verb: &str, target, parameters, reply| {
+        let bytes = intent_bytes(w1(), sequence, verb, target, parameters);
+        run.world
+            .events
+            .send(answers::Event::ArrivalAt { tick, bytes, reply })
+            .unwrap();
+    };
+    arrive(1, 1, "test:take", Some(vessel()), BTreeMap::new(), take.0);
+    arrive(
+        WALK_AT,
+        2,
+        "test:walk",
+        Some(ground()),
+        point(south(3_000_000)),
+        walk.0,
+    );
+    let (done, ran) = std::sync::mpsc::channel();
+    run.world
+        .events
+        .send(answers::Event::RunTo { tick: 400, done })
+        .unwrap();
+    ran.recv().unwrap();
+    // The take's run started (its progress answer) before the walk arrived, and ended once.
+    let final_of = |rx: &std::sync::mpsc::Receiver<Vec<u8>>| {
+        let frames: Vec<_> = rx.try_iter().collect();
+        let (progress, ends): (Vec<_>, Vec<_>) = frames
+            .iter()
+            .partition(|f| answers::progress_of(f).is_some());
+        assert_eq!(ends.len(), 1, "one final answer");
+        (progress.len(), answer_in(ends[0]))
+    };
+    let (first, second) = (final_of(&take.1), final_of(&walk.1));
     println!("#4187 trace: take then walk answered {first:?} then {second:?}");
     let r = run.replay();
     println!(
@@ -1034,11 +1069,11 @@ fn i4187_a_walk_sent_during_an_open_form_run() {
     );
     assert_eq!(
         first,
-        (1, Err("claim-taken".to_owned())),
-        "the take is replaced"
+        (1, (1, Err("claim-taken".to_owned()))),
+        "the take's run started, and is replaced"
     );
     assert!(
-        matches!(second, (2, Ok(_))),
+        matches!(second, (_, (2, Ok(_)))),
         "the walk is accepted and done"
     );
     assert_eq!(
@@ -1051,7 +1086,63 @@ fn i4187_a_walk_sent_during_an_open_form_run() {
         (Some(ground()), None),
         "nothing taken"
     );
-    run.stop();
+    run.world.stop();
+}
+
+/// The tick #4187's walk arrives at: the take's approach (ticks 2 and 3).
+const WALK_AT: i64 = 2;
+
+/// The test world in lockstep (no socket): intents arrive at the ticks they name, and nothing waits on a clock.
+fn lockstep() -> Run {
+    let store = Mem::with(Vec::new());
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.lockstep = true;
+    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
+    cfg.engine = Some((
+        tree_rules(),
+        vec![
+            activity(PAIR, ["test:first", "test:second"]),
+            activity(CARRY, ["test:front", "test:back"]),
+        ],
+    ));
+    let rules = Rules {
+        kinds: entries(),
+        moves: Json::Obj(Vec::new()),
+    };
+    let world = answers::start(world(), rules, store.clone(), cfg).expect("the world starts");
+    let path = std::env::temp_dir().join(format!("c2-lockstep-{}.sock", std::process::id()));
+    Run { world, store, path }
+}
+
+/// Soul `soul`'s intent, encoded as it arrives: its expiry far ahead of any world time.
+fn intent_bytes(
+    soul: Id,
+    sequence: u64,
+    verb: &str,
+    target: Option<Id>,
+    parameters: BTreeMap<u64, Value>,
+) -> Vec<u8> {
+    let i = Intent {
+        actor: Actor::Soul(soul),
+        verb: name(verb),
+        target: target.map(Target::Node),
+        parameters,
+        sequence,
+        basis: Version {
+            lineage: LINEAGE,
+            zone: Id::new(LINEAGE, 0).unwrap(),
+            epoch: 1,
+            sequence: 0,
+        }
+        .to_value(),
+        expiry: answers::now() + 60_000_000,
+        resources: Vec::new(),
+        fallbacks: Vec::new(),
+        replaces: None,
+        body: None,
+        reflex: false,
+    };
+    encode(&i.to_value()).unwrap()
 }
 
 /// #4187: a second form act from the Soul's own controller while its first run is open. Before this change it was

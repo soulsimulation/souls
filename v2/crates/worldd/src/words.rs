@@ -293,7 +293,12 @@ mod reserved_tests {
     /// The body fields this crate and `skills` number are in the engine's one list of reserved fields.
     #[test]
     fn body_fields_are_reserved() {
-        for n in [super::NAME, super::DESCRIPTION, skills::wear::BODY] {
+        for n in [
+            super::NAME,
+            super::DESCRIPTION,
+            skills::wear::BODY,
+            skills::wear::LOOK,
+        ] {
             assert!(
                 reserved().iter().any(|f| f.n == n && f.on == On::Body),
                 "{n}"
