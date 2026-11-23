@@ -37,6 +37,7 @@
 //! still loads, as "unknown kind", keeping its generic state; the store keeps why each refused kind was refused.
 
 pub mod body;
+pub mod defined;
 pub mod entry;
 pub mod place;
 pub mod sizes;

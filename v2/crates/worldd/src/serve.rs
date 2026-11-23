@@ -1964,6 +1964,7 @@ fn creator(spec: &str, built: &Built) -> R<Arc<Creator>> {
 /// `--compact-after` bytes of it (default 64 MiB, `compactor`). The clock's rate is world µs per real µs (default 1/1); a start whose rate differs from the
 /// last logged applies a new mapping, and the mapping in force is on the zone root for every copy (E7b, #3516).
 pub fn run(args: &[String]) -> i32 {
+    crate::stopped::install(); // D6: a SIGTERM or SIGINT leaves one line naming it
     match serve(args) {
         Ok(()) => 0,
         Err(e) => {
@@ -2437,6 +2438,8 @@ fn serve(args: &[String]) -> R<()> {
     let (ready_tx, ready_rx) = channel::<()>();
     let stream_header = built.header.clone();
     let stream_found = Arc::clone(&found);
+    // What a closed container holds stays out of the public stream too (#3948).
+    let stream_closed = closed_kinds.clone();
     // The history page's Back to live (#3661): the public stream this world serves now, written before listening.
     public_history_live(
         &dir,
@@ -2479,7 +2482,9 @@ fn serve(args: &[String]) -> R<()> {
                     history: Some(&*stream_found),
                 };
                 // Its recovery reads are the world's start: patient (#1960).
-                let mut writer = patiently(|| view_out::PublicWriter::open(start, stream_store))?;
+                let mut writer = patiently(|| {
+                    view_out::PublicWriter::open_hiding(start, stream_store, stream_closed)
+                })?;
                 // Both the pointer and placement bootstrap resolve the existing strict public history export.
                 let history = "history/";
                 let pointer = format!(
