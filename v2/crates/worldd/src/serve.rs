@@ -3830,8 +3830,8 @@ mod tests {
         let built = build(&facts, &entries).expect("builds");
         assert_eq!(
             built.activities.len(),
-            2,
-            "conversation and entry runtime pins"
+            3,
+            "conversation, give and entry runtime pins"
         );
         let prefix = imported.kind_lines.join("\n") + "\n";
         assert!(
