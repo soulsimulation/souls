@@ -68,8 +68,10 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
         conn.anchor = { tick: v.takes.serverTick, at: Date.now() - (performance.now() - v.takes.receivedAt) };
         if (v.souls !== lastSouls) {
           lastSouls = v.souls;
-          conn.replica.souls = new Map([...v.souls.values()].map((x) => [x.id, { id: x.id, entityId: x.entityId, name: x.name, description: '', owner: '', intent: null, intentText: '',
-            mood: '', energy: '', doing: '', native: false } satisfies PublicSoul]));
+          // B3-3: the card's name, description and what it is doing now, from the stream; its body is awake unless the world
+          // is winding it down (idle, zombie, asleep)
+          conn.replica.souls = new Map([...v.souls.values()].map((x) => [x.id, { id: x.id, entityId: x.entityId, name: x.name, description: x.description, owner: '', intent: null, intentText: '',
+            mood: '', energy: '', doing: x.doing, native: false, body: { state: x.state, doing: null, since: 0 } } satisfies PublicSoul]));
         }
         if (v.error && v.error !== lastError) { lastError = v.error; errorAtParts = v.parts; console.warn('v2 stream:', v.error); }
         if (v.parts !== seenParts) { seenParts = v.parts; lastPartAt = performance.now(); }
