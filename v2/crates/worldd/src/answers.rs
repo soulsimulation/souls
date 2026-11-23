@@ -5428,6 +5428,8 @@ pub fn start<S: Storage + 'static>(
                         if let Err(r) = crate::orders::resume(&mut b, &order_parts, at) {
                             eprintln!("worldd: standing orders were not restored: {r}");
                         }
+                        // N2: a form's run open at the kill is ended `restart` in the first tick (`Acts::recover`).
+                        c.forms.recover(&wind_records, at);
                         b.wind_resume(
                             &wind_records,
                             |s| c.life.as_ref().and_then(|l| l.life.body_of(s)),

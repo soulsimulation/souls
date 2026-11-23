@@ -69,18 +69,7 @@ if [ -z "${V2_WEB:-}" ]; then
 fi
 [ -f "$WEB/index.html" ] || die "no built page in $WEB"
 
-# The world: N2's test world and the body's family from the repository's own entries, its creator the test person
-# Ada's grant. Seeded once per folder.
-CREATOR=$(printf 'd0%.0s' $(seq 16))-1
 cd "$DIR"
-if [ ! -f world/world.json ]; then
-  mkdir -p seed/entries
-  "$BIN/testworld" --seed 1 --things 0 --out seed > logs/seed.log
-  cp "$V2/../content/kinds/body/humanoid.json" seed/entries/
-  "$BIN/worldd" seed --facts seed/testworld-s1-t0.facts.json --dir world --souls 0 --at 0,0 --entries seed/entries \
-    --creator "$CREATOR" >> logs/seed.log 2>&1 || die "worldd seed failed: $(tail -n 3 logs/seed.log)"
-  od -An -tx1 -N32 /dev/urandom | tr -d ' \n' > view.key
-fi
 
 PIDS=() NAMES=()
 stop() {
@@ -108,6 +97,29 @@ until_ready() {
   done
   die "$name was not ready in 60 s: $(tail -n 3 "logs/$name.log")"
 }
+
+# The world: N2's test world and the body's family from the repository's own entries, its creator the test person
+# Ada. Seeded once per folder. The gateway's session exchange compares a session's principal with the world's creator
+# (gatewayd `creator.rs`), and the directory makes Ada's principal, at random, on her first sign-in: so the directory
+# signs her in once here, and the world is seeded with that principal (`creator`, kept beside it).
+if [ ! -f world/world.json ]; then
+  mkdir -p seed/entries
+  od -An -tx1 -N32 /dev/urandom | tr -d ' \n' > view.key
+  start directoryd "$BIN/directoryd" --listen "$DIRECTORY" --public-url "$BASE" --store "$DIR/accounts.sqlite" \
+    --pairing "$DIR/pairing.sqlite" --gateway-tokens "$DIR/seed/tokens" --view-key "$DIR/view.key" --test-sign-in
+  until_ready directoryd grep -q '^listening' logs/directoryd.log
+  node -e 'fetch(process.argv[1], { method: "POST", headers: { "content-type": "application/json" }, body: "{\"name\":\"Ada\"}" })
+    .then((r) => r.json()).then((b) => console.log(b.principal.replace(":", "-")))' "http://$DIRECTORY/v1/account/test-sign-in" > creator
+  kill "${PIDS[0]}" && wait "${PIDS[0]}" 2> /dev/null || true
+  PIDS=() NAMES=()
+  grep -Eq '^[0-9a-f]{32}-[0-9]+$' creator || die "the directory gave Ada no principal: $(tail -n 3 logs/directoryd.log)"
+  "$BIN/testworld" --seed 1 --things 0 --out seed > logs/seed.log
+  cp "$V2/../content/kinds/body/humanoid.json" seed/entries/
+  "$BIN/worldd" seed --facts seed/testworld-s1-t0.facts.json --dir world --souls 0 --at 0,0 --entries seed/entries \
+    --creator "$(cat creator)" >> logs/seed.log 2>&1 || die "worldd seed failed: $(tail -n 3 logs/seed.log)"
+fi
+[ -f creator ] || die "$DIR holds a world seeded before its creator was Ada's principal: use a new --dir"
+CREATOR=$(cat creator)
 
 # The directory first: with the dev sign-in it refuses a page address that is not loopback, and nothing else starts.
 start directoryd "$BIN/directoryd" --listen "$DIRECTORY" --public-url "$BASE" --store "$DIR/accounts.sqlite" \
