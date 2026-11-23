@@ -136,7 +136,7 @@ import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { atSocket, readSeat, runtimeOf } from '../home/home.mjs';
-import { QUOTED_NOTE, brief, changedBlock } from '../brief/brief.mjs';
+import { QUOTED_NOTE, brief, changedBlock, heldBy } from '../brief/brief.mjs';
 import { changedBetween, decode, posesOf, rememberPublicNames, rowsOf, sequenceOf, rememberPublicWords } from '../brief/copy.mjs';
 import { find } from '../find/find.mjs';
 import { publicNameHydration } from '../find/public-names.mjs';
@@ -146,6 +146,7 @@ import { ageOf } from './age.mjs';
 import { moveForm, moveVerdict, seatedAfter } from './moves.mjs';
 import { BATCH_MOST, BATCH_READS, catalog, context, query } from './reads.mjs';
 import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check/check.mjs';
+import { risesFromSeat } from '../check/stand.mjs';
 import { kindsHeld, kindsIn, stateOf } from '../check/state.mjs';
 import { actWords, nearestIds, nearestOffers, offerNamed, offersOf } from '../check/offers.mjs';
 import { Table } from '../reflex/reflex.mjs';
@@ -317,6 +318,29 @@ const INTENT_MOST = 4096;
 
 /** A creator's bulk edit (#3695) by the gateway's `POST /v2/creator-edit`: null when it was taken (its answer comes on
  *  the socket), else the refusal's name. Its bytes are never logged. */
+/** #3697: a creator's upload, by the gateway's `POST /v2/creator-upload`: G6's check in a child process, metadata
+ *  stripped, the hold point. The answer `{hash, state: allowed|held}` or the refusal; the token never leaves here. */
+async function upload(req) {
+  if (seat.grant.actor !== 'creator') return { ok: false, code: 'upload.not-the-creator', detail: 'this home holds a Soul\'s token, not a creator\'s' };
+  let body;
+  try { body = readFileSync(String(req.path ?? '')); } catch (e) { return { ok: false, code: 'file-unreadable', detail: `${req.path}: ${e.code ?? e.message}` }; }
+  const u = new URL(seat.gateway);
+  u.protocol = u.protocol === 'wss:' ? 'https:' : u.protocol === 'ws:' ? 'http:' : u.protocol;
+  const base = u.pathname.replace(/\/v2\/ws$/, '');
+  u.pathname = `${base}/v2/creator-upload`;
+  u.search = ''; u.hash = '';
+  try {
+    const r = await fetch(u, { method: 'POST', headers: { authorization: `Bearer ${seat.token}`, 'content-type': 'application/octet-stream' }, body, signal: AbortSignal.timeout(30_000) });
+    let a = {};
+    try { a = await r.json(); } catch { /* not JSON */ }
+    if (r.status !== 200) return { ok: false, code: a.refused ?? `upload.http-${r.status}`, ...(a.detail ? { detail: a.detail } : {}) };
+    u.pathname = `${base}/v2/uploads/${a.hash}`;
+    return { ok: true, ...a, ...(a.state === 'allowed' ? { url: u.href } : {}) };
+  } catch {
+    return { ok: false, code: 'upload.unreachable', detail: 'the gateway did not answer' };
+  }
+}
+
 async function sendBulk(bytes, sequence) {
   state.unanswered.push(sequence);
   save();
@@ -798,6 +822,7 @@ const OPS = new Set([
   'stop',
   'trace',
   'undo',
+  'upload',
   'wait',
   'wake',
   'wear',
@@ -1016,6 +1041,9 @@ function actsOf(words) {
   return out;
 }
 
+/** D8 (`check/stand.mjs`): a stand on this Soul's own seated or lying body goes as its seat's rise. */
+const standsFromSeat = (candidates) => risesFromSeat(candidates, { rows: rowsOf(copy), kinds: heldKinds(), me: ME, ns: NS });
+
 /**
  * Builds the next intent, `ranked` verbs on `target` with `words`, and sends it once (now, or at the next sign-in).
  * `reflex` marks an R9 reflex's intent (#3764); an agent's never is.
@@ -1224,7 +1252,7 @@ async function answer(req) {
     }
     case 'act': {
       if (req.for !== undefined && !mail.has(req.for)) return { ok: false, code: 'mail-not-found', detail: 'for names an open message this daemon was given' };
-      const candidates = Array.isArray(req.acts) ? actsOf(req.acts) : (Array.isArray(req.verbs) ? req.verbs : [req.verb]).map(candidateOf);
+      const candidates = standsFromSeat(Array.isArray(req.acts) ? actsOf(req.acts) : (Array.isArray(req.verbs) ? req.verbs : [req.verb]).map(candidateOf));
       if (candidates.length === 0 || candidates.length > ACT_MOST || candidates.some((c) => !c.verb || /\s/.test(c.verb))) {
         return { ok: false, code: 'act-ranked-list', detail: `one to ${ACT_MOST} verbs, best first` };
       }
@@ -1285,6 +1313,7 @@ async function answer(req) {
       return closing({ ok: true, sequence, sent, verb: f.verb, basis: sequenceOf(basis), ...(toward ? { to: toward } : {}) }, null, { now: true });
     }
     case 'inspect': return inspect(req);
+    case 'upload': return upload(req);
     case 'whatson': case 'calendar': return calendar(req);
     // #3704 (today's `query`, `catalog`, `context` and `batch`): reads from the copy, asking the world nothing.
     case 'query': { const rows = rowsOf(copy), me = [...rows.values()].find((r) => r.id === ME || r.soul === ME)?.id ?? null; const q = query(rows, req.questions, { budget: req.budget, me }); return q.ok ? closing(q, null, { now: true }) : { ...q, ...ageNow() }; }
@@ -1435,7 +1464,11 @@ async function answer(req) {
       if (!r) return { ok: false, code: 'receipt-not-found', detail: which === undefined ? 'no intent sent since the daemon started' : `no intent ${which} among the last ${RECEIPTS_KEPT} this daemon sent`, ...ageNow() };
       // D1: `act --wait` asks `quiet` while it waits, so what changed is kept for its last answer, not spent on a poll.
       const got = { ok: true, receipt: { ...r, going: going.includes(r.sequence) } };
-      return req.quiet ? { ...got, ...ageNow() } : closing(got, null, { now: true });
+      if (req.quiet) return { ...got, ...ageNow() };
+      // D7: an act that ended with its receipt names which of its ranked targets now holds this Soul's body (a seat a
+      // fallback took), read from the copy brought current.
+      const done = r.answers.at(-1)?.answer === 'receipt';
+      return closing(got, done ? (rows) => { const h = heldBy(rows, ME, r); return h ? { receipt: { ...got.receipt, held: h } } : {}; } : null, { now: !done });
     }
     case 'events': {
       // #3705: the events after cursor `since` (0: every one kept), without taking them: `wait` still hands them.

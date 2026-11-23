@@ -13,7 +13,8 @@
 //!   takes it out, and until then it is withheld from the hider too (closed, never open, on a doubt).
 //! - **The rule never reads a kind's words or a clock,** only the entries' `closed` sections, the tree and the log.
 //!
-//! Not here: the view stream's entries and their named events (R4's hub), and the public stream on disk (V1).
+//! The public stream on disk (V1, #3948) asks as nobody: what is in a closed container is out of its state
+//! ([`Closed::hidden`], [`Closed::hides`]) and its entries ([`Inside`]) until it is taken out (`view_out`).
 
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
@@ -94,6 +95,31 @@ impl Closed {
             at = tree.node(tree.handle(p)?)?.parent();
         }
         None
+    }
+
+    /// Whether `id` is in a closed container: what [`Withhold::withheld`] answers an asker who is nobody, the public.
+    pub fn hides(&self, tree: &Tree, id: Id) -> bool {
+        !self.kinds.is_empty() && self.container_of(tree, id).is_some()
+    }
+
+    /// Every node of `tree` in a closed container, at any depth: those [`Closed::hides`].
+    pub fn hidden(&self, tree: &Tree) -> BTreeSet<Id> {
+        let mut out = BTreeSet::new();
+        if self.kinds.is_empty() {
+            return out;
+        }
+        let mut todo = vec![(tree.root(), false)];
+        while let Some((h, under)) = todo.pop() {
+            let Some(n) = tree.node(h) else { continue };
+            if under {
+                out.insert(n.id());
+            }
+            let container = self.kinds.contains_key(plain(n.kind().as_str()));
+            for &c in tree.children(h).unwrap_or_default() {
+                todo.push((c, under || container));
+            }
+        }
+        out
     }
 
     /// Whether `soul` is in the container's rule's audience now.
