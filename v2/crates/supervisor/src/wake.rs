@@ -4,9 +4,10 @@
 //!
 //! - **At start** it reads the record and arms every alarm, overdue first: a world whose alarm came due while the
 //!   daemon or the machine was down is woken at once. A killed daemon or a reboot loses no alarm.
-//! - **Early by the wake and the queue:** a world is woken at its due time less the longest wake measured lately
-//!   (start to `awake`, at least [`WAKE_FLOOR_US`]) less [`START_US`] for each other world due within a second either
-//!   side of it, so 100 worlds due in one second are started in order and each is up before its due change. A woken world waits for
+//! - **Early by the wake and the queue:** a world is woken at its due time less the longest wake measured lately and
+//!   a quarter more (start to `awake`, or the world's own start when its unit started it; at least [`WAKE_FLOOR_US`])
+//!   less [`START_US`] for each other world due within a second either side of it, so 100 worlds due in one second
+//!   are started in order and each is up before its due change. A woken world waits for
 //!   its due time; it never commits early.
 //! - **By an intent:** `wake <world>` (the gateway holds an intent for it) starts the world now. Nothing else wakes
 //!   one: a viewer never reaches this socket.
@@ -95,7 +96,8 @@ impl Waker for Program {
 pub enum Msg {
     Alarm(String, Option<i64>, Sender<String>),
     Wake(String, Sender<String>),
-    Awake(String),
+    /// A world up, with how long its own start took (µs) when it says.
+    Awake(String, Option<i64>),
 }
 
 /// Reads one line from each connection to `socket` and hands it on; answers what comes back.
@@ -122,7 +124,12 @@ pub fn listen(socket: &Path, to: Sender<Msg>) -> std::io::Result<()> {
                         .map(|d| Msg::Alarm(world.into(), Some(d), tx)),
                     ["wake", world] => Some(Msg::Wake(world.into(), tx)),
                     ["awake", world] => {
-                        let _ = to.send(Msg::Awake(world.into()));
+                        let _ = to.send(Msg::Awake(world.into(), None));
+                        let _ = s.write_all(b"ok\n");
+                        return;
+                    }
+                    ["awake", world, took] => {
+                        let _ = to.send(Msg::Awake(world.into(), took.parse().ok()));
                         let _ = s.write_all(b"ok\n");
                         return;
                     }
@@ -159,14 +166,11 @@ impl<S: Store> Daemon<S> {
         }
     }
 
-    /// The lead a world is woken with: the longest wake measured lately, at least [`WAKE_FLOOR_US`].
+    /// The lead a world is woken with: the longest wake measured lately and a quarter more (a large world's start
+    /// varies by a second or two: 0.133 S3b measured imported Eden at 9.7 to 11.7 s), at least [`WAKE_FLOOR_US`].
     pub fn lead(&self) -> i64 {
-        self.wakes
-            .iter()
-            .copied()
-            .max()
-            .unwrap_or(0)
-            .max(WAKE_FLOOR_US)
+        let longest = self.wakes.iter().copied().max().unwrap_or(0);
+        (longest + longest / 4).max(WAKE_FLOOR_US)
     }
 
     /// Each armed alarm's wake time, in the order of the due times (overdue first): its due time less the lead and
@@ -231,9 +235,11 @@ impl<S: Store> Daemon<S> {
                 self.fired.entry(world).or_insert(now);
                 let _ = answer.send("ok".into());
             }
-            Msg::Awake(world) => {
-                if let Some(at) = self.fired.get(&world) {
-                    self.wakes.push_back(now - at);
+            Msg::Awake(world, took) => {
+                // Measured from the daemon's wake when it woke the world, else the world's own start (0.133 S3b).
+                let measured = self.fired.get(&world).map(|at| now - at).or(took);
+                if let Some(m) = measured {
+                    self.wakes.push_back(m);
                     if self.wakes.len() > MEASURED {
                         self.wakes.pop_front();
                     }
@@ -318,8 +324,24 @@ mod tests {
         let mut w = Woken::default();
         let (tx, _rx) = mpsc::channel();
         d.handle(Msg::Wake("a".into(), tx), 0, &mut w);
-        d.handle(Msg::Awake("a".into()), 900_000, &mut w);
-        assert_eq!(d.lead(), 900_000);
+        d.handle(Msg::Awake("a".into(), None), 900_000, &mut w);
+        assert_eq!(d.lead(), 1_125_000);
         assert_eq!(w.0, ["a"]);
+    }
+
+    #[test]
+    fn a_world_started_by_its_unit_says_how_long_its_start_took() {
+        let store = Memory::default();
+        let mut d = daemon(&store);
+        let mut w = Woken::default();
+        // Not woken by the daemon: its own measure is the one it has.
+        d.handle(Msg::Awake("eden".into(), Some(10_000_000)), 0, &mut w);
+        assert_eq!(d.lead(), 12_500_000);
+        d.handle(Msg::Awake("other".into(), None), 0, &mut w);
+        assert_eq!(
+            d.lead(),
+            12_500_000,
+            "an awake with no measure measures nothing"
+        );
     }
 }

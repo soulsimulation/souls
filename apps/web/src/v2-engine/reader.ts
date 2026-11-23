@@ -7,3 +7,9 @@ export const makeReader = (replica: string) => {
   if (typeof __SIM_V2_REPLICA_SERVED__ === 'undefined' || __SIM_V2_REPLICA_SERVED__) worker.postMessage({ replica });
   return worker;
 };
+/** R2: the history worker (history-worker.ts), given the same served replica. */
+export const makeHistoryReader = (replica: string) => {
+  const worker = new Worker(new URL('./history-worker.ts', import.meta.url), { type: 'module' });
+  if (typeof __SIM_V2_REPLICA_SERVED__ === 'undefined' || __SIM_V2_REPLICA_SERVED__) worker.postMessage({ replica });
+  return worker;
+};
