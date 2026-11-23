@@ -352,6 +352,8 @@ impl Measures {
         }
         o.push_str("},\"stalled\":");
         STALLS.json(&mut o);
+        o.push_str(",\"sync\":");
+        SYNCS.json(&mut o);
         o.push_str("}\n");
         o
     }
@@ -402,6 +404,60 @@ impl Stalls {
             self.now_ms.load(Ordering::Relaxed),
             self.count.load(Ordering::Relaxed),
             self.longest_ms.load(Ordering::Relaxed)
+        );
+    }
+}
+
+/// The sync thread's copy (`crate::syncs`, #1960): its seals, the records requests refused `sync-unknown-hash` (a
+/// record replaced longer ago than its window), and how far back each window of replaced records reached at the last
+/// seal, in seals and ms (`replica::sync::Records::windows`). One per process, written by the sync thread.
+pub struct Syncs {
+    seals: AtomicU64,
+    unknown_hash: AtomicU64,
+    small_seals: AtomicU64,
+    small_ms: AtomicU64,
+    big_seals: AtomicU64,
+    big_ms: AtomicU64,
+}
+
+/// This process's sync copy.
+pub static SYNCS: Syncs = Syncs {
+    seals: AtomicU64::new(0),
+    unknown_hash: AtomicU64::new(0),
+    small_seals: AtomicU64::new(0),
+    small_ms: AtomicU64::new(0),
+    big_seals: AtomicU64::new(0),
+    big_ms: AtomicU64::new(0),
+};
+
+impl Syncs {
+    /// A seal, and how far back the windows reach after it: seals and ms.
+    pub fn sealed(&self, small: u64, small_ms: u128, big: u64, big_ms: u128) {
+        let ms = |v: u128| u64::try_from(v).unwrap_or(u64::MAX);
+        self.seals.fetch_add(1, Ordering::Relaxed);
+        self.small_seals.store(small, Ordering::Relaxed);
+        self.small_ms.store(ms(small_ms), Ordering::Relaxed);
+        self.big_seals.store(big, Ordering::Relaxed);
+        self.big_ms.store(ms(big_ms), Ordering::Relaxed);
+    }
+
+    /// A records request refused `sync-unknown-hash`.
+    pub fn unknown_hash(&self) {
+        self.unknown_hash.fetch_add(1, Ordering::Relaxed);
+    }
+
+    /// `{"seals":n,"unknown_hash":n,"small_window":{"seals":n,"ms":n},"big_window":{"seals":n,"ms":n}}`.
+    pub fn json(&self, o: &mut String) {
+        let l = |a: &AtomicU64| a.load(Ordering::Relaxed);
+        let _ = write!(
+            o,
+            "{{\"seals\":{},\"unknown_hash\":{},\"small_window\":{{\"seals\":{},\"ms\":{}}},\"big_window\":{{\"seals\":{},\"ms\":{}}}}}",
+            l(&self.seals),
+            l(&self.unknown_hash),
+            l(&self.small_seals),
+            l(&self.small_ms),
+            l(&self.big_seals),
+            l(&self.big_ms)
         );
     }
 }

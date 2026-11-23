@@ -8,6 +8,7 @@ import {apiPath,worldKey,worldPath} from './world-path.ts';
 import {BASE} from './base-path.ts';
 import './SoulCard.css';
 import {SoulMessageBox,soulStartPrompt,useSoulInbox,useWindowCode,type AgentInbox} from './AgentMessageBox.tsx';
+import {v2World} from './v2-engine/owner-mailbox.ts';
 import {VisitorFrom} from './SoulTravel.tsx';
 import {clockAt,clockTitle,useAgentPresence,type AgentHere} from './agent-presence.ts';
 import {ApprovalCard} from './god-ui/ApprovalDialog.tsx';
@@ -55,7 +56,7 @@ function OwnerCard({api,soul,camera,signedIn=true,body,now,place}:SoulCardProps&
  const {inbox,send}=useSoulInbox(api,soul.id),here=useAgentPresence(soul.id),code=useWindowCode();
  const link=ownerLink(here?.link??null,here);
  const disconnect=async()=>{const r=await api(`/v1/souls/${encodeURIComponent(soul.id)}/revoke`,{});return r.status===200&&r.data?.ok===true;};
- return <SoulCardView soul={soul} view="owner" link={link} here={here} inbox={inbox} send={send} body={body} now={newest(now,readNow(inbox?.now))} place={place} doing={doingNow(soul)}
+ return <SoulCardView soul={soul} view="owner" link={link} here={here} inbox={inbox} send={send} body={body} now={newest(now,readNow(inbox?.now))} place={place} mailbox={!!v2World()} doing={doingNow(soul)}
   prompt={soulStartPrompt(location.origin+apiPath(''),soul.id,soul.name,code)} camera={camera} signedIn={signedIn} disconnect={disconnect} retire={()=>retireSoul(api,soul,()=>true)}/>;
 }
 
@@ -68,9 +69,11 @@ export type SoulCardViewProps={soul:PublicSoul;view:'owner'|'visitor';body:Body|
  retire?():Promise<boolean>;
  /** fixtures and shots: a fixed clock, the link details (and Pair another session) open from the start */
  clock?:number;open?:{details?:boolean;pair?:boolean};
+ /** owner only (B3-2): a v2 world's mailbox, which keeps a message until the agent takes it: the box shows without a link */
+ mailbox?:boolean;
  /** B3-3: what it is doing now ("Walking"), shown in the status line while it is awake; null when not known */
  doing?:string|null};
-export function SoulCardView({soul,view,body,now,place,camera,story,link=null,here=null,inbox=null,send,prompt='',signedIn=true,disconnect,retire,clock,open,doing=null}:SoulCardViewProps){
+export function SoulCardView({soul,view,body,now,place,camera,story,link=null,here=null,inbox=null,send,prompt='',signedIn=true,disconnect,retire,clock,open,mailbox=false,doing=null}:SoulCardViewProps){
  const t=clock??Date.now();
  const [copied,setCopied]=useState<''|'ok'|'failed'>('');
  const [details,setDetails]=useState(!!open?.details);
@@ -114,7 +117,7 @@ export function SoulCardView({soul,view,body,now,place,camera,story,link=null,he
   {disconnected&&!waiting&&<ReconnectBox name={soul.name} link={link!} prompt={prompt} clock={t}/>}
   {!owner&&story&&story.length>0&&<SoulStory story={story}/>}
   <div className="soul-card-thread" data-soul-thread={soul.id}/>
-  {connected&&send&&<SoulMessageBox name={soul.name} inbox={inbox} send={send} draftKey={`soul:${worldKey}:${soul.id}`}/>}
+  {(connected||(owner&&mailbox))&&send&&<SoulMessageBox name={soul.name} inbox={inbox} send={send} draftKey={`soul:${worldKey}:${soul.id}`}/>}
   {followShown&&<div className="soul-actions">
    <button className={camera.following?'soul-follow on':'soul-follow'} aria-pressed={camera.following} title={camera.following?'Stop following':'Keep the camera on this Soul'} onClick={camera.following?camera.stop:camera.follow}><svg viewBox="0 0 16 16" aria-hidden="true"><circle cx="8" cy="8" r="2.6" fill="currentColor"/><circle cx="8" cy="8" r="6" fill="none" stroke="currentColor" strokeWidth="1.4"/></svg>{camera.following?'Following':'Follow'}</button>
   </div>}

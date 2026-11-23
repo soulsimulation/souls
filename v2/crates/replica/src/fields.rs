@@ -46,6 +46,7 @@ const RESERVED: &[Reserved] = &[
     r(30, "worldd::words::NAME", On::Body),
     r(31, "worldd::words::DESCRIPTION", On::Body),
     r(32, "skills::wear::BODY", On::Body),
+    r(33, "skills::wear::LOOK", On::Body),
     r(crate::host::F_CROSSING, "host::F_CROSSING", On::Body),
     r(crate::host::F_WAITING, "host::F_WAITING", On::Body),
     r(crate::host::F_TURNS, "host::F_TURNS", On::Link),

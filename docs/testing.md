@@ -160,9 +160,13 @@ Since 0.132 (task F1), **every push to a ready (non-draft) pull request runs `ci
   separate `security` (gitleaks, path-guard, scrub-guard), `proof` and `changelog` workflows. Labels start no run.
 - **A draft** runs `scope` and `repo` only. When its paths select heavier jobs, `ci-ok` fails as "Full CI deferred"
   until it is marked ready for review, which starts a full run. Docs or tools-only drafts are never deferred.
-- **The merge queue runs nothing again.** A PR enters only with its required checks green at its head, so a
-  `merge_group` run of `ci` skips `scope`, `repo`, `qualify` and `smoke` and `ci-ok` passes at once. The push to main
-  that lands it runs its paths' light set; that, the daily full run and the remote gate are the net after merging.
+- **The merge queue runs no test again; it compiles the group.** A PR enters only with its required checks green at
+  its head, so a `merge_group` run of `ci` skips `scope`, `repo`, `qualify` and `smoke`. Two PRs green alone can still
+  combine into code that does not build, so `group-check` compiles the combined code: `cargo check --workspace
+  --all-targets --locked` of `v2/` and `tsc --noEmit -p apps/web`, each only when the group changed what it builds
+  from (`groupChecks` in `.github/scripts/ci-scope.mjs`). It runs on the self-hosted pool with its toolchain and cargo
+  target kept per runner, and `ci-ok` waits for it. The push to main that lands it runs its paths' light set; that,
+  the daily full run and the remote gate are the net after merging.
 - **`proof-ok` and `fragment` never block.** Both report success on every PR and merge group: no proof tier, journal
   entry, maintainer sign-off or changelog fragment is required. `fragment` logs a warning for a malformed fragment.
 - **The full battery runs daily at 06:23 UTC and before each release, not per change** (Gene, 18 Nov: startup mode,
@@ -372,6 +376,30 @@ wind-down, a one-hour gap) takes about three and a half hours; the timed-run job
 other command keeps 120). A piece of the tranche the checkout lacks (`/__sim/still`, the jump and its counters, the
 wind-down, the load queue, `--worlds-mem-mb`) is listed under "Missing from this checkout" with its issue, and the
 parts that need it are reported as not shown, never as passed.
+
+## The 0.132 check (F5)
+
+`node tools/release/check-0132.mjs` checks 0.132's "Done when" lines 2 to 4 on a local Eden on the new engine. Eden runs
+behind the local front door (`v2/tools/ops/proxy/soul-game.caddy` with the run's addresses) and is switched with
+`tools/world-launcher/v2-switch.mjs`. Local only, fake minds, its own folder under `.local/check-0132/`.
+
+```sh
+node tools/release/check-0132.mjs --bin <release worldd, gatewayd, directoryd, driver> --pkg <replica wasm package> \
+  --card <v2/web build> [--mars-web <mars/viewer/dist/client>] [--facts <eden facts>] [--agents 100] [--seconds 600] \
+  [--only 2,3,4] [--keep]
+```
+
+- **2.** A fresh agent pairs at `/pair` (the served client, approved in a real browser) and then walks, sits, lies,
+  takes, carries, puts down, says and gestures. Each step must show on the old page within 2 s. One uncut clip of the
+  page goes to `clip/`.
+- **3.** `--agents` seeded Souls are driven by the driver (`loads.mjs mix-<n>-even-every4`, `--trace`). It counts:
+  - intents never answered;
+  - acts not answered within 10 s;
+  - pairs of bodies closer than 0.3 m in two chunks running, sampled on the page.
+- **4.** A browser smoke of home, sign-in, sound, music and the camera.
+
+It prints a pass/fail table and writes `report.json`. Exit 0 when every line passes. Run the 100-agent line on the
+shared build machine when the laptop is busy.
 
 ## Playtests and the swarm director
 
