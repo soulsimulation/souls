@@ -251,6 +251,49 @@ impl Activities {
         Ok(())
     }
 
+    /// `entries` as one part, caused and acted as `by` says, with no event: a give's transfer (T1's leave and arrive).
+    fn emit_part(
+        &mut self,
+        tree: &mut Tree,
+        by: (Micros, Actor, Cause),
+        entries: Vec<(Id, Audience, Body)>,
+    ) -> R<()> {
+        let effects: Vec<Effect> = entries
+            .into_iter()
+            .zip(self.next..)
+            .map(|((node, audience, body), sequence)| Effect {
+                envelope: Envelope {
+                    sequence,
+                    at: by.0,
+                    cause: by.2,
+                    actor: by.1,
+                    audience,
+                    node,
+                },
+                body,
+                events: None,
+                rest: Rest::new(),
+            })
+            .collect();
+        let bytes = encode(&Value::Map(BTreeMap::from([
+            (1, Value::Bytes(self.header.hash().to_bytes())),
+            (
+                2,
+                Value::Array(effects.iter().map(Effect::to_value).collect()),
+            ),
+        ])))
+        .map_err(|e| Refusal {
+            name: "encoding",
+            detail: e.to_string(),
+        })?;
+        let part = Part::read(&bytes)?;
+        self.structure.check(tree, &part.effects)?;
+        tree.commit(&self.header, &part, &self.rules)?;
+        self.next += effects.len() as u64;
+        self.stream.extend(effects);
+        Ok(())
+    }
+
     /// Proposes an activity of `kind` under `place`: its node, with no members, expiring after the kind's
     /// `proposal_lasts`. Reserves nothing. `activity-kind-unknown`, `place-missing`.
     pub fn propose(

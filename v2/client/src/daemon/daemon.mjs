@@ -163,6 +163,7 @@ import { cloneFile, moveByOps, removeOps, selectOf } from '../creator/things.mjs
 import { TRACE_MOST, openCreatorTrace, rowOf } from '../creator/trace.mjs';
 import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
+import { giveIntents } from '../give/give.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
 import { blankAt, CALENDAR_NOTE, calendarItems, calendarList, calendarOf, nextWorldTime, whatsOn, worldDue, worldTimeOf, heldBlank, noticeBoards } from '../schedule/world.mjs';
 import { refreshEntries } from '../pair/pair.mjs';
@@ -839,6 +840,7 @@ const OPS = new Set([
   'context',
   'converse',
   'describe',
+  'give',
   'edit',
   'event',
   'events',
@@ -1160,7 +1162,7 @@ const summary = (plan, edits, started) => ({
 // A write's key is kept with its first answer and the world's answer to its intent, on disk with the sequence, so a
 // retry (a harness that timed out, the same command run twice, a daemon restarted between) sends nothing and gets the
 // first answer back, `repeat: true`, with the receipt as it stands. Two at once with one key wait for the same write.
-const KEYED = new Set(['act', 'object', 'say', 'whisper', 'lie', 'set-down', 'converse', 'wear']);
+const KEYED = new Set(['act', 'object', 'say', 'whisper', 'lie', 'set-down', 'converse', 'wear', 'give']);
 const KEYS_KEPT = 500, keying = new Map();
 /** Today's limits for a key (eden.mjs `keyArg`): 1 to 100 printable characters, no spaces. */
 const keyOk = (k) => typeof k === 'string' && /^[\x21-\x7e]{1,100}$/.test(k);
@@ -1667,6 +1669,7 @@ async function answer(req, conn = null) {
 
     }
     case 'converse': return converse(req);
+    case 'give': return give(req);
     case 'look-set': {
       // G3: the Soul's own look on its default body (`life:look`, G2): its params' bytes as T8's words shape.
       const params = String(req.params ?? '');
@@ -1917,6 +1920,19 @@ function converse(req) {
   if (req.do === 'leave') delete state.conversations[req.conversation];
   const basis = shownVersion ?? state.cursor;
   const sent = intents.map((i) => ({ verb: i.verb, ...sendIntent([i.verb], { target: i.target, words: i.words, params: i.params, basis }) }));
+  return closing({ ok: true, sent, basis: sequenceOf(basis) }, null, { now: true });
+}
+
+/** 0.133 R4: a give's intents (`../give/give.mjs`), sent once as `act`'s are; the answers arrive as events. The offer's
+ *  node goes on the open ground, which admits activities (a floor or a room does not): where the two stand is the
+ *  world's check at the accept. */
+function give(req) {
+  const rows = [...rowsOf(copy).values()];
+  const place = rows.find((r) => r.kind?.split('@')[0] === 'eden:ground')?.id ?? rows.find((r) => r.id === ME || r.soul === ME)?.parent ?? null;
+  const intents = giveIntents(req, { place });
+  if (intents.code) return { ok: false, code: intents.code, detail: intents.detail };
+  const basis = shownVersion ?? state.cursor;
+  const sent = intents.map((i) => ({ verb: i.verb, ...sendIntent([i.verb], { target: i.target, params: i.params, basis }) }));
   return closing({ ok: true, sent, basis: sequenceOf(basis) }, null, { now: true });
 }
 
