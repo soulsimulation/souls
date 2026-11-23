@@ -457,7 +457,9 @@ export async function actEnd(ask, sent, { ms = ACT_WAIT_MS, every = 200, now = D
           // D7: which of the ranked targets holds the body now (a seat a fallback took), when one does.
           ...(r?.receipt?.held ? { held: r.receipt.held } : {}),
           // R1b: refused, one offer of the same thing that would work instead.
-          ...(phase === 'refused' && r?.receipt?.try ? { try: r.receipt.try } : {}) };
+          ...(phase === 'refused' && r?.receipt?.try ? { try: r.receipt.try } : {}),
+          // A walk that could not get there: what it waited for, as the world's ladder named it (daemon stuck.mjs).
+          ...(phase === 'refused' && r?.receipt?.why ? { why: r.receipt.why } : {}) };
       }
       return { ...sent, ...(r?.ok ? r : {}), phase: end ? 'running' : 'sent', stillRunning: true,
         detail: `still running after ${Math.round(ms / 1000)} s: check with \`receipt ${sent.sequence}\`, or \`stop ${sent.sequence}\` to end it` };

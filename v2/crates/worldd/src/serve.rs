@@ -2315,6 +2315,15 @@ fn serve(args: &[String]) -> R<()> {
         kinds: Json::Obj(kinds),
         moves,
     };
+    // The joined-part rule the world checks every write on (B18, B20 #3356), read from its entries.
+    let joined = sim::structure::Structure::from_entries(&rules.kinds);
+    let (bays, standing, bearing) = joined.kinds();
+    println!(
+        "joined parts: bays [{}], standing [{}], bearing [{}]",
+        bays.join(", "),
+        standing.join(", "),
+        bearing.join(", ")
+    );
     let bucket = arg(args, "--store")
         .cloned()
         .or_else(|| std::env::var("WORLDD_STORE").ok())

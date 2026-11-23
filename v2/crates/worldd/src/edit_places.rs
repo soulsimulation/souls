@@ -73,7 +73,7 @@ impl Projection {
                     Ref::New(n) => committed.names[n],
                 },
                 // These do not change immutable declared slots or ancestor poses.
-                Op::Set { .. } | Op::Doorway { .. } => continue,
+                Op::Set { .. } | Op::Rows { .. } | Op::Doorway { .. } | Op::Link { .. } => continue,
             };
             subtree(copy.tree(), id, &mut affected);
             subtree(preview.tree(), id, &mut affected);

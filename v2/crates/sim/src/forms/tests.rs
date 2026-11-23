@@ -91,6 +91,8 @@ struct Snap {
     /// Every distance is this far, when set.
     far: bool,
     defer_walk: bool,
+    /// The thing every move aims at, when set (worldd's thing argument).
+    aimed: Option<Id>,
 }
 
 impl Geometry for Snap {
@@ -144,6 +146,9 @@ impl Reach for Snap {
             i128::from(t.z + p.z - b.z),
         ];
         i64::try_from((d[0] * d[0] + d[1] * d[1] + d[2] * d[2]).isqrt()).ok()
+    }
+    fn aimed(&self, _: Id, _: &Name) -> Option<Id> {
+        self.aimed
     }
 }
 
@@ -830,6 +835,53 @@ fn a_runs_move_record_is_written_for_viewers_and_a_restart_ignores_it() {
     assert_eq!((a.is_empty(), a.len()), (c.is_empty(), c.len()));
     b.run(now + 60_000_000);
     b.clean();
+}
+
+/// The record a run's first move writes for viewers: its event's record map (field 3).
+fn first_move_record(
+    b: &mut Bench,
+    entry: &json::Value,
+    form: &str,
+    body: Id,
+    node: Id,
+) -> BTreeMap<u64, Value> {
+    let it = intent(body, 11);
+    assert!(matches!(
+        b.ask(body, node, entry, form, Limits::default(), it),
+        Ok(Asked::Started(_))
+    ));
+    let mut log = Vec::new();
+    while !log.iter().any(is_move_record) {
+        assert!(!b.forms.is_empty(), "the run ended without a move record");
+        b.tick();
+        b.flush(&mut log);
+    }
+    let rec = log.iter().find(|e| is_move_record(e)).expect("the record");
+    let Some(Value::Map(m)) = rec.events.as_ref().expect("events")[0].fields.get(&3) else {
+        panic!("a move record")
+    };
+    m.clone()
+}
+
+/// #4330: the record names the move's target, the form's node; a move aimed at a thing argument (a point toward a
+/// lamp) names that thing, so the page turns the body toward it, not toward itself.
+#[test]
+fn a_move_record_names_the_thing_it_aims_at() {
+    let (entry, form) = effecting();
+    let mut b = Bench::new();
+    let (body, node) = b.add(&entry, Vec3::new(0, 0, 3_000_000), Vec3::ZERO);
+    assert_eq!(
+        first_move_record(&mut b, &entry, &form, body, node).get(&5),
+        Some(&node.to_value())
+    );
+    let mut b = Bench::new();
+    let (body, node) = b.add(&entry, Vec3::new(0, 0, 3_000_000), Vec3::ZERO);
+    let thing = fixture(77);
+    b.snap.aimed = Some(thing);
+    assert_eq!(
+        first_move_record(&mut b, &entry, &form, body, node).get(&5),
+        Some(&thing.to_value())
+    );
 }
 
 fn splitmix(x: &mut u64) -> u64 {
