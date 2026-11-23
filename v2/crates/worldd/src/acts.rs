@@ -52,8 +52,12 @@
 //!   world's own state, links, seats and hands included ([`crate::needs`]): an unmet need is refused by its reason's
 //!   name and index before any walk or effect. Reach is the move's own, measured at its start (C22).
 //!
+//! - **A restart** (N2, 0.133). The forms are read back from the log ([`Acts::recover`]): a run open at the kill is
+//!   ended `restart` in the first tick, so its reservation is freed and the log holds its end. Its intent, never
+//!   answered, is taken afresh when the gateway sends it again: a walk is planned again from where the body stands.
+//!
 //! Not here: a form's reservation (F3's link needs both ends in the tree, so a form reserves nothing until bodies are
-//! nodes); resuming a run after a restart.
+//! nodes); resuming a run mid-way after a restart.
 
 use replica::host::WalkPlan;
 use sim::ground::Versions;
@@ -1491,6 +1495,28 @@ pub struct Acts {
     planning: RefCell<Planning>,
     /// The code hatches' modules this world ships (F8, #3713), loaded and checked once, by their SHA-256 multihash.
     hatches: BTreeMap<Vec<u8>, replica::hatch::Loaded>,
+    /// The zone's header, which the forms write a take or a put under: given again to forms read back at a restart.
+    zone: replica::effects::Header,
+}
+
+/// The entries' amounts as F4 reads them (`Forms::kinds`): each entry without its forms, a timed field left out.
+fn loaded(kinds: &Json) -> replica::kinds::Kinds {
+    let mut loaded = replica::kinds::Kinds::default();
+    for (_, entry) in kinds.obj().unwrap_or(&[]) {
+        let mut e = entry.clone();
+        if let Json::Obj(o) = &mut e {
+            o.retain(|(k, _)| k != "forms");
+            // A timed field (a kettle's heat) is not an amount, and the kind format cannot hold its default yet:
+            // left out, so the entry's amounts load (#3715).
+            if let Some((_, Json::Obj(state))) = o.iter_mut().find(|(k, _)| k == "state") {
+                state.retain(|(_, f)| f.get("type").and_then(Json::str) != Some("timed"));
+            }
+        }
+        if let Ok(text) = replica::kinds::entry::entry_to_kind(&e.to_json()) {
+            loaded.load(&[("entry", text.as_str())]);
+        }
+    }
+    loaded
 }
 
 /// The refusal of a thing argument the caller left out whose selector finds nothing (#3914): `form-rules` names the
@@ -1797,23 +1823,8 @@ impl Acts {
         // A form's `create` names its kind plainly; the world makes it as the header pins it (#3703).
         let kinds = pin_made(kinds, &header.kinds);
         let mut forms = Forms::new();
-        let mut loaded = replica::kinds::Kinds::default();
-        for (_, entry) in kinds.obj().unwrap_or(&[]) {
-            let mut e = entry.clone();
-            if let Json::Obj(o) = &mut e {
-                o.retain(|(k, _)| k != "forms");
-                // A timed field (a kettle's heat) is not an amount, and the kind format cannot hold its default yet:
-                // left out, so the entry's amounts load (#3715).
-                if let Some((_, Json::Obj(state))) = o.iter_mut().find(|(k, _)| k == "state") {
-                    state.retain(|(_, f)| f.get("type").and_then(Json::str) != Some("timed"));
-                }
-            }
-            if let Ok(text) = replica::kinds::entry::entry_to_kind(&e.to_json()) {
-                loaded.load(&[("entry", text.as_str())]);
-            }
-        }
-        forms.kinds(&loaded);
-        forms.zone(header);
+        forms.kinds(&loaded(&kinds));
+        forms.zone(header.clone());
         Acts {
             forms,
             kinds,
@@ -1831,7 +1842,19 @@ impl Acts {
             blocked: BTreeMap::new(),
             planning: RefCell::new(Planning::default()),
             hatches: BTreeMap::new(),
+            zone: header,
         }
+    }
+
+    /// N2 (0.133): the forms read back from the log at a restart at `now` (`Forms::recover`): every run the log shows
+    /// started and not ended is ended `restart` now, its ending entry (which frees what it reserved) written with the
+    /// first tick. Its intent is not answered here: the gateway sends it again and it starts afresh from where the
+    /// body stands. `log` is the restart's replayed entries of the Souls' acts, in order.
+    pub fn recover(&mut self, log: &[Effect], now: Micros) {
+        let mut forms = Forms::recover(log, now);
+        forms.kinds(&loaded(&self.kinds));
+        forms.zone(self.zone.clone());
+        self.forms = forms;
     }
 
     /// Loads the code hatches' modules the world ships (`<world>/hatches/*.wasm`, #3713), each named by the hash of
