@@ -1331,6 +1331,7 @@ impl Bodies {
                 speed: WALK,
                 to: node,
                 arrive: None,
+                hold: false,
             };
             if self.runner.controller.carry(s, track).is_ok() {
                 moved.push((s, from, to));
