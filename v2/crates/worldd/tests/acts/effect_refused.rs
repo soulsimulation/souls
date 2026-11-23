@@ -26,3 +26,49 @@ fn a_forms_effects_the_world_refuses_refuse_its_act_and_write_nothing() {
     assert_eq!(made, 1, "one plank in the rack's slot");
     run.stop();
 }
+
+/// The rack's plank count on the replayed log.
+fn planks(run: &Run) -> usize {
+    let r = run.replay();
+    let t = r.tree();
+    t.children(t.handle(rack()).unwrap()).map_or(0, <[_]>::len)
+}
+
+/// #3697 review: one Soul's form whose effects the world refuses is refused alone; another Soul's act sent with it
+/// (the same tick, or the next) lands.
+#[test]
+fn a_refused_form_sinks_no_other_souls_act_beside_it() {
+    let (run, mut a, mut b) = serve("refused-beside");
+    a.send("test:overstock", Some(rack()), BTreeMap::new());
+    b.send("test:play_at_end_a", Some(court()), BTreeMap::new());
+    let (over, played) = (a.answer(), b.answer());
+    println!("overstock: {over:?}; another Soul's act beside it: {played:?}");
+    assert_eq!(
+        over,
+        Err("kind-not-in-header".to_owned()),
+        "refused alone, by name"
+    );
+    assert!(!played.expect("the other Soul's act lands").is_empty());
+    assert_eq!(planks(&run), 0, "no ghost");
+    // And the world goes on for the first Soul too.
+    let stocked = a.act("test:stock", Some(rack()), BTreeMap::new());
+    assert!(!stocked.expect("the stock lands").is_empty());
+    assert_eq!(planks(&run), 1, "the plank");
+    run.stop();
+}
+
+/// #3697 review: a timer the world starts (no Soul's act) whose form's effects are refused, re-arming itself every
+/// µs, writes nothing and stalls nothing: a Soul's act after it lands, and the log replays.
+#[test]
+fn a_refused_timer_ring_stalls_nothing() {
+    let (run, mut a, mut b) = serve("refused-ring");
+    let haunt = a.act("test:haunt", Some(rack()), BTreeMap::new());
+    println!("haunt: {haunt:?}");
+    assert!(!haunt.expect("the timer is set").is_empty());
+    std::thread::sleep(Duration::from_millis(300));
+    let stocked = b.act("test:stock", Some(rack()), BTreeMap::new());
+    println!("stock after the ring: {stocked:?}");
+    assert!(!stocked.expect("the stock lands").is_empty());
+    assert_eq!(planks(&run), 1, "the plank, and no ghost");
+    run.stop();
+}
