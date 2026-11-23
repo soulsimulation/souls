@@ -6,13 +6,15 @@
 #   bash install.sh apply --from <bundle>       as root: makes it so; a second run changes nothing
 #   bash install.sh uninstall                   as root: removes what apply made, and only that
 #   bash install.sh check                       the test: nothing it writes is today's system's (a repo checkout)
-#   bash install.sh bundle <out> <cargo release dir> <page dist dir>   puts a bundle together (the workflow)
+#   bash install.sh bundle <out> <cargo release dir> <page dist dir> [<templates> [<served client>]]
+#                                               puts a bundle together (the workflow)
 #   INSTALL_TARGET=<ssh target> bash install.sh remote <plan|apply|uninstall> <bundle>
 #                                               runs it on another machine through `$INSTALL_SSH <target> <command>`
 #
 # What it makes: the unprivileged user souls; the programs in /usr/local/lib/souls (supervisor, worldd, gatewayd,
-# directoryd, the origin and the page's files); data in /var/lib/souls; settings in /etc/souls, the secrets file
-# root-owned; the units souls.slice, worldd@ (with its drop-in), souls-gateway@, souls-directory and souls-origin.
+# directoryd, register-world, deploy, gateway-upgrade, import-accounts, import-world, publish-template, the origin and the page's files); data in
+# /var/lib/souls; settings in /etc/souls (751), the secrets file root-owned; the units souls.slice, worldd@ (with its drop-in), souls-gateway@,
+# souls-directory, souls-origin and souls-agents.
 # Carried over from today's installer: idempotent, and it starts, enables and restarts nothing. It never reads or
 # writes today's units, users, data, proxy, DNS or firewall: it refuses, changing nothing, when anything it would
 # make is already there and not its own (install.state records what it made).
@@ -26,8 +28,11 @@ DATA=/var/lib/souls
 ETC=/etc/souls
 UNITS=/etc/systemd/system
 STATE=$ETC/install.state
-PROGRAMS=(supervisor worldd gatewayd directoryd)
-UNIT_FILES=(souls.slice worldd@.service souls-gateway@.service souls-directory.service souls-origin.service)
+PROGRAMS=(supervisor worldd gatewayd directoryd register-world deploy gateway-upgrade import-accounts import-world publish-template)
+# A program's cargo binary: the `templates` crate's is installed as publish-template, since $LIB/templates is the
+# catalogue it writes (W3b's placement.json `templates`).
+built() { if [ "$1" = publish-template ]; then echo templates; else echo "$1"; fi; }
+UNIT_FILES=(souls.slice worldd@.service souls-gateway@.service souls-directory.service souls-origin.service souls-agents.service souls-place.path souls-place.service)
 DROPIN=$UNITS/worldd@.service.d
 # Everything it may make, and so everything it may remove: the user, three folders it owns whole, its units.
 OWNED=("user $ACCOUNT" "tree $LIB" "tree $DATA" "tree $ETC" "tree $DROPIN")
@@ -128,7 +133,7 @@ ensure_tree() {
   done < <(cd "$R$dst" && find . -mindepth 1 | sed 's|^\./||' | sort -r)
 }
 
-DIRECTORY_PORT=7310 # on loopback; the origin's, 7320, is in souls-origin.service
+DIRECTORY_PORT=7310 # on loopback; the origin's, 7320, and the agents' relay's, 7330, are in their units
 # The directory's arguments, written once. It listens on this machine's IPv4 loopback address, as localhost resolves
 # (directoryd takes an address, not a name).
 directory_args() {
@@ -154,23 +159,64 @@ install_all() {
   from=$(cd "$from" && pwd)
   # The record's folder first, then the user recorded before it is made, so a run that stops anywhere leaves nothing
   # unrecorded. The folder's group is the user's, so it is root's until the user exists.
+  # 751: today's launcher (simworlds, no Souls group) reads its cut-over fence's binding,
+  # /etc/souls/cutover-binding.json (v2/docs/cutover.md), through this folder; it can list nothing here. Every
+  # file keeps its own mode, and every folder below stays 750 or tighter.
   local group=root
   if has_user; then group=$ACCOUNT; fi
-  ensure_dir "$ETC" 750 root "$group" "tree $ETC"
+  ensure_dir "$ETC" 751 root "$group" "tree $ETC"
   record "user $ACCOUNT"
   ensure_user
   if [ "$MODE" = apply ] || [ -d "$R$ETC" ]; then
-    ensure_dir "$ETC" 750 root "$ACCOUNT"
+    ensure_dir "$ETC" 751 root "$ACCOUNT"
   else
-    act "perms $ETC 750 root:$ACCOUNT" true
+    act "perms $ETC 751 root:$ACCOUNT" true
   fi
   ensure_dir "$LIB" 755 root root "tree $LIB"
   for p in "${PROGRAMS[@]}"; do ensure_file "$from/bin/$p" "$LIB/$p" 755 root root; done
   ensure_tree "$from/origin" "$LIB/origin"
   ensure_tree "$from/web" "$LIB/web"
-  ensure_dir "$DATA" 750 "$ACCOUNT" "$ACCOUNT" "tree $DATA"
+  ensure_tree "$from/ops" "$LIB/ops"
+  ensure_dir "$LIB/templates" 755 root root
+  if [ -d "$from/templates" ]; then ensure_tree "$from/templates" "$LIB/templates"; fi
+  # The served client (R17; the cut-over fence's clientDir), placed once and whole: release-v2's move replaces it
+  # later, so an install never puts back an older one.
+  if [ -f "$from/client/soul-client.json" ] && [ ! -e "$R$LIB/client" ]; then
+    act "client $LIB/client (once; a release's move replaces it)" bash -c 'set -e; rm -rf "$2.install"; cp -R "$1" "$2.install"
+      chown -R root:root "$2.install"; find "$2.install" -type d -exec chmod 755 {} +; find "$2.install" -type f -exec chmod 644 {} +
+      mv "$2.install" "$2"' _ "$from/client" "$LIB/client"
+  fi
+  # 751: today's launcher (simworlds, no Souls group) reaches the route file its cut-over fence reads
+  # (/etc/souls/cutover-binding.json `routesFile`, v2/docs/cutover.md); it can list nothing here, and every store
+  # below stays 750.
+  ensure_dir "$DATA" 751 "$ACCOUNT" "$ACCOUNT" "tree $DATA"
   for p in worlds directory views; do ensure_dir "$DATA/$p" 750 "$ACCOUNT" "$ACCOUNT"; done
+  # The world route file (placement, the cut-over and the origin write or read it): Souls-owned, so a root-run
+  # cut-over write never leaves a folder the placement child cannot lock.
+  ensure_dir "$DATA/routes" 755 "$ACCOUNT" "$ACCOUNT"
+  # Each world's baked models (/w/<slug>/models/ at the front door), placed by the runbook's bake step: root-owned and
+  # world-readable for Caddy, and outside $LIB/web, whose mirror removes what the bundle lacks.
+  ensure_dir "$DATA/models" 755 root root
+  ensure_dir "$DATA/worlds/directory" 750 "$ACCOUNT" "$ACCOUNT"
+  ensure_dir "$DATA/worlds/worlds" 750 "$ACCOUNT" "$ACCOUNT"
+  ensure_dir "$DATA/directory/placement-backup" 750 "$ACCOUNT" "$ACCOUNT"
+  ensure_dir "$ETC/placement-data" 750 root "$ACCOUNT"
+  ensure_dir "$ETC/placement-data/archived" 750 root "$ACCOUNT"
+  ensure_dir "$ETC/placement-data/archives" 750 root "$ACCOUNT"
+  ensure_dir "$ETC/placement-data/requests" 770 root "$ACCOUNT"
+  ensure_dir "$ETC/placement-data/status" 750 root "$ACCOUNT"
+  ensure_dir "$ETC/placement-data/attempts" 700 root root
+  ensure_once "$ETC/placement-data/authority.json" 640 root "$ACCOUNT" '{"format":"souls/world-authority/1","worldsRoot":"/var/lib/souls/worlds","worlds":{}}'
+  local build
+  build=$(node -e 'const f=require("node:fs"),c=require("node:crypto");process.stdout.write("1220"+c.createHash("sha256").update(f.readFileSync(process.argv[1])).digest("hex"))' "$from/bin/worldd")
+  ensure_once "$ETC/placement.json" 640 root "$ACCOUNT" "{\"format\":\"souls/placement/1\",\"build\":\"$build\",\"worldsRoot\":\"$DATA/worlds\",\"templates\":\"$LIB/templates\",\"library\":\"$LIB\",\"placement\":\"$ETC/placement-data\",\"backup\":\"$DATA/directory/placement-backup\",\"directory\":\"http://localhost:$DIRECTORY_PORT\",\"originUpstream\":\"http://localhost:7320\",\"worldRoutes\":\"$DATA/routes/worlds.json\",\"routesOut\":\"/var/lib/souls-routes\",\"portFirst\":7500,\"portLast\":7999}"
   ensure_once "$ETC/directory.args" 640 root "$ACCOUNT" "$args"
+  ensure_once "$ETC/origin.env" 640 root "$ACCOUNT" "# Browser provider: AUTH_PROVIDER=clerk, CLERK_PUBLISHABLE_KEY, CLERK_ISSUER_URL.
+# Optional CLERK_SATELLITE_DOMAIN and CLERK_SIGN_IN_URL. Never put secrets or tokens here.
+# Private ops settings: SIM_SITE_OWNERS, SOULS_OPS_PUBLIC_ORIGIN, CLERK_AUTHORIZED_PARTIES.
+# Match the provider and application origin configured for souls-directory.
+# Serving processes on the origin's port: ORIGIN_PROCESSES (default: the cores less ORIGIN_RESERVE_CORES, 2).
+SOULS_OPS_DIRECTORY=http://127.0.0.1:$DIRECTORY_PORT"
   ensure_once "$ETC/secrets.env" 600 root root "$SECRETS"
   for u in "${UNIT_FILES[@]}"; do
     record "file $UNITS/$u"
@@ -178,6 +224,15 @@ install_all() {
   done
   ensure_dir "$DROPIN" 755 root root "tree $DROPIN"
   ensure_file "$from/units/worldd-install.conf" "$DROPIN/10-install.conf" 644 root root
+  # Per-world limits: each world units/world-limits.json lists and this machine has placed gets
+  # worldd@<world>.service.d/limits.conf (world-limits.mjs; a world not listed keeps the unit's own).
+  local l limits
+  limits=$(node "$from/ops/world-limits.mjs" plan --config "$from/units/world-limits.json" --root "$R")
+  if [ -n "$limits" ]; then
+    [ "$MODE" = plan ] || node "$from/ops/world-limits.mjs" apply --config "$from/units/world-limits.json" > /dev/null
+    while IFS= read -r l; do act "$l" true; done <<< "$limits"
+    UNITS_CHANGED=1
+  fi
   if [ "$UNITS_CHANGED" = 1 ]; then act "systemctl daemon-reload" systemctl daemon-reload; fi
 }
 
@@ -189,6 +244,9 @@ machine() {
   [ "${v:-0}" -ge 254 ] 2> /dev/null || die "needs systemd 254 or later, found ${v:-none}"
   [ "$(stat -fc %T /sys/fs/cgroup)" = cgroup2fs ] || die "needs cgroup v2"
   command -v node > /dev/null || echo "install: warning: no node on PATH; souls-origin needs it" >&2
+  # Below 22.12 the origin runs one process: its port cannot be shared (listen reusePort).
+  node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=12)?0:1)' 2> /dev/null \
+    || echo "install: warning: node older than 22.12; souls-origin will run one process" >&2
 }
 
 # Refuses unless every unit of the install is inactive or failed (not running, starting, stopping or reloading) and
@@ -250,12 +308,68 @@ check() {
   [ -f "$today/install.sh" ] || die "check runs in a repo checkout (no $today/install.sh)"
   tmp=$(mktemp -d) # global: the EXIT trap reads it
   trap 'rm -rf "$tmp"' EXIT
-  mkdir -p "$tmp/root" "$tmp/b/bin" "$tmp/b/web" "$tmp/b/units"
-  for p in "${PROGRAMS[@]}"; do : > "$tmp/b/bin/$p"; done
-  cp -R "$HERE/../origin" "$tmp/b/origin"
-  cp "$HERE"/units/* "$tmp/b/units/"
-  echo '<!doctype html>' > "$tmp/b/web/index.html"
+  mkdir -p "$tmp/root" "$tmp/bins" "$tmp/page"
+  for p in "${PROGRAMS[@]}"; do printf '%s\n' "$p" > "$tmp/bins/$(built "$p")"; done
+  echo '<!doctype html>' > "$tmp/page/index.html"
+  mkdir -p "$tmp/client" && echo '{}' > "$tmp/client/soul-client.json"
+  bundle "$tmp/b" "$tmp/bins" "$tmp/page" "" "$tmp/client" > "$tmp/bundle"
   INSTALL_ROOT=$tmp/root bash "$0" plan --from "$tmp/b" > "$tmp/plan"
+  grep -qxF "would client $LIB/client (once; a release's move replaces it)" "$tmp/plan" || die "check: the served client missing from plan"
+  cp -R "$tmp/root" "$tmp/placed"
+  mkdir -p "$tmp/placed$LIB/client" "$tmp/placed$ETC"
+  printf '%s\n' "${OWNED[@]}" > "$tmp/placed$STATE"
+  INSTALL_ROOT=$tmp/placed bash "$0" plan --from "$tmp/b" > "$tmp/plan2" || die "check: the plan over a placed client refused"
+  ! grep -q "^would client" "$tmp/plan2" || die "check: an install would replace a placed client"
+  grep -qxF "would dir $ETC 751 root:root" "$tmp/plan" && grep -qxF "would perms $ETC 751 root:$ACCOUNT" "$tmp/plan" ||
+    die "check: a fresh install does not make $ETC 751"
+  (
+    # A re-install over a 750 $ETC, with the user and root ownership simulated: it puts back 751, then changes nothing.
+    R=$tmp/etc
+    mkdir -p "$R$ETC" && chmod 750 "$R$ETC"
+    printf '%s\n' "${OWNED[@]}" > "$R$STATE"
+    has_user() { true; }
+    perms() { echo "$(stat -c %a "$1" 2> /dev/null || stat -f %Lp "$1") root $ACCOUNT"; }
+    install_all "$tmp/b" > "$tmp/etc.plan"
+    grep -qxF "would perms $ETC 751 root:$ACCOUNT" "$tmp/etc.plan" || die "check: a re-install leaves $ETC at 750"
+    chmod 751 "$R$ETC"
+    install_all "$tmp/b" > "$tmp/etc.plan2"
+    ! grep -qE "^would (dir|perms) $ETC " "$tmp/etc.plan2" || die "check: a re-install changes a 751 $ETC"
+  )
+  echo "check: $ETC is 751 after a fresh install and after a re-install over 750"
+  for p in import-accounts import-world publish-template; do
+    cmp -s "$tmp/bins/$(built "$p")" "$tmp/b/bin/$p" || die "check: $p missing or changed in bundle"
+    [ -n "$(find "$tmp/b/bin/$p" -prune -perm 755)" ] || die "check: $p bundle mode is not 755"
+    grep -qxF "would file $LIB/$p 755 root:root" "$tmp/plan" || die "check: $p missing from plan"
+  done
+  (
+    # Exercise the same file comparison as apply, entirely under the fixture root. Root ownership is simulated;
+    # bytes and modes are real. Plan mode ensures even a regression cannot write to the machine installation.
+    R=$tmp/root
+    mkdir -p "$R$LIB" "$R$ETC"
+    printf '%s\n' "${OWNED[@]}" > "$R$STATE"
+    recorded "tree $LIB" || die "check: programs are not owned by the installation record"
+    preflight
+    perms() {
+      if [ -n "$(find "$1" -prune -perm 755)" ]; then echo '755 root root'; else echo '644 root root'; fi
+    }
+    for p in import-accounts import-world; do
+      CHANGES=0
+      ensure_file "$tmp/b/bin/$p" "$LIB/$p" 755 root root > "$tmp/missing"
+      [ "$CHANGES" = 1 ] || die "check: missing $p was not planned"
+      install -m 755 "$tmp/b/bin/$p" "$R$LIB/$p"
+      CHANGES=0
+      ensure_file "$tmp/b/bin/$p" "$LIB/$p" 755 root root
+      [ "$CHANGES" = 0 ] || die "check: identical $p is not inert"
+      printf 'changed\n' >> "$R$LIB/$p"
+      ensure_file "$tmp/b/bin/$p" "$LIB/$p" 755 root root > "$tmp/changed"
+      [ "$CHANGES" = 1 ] || die "check: changed $p was not planned"
+      install -m 644 "$tmp/b/bin/$p" "$R$LIB/$p"
+      CHANGES=0
+      ensure_file "$tmp/b/bin/$p" "$LIB/$p" 755 root root > "$tmp/mode"
+      [ "$CHANGES" = 1 ] || die "check: $p mode was not repaired"
+    done
+  )
+  echo 'check: both importers bundled at 755, recorded, planned, inert for identical bytes and repaired for changed bytes or mode'
   ours=$tmp/ours theirs=$tmp/theirs
   {
     awk '$1 == "would" && $2 ~ /^(dir|file)$/ {print "path " $3} $1 == "would" && $2 == "user" {print "user " $3}' "$tmp/plan"
@@ -293,11 +407,21 @@ bundle() {
   local out=$1 bins=$2 page=$3 p
   [ -d "$page" ] || die "no page build at $page"
   mkdir -p "$out/bin" "$out/units"
-  for p in "${PROGRAMS[@]}"; do install -m 755 "$bins/$p" "$out/bin/$p"; done
+  for p in "${PROGRAMS[@]}"; do install -m 755 "$bins/$(built "$p")" "$out/bin/$p"; done
   rm -rf "$out/origin" "$out/web"
   mkdir -p "$out/origin"
-  cp "$HERE/../origin/origin.mjs" "$HERE/../origin/cache.mjs" "$out/origin/"
+  cp "$HERE/../origin/origin.mjs" "$HERE/../origin/cache.mjs" "$HERE/../origin/site.mjs" "$HERE/../origin/ops.mjs" "$HERE/../origin/owner-auth.mjs" "$HERE/../origin/world-routes.mjs" "$HERE/../origin/upgrade-refusal.mjs" "$HERE/../origin/agents.mjs" "$HERE/../../client/served/serve.mjs" "$out/origin/"
+  cp "$HERE/../../../tools/world-launcher/owner-overview-data.mjs" "$out/origin/"
   cp -R "$page" "$out/web"
+  mkdir -p "$out/ops/proxy"
+  cp "$HERE/place-created-world.mjs" "$HERE/archive-world.mjs" "$HERE/place-world.sh" "$HERE/world-limits.mjs" "$out/ops/"
+  cp "$HERE/proxy/route-config.mjs" "$HERE/proxy/routes.mjs" "$out/ops/proxy/"
+  if [ -n "${4:-}" ]; then cp -R "$4" "$out/templates"; fi
+  rm -rf "$out/client"
+  if [ -n "${5:-}" ]; then
+    [ -f "$5/soul-client.json" ] || die "no served client at $5 (v2/client/served/build.mjs)"
+    cp -R "$5" "$out/client"
+  fi
   cp "$HERE"/units/* "$out/units/"
   install -m 755 "$0" "$out/install.sh"
   echo "bundle: $(cd "$out" && find . -type f | wc -l | tr -d ' ') files in $out"

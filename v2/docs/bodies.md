@@ -4,8 +4,8 @@ Engine v2 T9 (#2663), contract T9 in [TRUNK.md](TRUNK.md). It fixes what a body 
 is (a claim on them), the one interface a skill touches the world through, and the code hatch's shape. Code:
 `v2/crates/replica/src/bodies.rs` and `host.rs`; the built-in skills in `v2/crates/skills`. Fixtures:
 `v2/crates/replica/fixtures/bodies/`. Checks: `crates/replica/tests/bodies.rs` and `crates/skills/tests/`. Moving
-the real walk behind the interface and handing intents back after a restart (K13, T9b) and running a hatch (F8) are
-not here. The controller (B1) is summarised under [The controller](#the-controller-b1).
+the real walk behind the interface and handing intents back after a restart (K13, T9b) are not here; running a
+hatch (F8) is rule 11. The controller (B1) is summarised under [The controller](#the-controller-b1).
 
 ## Bodies and skills
 
@@ -125,7 +125,9 @@ slot) with the stance the request named. Postures are the controller's stance in
 - **Reserved at commit.** One tick's requests are taken together and ordered by a stable key: the body's id, then the
   seat's. The first takes the seat. Each later request is refused `place-taken`, and the refusal names the holder. The
   hold is keyed by the seat's thing, so finding the holder is one lookup, never a scan.
-- **A seat above standing reach is refused** `place-out-of-reach`. Its height alone is compared with the move's reach.
+- **A seat above standing reach is refused** `place-out-of-reach`. Its height alone is compared with the body's
+  standing reach: 2.06 m for the standard 1.75 m body, scaled by the admitted build's height, unscaled for a hovering
+  body (`sim::slots::standing_reach`, today's SEATDEF). The move's own reach is horizontal, to the seat's stand point.
 - **A seated body has no timer and no mover.** A driver with no timer holds its legs and its stance, and the
   controller keeps it apart from the bodies it steps, so a tick never visits it.
 - **The engine releases the seat, never the skill.** It does so when the holder rises (at the rise's contact), and
@@ -148,19 +150,58 @@ by the intent, and is answered once, at its end: a receipt naming both when done
 (`claim-taken`, `resource-held`, ...). A new move ends a walk still going for an earlier intent as `claim-taken`. A
 sit or a rise past its act's deadline runs to its end, so a seat is never left half taken.
 
+C14 (#3442): a walk to a node that is neither a point nor a seat (a room, the square, an area) goes to a free standing
+spot in it: its middle by E2's shared library (`replica::select`), granted by N9's table, the same every run. A walk,
+sit or lie with ranked fallbacks (other targets of the same form) takes the first that holds: a sit's or a lie's
+through I5's `sim::commit::bind` (the first free seat), a walk's the first with somewhere to go; none is refused by
+name (`place-taken`). The started entry names what was taken: field 5 its rank, field 6 its target. Before starting,
+the move is checked by `replica::move_check`, the function a client's `can` runs (R8) on its copy and its own
+receipts, so its `no` is the world's name: `move.no-target`, `move.bad-point`, `resource-held` (a walk while seated),
+`place-already-held`, `place-taken`, `not-seated`. A seat's holds are not in a client's copy, so its verdict on a sit
+on a free-looking seat stays `unknown`.
+
+## The wind-down (B16)
+
+The one move the world starts on a body (TRUNK T10, Gene 17 Nov; today's `wind-down/1`): `skills::wind_down` decides,
+`worldd::bodies` carries it out. A Soul whose agent has not acted for an hour (an intent with `Intent::agent_act`: a
+reflex its client sends never counts) stands up and wanders (`idle`: a walk of 5 to 15 m every 2 to 4 minutes, each
+ending farther from the town's centre), becomes a `zombie` 30 minutes later and walks to its sleeping spot (the
+nearest open ground with 3 m of open ground round it, 3 m from another Soul's spot, within 80 m), then lies down there
+`asleep`, held by a driver of its own, at the latest 50 minutes after it began wandering. Its agent's next act lets it
+go on that tick (`awake`) and runs. Each move goes through `Bodies::start` like any move intent (N7's walk, B3's rise)
+and is written as the world's record (cause and actor the world, event `souls:idle|zombie|asleep|awake` with the rule's
+state); a restart rebuilds the rule from those records. Choices come from a hash of the body's id, never the world's
+random source. It never moves a body something else holds (an open act, an order, a carry). A sleeping body is on no
+due list. BUILDSAFE judges it as any body on the ground, so an edit cannot bury it. `WORLDD_WIND_DOWN=wander,zombie,
+leg_min,leg_max,bound` (seconds) shortens the clocks in a test world. The page's Soul card reads its word from the
+records. A restart rebuilds it from the records after its checkpoint; a body the checkpoint has lying on the ground
+sleeps on, and one wandering or walking out starts its hour again.
+
 ## The code hatch, shape only
 
 10. **The hatch is one pure function named by the hash of its module** (SA-F9, #3000): `{1: module (its SHA-256
     multihash), 2: [read, ...], 3: steps most, 4: answers, 5: why}`. Reads are declared, whole values only: a field
     of the thing `{1: 1, 2: field}` or an argument of the form `{1: 2, 2: name}`; it reads nothing else. It answers a
-    verdict `{1: 1}` or one field's new value `{1: 2, 2: field}`. Its steps are 1 to 1,000,000, counted by F8's own
+    verdict `{1: 1}`, one field's new value `{1: 2, 2: field}`, or a verdict and, with a yes, the new values of up to
+    eight fields `{1: 3, 2: [field, ...]}` (a board's pieces, whose turn, the phase). Its steps are 1 to 1,000,000, counted by F8's own
     meter, never a runtime's. `why` is its text key. Refusals: `hatch-not-a-record` (unknown fields included),
     `hatch-module-not-hash`, `hatch-reads-nothing`, `hatch-steps-out-of-range`. One read is the engine's floor; SA-F9's
     gate asks for two, against hatches that bypass the closed lists. It sits on a form (`forms.<name>.hatch`), inside
     the kind's hash.
-11. **No scripting language is embedded.** F8 will run a hatch in one WASM interpreter inside `replica`, with no
-    imports, so the client and the server give the same answer. That is an interpreter of a pure function, not a
-    language a world is written in.
+11. **No scripting language is embedded.** F8 (#2823) runs a hatch in one WASM interpreter inside `replica`
+    (`wasmi`, `v2/crates/replica/src/hatch`), with no imports, so the world, the daemon and a page give the same
+    verdict at the same counted steps. That is an interpreter of a pure function, not a language a world is written
+    in. A module is refused at load by name: `hatch-module-hash-differs`, `-invalid`, `-float` (any float
+    instruction), `-imports`, `-memory` (over 1 MiB), `-shape`. It exports `memory`, an `i32` global `input` and
+    `run: (i32) -> i64`; the host writes each read at `input` as a count of i64 words and the words (a list or a
+    record flattened in order, an enum's value as its place in the field's `values`). A hatch that answers fields
+    also exports an `i32` global `output`: when `run` answers 1 it has written there, for each answered field in
+    order, a count of words (at most 1,024) and the words, the same shape as a read; the form runner turns them into
+    the fields' values by their definitions and refuses a misfit `hatch-answer-malformed` (past a bound, not one of
+    an enum's values, the wrong number of words, more records than the list's `most`), a bad count
+    `hatch-output-malformed`. Over its budget a call ends `hatch-over-budget`; any other fault `hatch-trapped`, in
+    that call only. The form runner binds and calls it (`bind_hatch`, `run_hatch`); a no refuses the act
+    `hatch-said-no` with its `why`.
 
 **Step 0.** A throwaway skill crate depending on `replica` alone, naming `sim::walk::Walker`, does not compile:
 `error[E0433]: failed to resolve: use of unresolved module or unlinked crate 'sim'`. The same crate using only
@@ -182,3 +223,25 @@ sit or a rise past its act's deadline runs to its end, so a seat is never left h
   would answer differently.
 - **A hatch named by a name rather than a hash.** A changed module would change history.
 - **A trusted value a skill can make up** (a claim, a grant). The host must make those; a skill only asks.
+
+
+## Released body choices
+
+`node v2/tools/import-body/presets.ts --out <prepared> --media <checkout>` prepares every released Little Martian,
+Pip, monster, ghost, centaur and procedural duck, snail and dog. Ordinary uploads keep their existing size, texture
+and validation limits. Released scans require their exact manifest pin; authored examples require their existing
+normalized revision pin. Procedural models sample the released source into shared model bakes, rather than creating
+a rig for each Soul. Meshes and sampled clips determine the admitted Small, Standard, Large or Giant class.
+
+A Soul uses `wear <preset-or-hash>`. Successful native admission records field32's content hash; refused fit keeps
+the previous body. Both live and history workers carry that field to the same crowd renderer. Only an absent hash
+selects the default person. A requested model is hidden while loading, then becomes ready or named unavailable;
+it never substitutes another preset. Materials, maps and UV seams remain model-specific instanced batches.
+
+The page build accepts the explicit prepared directory as `V2_BODY_ASSETS`. Its fixed manifest validates regular
+files, source pins and the complete catalogue/model/default/decoder closure before publishing `assets/bodies/`.
+Install and release callers prepare that input through the existing verified asset pull. No runtime model fetch
+comes from a recorded arbitrary URL. Optional public-boot field7 pins the regular `bodies.json`; template creation
+and fork carry only its validated bytes. Without field7 the legacy support encoding is unchanged.
+
+The prepared catalogue also pins canonical released BODY-v1 definitions for account migration. Mapped `import-accounts --bodies` records choices only in the private per-world birth file. Serve validates that fixed `births.json` against its actual header and catalogue before handing choices to the existing C3 path. Existing bodies and subsequent wear are unchanged; private birth choices are never public boot support. A look the catalogue cannot carry (a custom humanoid look, an unknown definition, another URL form) is born in the default body, counted by reason in the import's row, and kept whole in the private account store for a later migration; it never silently becomes the default and never drops the Soul.

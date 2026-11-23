@@ -14,11 +14,19 @@
 //!   walk keeps a place behind a wall far; the weight fills the rings nearest the target first. When the target is
 //!   itself clear ground, a place must also be joined to it on foot: a walk between them within [`DETOUR`] times
 //!   their straight gap plus a pitch. A target that is not (in a box, a wall, a doorway, on a stair, on water, off the
-//!   ground) is bound to the nearest clear place beside it the same way.
+//!   ground) is bound to the nearest clear place beside it the same way, and so is a clear target the asker's walk
+//!   does not reach (a pocket of ground walled in by a desk's legs and the chairs round it, #4072).
 //! - **Recorded as the engine's.** Each grant is an [`Entry::Grant`] with the actor the world and the cause the
 //!   asker's order; the same marks give the same grants every run (integers, id order, no hashing).
 //! - **Released** when its holder no longer asks for it: it left (its mark asks for another target or none,
 //!   `spot-left`) or its order ended (no mark, `order-ended`).
+//!
+//! - **A place to act from** (C15, #3447, [`within`]). A form's walk to a point a body cannot stand on goes to the
+//!   nearest place within the body's reach of it, by the same rule on finer rings ([`REACH_PITCH`]), held by no one:
+//!   the act is brief, and the walk keeps bodies apart. A form's walk to a thing with a footprint (its entry's
+//!   bounds, [`footprint`]: a workbench, a shelf against a wall, a window in one) goes to the nearest place within
+//!   that reach of its outline, not of its middle; a walk to be at a walkable one ([`walkable`]: a stage, a rug, a
+//!   deck) ends on it ([`within_footprint`], #4072).
 //!
 //! Refusals: `spot-none-near` (no walkable place on the rings), `spot-none-free` (every place held or out of reach).
 //! Not here: seats (B3), facing (B11), formations and conversation circles, spots described in words (E2), perches
@@ -26,10 +34,11 @@
 
 use replica::effects::{Actor, Cause, Refusal};
 use replica::ids::Id;
+use replica::kinds::sizes::Size;
 use replica::pose::{Quat, Vec3};
 use replica::time::Micros;
 use replica::world_model::show;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// Between rings, and between neighbouring places on a ring, µm.
 pub const PITCH: i64 = 700_000;
@@ -42,6 +51,10 @@ pub const CLEAR: i64 = 700_000;
 pub const WEIGHT: i64 = 3;
 /// A place is joined to a clear target when walked to from it within this many times their straight gap, plus a pitch.
 pub const DETOUR: i64 = 2;
+/// A search for a place to stand gives up after this many route searches that find no way (#4072). A place the ground
+/// already knows no walk reaches ([`Ground::may_reach`], a lookup) is skipped without one and is not counted, so a
+/// target cut off from the asker (a floor with no way up) costs lookups, and at most this many failed searches.
+pub const MISSES_MOST: usize = 64;
 
 /// The ground as the spot tables read it. All µm.
 pub trait Ground {
@@ -52,6 +65,58 @@ pub trait Ground {
     fn passage(&self, node: Id, p: Vec3) -> bool;
     /// The walking distance from `a` on node `an` to `b` on node `bn`, never through a wall; `None` with no way there.
     fn walk(&mut self, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64>;
+    /// Whether a walk from `a` to `b` may find a way: `false` only when none can (no portal or link joins them),
+    /// told without a route search (#4072). A ground that cannot tell says `true`.
+    fn may_reach(&self, _an: Id, _a: Vec3, _bn: Id, _b: Vec3) -> bool {
+        true
+    }
+}
+
+/// The same geometry questions selected for one admitted footprint. Reservations are never stored here.
+pub trait ClassGround {
+    fn stand(&self, size: Size, node: Id, p: Vec3) -> Option<(Vec3, Vec3)>;
+    fn passage(&self, size: Size, node: Id, p: Vec3) -> bool;
+    fn walk(&mut self, size: Size, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64>;
+    fn may_reach(&self, _size: Size, _an: Id, _a: Vec3, _bn: Id, _b: Vec3) -> bool {
+        true
+    }
+}
+struct Selected<'a> {
+    ground: &'a mut dyn ClassGround,
+    size: Size,
+}
+impl Ground for Selected<'_> {
+    fn stand(&self, node: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
+        self.ground.stand(self.size, node, p)
+    }
+    fn passage(&self, node: Id, p: Vec3) -> bool {
+        self.ground.passage(self.size, node, p)
+    }
+    fn walk(&mut self, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64> {
+        self.ground.walk(self.size, an, a, bn, b)
+    }
+    fn may_reach(&self, an: Id, a: Vec3, bn: Id, b: Vec3) -> bool {
+        self.ground.may_reach(self.size, an, a, bn, b)
+    }
+}
+struct Standard<'a>(&'a mut dyn Ground);
+impl ClassGround for Standard<'_> {
+    fn stand(&self, size: Size, node: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
+        (size == Size::Standard)
+            .then(|| self.0.stand(node, p))
+            .flatten()
+    }
+    fn passage(&self, _size: Size, node: Id, p: Vec3) -> bool {
+        self.0.passage(node, p)
+    }
+    fn walk(&mut self, size: Size, an: Id, a: Vec3, bn: Id, b: Vec3) -> Option<i64> {
+        (size == Size::Standard)
+            .then(|| self.0.walk(an, a, bn, b))
+            .flatten()
+    }
+    fn may_reach(&self, _size: Size, an: Id, a: Vec3, bn: Id, b: Vec3) -> bool {
+        self.0.may_reach(an, a, bn, b)
+    }
 }
 
 /// A target: a point (µm) in the frame of a node (a floor, or the open ground).
@@ -143,9 +208,22 @@ pub struct Spots {
     pub owners: BTreeMap<Id, BTreeMap<[i64; 3], Table>>,
     pub record: Vec<Entry>,
     /// Per asker: the target and place it holds.
-    held: BTreeMap<Id, (Target, usize)>,
+    held: BTreeMap<Id, Held>,
+    /// Geometry caches only: every class uses the one held/refused/record authority below.
+    sized: BTreeMap<(Size, Target), Table>,
+    invalid_geometry: bool,
     /// Per asker: the target it was refused, and the refusal's name.
-    refused: BTreeMap<Id, (Target, &'static str)>,
+    refused: BTreeMap<Id, (Target, Size, &'static str)>,
+}
+
+#[derive(Clone, Copy)]
+struct Held {
+    target: Target,
+    index: usize,
+    size: Size,
+    at: Vec3,
+    world: Vec3,
+    place: (u16, u16),
 }
 
 /// The straight distance in x and z, µm.
@@ -197,13 +275,44 @@ impl Table {
     }
 
     /// The free place nearest `ask` (module docs), with its cost (µm), or a refusal's name.
-    fn nearest(&mut self, g: &mut dyn Ground, ask: &Ask) -> Result<(usize, i64), &'static str> {
+    fn nearest(
+        &mut self,
+        g: &mut dyn Ground,
+        ask: &Ask,
+        blocked: &BTreeSet<usize>,
+    ) -> Result<(usize, i64), &'static str> {
         if self.places.is_empty() {
             return Err("spot-none-near");
         }
         let Some((_, a)) = g.stand(ask.node, ask.from) else {
             return Err("spot-none-free");
         };
+        let found = self.nearest_by(g, ask, a, blocked, self.clear);
+        // A clear target the asker's walk does not reach (a pocket under a desk, #4072) is bound to the nearest place
+        // beside it, as a target in a box is. A crowd that holds every joined place of a reached target is still
+        // refused.
+        match found {
+            Err(_)
+                if self.clear
+                    && g.walk(ask.node, ask.from, ask.target.node, ask.target.point())
+                        .is_none() =>
+            {
+                self.nearest_by(g, ask, a, blocked, false)
+            }
+            r => r,
+        }
+    }
+
+    /// [`Table::nearest`] from the asker's place in the ground's frame `a`; with `joined`, only places joined on foot
+    /// to the target count.
+    fn nearest_by(
+        &mut self,
+        g: &mut dyn Ground,
+        ask: &Ask,
+        a: Vec3,
+        blocked: &BTreeSet<usize>,
+        joined: bool,
+    ) -> Result<(usize, i64), &'static str> {
         let t = ask.target;
         let gap = |p: &Place| flat(p.at, t.point());
         // Free places by a bound below their cost: the straight way there plus the weighted gap.
@@ -211,19 +320,26 @@ impl Table {
             .places
             .iter()
             .enumerate()
-            .filter(|(_, p)| p.holder.is_none())
+            .filter(|(i, p)| p.holder.is_none() && !blocked.contains(i))
             .map(|(i, p)| (flat(p.world, a) + WEIGHT * gap(p), p.ring, p.k, i))
             .collect();
         order.sort_unstable();
         let mut best: Option<(i64, u16, u16, usize)> = None;
+        let mut misses = 0;
         for (bound, ring, k, i) in order {
             if best.is_some_and(|b| bound > b.0) {
                 break;
             }
-            if self.clear && !self.joined(g, t, i) {
+            if !g.may_reach(ask.node, ask.from, t.node, self.places[i].at)
+                || joined && !self.joined(g, t, i)
+            {
                 continue;
             }
             let Some(walk) = g.walk(ask.node, ask.from, t.node, self.places[i].at) else {
+                misses += 1;
+                if misses >= MISSES_MOST {
+                    break;
+                }
                 continue;
             };
             let key = (walk + WEIGHT * gap(&self.places[i]), ring, k, i);
@@ -250,9 +366,340 @@ impl Table {
     }
 }
 
+/// Between the rings [`within`] tries, and between neighbouring places on a ring, µm.
+pub const REACH_PITCH: i64 = 100_000;
+
+/// Where a body may stand to act at `target` (C15, #3447): the target itself when a body may stand there and the
+/// asker's walk reaches it (#4072); else the
+/// nearest place within `reach` of it, on rings [`REACH_PITCH`] apart (`⌊2πk⌋` places on ring `k`), on walkable
+/// ground and out of doorways and off stairs, as a table's places are. Nearest as a table's nearest: the least walk
+/// from `from` (the asker's node and where it stands) plus [`WEIGHT`] times the place's gap to the target, ties by
+/// (ring, place), a place with no walk there skipped; with no `from`, by the gap alone. `None` when no place is.
+pub fn within(
+    g: &mut dyn Ground,
+    target: Target,
+    reach: i64,
+    from: Option<(Id, Vec3)>,
+) -> Option<Vec3> {
+    let t = target.point();
+    let from = from.and_then(|(node, p)| Some((node, p, g.stand(node, p)?.1)));
+    // A point a body may stand on is its own place, unless the asker's walk cannot reach it (a pocket under a desk,
+    // walled in by its legs and the chairs round it, #4072): then the rings are tried, and the point is kept only
+    // when none of them is reached either.
+    let standable = g.stand(target.node, t).is_some();
+    if standable && from.is_none_or(|(node, p, _)| g.walk(node, p, target.node, t).is_some()) {
+        return Some(t);
+    }
+    let found = rings(g, target, reach, from);
+    if found.is_none() && standable {
+        return Some(t);
+    }
+    found
+}
+
+/// A thing's footprint by its entry (#4072): the box its `geometry.bounds_mm` (whole mm `[x, y, z]`) gives, centred on
+/// the thing's origin, as its four corners in the thing's own frame (µm, y 0, in order round it), and its height (µm).
+/// The one rule for a thing's footprint: the reach a move at the thing is judged by and the place a form's walk to it
+/// goes to ([`within_footprint`]) both read it. `None` when the entry gives no bounds.
+pub fn footprint(entry: &replica::rules::json::Value) -> Option<([Vec3; 4], i64)> {
+    let mm = |v: &replica::rules::json::Value| match v {
+        replica::rules::json::Value::Int(n) => i64::try_from(*n).ok()?.checked_mul(1000),
+        _ => None,
+    };
+    let [x, y, z] = entry.get("geometry")?.get("bounds_mm")?.arr()? else {
+        return None;
+    };
+    let (x, y, z) = (mm(x)? / 2, mm(y)?, mm(z)? / 2);
+    let c = |u: i64, v: i64| Vec3::new(u, 0, v);
+    Some(([c(-x, -z), c(x, -z), c(x, z), c(-x, z)], y))
+}
+
+/// How far `p` is from the closed outline `ring` (its corners in order) across x and z, µm: 0 inside it.
+pub fn to_outline(p: Vec3, ring: &[Vec3]) -> i64 {
+    let k = ring.len();
+    let mut odd = false;
+    for i in 0..k {
+        let (a, b) = (ring[i], ring[(i + 1) % k]);
+        if (a.z > p.z) != (b.z > p.z) {
+            let x = i128::from(a.x)
+                + i128::from(b.x - a.x) * i128::from(p.z - a.z) / i128::from(b.z - a.z);
+            if i128::from(p.x) < x {
+                odd = !odd;
+            }
+        }
+    }
+    if odd {
+        return 0;
+    }
+    (0..k)
+        .map(|i| to_segment(p, ring[i], ring[(i + 1) % k]))
+        .min()
+        .unwrap_or(i64::MAX)
+}
+
+/// The most places [`within_footprint`] tries on one band round an outline: on a long one they are spread out, so
+/// the work does not grow with its size (a court's, a hill's).
+pub const BAND_PLACES: i64 = 48;
+
+/// How far inside a walkable thing's outline a walk onto it ends at the least ([`within_footprint`] with `on`), µm: a
+/// body's width, so the body stands on it, not on its edge.
+pub const ON_DEPTH: i64 = 400_000;
+
+/// Where a body may stand to be at, or act at, a thing whose footprint is `ring` (#4072: its corners in `target`'s
+/// node's frame, in order round it; `target` its middle).
+///
+/// - **Beside it** (`on` false): the nearest place within `reach` of its outline, not of its middle, so a long
+///   workbench, a shelf against a wall or a window in one is reached from wherever beside it the asker's walk gets
+///   to. The places lie on bands round the outline, its edges moved out by 0, [`REACH_PITCH`], … `reach`, each edge's
+///   line run on that far past both its corners.
+/// - **On it** (`on`, a walkable thing a body goes to: a stage, a rug, a deck, a court): the nearest place inside its
+///   outline, on bands moved in by [`ON_DEPTH`], then a pitch more each, to `reach`; with none reached, beside it as
+///   above.
+///
+/// On each band at most [`BAND_PLACES`] places, a pitch apart or spread evenly round a longer band. Kept, as
+/// [`within`]'s rings are, on walkable ground, out of doorways and off stairs. Nearest as [`within`]'s: the least walk
+/// from `from` plus [`WEIGHT`] times the place's gap to the outline (0 inside it; a place off a walkable thing, its edge
+/// too, counts `reach` more), ties by (band, edge, place); with no `from`, by the gap alone. With no such place,
+/// [`within`] at the middle, so a thing reached before still is.
+pub fn within_footprint(
+    g: &mut dyn Ground,
+    target: Target,
+    ring: &[Vec3],
+    on: bool,
+    reach: i64,
+    from: Option<(Id, Vec3)>,
+) -> Option<Vec3> {
+    let t = target.point();
+    let k = ring.len();
+    let walker = from.and_then(|(node, p)| Some((node, p, g.stand(node, p)?.1)));
+    // Twice the outline's signed area: its sign says which side of each edge is outside.
+    let area: i128 = (0..k)
+        .map(|i| {
+            let (a, b) = (ring[i], ring[(i + 1) % k]);
+            i128::from(a.x) * i128::from(b.z) - i128::from(b.x) * i128::from(a.z)
+        })
+        .sum();
+    let out = if area > 0 { 1 } else { -1 };
+    let lens: Vec<i64> = (0..k).map(|i| flat(ring[i], ring[(i + 1) % k])).collect();
+    // The bands, by how far out each lies (in when below 0).
+    let mut bands: Vec<i64> = Vec::new();
+    if on {
+        bands.extend(
+            (0..)
+                .map(|n| -ON_DEPTH - n * REACH_PITCH)
+                .take_while(|d| -d <= reach),
+        );
+    }
+    bands.extend((0..=reach / REACH_PITCH).map(|n| n * REACH_PITCH));
+    // What a place's gap to the outline counts, on band `d`: off a walkable thing (its edge too), more than any place
+    // on it.
+    let cost = |gap: i64, d: i64| {
+        if on && d >= 0 {
+            WEIGHT * (gap + reach)
+        } else {
+            WEIGHT * gap
+        }
+    };
+    let mut seen = BTreeSet::new();
+    // Places by a bound below their cost: the straight way there plus the weighted gap.
+    let mut order: Vec<(i64, (usize, usize, i64), Vec3)> = Vec::new();
+    for (band, &d) in bands.iter().enumerate() {
+        let whole: i64 = lens.iter().map(|l| (l + 2 * d).max(0)).sum();
+        let step = REACH_PITCH.max((whole + BAND_PLACES - 1) / BAND_PLACES);
+        for i in 0..k {
+            let (a, b, len) = (ring[i], ring[(i + 1) % k], lens[i]);
+            if len == 0 || len + 2 * d <= 0 {
+                continue;
+            }
+            // The edge's line moved out by `d`, at `s` µm along it from `a`.
+            let scale = |e: i64, by: i64| {
+                i64::try_from(i128::from(e) * i128::from(by) / i128::from(len)).unwrap_or(0)
+            };
+            let at = |s: i64| {
+                let along = |u: i64, v: i64| u + scale(v - u, s);
+                let n = |e: i64| scale(e, d);
+                Vec3::new(
+                    along(a.x, b.x) + out * n(b.z - a.z),
+                    t.y,
+                    along(a.z, b.z) - out * n(b.x - a.x),
+                )
+            };
+            for j in 0..=(len + 2 * d) / step {
+                let p = at(j * step - d);
+                // A place on a band in is as deep inside as the band (not past the far side of a narrow thing).
+                let shallow = || {
+                    (0..k)
+                        .map(|e| to_segment(p, ring[e], ring[(e + 1) % k]))
+                        .min()
+                        .is_none_or(|x| x < -d - 1)
+                };
+                if to_outline(p, ring) > reach || (d < 0 && shallow()) {
+                    continue;
+                }
+                let Some((at, world)) = g.stand(target.node, p) else {
+                    continue;
+                };
+                if !seen.insert([at.x, at.y, at.z]) || g.passage(target.node, at) {
+                    continue;
+                }
+                order.push((
+                    cost(to_outline(at, ring), d) + walker.map_or(0, |(_, _, w)| flat(world, w)),
+                    (band, i, j),
+                    at,
+                ));
+            }
+        }
+    }
+    order.sort_unstable_by_key(|&(bound, key, _)| (bound, key));
+    let best = match walker {
+        None => order.first().map(|o| o.2),
+        Some((node, p, _)) => {
+            let mut best: Option<(i64, (usize, usize, i64), Vec3)> = None;
+            let mut misses = 0;
+            for (bound, key, at) in order {
+                if best.is_some_and(|b| bound > b.0) {
+                    break;
+                }
+                // As `within`'s rings: a place the ground knows no walk reaches costs no search and no miss.
+                if !g.may_reach(node, p, target.node, at) {
+                    continue;
+                }
+                let Some(walk) = g.walk(node, p, target.node, at) else {
+                    misses += 1;
+                    if misses >= MISSES_MOST {
+                        break;
+                    }
+                    continue;
+                };
+                let c = walk + cost(to_outline(at, ring), bands[key.0]);
+                if best.is_none_or(|b| (c, key) < (b.0, b.1)) {
+                    best = Some((c, key, at));
+                }
+            }
+            best.map(|b| b.2)
+        }
+    };
+    // None found (the bands are sampled, and a search gives up after [`MISSES_MOST`] misses): [`within`] at the middle,
+    // so a thing reached before is still reached. A target cut off from the asker costs it lookups, not searches.
+    best.or_else(|| within(g, target, reach, from))
+}
+
+/// Whether a body goes onto a thing to be at it (#4072), by its entry: it is a place (`owner: place`: a deck, a pier, a
+/// terrace); it has an area that allows `stand`; it is no taller than a step ([`crate::ground::STEP`]) and wide enough
+/// to stand on (a rug, a mat; not a bowl); or a slot a body stands in (one that admits a body with no posture) lies inside its footprint (a stage's spots, a
+/// court's sides). A bed (its mattress allows only `lie` and `sit`) and a pool table (its players' slots stand round
+/// it) are not. A walk to be at a walkable thing ends on it ([`within_footprint`] with `on`).
+pub fn walkable(entry: &replica::rules::json::Value) -> bool {
+    use replica::rules::json::Value as J;
+    let mm = |v: &J| match v {
+        J::Int(n) => i64::try_from(*n).ok(),
+        _ => None,
+    };
+    let place = entry.get("owner").and_then(J::str) == Some("place");
+    let stand = match entry.get("areas") {
+        Some(J::Obj(areas)) => areas
+            .iter()
+            .any(|(_, a)| a.get("allows").and_then(|x| x.get("stand")).is_some()),
+        _ => false,
+    };
+    let bounds = entry
+        .get("geometry")
+        .and_then(|g| g.get("bounds_mm"))
+        .and_then(J::arr)
+        .and_then(|b| match b {
+            [x, y, z] => Some([mm(x)?, mm(y)?, mm(z)?]),
+            _ => None,
+        });
+    // Low, and wide enough to stand on a body's width in from its edge (not a bowl).
+    let wide = 2 * ON_DEPTH / 1000;
+    let low = bounds.is_some_and(|[x, y, z]| y <= crate::ground::STEP && x >= wide && z >= wide);
+    let standing = match (entry.get("slots"), bounds) {
+        (Some(J::Obj(slots)), Some([x, _, z])) => slots.iter().any(|(_, s)| {
+            let inside = match s.get("at_mm").and_then(J::arr) {
+                Some([sx, _, sz]) => {
+                    mm(sx).is_some_and(|v| 2 * v.abs() <= x)
+                        && mm(sz).is_some_and(|v| 2 * v.abs() <= z)
+                }
+                _ => false,
+            };
+            s.get("admits").and_then(J::str) == Some("body") && s.get("posture").is_none() && inside
+        }),
+        _ => false,
+    };
+    place || stand || low || standing
+}
+
+/// [`within`]'s rings: the place within `reach` of `target` nearest by the asker's walk, or by the gap alone.
+fn rings(
+    g: &mut dyn Ground,
+    target: Target,
+    reach: i64,
+    from: Option<(Id, Vec3, Vec3)>,
+) -> Option<Vec3> {
+    let t = target.point();
+    // Places by a bound below their cost: the straight way there plus the weighted gap.
+    let mut order: Vec<(i64, i64, i64, Vec3)> = Vec::new();
+    for ring in 1..=reach / REACH_PITCH {
+        let n = 6_283 * ring / 1_000;
+        for k in 0..n {
+            let off = Quat::from_yaw_mdeg(k * 360_000 / n)
+                .and_then(|q| q.rotate(Vec3::new(0, 0, ring * REACH_PITCH)))
+                .unwrap_or(Vec3::ZERO);
+            let Some((at, world)) = g.stand(target.node, Vec3::new(t.x + off.x, t.y, t.z + off.z))
+            else {
+                continue;
+            };
+            if g.passage(target.node, at) {
+                continue;
+            }
+            let gap = WEIGHT * flat(at, t);
+            order.push((
+                gap + from.map_or(0, |(_, _, a)| flat(world, a)),
+                ring,
+                k,
+                at,
+            ));
+        }
+    }
+    order.sort_unstable_by_key(|&(bound, ring, k, _)| (bound, ring, k));
+    let Some((node, p, _)) = from else {
+        return order.first().map(|o| o.3);
+    };
+    let mut best: Option<(i64, i64, i64, Vec3)> = None;
+    let mut misses = 0;
+    for (bound, ring, k, at) in order {
+        if best.is_some_and(|b| bound > b.0) {
+            break;
+        }
+        if !g.may_reach(node, p, target.node, at) {
+            continue;
+        }
+        let Some(walk) = g.walk(node, p, target.node, at) else {
+            misses += 1;
+            if misses >= MISSES_MOST {
+                break;
+            }
+            continue;
+        };
+        let key = (walk + WEIGHT * flat(at, t), ring, k, at);
+        if best.is_none_or(|b| (key.0, key.1, key.2) < (b.0, b.1, b.2)) {
+            best = Some(key);
+        }
+    }
+    best.map(|b| b.3)
+}
+
 impl Spots {
     pub fn new() -> Spots {
         Spots::default()
+    }
+
+    /// Prepared geometry changed; retain shared physical holders until they are revalidated against it.
+    pub fn invalidate_geometry(&mut self) {
+        self.owners.clear();
+        self.sized.clear();
+        self.refused.clear();
+        self.invalid_geometry = true;
     }
 
     /// The table of `target`, if its owner has made one.
@@ -263,13 +710,13 @@ impl Spots {
     /// What `who`, asking for `target`, was given: the place to stand (µm, the target node's frame) or a refusal's
     /// name; `None` until its ask is read.
     pub fn of(&self, who: Id, target: &Target) -> Option<Result<Vec3, &'static str>> {
-        if let Some((t, i)) = self.held.get(&who)
-            && t == target
+        if let Some(held) = self.held.get(&who)
+            && &held.target == target
         {
-            return self.table(t).map(|tb| Ok(tb.places[*i].at));
+            return Some(Ok(held.at));
         }
         match self.refused.get(&who) {
-            Some((t, name)) if t == target => Some(Err(*name)),
+            Some((t, _, name)) if t == target => Some(Err(*name)),
             _ => None,
         }
     }
@@ -277,30 +724,86 @@ impl Spots {
     /// The owners read the asks of the last tick (in id order) and write their tables for world time `at`: release
     /// what no ask holds any more, then grant each new ask its nearest free place.
     pub fn write(&mut self, g: &mut dyn Ground, asks: &[Ask], at: Micros) -> Result<(), Refusal> {
-        let asking: BTreeMap<Id, &Ask> = asks.iter().map(|a| (a.who, a)).collect();
-        // Releases: the holder asks for another target or none (it left), or has no mark (its order ended).
+        self.write_sized(
+            &mut Standard(g),
+            &asks
+                .iter()
+                .map(|a| (*a, Size::Standard))
+                .collect::<Vec<_>>(),
+            at,
+        )
+    }
+
+    /// One release/grant pass in the existing caller order, with shared physical occupancy across class caches.
+    pub fn write_sized(
+        &mut self,
+        grounds: &mut dyn ClassGround,
+        asks: &[(Ask, Size)],
+        at: Micros,
+    ) -> Result<(), Refusal> {
+        if self.invalid_geometry {
+            let holders: Vec<_> = self.held.iter().map(|(&id, &h)| (id, h)).collect();
+            for (who, h) in holders {
+                let selected = Selected {
+                    ground: grounds,
+                    size: h.size,
+                };
+                let table = if h.size == Size::Standard {
+                    self.owners
+                        .entry(h.target.node)
+                        .or_default()
+                        .entry(h.target.at)
+                        .or_insert_with(|| Table::new(&selected, h.target))
+                } else {
+                    self.sized
+                        .entry((h.size, h.target))
+                        .or_insert_with(|| Table::new(&selected, h.target))
+                };
+                match table.places.iter().position(|p| p.at == h.at) {
+                    Some(index) => {
+                        table.places[index].holder = Some(who);
+                        self.held.insert(who, Held { index, ..h });
+                    }
+                    None => {
+                        self.held.remove(&who);
+                        self.record.push(Entry::Release {
+                            at,
+                            who,
+                            target: h.target,
+                            place: h.place,
+                            why: "ground-changed",
+                        });
+                    }
+                }
+            }
+            self.invalid_geometry = false;
+        }
+        let asking: BTreeMap<Id, (&Ask, Size)> =
+            asks.iter().map(|(a, size)| (a.who, (a, *size))).collect();
         let gone: Vec<(Id, &'static str)> = self
             .held
             .iter()
-            .filter_map(|(who, (t, _))| match asking.get(who) {
+            .filter_map(|(who, held)| match asking.get(who) {
                 None => Some((*who, "order-ended")),
-                Some(a) if a.target != *t => Some((*who, "spot-left")),
+                Some((a, _)) if a.target != held.target => Some((*who, "spot-left")),
+                Some((_, size)) if *size != held.size => Some((*who, "body-class-changed")),
                 Some(_) => None,
             })
             .collect();
-        // A missing table is refused, and the other releases and the grants go on (#3275); the first is returned.
         let mut refused = None;
         for (who, why) in gone {
-            let (t, i) = self.held.remove(&who).expect("held");
-            let Some(p) = self
-                .owners
-                .get_mut(&t.node)
-                .and_then(|o| o.get_mut(&t.at))
-                .map(|tb| &mut tb.places[i])
-            else {
+            let held = self.held.remove(&who).expect("held");
+            let table = if held.size == Size::Standard {
+                self.owners
+                    .get_mut(&held.target.node)
+                    .and_then(|m| m.get_mut(&held.target.at))
+            } else {
+                self.sized.get_mut(&(held.size, held.target))
+            };
+            let Some(p) = table.and_then(|tb| tb.places.get_mut(held.index)) else {
                 refused.get_or_insert(Refusal {
                     name: "spot-table-missing",
-                    detail: show(t.node),
+                    detail: show(held.target.node),
                 });
                 continue;
             };
@@ -308,30 +811,74 @@ impl Spots {
             self.record.push(Entry::Release {
                 at,
                 who,
-                target: t,
+                target: held.target,
                 place: (p.ring, p.k),
                 why,
             });
         }
-        self.refused
-            .retain(|who, (t, _)| asking.get(who).is_some_and(|a| a.target == *t));
-        // Grants, in id order, to each ask not yet answered.
-        for a in asks {
+        self.refused.retain(|who, (t, size, _)| {
+            asking
+                .get(who)
+                .is_some_and(|(a, s)| a.target == *t && s == size)
+        });
+        for (a, size) in asks {
             if self.held.contains_key(&a.who) || self.refused.contains_key(&a.who) {
                 continue;
             }
             let t = a.target;
-            let tb = self
-                .owners
-                .entry(t.node)
-                .or_default()
-                .entry(t.at)
-                .or_insert_with(|| Table::new(g, t));
-            match tb.nearest(g, a) {
+            let mut g = Selected {
+                ground: grounds,
+                size: *size,
+            };
+            let tb = if *size == Size::Standard {
+                self.owners
+                    .entry(t.node)
+                    .or_default()
+                    .entry(t.at)
+                    .or_insert_with(|| Table::new(&g, t))
+            } else {
+                self.sized
+                    .entry((*size, t))
+                    .or_insert_with(|| Table::new(&g, t))
+            };
+            // Standard/standard keeps the existing exact table policy. Every pair involving another class
+            // must retain the existing standard clearance beyond the sum of its admitted radii.
+            let blocked = tb
+                .places
+                .iter()
+                .enumerate()
+                .filter_map(|(i, p)| {
+                    self.held
+                        .values()
+                        .any(|h| {
+                            if h.target.node != t.node
+                                || (*size == Size::Standard && h.size == Size::Standard)
+                            {
+                                return false;
+                            }
+                            let clearance = (size.radius_mm() + h.size.radius_mm() + 140) * 1000;
+                            let dx = i128::from(p.world.x - h.world.x);
+                            let dz = i128::from(p.world.z - h.world.z);
+                            dx * dx + dz * dz < i128::from(clearance) * i128::from(clearance)
+                        })
+                        .then_some(i)
+                })
+                .collect();
+            match tb.nearest(&mut g, a, &blocked) {
                 Ok((i, cost)) => {
                     let p = &mut tb.places[i];
                     p.holder = Some(a.who);
-                    self.held.insert(a.who, (t, i));
+                    self.held.insert(
+                        a.who,
+                        Held {
+                            target: t,
+                            index: i,
+                            size: *size,
+                            at: p.at,
+                            world: p.world,
+                            place: (p.ring, p.k),
+                        },
+                    );
                     self.record.push(Entry::Grant {
                         at,
                         who: a.who,
@@ -344,7 +891,7 @@ impl Spots {
                     });
                 }
                 Err(name) => {
-                    self.refused.insert(a.who, (t, name));
+                    self.refused.insert(a.who, (t, *size, name));
                     self.record.push(Entry::Refuse {
                         at,
                         who: a.who,
@@ -357,3 +904,6 @@ impl Spots {
         refused.map_or(Ok(()), Err)
     }
 }
+
+#[cfg(test)]
+mod tests;

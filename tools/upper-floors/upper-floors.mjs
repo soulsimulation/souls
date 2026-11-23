@@ -18,6 +18,7 @@
 //   apply    --data <dir> --backup <dir from backup> --port <launcher port> [--base ''] [--confirm]
 //   verify   --data <dir> [--expect installed|removed]                      the world DB's last upper-floors fact + audit
 //   rollback --data <dir> --backup <dir> --port <launcher port> [--base ''] [--confirm]
+import { isMain } from '../lib/is-main.mjs';
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
@@ -257,7 +258,7 @@ export function verify(L, expect) {
   return { ok, expect: expect ?? null, state: r.state, last, upperFloors: r.upperFloors, activitySpots: r.activitySpots };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (isMain(import.meta.url)) {
   const argv = process.argv.slice(2), flag = (k) => { const i = argv.indexOf(`--${k}`); return i >= 0 ? argv[i + 1] : undefined; }, has = (k) => argv.includes(`--${k}`);
   const cmd = argv[0], data = flag('data');
   const usage = () => { console.error(readFileSync(fileURLToPath(import.meta.url), 'utf8').split('\n').filter((l) => l.startsWith('//   ')).join('\n')); process.exit(2); };

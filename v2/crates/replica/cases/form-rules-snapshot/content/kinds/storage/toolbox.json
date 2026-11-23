@@ -1,0 +1,156 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:toolbox",
+  "owner": "thing",
+  "state": {
+    "open": {
+      "n": 1,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        510
+      ],
+      "yaw_mdeg": 180000
+    },
+    "handle": {
+      "role": "grip",
+      "at_mm": [
+        0,
+        340,
+        0
+      ]
+    }
+  },
+  "slots": {
+    "inside": {
+      "admits": "thing",
+      "most": 8,
+      "at_mm": [
+        0,
+        30,
+        0
+      ],
+      "fits_mm": [
+        460,
+        200,
+        180
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      500,
+      362,
+      220
+    ]
+  },
+  "forms": {
+    "open": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": false
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "slide",
+          "at": "handle"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": true,
+          "event": "opened"
+        }
+      ]
+    },
+    "close": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "open",
+          "is": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "handle"
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "open",
+          "to": false,
+          "event": "shut"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "one_hand"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:toolbox",
+    "table": [
+      {
+        "part": "lid",
+        "field": "open",
+        "do": "rotate",
+        "axis": "x",
+        "at": {
+          "true": -100000,
+          "false": 0
+        },
+        "over_us": 400000
+      }
+    ],
+    "shape": {"round":12,"shapes":[{"kind":"box","at":[0,120,0],"size":[476,216,196],"round":0,"tint":"box"},{"kind":"box","at":[0,245,0],"size":[500,20,220],"round":0,"tint":"lid","role":"lid","pivot":[0,245,-110]},{"kind":"torus","at":[0,270,0],"r":80,"r2":12,"segments":6,"tint":"lid","arc":180000,"role":"lid","pivot":[0,245,-110]}],"palette":{"box":"#c8382c","lid":"#3b3d40"},"tags":["work","toolbox","tools","item"]}
+  },
+  "text": {
+    "card": "A red metal toolbox: carry it by the handle, open its lid for the tools.",
+    "storage": "storage",
+    "tools": "tools",
+    "kit": "kit"
+  },
+  "card": {
+    "text": "card",
+    "category": "storage",
+    "synonyms": [
+      "tools",
+      "kit"
+    ]
+  }
+}

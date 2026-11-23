@@ -3,9 +3,9 @@
   "kind": "eden:poster",
   "owner": "thing",
   "state": {
-    "title": { "n": 1, "type": "text", "default": null, "audience": { "rule": "everyone" } },
-    "detail": { "n": 2, "type": "text", "default": null, "audience": { "rule": "everyone" } },
-    "out_of_date": { "n": 3, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
+    "title": { "n": 28, "type": "text", "default": null, "audience": { "rule": "everyone" } },
+    "detail": { "n": 29, "type": "text", "default": null, "audience": { "rule": "everyone" } },
+    "out_of_date": { "n": 30, "type": "bool", "default": false, "audience": { "rule": "everyone" } }
   },
   "links": {
     "author": { "n": 1, "from": "soul", "most": 1, "most_per": 2, "audience": { "rule": "everyone" } }

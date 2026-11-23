@@ -10,7 +10,7 @@
 // A bench times a run by the wall clock (the wall-clock rule, K7, is the engine's: v2/clippy.toml).
 #![allow(clippy::disallowed_methods)]
 
-use std::collections::{BTreeMap, HashMap};
+use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Write};
 use std::path::{Path, PathBuf};
 use std::process::{Child, Command, Stdio};
@@ -102,6 +102,7 @@ fn intent(actor: Actor, sequence: u64) -> Vec<u8> {
         fallbacks: Vec::new(),
         replaces: None,
         body: None,
+        reflex: false,
     };
     encode(&i.to_value()).expect("an intent")
 }
@@ -185,7 +186,7 @@ async fn agent(
         tokio::time::sleep(Duration::from_millis(50)).await;
     }
     // Per sequence: sent while the world was away, and how many answers.
-    let mut sent: HashMap<u64, (bool, u32)> = HashMap::new();
+    let mut sent: BTreeMap<u64, (bool, u32)> = BTreeMap::new();
     let mut seq = 0u64;
     let mut tick = tokio::time::interval(every);
     tick.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Delay);
@@ -257,7 +258,7 @@ async fn agent(
 /// Each actor's sequences as the world took them: (out of order, repeats across a restart).
 fn order(path: &Path) -> (u64, u64, u64) {
     let text = std::fs::read_to_string(path).unwrap_or_default();
-    let mut last: HashMap<&str, u64> = HashMap::new();
+    let mut last: BTreeMap<&str, u64> = BTreeMap::new();
     let (mut lines, mut out_of_order, mut repeats) = (0, 0, 0);
     for line in text.lines() {
         let Some((actor, s)) = line.split_once(' ') else {

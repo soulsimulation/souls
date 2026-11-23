@@ -38,6 +38,11 @@
 // `today`, drives today's local world through its adapters (tools/entry/load.mjs, SA-F3a's forms adapter): the god CLI
 // (tools/god-skill/cli.mjs) from the creator's folder (--god <dir>, default here) and the Soul CLI
 // (tools/world-launcher/soul/eden.mjs) for the Soul in SOULS_HOME (--soul <name> when there are several).
+// `act` and `begin` also get `{case, ids}`: the case's act and state, and which world id each of its nodes was placed
+// as (a world that decides on the case's own state reads it; today's ignores it). A transport with `stepped` true runs
+// a world that changes only when asked (tools/entry/v2.mjs, Engine v2's form runner): its reads are final, so the gate
+// never waits on them.
+import { isMain } from '../lib/is-main.mjs';
 import {spawnSync} from 'node:child_process';
 import {existsSync, mkdtempSync, readFileSync, rmSync, writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';
@@ -144,11 +149,12 @@ function setupGap(c, kinds) {
 async function readUntil(t, id, want, ms = 6000) {
   const end = Date.now() + ms;
   let got = await t.fields(id);
-  while (!sameFields(got, want) && Date.now() < end) { await sleep(500); got = await t.fields(id); }
+  while (!t.stepped && !sameFields(got, want) && Date.now() < end) { await sleep(500); got = await t.fields(id); }
   return got;
 }
 /** Fields read back once they have stopped changing (two reads a second apart agree). */
 async function settled(t, id) {
+  if (t.stepped) return t.fields(id);
   await sleep(1200);
   let a = await t.fields(id);
   for (let i = 0; i < 6; i++) { await sleep(800); const b = await t.fields(id); if (same(a, b)) return b; a = b; }
@@ -185,7 +191,7 @@ async function ruleCase(t, row, kinds, placed) {
   const ids = {[c.act.this]: id}, others = Object.entries(c.state.nodes).filter(([nid, n]) => n.kind && nid !== c.act.this);
   for (const [nid, n] of others) { ids[nid] = await placed(n.kind); await t.set(ids[nid], startFields(kinds.get(n.kind), n)); }
   for (const [nid, n] of others) await readUntil(t, ids[nid], seen(kinds.get(n.kind), startFields(kinds.get(n.kind), n)));
-  const got = await t.act(id, c.act.form, Object.fromEntries(Object.entries(c.act.args ?? {}).map(([a, v]) => [a, ids[v] ?? v])));
+  const got = await t.act(id, c.act.form, Object.fromEntries(Object.entries(c.act.args ?? {}).map(([a, v]) => [a, ids[v] ?? v])), {case: c, ids});
   const after = got.verdict === 'no' ? await settled(t, id) : await t.fields(id);
   const {off, via} = judge({...c.expect, ...(c.expect.verdict === 'no' ? {fix: rulesFix(c)} : {})}, got, before, after);
   return {result: off.length ? 'fail' : 'pass', ...(off.length ? {why: off.join('; ')} : {}), got: brief(got), ...(via ? {via} : {})};
@@ -213,7 +219,7 @@ async function effectCase(t, row, kinds, placed) {
     if (unread.length && !t.reads?.includes?.(unread[0])) return {result: 'skip', why: `step ${k}: a ${unread[0]} change cannot be read from outside on this world`, steps};
     const before = await t.fields(id);
     const args = Object.fromEntries(Object.entries(step.act.args ?? {}).map(([a, v]) => [a, ids[v] ?? v]));
-    const got = await t.act(id, step.act.form, args);
+    const got = await t.act(id, step.act.form, args, {case: {act: step.act, state: c.state}, ids});
     const sets = setsOf(step.expect, ids, c, kinds);
     const after = got.verdict === 'no' ? await settled(t, id) : await readUntil(t, id, sets[id] ?? {});
     const {off, via} = judge(step.expect ?? {}, got, before, after);
@@ -269,7 +275,7 @@ async function reach(t, rid, first, stage, steps) {
     if (!['accepted', 'started'].includes(p.phase)) return {ended: p};
     if (atStage(p)) return {at: p};
     if (passed(p)) return {passed: p};
-    await sleep(150);
+    if (!t.stepped) await sleep(150);
   }
   return {passed: p};
 }
@@ -290,7 +296,7 @@ async function disturbCase(t, row, kinds, placed) {
   if (!(await t.offers(id)).includes(row.form)) return {result: 'skip', why: `${row.form} is not offered by this world`};
   const gap = setupGap(c, kinds); if (gap) return {result: 'skip', why: gap};
   const body0 = await t.body();
-  const b = await t.begin(id, row.form, c.act.args);
+  const b = await t.begin(id, row.form, c.act.args, {case: c, ids: {[c.act.this]: id}});
   if (b.verdict !== 'started') return {result: 'fail', why: `the act was not accepted (${b.code ?? b.reason ?? b.verdict}), though every need is met`};
   const r = await reach(t, b.rid, b.progress, row.stage, row.steps);
   if (r.gap) { await t.leave(b.rid).catch(() => {}); await t.wait(b.rid).catch(() => {}); return {result: 'skip', why: r.gap}; }
@@ -313,14 +319,14 @@ async function disturbCase(t, row, kinds, placed) {
   let again;
   if (row.how === 'remove') {
     const fresh = await scene();
-    again = await t.act(fresh.id, row.form, c.act.args);
+    again = await t.act(fresh.id, row.form, c.act.args, {case: c, ids: {[c.act.this]: fresh.id}});
     if (again.verdict !== 'yes') off.push(`afterwards the Soul could not do ${row.form} on a fresh thing (${again.code ?? again.reason ?? again.verdict})`);
   } else {
     const after = await settled(t, id);
     if (!sameFields(after, before)) off.push(`stopped, yet the thing's fields changed: ${JSON.stringify(before)} → ${JSON.stringify(after)}`);
     if (!(await t.offers(id)).includes(row.form)) off.push(`afterwards the thing no longer offers ${row.form}`);
     else {
-      again = await t.act(id, row.form, c.act.args);
+      again = await t.act(id, row.form, c.act.args, {case: c, ids: {[c.act.this]: id}});
       if (again.verdict !== 'yes') off.push(`afterwards ${row.form} could not be done again on the thing as it stands (${again.code ?? again.reason ?? again.verdict}): it is left unusable`);
     }
   }
@@ -334,7 +340,7 @@ export function setsOf(expect, ids, c, kinds) {
   for (const x of expect?.changes ?? []) if (x.change === 'set' && ids[x.node] && kinds?.get(c?.state?.nodes?.[x.node]?.kind)?.state?.[x.field]?.type !== 'text') (out[ids[x.node]] ??= {})[x.field] = asWorld(kinds?.get(c?.state?.nodes?.[x.node]?.kind), x.field, x.to);
   return out;
 }
-const brief = g => ({verdict: g.verdict, ...(g.reason ? {reason: g.reason} : {}), ...(g.code ? {code: g.code} : {}), ...(g.receipt ? {receipt: g.receipt} : {})});
+const brief = g => ({verdict: g.verdict, ...(g.reason ? {reason: g.reason} : {}), ...(g.code ? {code: g.code} : {}), ...(g.detail ? {detail: g.detail} : {}), ...(g.receipt ? {receipt: g.receipt} : {})});
 
 /** Run every case once. Things are placed fresh for each case and removed after it. */
 export async function runOnce(t, kinds, rows) {
@@ -513,8 +519,8 @@ export async function main(argv) {
   const args = argv[0] === 'run' ? argv.slice(1) : argv;
   const flag = k => { const i = args.indexOf(`--${k}`); return i >= 0 ? args[i + 1] : undefined; };
   const target = args.find((a, i) => !a.startsWith('--') && !(i > 0 && args[i - 1].startsWith('--')));
-  const usage = 'usage: node tools/entry/run.mjs <family|folder|file> --world <address> [--repeats 2] [--transport <module>] [--cases <dir>] [--god <dir>] [--soul <name>] [--launcher <origin>]';
-  if (!target || !flag('world')) { console.log(JSON.stringify({error: usage})); return 2; }
+  const usage = 'usage: node tools/entry/run.mjs <family|folder|file> (--world <address> | --transport <module>) [--repeats 2] [--transport <module>] [--cases <dir>] [--god <dir>] [--soul <name>] [--launcher <origin>]';
+  if (!target || (!flag('world') && !flag('transport'))) { console.log(JSON.stringify({error: usage})); return 2; }
   const repeats = Number(flag('repeats') ?? 2);
   if (!Number.isInteger(repeats) || repeats < 1) { console.log(JSON.stringify({error: '--repeats takes a whole number of at least 1'})); return 2; }
   let v;
@@ -524,4 +530,4 @@ export async function main(argv) {
   return v.error ? 2 : v.ok ? 0 : 1;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === resolve(process.argv[1])) process.exitCode = await main(process.argv.slice(2));
+if (isMain(import.meta.url)) process.exitCode = await main(process.argv.slice(2));

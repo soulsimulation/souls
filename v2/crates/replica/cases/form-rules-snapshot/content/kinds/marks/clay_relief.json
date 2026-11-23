@@ -1,0 +1,872 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:clay_relief",
+  "owner": "thing",
+  "state": {
+    "left": {
+      "n": 1,
+      "type": "enum",
+      "values": [
+        "level0",
+        "level1",
+        "level2",
+        "level3",
+        "level4"
+      ],
+      "default": "level0",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "middle": {
+      "n": 2,
+      "type": "enum",
+      "values": [
+        "level0",
+        "level1",
+        "level2",
+        "level3",
+        "level4"
+      ],
+      "default": "level0",
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "right": {
+      "n": 3,
+      "type": "enum",
+      "values": [
+        "level0",
+        "level1",
+        "level2",
+        "level3",
+        "level4"
+      ],
+      "default": "level0",
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        700
+      ],
+      "yaw_mdeg": 180000
+    },
+    "left": {
+      "role": "contact",
+      "at_mm": [
+        -180,
+        800,
+        0
+      ]
+    },
+    "middle": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        800,
+        0
+      ]
+    },
+    "right": {
+      "role": "contact",
+      "at_mm": [
+        180,
+        800,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      620,
+      1080,
+      500
+    ]
+  },
+  "forms": {
+    "left_to_0": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "left",
+          "not": "level0"
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "left"
+        },
+        {
+          "step": "wait",
+          "us": 8000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "left",
+          "to": "level0",
+          "event": "shaped"
+        }
+      ]
+    },
+    "left_to_1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "left",
+          "not": "level1"
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "left"
+        },
+        {
+          "step": "wait",
+          "us": 8000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "left",
+          "to": "level1",
+          "event": "shaped"
+        }
+      ]
+    },
+    "left_to_2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "left",
+          "not": "level2"
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "left"
+        },
+        {
+          "step": "wait",
+          "us": 8000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "left",
+          "to": "level2",
+          "event": "shaped"
+        }
+      ]
+    },
+    "left_to_3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "left",
+          "not": "level3"
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "left"
+        },
+        {
+          "step": "wait",
+          "us": 8000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "left",
+          "to": "level3",
+          "event": "shaped"
+        }
+      ]
+    },
+    "left_to_4": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "left",
+          "not": "level4"
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "left"
+        },
+        {
+          "step": "wait",
+          "us": 8000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "left",
+          "to": "level4",
+          "event": "shaped"
+        }
+      ]
+    },
+    "middle_to_0": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "middle",
+          "not": "level0"
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "middle"
+        },
+        {
+          "step": "wait",
+          "us": 8000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "middle",
+          "to": "level0",
+          "event": "shaped"
+        }
+      ]
+    },
+    "middle_to_1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "middle",
+          "not": "level1"
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "middle"
+        },
+        {
+          "step": "wait",
+          "us": 8000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "middle",
+          "to": "level1",
+          "event": "shaped"
+        }
+      ]
+    },
+    "middle_to_2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "middle",
+          "not": "level2"
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "middle"
+        },
+        {
+          "step": "wait",
+          "us": 8000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "middle",
+          "to": "level2",
+          "event": "shaped"
+        }
+      ]
+    },
+    "middle_to_3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "middle",
+          "not": "level3"
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "middle"
+        },
+        {
+          "step": "wait",
+          "us": 8000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "middle",
+          "to": "level3",
+          "event": "shaped"
+        }
+      ]
+    },
+    "middle_to_4": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "middle",
+          "not": "level4"
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "middle"
+        },
+        {
+          "step": "wait",
+          "us": 8000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "middle",
+          "to": "level4",
+          "event": "shaped"
+        }
+      ]
+    },
+    "right_to_0": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "right",
+          "not": "level0"
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "right"
+        },
+        {
+          "step": "wait",
+          "us": 8000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "right",
+          "to": "level0",
+          "event": "shaped"
+        }
+      ]
+    },
+    "right_to_1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "right",
+          "not": "level1"
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "right"
+        },
+        {
+          "step": "wait",
+          "us": 8000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "right",
+          "to": "level1",
+          "event": "shaped"
+        }
+      ]
+    },
+    "right_to_2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "right",
+          "not": "level2"
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "right"
+        },
+        {
+          "step": "wait",
+          "us": 8000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "right",
+          "to": "level2",
+          "event": "shaped"
+        }
+      ]
+    },
+    "right_to_3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "right",
+          "not": "level3"
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "right"
+        },
+        {
+          "step": "wait",
+          "us": 8000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "right",
+          "to": "level3",
+          "event": "shaped"
+        }
+      ]
+    },
+    "right_to_4": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "right",
+          "not": "level4"
+        },
+        {
+          "need": "hand",
+          "free": true
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "front"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "right"
+        },
+        {
+          "step": "wait",
+          "us": 8000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "right",
+          "to": "level4",
+          "event": "shaped"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "two_hands"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:clay_relief",
+    "table": [
+      {
+        "part": "knob",
+        "field": "left",
+        "do": "scale",
+        "axis": "y",
+        "at": {
+          "level0": 50,
+          "level1": 250,
+          "level2": 500,
+          "level3": 750,
+          "level4": 1000
+        }
+      },
+      {
+        "part": "fill",
+        "field": "middle",
+        "do": "scale",
+        "axis": "y",
+        "at": {
+          "level0": 50,
+          "level1": 250,
+          "level2": 500,
+          "level3": 750,
+          "level4": 1000
+        }
+      },
+      {
+        "part": "lid",
+        "field": "right",
+        "do": "scale",
+        "axis": "y",
+        "at": {
+          "level0": 50,
+          "level1": 250,
+          "level2": 500,
+          "level3": 750,
+          "level4": 1000
+        }
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            30,
+            0
+          ],
+          "size": [
+            500,
+            60,
+            400
+          ],
+          "tint": "plinth"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            380,
+            0
+          ],
+          "size": [
+            160,
+            640,
+            160
+          ],
+          "tint": "plinth"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            720,
+            0
+          ],
+          "size": [
+            620,
+            40,
+            500
+          ],
+          "tint": "plinth"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            750,
+            0
+          ],
+          "size": [
+            540,
+            20,
+            300
+          ],
+          "tint": "clay"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -180,
+            920,
+            0
+          ],
+          "size": [
+            140,
+            320,
+            280
+          ],
+          "tint": "clay",
+          "role": "knob",
+          "pivot": [
+            -180,
+            760,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            920,
+            0
+          ],
+          "size": [
+            140,
+            320,
+            280
+          ],
+          "tint": "clay",
+          "role": "fill",
+          "pivot": [
+            0,
+            760,
+            0
+          ]
+        },
+        {
+          "kind": "box",
+          "at": [
+            180,
+            920,
+            0
+          ],
+          "size": [
+            140,
+            320,
+            280
+          ],
+          "tint": "clay",
+          "role": "lid",
+          "pivot": [
+            180,
+            760,
+            0
+          ]
+        }
+      ],
+      "palette": {
+        "plinth": "#65584b",
+        "clay": "#b77653"
+      },
+      "tags": [
+        "art",
+        "sculpture",
+        "clay",
+        "relief"
+      ]
+    }
+  },
+  "text": {
+    "card": "A clay relief on its own plinth: shape each of its three columns, 0 to 4 high.",
+    "art": "art",
+    "sculpture": "sculpture",
+    "clay": "clay",
+    "howto_shape": "With both hands free, shape one column to the height you choose; eight seconds of work. Carry it with both hands."
+  },
+  "card": {
+    "text": "card",
+    "category": "art",
+    "synonyms": [
+      "sculpture",
+      "clay"
+    ]
+  },
+  "howtos": {
+    "shape": {
+      "text": "howto_shape",
+      "steps": [
+        {
+          "form": "middle_to_3"
+        }
+      ]
+    }
+  }
+}

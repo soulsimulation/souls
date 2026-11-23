@@ -4,6 +4,7 @@
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;
+use std::sync::atomic::{AtomicUsize, Ordering};
 use std::sync::{Arc, Mutex};
 
 use futures_util::{SinkExt, StreamExt};
@@ -39,10 +40,17 @@ fn version(sequence: u64) -> Version {
 }
 
 fn intent(grant: Grant, sequence: u64) -> Vec<u8> {
+    intent_to(grant, sequence, "eden:wave")
+}
+
+/// An intent the stand-in world refuses.
+const REFUSED: &str = "eden:refused";
+
+fn intent_to(grant: Grant, sequence: u64, verb: &str) -> Vec<u8> {
     let Grant::Actor(actor) = grant;
     let i = Intent {
         actor,
-        verb: Name::new("eden:wave").unwrap(),
+        verb: Name::new(verb).unwrap(),
         target: None,
         parameters: BTreeMap::new(),
         sequence,
@@ -52,12 +60,15 @@ fn intent(grant: Grant, sequence: u64) -> Vec<u8> {
         fallbacks: Vec::new(),
         replaces: None,
         body: None,
+        reflex: false,
     };
     encode(&i.to_value()).unwrap()
 }
 
-/// A stand-in world: answers every intent with a receipt, one version per answer; from sequence 100, a refusal.
-async fn world(listener: UnixListener) {
+/// A stand-in world: answers every intent with a receipt, one version per answer; from sequence 100, a refusal. A
+/// [`REFUSED`] intent it refuses at the version it is at, as `worldd` does (a refusal does not move the version).
+/// `answered` counts its answers.
+async fn world(listener: UnixListener, answered: Arc<AtomicUsize>) {
     let mut sequence = 0;
     while let Ok((mut s, _)) = listener.accept().await {
         loop {
@@ -70,21 +81,33 @@ async fn world(listener: UnixListener) {
                 break;
             }
             let i = Intent::read(&bytes).unwrap();
-            sequence += 1;
-            let answer = if i.sequence >= 100 {
+            let answer = if i.verb.as_str() == REFUSED {
+                Answer::Refused {
+                    actor: i.actor,
+                    sequence: i.sequence,
+                    reason: Name::new("act.refused").unwrap(),
+                    now: version(sequence).to_value(),
+                    changed: Vec::new(),
+                    op: None,
+                }
+            } else if i.sequence >= 100 {
+                sequence += 1;
                 Answer::Refused {
                     actor: i.actor,
                     sequence: i.sequence,
                     reason: Name::new("eden:out-of-reach").unwrap(),
                     now: version(sequence).to_value(),
                     changed: Vec::new(),
+                    op: None,
                 }
             } else {
+                sequence += 1;
                 Answer::Receipt {
                     actor: i.actor,
                     sequence: i.sequence,
                     intent: Id::new(LINEAGE, sequence).unwrap(),
                     entries: vec![sequence],
+                    names: BTreeMap::new(),
                 }
             };
             let frame = encode(&Value::Map(
@@ -95,6 +118,7 @@ async fn world(listener: UnixListener) {
                 .write_all(&u32::try_from(frame.len()).unwrap().to_be_bytes())
                 .await;
             let _ = s.write_all(&frame).await;
+            answered.fetch_add(1, Ordering::SeqCst);
         }
     }
 }
@@ -103,6 +127,7 @@ struct Running {
     gw: Arc<Gateway>,
     url: String,
     lines: Arc<Mutex<Vec<String>>>,
+    answered: Arc<AtomicUsize>,
 }
 
 async fn start(name: &str, tokens: Tokens) -> Running {
@@ -112,7 +137,8 @@ async fn start(name: &str, tokens: Tokens) -> Running {
 async fn start_with(name: &str, tokens: Tokens, receipts: Receipts) -> Running {
     let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join(format!("gw-{name}.sock"));
     let _ = std::fs::remove_file(&path);
-    tokio::spawn(world(UnixListener::bind(&path).unwrap()));
+    let answered = Arc::new(AtomicUsize::new(0));
+    tokio::spawn(world(UnixListener::bind(&path).unwrap(), answered.clone()));
     let lines = Arc::new(Mutex::new(Vec::new()));
     let sink = lines.clone();
     let log: Log = Arc::new(move |l: &str| sink.lock().unwrap().push(l.to_owned()));
@@ -124,7 +150,12 @@ async fn start_with(name: &str, tokens: Tokens, receipts: Receipts) -> Running {
     while !gw.link.up() {
         tokio::time::sleep(std::time::Duration::from_millis(5)).await;
     }
-    Running { gw, url, lines }
+    Running {
+        gw,
+        url,
+        lines,
+        answered,
+    }
 }
 
 /// The next binary frame, decoded; `None` when the socket closes.
@@ -153,10 +184,13 @@ fn hello() -> Vec<u8> {
     .unwrap()
 }
 
-fn sign_in(token: &str, cursor: Option<Value>) -> Vec<u8> {
+fn sign_in(token: &str, cursor: Option<Value>, seen: Option<u64>) -> Vec<u8> {
     let mut m = BTreeMap::from([(1, Value::Text(Name::new(token).unwrap()))]);
     if let Some(c) = cursor {
         m.insert(2, c);
+    }
+    if let Some(n) = seen {
+        m.insert(3, Value::Uint(n));
     }
     encode(&Value::Map(m)).unwrap()
 }
@@ -173,6 +207,16 @@ fn outcome(v: &Value) -> String {
 
 /// Connects, exchanges first frames and signs in by message; the sign-in's outcome.
 async fn connect(url: &str, token: &str, cursor: Option<Value>) -> (Ws, String) {
+    connect_seen(url, token, cursor, None).await
+}
+
+/// [`connect`], saying how many frames at the cursor's version the client applied.
+async fn connect_seen(
+    url: &str,
+    token: &str,
+    cursor: Option<Value>,
+    seen: Option<u64>,
+) -> (Ws, String) {
     let (mut ws, _) = tokio_tungstenite::connect_async(url).await.unwrap();
     put(&mut ws, hello()).await;
     let first = Hello::read(&encode(&next(&mut ws).await.unwrap()).unwrap()).unwrap();
@@ -180,7 +224,7 @@ async fn connect(url: &str, token: &str, cursor: Option<Value>) -> (Ws, String) 
         (first.protocol, first.build.as_slice()),
         (PROTOCOL, &BUILD[..])
     );
-    put(&mut ws, sign_in(token, cursor)).await;
+    put(&mut ws, sign_in(token, cursor, seen)).await;
     let o = next(&mut ws).await.map(|v| outcome(&v)).unwrap_or_default();
     (ws, o)
 }
@@ -274,6 +318,10 @@ async fn a3_a_revoked_token_is_refused_and_no_token_is_in_any_log_line() {
     assert_eq!(outcome(&next(&mut ws).await.unwrap()), "stream.started");
     put(&mut ws, intent(soul(13), 1)).await;
     assert!(next(&mut ws).await.is_some(), "an answer");
+    // Revoked while signed in (W9, #2827): the next intent is refused by name.
+    r.gw.tokens.write().unwrap().revoke(&fresh.hash());
+    put(&mut ws, intent(soul(13), 2)).await;
+    assert_eq!(outcome(&next(&mut ws).await.unwrap()), "token.refused");
 
     let lines = r.lines.lock().unwrap().clone();
     assert!(lines.iter().any(|l| l.contains("refused")), "{lines:?}");
@@ -338,6 +386,226 @@ async fn a4_a_client_resumes_from_its_cursor_or_is_told_it_cannot() {
     // A cursor newer than anything sent: the same.
     let (_ws, o) = connect(&r.url, t.reveal(), Some(version(1_000).to_value())).await;
     assert_eq!(o, "stream.cannot-resume");
+}
+
+/// The wall clock, µs from the Unix epoch, for an intent's expiry (world time is real time).
+#[allow(clippy::disallowed_methods)] // a test that sets real expiries reads the wall clock
+fn unix_us() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .unwrap()
+        .as_micros() as i64
+}
+
+/// A stand-in world that takes `n` intents, never answers, then goes away for good.
+async fn mute_world(listener: UnixListener, n: usize) {
+    let (mut s, _) = listener.accept().await.unwrap();
+    for _ in 0..n {
+        let mut len = [0u8; 4];
+        s.read_exact(&mut len).await.unwrap();
+        let mut bytes = vec![0u8; u32::from_be_bytes(len) as usize];
+        s.read_exact(&mut bytes).await.unwrap();
+    }
+}
+
+/// The answer's sequence and refusal name in a frame the gateway gave itself (`{2: answer}`).
+fn refusal(v: &Value) -> (Option<u64>, String) {
+    let Value::Map(m) = v else {
+        return (None, String::new());
+    };
+    let Some(Value::Map(a)) = m.get(&2) else {
+        return (None, String::new());
+    };
+    let name = match a.get(&4) {
+        Some(Value::Text(n)) => n.as_str().to_owned(),
+        _ => String::new(),
+    };
+    (frame_sequence(v), name)
+}
+
+/// C8 (#3396) A3: intents the world took and never answered, the world then away, are answered by the gateway by
+/// their deadlines: `intent.expired` at the expiry when that comes first, else `act.timed-out` 10 s after receipt.
+/// Never silence, each answered once, and neither kept to send again.
+#[allow(clippy::disallowed_methods)] // the test times the answers against the deadline
+#[tokio::test]
+async fn c8_an_intent_with_no_answer_by_its_deadline_is_answered_by_name() {
+    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("gw-c8.sock");
+    let _ = std::fs::remove_file(&path);
+    let world = tokio::spawn(mute_world(UnixListener::bind(&path).unwrap(), 2));
+    let mut tokens = Tokens::default();
+    let t = issue(&mut tokens, soul(30));
+    let gw = Gateway::new(tokens, BUILD.to_vec(), Arc::new(|_: &str| {}));
+    tokio::spawn(world_link::run(gw.clone(), path.clone()));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}{}", listener.local_addr().unwrap(), socket::PATH);
+    tokio::spawn(axum::serve(listener, socket::router(gw.clone())).into_future());
+    while !gw.link.up() {
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    let (mut ws, o) = connect(&url, t.reveal(), None).await;
+    assert_eq!(o, "stream.started");
+    let with_expiry = |sequence: u64, expiry: i64| {
+        let mut v = decode(&intent(soul(30), sequence)).unwrap().value;
+        if let Value::Map(m) = &mut v {
+            m.insert(7, Value::Uint(u64::try_from(expiry).unwrap()));
+        }
+        encode(&v).unwrap()
+    };
+    let start = std::time::Instant::now();
+    // One expires in 1.5 s; the other's expiry is a minute off, so its deadline is the gateway's 10 s.
+    put(&mut ws, with_expiry(1, unix_us() + 1_500_000)).await;
+    put(&mut ws, with_expiry(2, unix_us() + 60_000_000)).await;
+    // The world takes both and goes away, its socket gone.
+    world.await.unwrap();
+    let _ = std::fs::remove_file(&path);
+    let first = next(&mut ws).await.unwrap();
+    let at_first = start.elapsed().as_secs_f64();
+    assert_eq!(refusal(&first), (Some(1), "intent.expired".to_owned()));
+    let bars = std::env::var_os("V2_SPEED_BARS").is_some();
+    assert!(
+        at_first >= 1.4,
+        "expired at {at_first} s, before its expiry"
+    );
+    assert!(!bars || at_first < 2.0, "expired at {at_first} s");
+    let second = next(&mut ws).await.unwrap();
+    let at_second = start.elapsed().as_secs_f64();
+    assert_eq!(refusal(&second), (Some(2), "act.timed-out".to_owned()));
+    assert!(
+        at_second >= 9.9,
+        "timed out at {at_second} s, before its deadline"
+    );
+    assert!(!bars || at_second < 10.5, "timed out at {at_second} s");
+    assert_eq!(gw.link.unanswered(), 0, "neither is kept to send again");
+    println!(
+        "C8: intent.expired after {at_first:.2} s, act.timed-out after {at_second:.2} s, none kept"
+    );
+}
+
+/// The next frame within 30 s: an answer that never comes fails the test rather than hanging it.
+async fn soon(ws: &mut Ws) -> Value {
+    tokio::time::timeout(std::time::Duration::from_secs(30), next(ws))
+        .await
+        .expect("a frame within 30 s")
+        .expect("the socket is open")
+}
+
+fn is_refusal(v: &Value) -> bool {
+    let Value::Map(m) = v else { return false };
+    let Some(Value::Map(a)) = m.get(&2) else {
+        return false;
+    };
+    a.get(&3) == Some(&Value::Uint(2))
+}
+
+/// Waits until the stand-in world has answered `n` intents and the gateway has taken every answer.
+async fn answered(r: &Running, n: usize) {
+    while r.answered.load(Ordering::SeqCst) < n || r.gw.link.unanswered() > 0 {
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    // The gateway keeps an answer just after it stops counting it unanswered.
+    tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+}
+
+#[tokio::test]
+async fn a_refusal_lost_on_a_drop_is_replayed_once_on_resume() {
+    let mut tokens = Tokens::default();
+    let t = issue(&mut tokens, soul(30));
+    let r = start("refusal", tokens).await;
+
+    let (mut ws, o) = connect(&r.url, t.reveal(), None).await;
+    assert_eq!(o, "stream.started");
+    put(&mut ws, intent(soul(30), 1)).await;
+    let first = soon(&mut ws).await;
+    let cursor = frame_version(&first).unwrap();
+    // The world refuses the next intent without moving the version; the socket drops before its answer arrives.
+    put(&mut ws, intent_to(soul(30), 2, REFUSED)).await;
+    drop(ws);
+    answered(&r, 2).await;
+
+    let (mut ws, o) = connect_seen(&r.url, t.reveal(), Some(cursor.clone()), Some(1)).await;
+    assert_eq!(o, "stream.resumed");
+    let replayed = soon(&mut ws).await;
+    assert!(is_refusal(&replayed), "{replayed:?}");
+    assert_eq!(frame_sequence(&replayed), Some(2), "with its request id");
+    assert_eq!(
+        frame_version(&replayed),
+        Some(cursor),
+        "at the same version"
+    );
+    // Once: the next frame is the next intent's answer.
+    put(&mut ws, intent(soul(30), 3)).await;
+    assert_eq!(frame_sequence(&soon(&mut ws).await), Some(3));
+}
+
+#[tokio::test]
+async fn accepted_and_refused_answers_resume_in_order_none_twice() {
+    let mut tokens = Tokens::default();
+    let t = issue(&mut tokens, soul(31));
+    let r = start("mixed", tokens).await;
+
+    let (mut ws, _) = connect(&r.url, t.reveal(), None).await;
+    // 1 accepted (version 1), 2 and 3 refused (still 1), 4 accepted (2), 5 refused (2).
+    let mut got = Vec::new();
+    for (s, verb) in [
+        (1, "eden:wave"),
+        (2, REFUSED),
+        (3, REFUSED),
+        (4, "eden:wave"),
+        (5, REFUSED),
+    ] {
+        put(&mut ws, intent_to(soul(31), s, verb)).await;
+        got.push(soon(&mut ws).await);
+    }
+    let refused: Vec<_> = got.iter().map(is_refusal).collect();
+    assert_eq!(refused, [false, true, true, false, true]);
+    assert_eq!(frame_version(&got[1]), frame_version(&got[0]));
+    // The client applied the first two only (two frames at version 1), then its socket dropped.
+    drop(ws);
+    let (mut ws, o) = connect_seen(&r.url, t.reveal(), frame_version(&got[1]), Some(2)).await;
+    assert_eq!(o, "stream.resumed");
+    let mut replay = Vec::new();
+    for _ in 0..3 {
+        replay.push(frame_sequence(&soon(&mut ws).await));
+    }
+    assert_eq!(replay, [Some(3), Some(4), Some(5)]);
+    put(&mut ws, intent(soul(31), 6)).await;
+    assert_eq!(frame_sequence(&soon(&mut ws).await), Some(6), "none twice");
+    drop(ws);
+
+    // Having applied everything (6 is the one frame at version 3): nothing is replayed.
+    let (mut ws, o) = connect_seen(&r.url, t.reveal(), Some(version(3).to_value()), Some(1)).await;
+    assert_eq!(o, "stream.resumed");
+    put(&mut ws, intent(soul(31), 7)).await;
+    assert_eq!(frame_sequence(&soon(&mut ws).await), Some(7));
+}
+
+#[tokio::test]
+async fn the_gateways_own_refusal_lost_on_a_drop_is_replayed_once_on_resume() {
+    let mut tokens = Tokens::default();
+    let t = issue(&mut tokens, soul(32));
+    let r = start("own-refusal", tokens).await;
+
+    let (mut ws, _) = connect(&r.url, t.reveal(), None).await;
+    put(&mut ws, intent(soul(32), 1)).await;
+    let cursor = frame_version(&soon(&mut ws).await).unwrap();
+    // An intent for an actor this token does not grant: the gateway refuses it itself, `intent-not-granted` (the
+    // same path as `world.restarting`). The socket drops before the refusal arrives.
+    put(&mut ws, intent(soul(99), 7)).await;
+    drop(ws);
+    tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+
+    let (mut ws, o) = connect_seen(&r.url, t.reveal(), Some(cursor.clone()), Some(1)).await;
+    assert_eq!(o, "stream.resumed");
+    let replayed = soon(&mut ws).await;
+    assert!(is_refusal(&replayed), "{replayed:?}");
+    assert_eq!(frame_sequence(&replayed), Some(7), "with its request id");
+    assert_eq!(
+        frame_version(&replayed),
+        Some(cursor),
+        "at the newest version"
+    );
+    put(&mut ws, intent(soul(32), 2)).await;
+    assert_eq!(frame_sequence(&soon(&mut ws).await), Some(2), "once");
 }
 
 fn tmp(name: &str) -> PathBuf {
@@ -485,7 +753,7 @@ async fn r2_a_failed_write_drops_and_counts_and_the_answer_still_comes() {
     let mut ws = connect_as(&r.url, &t, "souls-client/1.2.0").await;
     for s in 1..=5 {
         put(&mut ws, intent(soul(50), s)).await;
-        let answer = tokio::time::timeout(std::time::Duration::from_secs(2), next(&mut ws))
+        let answer = tokio::time::timeout(std::time::Duration::from_secs(30), next(&mut ws))
             .await
             .expect("the answer is not held up");
         assert_eq!(frame_sequence(&answer.unwrap()), Some(s));
@@ -548,7 +816,11 @@ async fn o2_an_intent_wakes_a_sleeping_world_and_a_reader_does_not() {
         let p = p.clone();
         rt.spawn(async move {
             tokio::time::sleep(WAKE).await;
-            world(UnixListener::bind(&p).unwrap()).await;
+            world(
+                UnixListener::bind(&p).unwrap(),
+                Arc::new(AtomicUsize::new(0)),
+            )
+            .await;
         });
     }));
     tokio::spawn(world_link::run(gw.clone(), path));
@@ -575,10 +847,21 @@ async fn o2_an_intent_wakes_a_sleeping_world_and_a_reader_does_not() {
     assert_eq!(wakes.load(Ordering::SeqCst), 0, "a reader woke the world");
     assert!(!gw.link.up());
 
-    // A4: an intent wakes it and is answered within 3 s; a second one asks no second wake.
+    // A4: an intent wakes it and is answered within 3 s; a second one asks no second wake. Held while the world is
+    // away, an intent keeps its deadline (C8): these expire a minute on, so the gateway's own deadline is 10 s.
+    let live = |sequence: u64| {
+        let mut v = decode(&intent(soul(30), sequence)).unwrap().value;
+        if let Value::Map(m) = &mut v {
+            m.insert(
+                7,
+                Value::Uint(u64::try_from(unix_us() + 60_000_000).unwrap()),
+            );
+        }
+        encode(&v).unwrap()
+    };
     let sent = Instant::now();
-    put(&mut ws, intent(soul(30), 1)).await;
-    put(&mut ws, intent(soul(30), 2)).await;
+    put(&mut ws, live(1)).await;
+    put(&mut ws, live(2)).await;
     let first = next(&mut ws).await.unwrap();
     let took = sent.elapsed();
     let second = next(&mut ws).await.unwrap();
@@ -596,5 +879,123 @@ async fn o2_an_intent_wakes_a_sleeping_world_and_a_reader_does_not() {
         "o2: an intent to a sleeping world answered in {} ms (the world up {} ms after the wake)",
         took.as_millis(),
         WAKE.as_millis()
+    );
+}
+
+/// O16 (#2809): a stopping gateway closes every signed-in socket with 1012, Service Restart; the client reconnects.
+#[tokio::test]
+async fn o16_a_stopping_gateway_closes_each_socket_with_1012() {
+    let mut tokens = Tokens::default();
+    let (a, b) = (issue(&mut tokens, soul(1)), issue(&mut tokens, soul(2)));
+    let r = start("o16-stop", tokens).await;
+    let (mut wa, _) = connect(&r.url, a.reveal(), None).await;
+    let (mut wb, _) = connect(&r.url, b.reveal(), None).await;
+    r.gw.closing.send_replace(true);
+    for ws in [&mut wa, &mut wb] {
+        let code = loop {
+            match ws.next().await {
+                Some(Ok(Message::Close(Some(f)))) => break Some(u16::from(f.code)),
+                Some(Ok(_)) => {}
+                _ => break None,
+            }
+        };
+        assert_eq!(code, Some(gatewayd::RESTART));
+    }
+}
+
+/// A stand-in world that takes one intent, says it is in progress with `left` µs to its deadline (C20's progress
+/// answer, `worldd::answers::progress`: T10's accepted with field 5), then goes away.
+async fn busy_world(listener: UnixListener, left: u64) {
+    let (mut s, _) = listener.accept().await.unwrap();
+    let mut len = [0u8; 4];
+    s.read_exact(&mut len).await.unwrap();
+    let mut bytes = vec![0u8; u32::from_be_bytes(len) as usize];
+    s.read_exact(&mut bytes).await.unwrap();
+    let i = Intent::read(&bytes).unwrap();
+    let Value::Map(mut answer) = (Answer::Accepted {
+        actor: i.actor,
+        sequence: i.sequence,
+        intent: Id::new(LINEAGE, 1).unwrap(),
+    })
+    .to_value() else {
+        panic!("an answer is a map")
+    };
+    answer.insert(5, Value::Uint(left));
+    let frame = encode(&Value::Map(
+        [(1, version(1).to_value()), (2, Value::Map(answer))].into(),
+    ))
+    .unwrap();
+    s.write_all(&u32::try_from(frame.len()).unwrap().to_be_bytes())
+        .await
+        .unwrap();
+    s.write_all(&frame).await.unwrap();
+}
+
+/// The answer's kind in a frame (`{2: {3: kind}}`).
+fn kind(v: &Value) -> Option<u64> {
+    let Value::Map(m) = v else { return None };
+    let Some(Value::Map(a)) = m.get(&2) else {
+        return None;
+    };
+    match a.get(&3) {
+        Some(Value::Uint(k)) => Some(*k),
+        _ => None,
+    }
+}
+
+/// C20 (#3469) A3: an act the world says is in progress (a form's walk across the town, a long read) is passed on to
+/// the actor as progress, and the gateway waits for it to the world's deadline, not C8's 10 s: the world goes away
+/// after its progress answer, is back at 11 s, and the intent sent again is answered with its receipt, never
+/// `act.timed-out`. An intent the world says nothing of keeps C8's 10 s (`c8_` above).
+#[allow(clippy::disallowed_methods)] // the test times the answers against the deadlines
+#[tokio::test]
+async fn c20_an_act_in_progress_is_answered_with_progress_not_timed_out() {
+    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR")).join("gw-c20.sock");
+    let _ = std::fs::remove_file(&path);
+    let busy = tokio::spawn(busy_world(UnixListener::bind(&path).unwrap(), 30_000_000));
+    let mut tokens = Tokens::default();
+    let t = issue(&mut tokens, soul(31));
+    let gw = Gateway::new(tokens, BUILD.to_vec(), Arc::new(|_: &str| {}));
+    tokio::spawn(world_link::run(gw.clone(), path.clone()));
+    let listener = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}{}", listener.local_addr().unwrap(), socket::PATH);
+    tokio::spawn(axum::serve(listener, socket::router(gw.clone())).into_future());
+    while !gw.link.up() {
+        tokio::time::sleep(std::time::Duration::from_millis(5)).await;
+    }
+    let (mut ws, o) = connect(&url, t.reveal(), None).await;
+    assert_eq!(o, "stream.started");
+    let mut v = decode(&intent(soul(31), 1)).unwrap().value;
+    if let Value::Map(m) = &mut v {
+        m.insert(
+            7,
+            Value::Uint(u64::try_from(unix_us() + 60_000_000).unwrap()),
+        );
+    }
+    let start = std::time::Instant::now();
+    put(&mut ws, encode(&v).unwrap()).await;
+    let progress = next(&mut ws).await.unwrap();
+    assert_eq!(kind(&progress), Some(3), "progress first: {progress:?}");
+    assert_eq!(frame_sequence(&progress), Some(1));
+    // The world goes away, its socket gone, and is back at 11 s: past C8's 10 s, before the world's deadline.
+    busy.await.unwrap();
+    let _ = std::fs::remove_file(&path);
+    tokio::time::sleep(std::time::Duration::from_secs(11).saturating_sub(start.elapsed())).await;
+    tokio::spawn(world(
+        UnixListener::bind(&path).unwrap(),
+        Arc::new(AtomicUsize::new(0)),
+    ));
+    let answer = next(&mut ws).await.unwrap();
+    let at = start.elapsed().as_secs_f64();
+    assert_eq!(
+        kind(&answer),
+        Some(1),
+        "a receipt, not act.timed-out: {answer:?}"
+    );
+    assert_eq!(frame_sequence(&answer), Some(1));
+    assert!(at >= 11.0, "answered at {at} s");
+    assert_eq!(gw.link.unanswered(), 0);
+    println!(
+        "C20: progress at once, the world away 11 s, then the receipt at {at:.2} s; no act.timed-out"
     );
 }

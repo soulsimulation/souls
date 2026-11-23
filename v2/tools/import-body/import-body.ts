@@ -23,24 +23,25 @@
 //
 // writes <dir>/<slug>.diag (the kind), <dir>/<slug>.json (what the crowd loads) and <dir>/models/<sha256>.glb|.mesh,
 // and prints the summary as JSON. A refusal prints {refused: {code, message, field?, measured?, limit?}} and exits 1.
+import { isMain } from '../../../tools/lib/is-main.mjs';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
-import { tmpdir } from 'node:os';
 import { join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import * as THREE from '../../web/node_modules/three/build/three.module.js';
-import { inPlace, merge, parseModel } from '../../web/src/crowd/bake.ts';
+import { inPlace, merge, parseModel, fitRigid, bakeModel } from '../../web/src/crowd/bake.ts';
+import { decodedGeometry } from './decode-draco.ts';
 import { encodeMesh, simplify, type LodMesh } from '../../web/src/crowd/lod.ts';
+import type { BodyMotion } from '../../../mars/viewer/engine/bodies/motion.ts';
 import { BODY_LIMITS } from '../../../apps/server/src/edge/body/admission.ts';
 
 const REPO = resolve(import.meta.dirname, '../../..');
 export const SIMPLE_TRIANGLES = 600;
 export const MEASURE_FPS = 15;
 /** B12's size classes, smallest first: name and radius in mm (`sizes.rs`, `Size::ALL`). */
-export const SIZES: [string, number][] = [['small', 200], ['standard', 280], ['large', 500]];
+export const SIZES: [string, number][] = [['small', 200], ['standard', 280], ['large', 500], ['giant', 1300]];
 /** How the world draws a rigid body (`authoring.ts`'s contract: profiles.rigid). */
-const RIGID_EXTENT = 0.7, RIGID_HOVER = 1.45;
+const RIGID_HOVER = 1.45;
 
 export class Refused extends Error {
   code: string;
@@ -56,7 +57,8 @@ export class Refused extends Error {
 
 /** The kit as a world serves it: the validator and the modules it imports, under the names it imports them by. */
 function kit(): string {
-  const dir = mkdtempSync(join(tmpdir(), 'import-body-'));
+  const root = join(REPO, '.local/import-body'); mkdirSync(root, { recursive: true });
+  const dir = mkdtempSync(join(root, 'kit-'));
   const files: [string, string][] = [
     ['validate.mjs', 'tools/body-authoring/validate.mjs'],
     ['rig.ts', 'apps/server/src/edge/body/rig.ts'],
@@ -72,7 +74,7 @@ function kit(): string {
   return dir;
 }
 
-type Report = {
+export type Report = {
   admitted: { assetId: string; type: string; name?: string; triangles: number; bytes: number; actionProfile?: string };
   report: { profile: string; actions: { supported: { action: string }[] } };
 };
@@ -143,55 +145,18 @@ function geometryOnly(bytes: Buffer): ArrayBuffer {
 
 export type Measure = { radius: number; height: number; hover: number; clips: string[]; mesh: LodMesh };
 
-/** The rigid body's parts in one unskinned mesh, fitted and centred as the world draws it. */
-function rigidMesh(scene: THREE.Object3D): { mesh: LodMesh; scale: number } {
-  scene.updateMatrixWorld(true);
-  const pos: number[] = [], nor: number[] = [], col: number[] = [], idx: number[] = [];
-  const v = new THREE.Vector3(), nm = new THREE.Matrix3();
-  scene.traverse((o) => {
-    const m = o as THREE.Mesh;
-    if (!m.isMesh) return;
-    const g = m.geometry, base = pos.length / 3, P = g.getAttribute('position'), N = g.getAttribute('normal'), C = g.getAttribute('color');
-    const c = (m.material as THREE.MeshStandardMaterial).color ?? new THREE.Color(1, 1, 1);
-    nm.getNormalMatrix(m.matrixWorld);
-    for (let i = 0; i < P.count; i++) {
-      v.fromBufferAttribute(P, i).applyMatrix4(m.matrixWorld);
-      pos.push(v.x, v.y, v.z);
-      if (N) v.fromBufferAttribute(N, i).applyMatrix3(nm).normalize();
-      else v.set(0, 1, 0);
-      nor.push(v.x, v.y, v.z);
-      if (C) col.push(C.getX(i) * c.r, C.getY(i) * c.g, C.getZ(i) * c.b);
-      else col.push(c.r, c.g, c.b);
-    }
-    if (g.index) for (let i = 0; i < g.index.count; i++) idx.push(base + g.index.getX(i));
-    else for (let i = 0; i < P.count; i++) idx.push(base + i);
-  });
-  const box = new THREE.Box3().setFromArray(pos), size = box.getSize(new THREE.Vector3()), mid = box.getCenter(new THREE.Vector3());
-  const scale = RIGID_EXTENT / Math.max(size.x, size.y, size.z);
-  for (let i = 0; i < pos.length; i += 3) {
-    pos[i] = (pos[i] - mid.x) * scale;
-    pos[i + 1] = (pos[i + 1] - box.min.y) * scale;
-    pos[i + 2] = (pos[i + 2] - mid.z) * scale;
-  }
-  const n = pos.length / 3;
-  const skinWeight = new Float32Array(n * 4);
-  for (let i = 0; i < n; i++) skinWeight[i * 4] = 1;
-  return {
-    mesh: { position: new Float32Array(pos), normal: new Float32Array(nor), color: new Float32Array(col), skinIndex: new Uint16Array(n * 4), skinWeight, index: new Uint32Array(idx) },
-    scale,
-  };
-}
-
 /** Measures the body: footprint radius and height (m), hover (m) and the clips posed, and its merged mesh. */
-export async function measure(bytes: Buffer): Promise<Measure> {
-  const gltf = await parseModel(geometryOnly(bytes));
+export async function measure(bytes: Buffer, motion?: BodyMotion): Promise<Measure> {
+  const gltf = await parseModel(geometryOnly(await decodedGeometry(bytes)));
   let skinned = false;
   gltf.scene.traverse((o) => void ((o as THREE.SkinnedMesh).isSkinnedMesh && (skinned = true)));
   if (!skinned) {
-    const { mesh } = rigidMesh(gltf.scene);
+    fitRigid(gltf.scene);
+    const { mesh } = merge(gltf);
     let r = 0, top = 0;
     for (let i = 0; i < mesh.position.length; i += 3) (r = Math.max(r, Math.hypot(mesh.position[i], mesh.position[i + 2]))), (top = Math.max(top, mesh.position[i + 1]));
-    return { radius: r, height: top, hover: Math.max(0, RIGID_HOVER - top / 2), clips: [], mesh };
+    const animated = motion ? bakeModel('released-rigid', gltf, [], [], undefined, motion) : null;
+    return { radius: animated?.radius ?? r, height: animated?.height ?? top, hover: Math.max(0, RIGID_HOVER - top / 2), clips: [], mesh };
   }
   const { mesh, skeleton } = merge(gltf);
   const P = mesh.position, I = mesh.skinIndex, W = mesh.skinWeight, n = P.length / 3;
@@ -263,7 +228,7 @@ const q = (s: string) => JSON.stringify(s);
 export type Imported = {
   kind: string; text: string; size: string; radiusMm: number; heightMm: number; hoverMm: number;
   resources: [string, number, number?][]; actions: string[]; clips: string[]; assetId: string; profile: string;
-  full: { hash: string; bytes: Uint8Array; triangles: number }; simple: { hash: string; bytes: Uint8Array; triangles: number };
+  full: { hash: string; bytes: Uint8Array; triangles: number; format?: 'baked' }; simple: { hash: string; bytes: Uint8Array; triangles: number };
 };
 
 /** Admits the body and returns its kind and models (nothing written). */
@@ -271,6 +236,11 @@ export async function importBody(glb: string, manifest: string): Promise<Importe
   const v = validate(glb, manifest);
   const bytes = readFileSync(glb);
   const m = await measure(bytes);
+  return imported(bytes, v, m);
+}
+
+/** Shared data constructor after ordinary validation or exact immutable core admission; no authority is granted here. */
+export function imported(bytes: Buffer, v: Report, m: Measure): Imported {
   const radiusMm = Math.ceil(m.radius * 1000), heightMm = Math.ceil(m.height * 1000), hoverMm = Math.round(m.hover * 1000);
   const size = sizeFor(radiusMm);
   const simple = encodeMesh(simplify(m.mesh, SIMPLE_TRIANGLES));
@@ -297,11 +267,11 @@ export async function importBody(glb: string, manifest: string): Promise<Importe
 export function write(b: Imported, out: string) {
   const name = b.kind.slice(b.kind.indexOf(':') + 1), models = join(out, 'models');
   mkdirSync(models, { recursive: true });
-  const fullFile = `models/${b.full.hash.slice(7)}.glb`, simpleFile = `models/${b.simple.hash.slice(7)}.mesh`;
+  const fullFile = `models/${b.full.hash.slice(7)}.${b.full.format === 'baked' ? 'json' : 'glb'}`, simpleFile = `models/${b.simple.hash.slice(7)}.mesh`;
   writeFileSync(join(out, fullFile), b.full.bytes);
   writeFileSync(join(out, simpleFile), b.simple.bytes);
   writeFileSync(join(out, `${name}.diag`), b.text);
-  const crowd = { kind: b.kind, full: fullFile, simple: simpleFile, clips: b.clips };
+  const crowd = { kind: b.kind, full: fullFile, simple: simpleFile, clips: b.clips, format: b.full.format ?? 'gltf', rigid: b.profile === 'rigid' };
   writeFileSync(join(out, `${name}.json`), JSON.stringify(crowd, null, 1) + '\n');
   return {
     kind: b.kind, file: `${name}.diag`, assetId: b.assetId, profile: b.profile, size: b.size, radiusMm: b.radiusMm, heightMm: b.heightMm, hoverMm: b.hoverMm,
@@ -310,7 +280,7 @@ export function write(b: Imported, out: string) {
   };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (isMain(import.meta.url)) {
   const a = process.argv.slice(2), o = a.indexOf('--out'), out = o >= 0 ? a.splice(o, 2)[1] : null;
   if (a.length !== 2 || !out) {
     console.error('usage: node v2/tools/import-body/import-body.ts <body.glb> <manifest.json> --out <dir>');

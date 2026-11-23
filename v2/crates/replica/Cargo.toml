@@ -14,5 +14,17 @@ vectors = []
 # The checker build a client loads by hash (T10, #2664): no wasm-bindgen exports, so the module has no imports.
 checker = []
 
+[dependencies]
+# The code hatch's one interpreter (F8, #2823): a form's pure function runs in it, metered by its own fuel count, the
+# same natively and in the WASM build. 0.31 is the last stack-machine line: 2.0.1 tripled replica's WASM file (F8's
+# limit is twice), 0.31.2 adds 0.85 times it.
+wasmi = { version = "=0.31.2", default-features = false, features = ["std"] }
+
+# SHA-256 with the processor's own instructions where it has them (x86-64 SHA-NI, aarch64 SHA2), found at run time,
+# and portable Rust otherwise (#1960, follow-up of #4080). Native only: the WASM build keeps replica's written-out
+# SHA-256 (`ids.rs`), so the module a page loads does not grow. No `asm` feature: Rust alone, no assembler.
+[target.'cfg(not(target_arch = "wasm32"))'.dependencies]
+sha2 = { version = "0.10.9", default-features = false }
+
 [target.'cfg(target_arch = "wasm32")'.dependencies]
 wasm-bindgen.workspace = true

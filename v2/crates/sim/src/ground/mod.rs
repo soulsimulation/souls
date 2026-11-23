@@ -6,7 +6,7 @@
 //!   plus [`MARGIN`]; the open ground's square edges are no walls and are not shrunk. From either, the union of every
 //!   box whose height span meets the body's ([`BODY_LOW`] to [`BODY_HIGH`] above the floor) is taken away, grown by
 //!   the same amount, and so are the doorways (a doorway is never floor), the floors of buildings standing on the
-//!   open ground (each is a node of its own) and the waters (N11, #2735, cuts water patches from the outlines kept here).
+//!   open ground (each is a node of its own) and the waters, which are cut beside it ([`OpenGround::cut_water`]).
 //! - **Ground cover.** A floor on the open ground that holds no room and lies within [`STEP`] of the ground
 //!   (Eden's footpaths, lawns, garden beds, shores, piers) is not a node of its own to walk: it is open ground, added
 //!   back over any water it lies on, so a pier reaches out over the sea. A body on it stays on the open ground (its
@@ -50,6 +50,14 @@
 //! - **Steep cells.** A 1 m cell whose slope is above [`STEEP`] (a rise over run of 0.5774, today's) is taken from
 //!   the open ground before its cover is added back: no centre stands on it, so the mover slides along its edge and
 //!   a route goes round it. Cells are taken as they are, not grown by the radius: a body's edge may hang over one.
+//! - **Water** (N11b, #3198). Each water in a square, less the ground cover over it (a pier) and the waters before it
+//!   in the scene (a river's mouth in a lake), with the same boxes taken away, is that square's water patch: pieces of
+//!   their own kind ([`Piece::ground`]) beside the dry ground. Its edge is the water's own outline. A 1 m terrain cell
+//!   whose bed at its middle lies more than [`crate::gaits::WADE_DEPTH`] under the water's level is swimming water,
+//!   a piece at the water's level ([`Ground::Water`]); the rest is wading ground, on the bed (its triangles lie on the
+//!   terrain, [`OpenGround::on_terrain`]). The line between the two is the cells' edge. With no terrain, a water is
+//!   all swimming water. Dry ground, wading ground and water meet edge to edge: crossing between them is a shore link
+//!   naming its move (`crate::routes`, N11c, #3218), so the mover, on one ground, slides along such an edge.
 //! - **Where it lives.** Here in `sim`, native only. An agent's client never loads the ground: where a described spot
 //!   is a point, the server binds the legal standing spot (E2, #2709).
 //! - **Versions** (G3, #2760). Each node's ground has a version ([`Versions`]), bumped when a committed part changes
@@ -59,21 +67,31 @@
 //!   of the touched nodes is cut off the clock thread from the tree as the part leaves it, and installed on the tick
 //!   the part commits (`crate::walk::town::Town::install`): no tick sees new geometry over old ground. A route
 //!   records the versions it was planned on, and the walk is planned again on a mismatch (`crate::unstick`).
+//! - **Seated parts** (N19, #3341). A part seated in a bay is fixed geometry: its boxes are cut like any other's. A
+//!   thing riding a slot its parent gives no point for (`F_SLOTS`: a body's hands, a crew's carry) is carried, and is
+//!   not cut. A part moved to a new parent with its boxes (a transfer, not a creator's edit) touches its old ground and
+//!   its new, so the commit that seats or takes it asks for G3's rebuild (`crate::activity::seating::Seating::write`).
+//!   A body standing where a part would be seated is found by [`scene::stands_in`].
 //!
 //! A [`Turn`] moves the node's geometry into a turned and shifted frame before it is put on the grid; the door table
 //! (36 yaws, 25 offsets) uses it to show the cut does not depend on where the grid falls.
 
+// The repeat rule (K12, v2/clippy.toml): the patch map is a lookup, never iterated, so its order reaches nothing.
+#![allow(clippy::disallowed_types)]
+
 pub mod exits;
+pub mod open;
 pub mod scene;
 pub mod sizes;
 
+use crate::gaits::{Ground, WADE_DEPTH};
 use i_overlay::core::fill_rule::FillRule;
 use i_overlay::core::overlay::{Overlay, ShapeType};
 use i_overlay::core::overlay_rule::OverlayRule;
 use i_overlay::i_float::int::point::IntPoint;
 use i_overlay::i_shape::int::shape::{IntShape, IntShapes};
 use i_triangle::int::triangulatable::IntTriangulatable;
-use replica::effects::{Body, Change, Part};
+use replica::effects::{Body, Change, Part, Refusal, TransferRec};
 use replica::ids::Id;
 use replica::kinds::sizes::Size;
 use replica::pose::{Quat, Vec3};
@@ -102,8 +120,14 @@ const CELL: i32 = 1_000;
 pub const HUMAN_RADIUS: i64 = Size::Standard.radius_mm();
 /// A doorway's depth either side of its middle when no wall flanks it, mm.
 const DOOR_HALF_DEPTH: i64 = 100;
-/// How far the passage through a doorway runs past the grown wall, so that it overlaps the patch on each side, mm.
-const PASSAGE_REACH: i64 = 40;
+/// How far the passage through a doorway runs past the grown wall, so that it overlaps the patch on each side, mm. A
+/// modelled floor may stop short of its wall's inner face (the Mars campus's Mimos: 100 mm), and its door must still
+/// meet it.
+const PASSAGE_REACH: i64 = 150;
+/// How far a doorway's end on the grown wall's face may lie off the floor it meets and stay there, mm: the walker's
+/// own reach for a leg's end on its piece's edge (`walk::town`'s `AT_EDGE`). Further off, the end is put on the floor's
+/// edge ([`meets`]).
+const MEET_SHORT: i64 = 20;
 
 type P = IntPoint<i32>;
 
@@ -123,18 +147,20 @@ impl Turn {
     };
 }
 
-/// One piece of a patch: its outline (outer ring counter-clockwise, then holes) and its triangles.
+/// One piece of a patch: its outline (outer ring counter-clockwise, then holes), its triangles and the ground it is
+/// (dry, or wading ground or water: [`OpenGround::cut_water`]).
 #[derive(Clone, Debug)]
 pub struct Piece {
     pub outline: Vec<Vec<[i32; 3]>>,
     pub vertices: Vec<[i32; 3]>,
     pub triangles: Vec<[u32; 3]>,
+    pub ground: Ground,
 }
 
 /// Where a doorway link meets a piece: the segment `a`–`b` (mm, with height) where the passage's narrowest width
 /// reaches this side's piece, the side of the wall (+1 the way the opening faces, −1 behind it), and that width left
 /// for the centre at the doorway's middle (0: nothing passes).
-#[derive(Clone, Debug)]
+#[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Meet {
     pub link: Id,
     pub piece: u32,
@@ -439,6 +465,8 @@ struct Grown {
     never: Vec<(Vec<P>, i64, [i32; 4])>,
     /// Waters, taken from the open ground before its cover is added back.
     waters: Vec<(Vec<P>, [i32; 4])>,
+    /// For each of `waters`, the index of its water in the scene and that water's level, µm.
+    wet: Vec<(u32, i64)>,
     /// Ground cover: open ground, over water too.
     covers: Vec<(Vec<P>, [i32; 4])>,
     /// The bounds of the open ground's named places: they only widen the squares cut.
@@ -562,8 +590,8 @@ fn prepare(s: &Scene, radius: i64, t: Turn) -> Result<Grown, String> {
             }
         }
     }
-    let mut waters = Vec::new();
-    for w in &s.waters {
+    let (mut waters, mut wet) = (Vec::new(), Vec::new());
+    for (k, w) in s.waters.iter().enumerate() {
         if w.ring.len() >= 3 {
             let r = ccw(w.ring.iter().map(|p| g(*p)).collect::<Result<_, _>>()?);
             let bb = bounds(&r);
@@ -581,6 +609,7 @@ fn prepare(s: &Scene, radius: i64, t: Turn) -> Result<Grown, String> {
                 waters.push((r, bb));
             }
         }
+        wet.resize(waters.len(), (k as u32, w.level));
     }
     let mut covers = Vec::new();
     for c in &s.covers {
@@ -599,6 +628,7 @@ fn prepare(s: &Scene, radius: i64, t: Turn) -> Result<Grown, String> {
         boxes,
         never,
         waters,
+        wet,
         covers,
         areas,
         doors,
@@ -623,7 +653,7 @@ fn cut_level(g: &Grown, subj: IntShapes<i32>, y: i64, window: Option<[i32; 4]>) 
     shapes_op(&subj, &clip, OverlayRule::Difference)
 }
 
-fn piece(shape: &IntShape<i32>, y: i64) -> Piece {
+fn piece(shape: &IntShape<i32>, y: i64, ground: Ground) -> Piece {
     let y = mm(y) as i32;
     let t = shape
         .triangulate()
@@ -637,6 +667,7 @@ fn piece(shape: &IntShape<i32>, y: i64) -> Piece {
             .collect(),
         vertices: t.points.iter().map(|p| [p.x, y, p.y]).collect(),
         triangles: t.indices.chunks(3).map(|c| [c[0], c[1], c[2]]).collect(),
+        ground,
     }
 }
 
@@ -683,6 +714,23 @@ fn in_any(rings: &[Vec<P>], p: P) -> bool {
     })
 }
 
+/// Where the ring `cs` (a doorway's own axes: along, across) lies nearest to `face` on the line across the doorway at
+/// `s` along it: `face` itself when that point is inside the ring, else the nearest crossing of the ring's outline;
+/// none when the line misses the ring.
+fn nearest_across(cs: &[(i64, i64)], s: i64, face: i64) -> Option<i64> {
+    let mut hits = Vec::new();
+    for k in 0..cs.len() {
+        let (a, b) = (cs[k], cs[(k + 1) % cs.len()]);
+        if a.0.min(b.0) <= s && s < a.0.max(b.0) {
+            hits.push(a.1 + (b.1 - a.1) * (s - a.0) / (b.0 - a.0));
+        }
+    }
+    if hits.iter().filter(|&&n| n <= face).count() % 2 == 1 {
+        return Some(face);
+    }
+    hits.into_iter().min_by_key(|n| (n - face).abs())
+}
+
 /// The doorways' meets with the pieces just cut (all at height `y`).
 fn meets(
     g: &Grown,
@@ -722,37 +770,67 @@ fn meets(
         }
         let width_left = a1 - a0;
         let mut sides = [false, false];
-        let mut found = Vec::new();
+        // Each part of the passage on a piece: the piece, its ring in the doorway's own axes (along, across), its
+        // side of the wall and the part of the narrowest width that reaches it.
+        let mut parts = Vec::new();
         for (k, sh) in shapes.iter().enumerate() {
             let both = shapes_op(&passage, sh, OverlayRule::Intersect);
             for part in &both {
                 let cs: Vec<(i64, i64)> = part[0].iter().map(|p| door.coords(*p)).collect();
                 let mid = cs.iter().map(|c| c.1).sum::<i64>() / cs.len().max(1) as i64;
                 let side: i8 = if mid >= 0 { 1 } else { -1 };
-                let n = if side > 0 {
-                    door.n1 + g.d
-                } else {
-                    door.n0 - g.d
-                };
                 // The segment is the part of the narrowest width that reaches this piece: where a box beyond the
                 // wall leaves the piece only one side of the doorway, the middle of the whole width lies off it.
                 let lo = cs.iter().map(|c| c.0).min().unwrap_or(a0).max(a0);
                 let hi = cs.iter().map(|c| c.0).max().unwrap_or(a1).min(a1);
                 let (s0, s1) = if lo <= hi { (lo, hi) } else { (a0, a1) };
-                let (pa, pb) = (door.point(s0, n), door.point(s1, n));
-                let ym = mm(y) as i32;
                 sides[usize::from(side > 0)] = true;
-                found.push(Meet {
-                    link: door.link,
-                    piece: first + k as u32,
-                    side,
-                    a: [pa.x, ym, pa.y],
-                    b: [pb.x, ym, pb.y],
-                    width_left,
-                    through: false,
-                    step: door.step,
-                });
+                parts.push((first + k as u32, cs, side, s0, s1));
             }
+        }
+        // A side's segments lie on the grown wall's face, where ground cut by that wall ends. A floor whose own
+        // outline stops short of the face (a modelled floor: the Mars campus's Mimos, 50 mm) leaves that end off
+        // every piece, where a route took it for a portal and no walker could aim at it (W8, #4084): the side's
+        // segments are then put on the floor's edge nearest the face. Only a floor is measured (`within` is a square
+        // of the open ground, which the grown wall itself cuts), and only when no piece of the side comes within
+        // [`MEET_SHORT`] of the face along its own segment's middle.
+        let face = |side: i8| {
+            if side > 0 {
+                door.n1 + g.d
+            } else {
+                door.n0 - g.d
+            }
+        };
+        let line = [1i8, -1].map(|side| {
+            let f = face(side);
+            if within.is_some() {
+                return f;
+            }
+            let near = parts
+                .iter()
+                .filter(|p| p.2 == side)
+                .filter_map(|(_, cs, _, s0, s1)| nearest_across(cs, (s0 + s1) / 2, f))
+                .min_by_key(|n| (n - f).abs());
+            match near {
+                Some(n) if (n - f) * i64::from(side) > MEET_SHORT => n,
+                _ => f,
+            }
+        });
+        let mut found = Vec::new();
+        for (piece, _, side, s0, s1) in parts {
+            let n = line[usize::from(side < 0)];
+            let (pa, pb) = (door.point(s0, n), door.point(s1, n));
+            let ym = mm(y) as i32;
+            found.push(Meet {
+                link: door.link,
+                piece,
+                side,
+                a: [pa.x, ym, pa.y],
+                b: [pb.x, ym, pb.y],
+                width_left,
+                through: false,
+                step: door.step,
+            });
         }
         let through = passage.len() == 1 && width_left > 0 && sides == [true, true];
         for mut m in found {
@@ -787,7 +865,9 @@ pub fn cut_floor(s: &Scene, radius: i64, t: Turn) -> Result<Patch, String> {
         let shapes = cut_level(&g, floor, *y, None);
         let first = patch.pieces.len() as u32;
         meets(&g, &shapes, first, *y, None, &mut patch.meets);
-        patch.pieces.extend(shapes.iter().map(|sh| piece(sh, *y)));
+        patch
+            .pieces
+            .extend(shapes.iter().map(|sh| piece(sh, *y, Ground::Dry)));
     }
     Ok(patch)
 }
@@ -814,9 +894,10 @@ impl OpenGround {
         self.1.as_ref()
     }
 
-    /// Per piece of `pieces` (cut from this open ground), per triangle: whether it lies on the terrain, so that its
-    /// heights are the terrain's. Not when there is no terrain, nor when a corner or the middle of the triangle lies
-    /// in or on a water's outline (ground cover over water keeps 0).
+    /// Per piece of `pieces` (cut from this open ground, dry or wet), per triangle: whether it lies on the terrain, so
+    /// that its heights are the terrain's. Not when there is no terrain; on dry ground, not when a corner or the middle
+    /// of the triangle lies in or on a water's outline (ground cover over water keeps 0). Wading ground lies on it (its
+    /// bed), water never (its level).
     pub fn on_terrain(&self, pieces: &[Piece]) -> Vec<Vec<bool>> {
         let wet = |p: P| {
             self.0.waters.iter().any(|(r, bb)| {
@@ -830,6 +911,10 @@ impl OpenGround {
         pieces
             .iter()
             .map(|pc| {
+                if pc.ground != Ground::Dry {
+                    let on = self.1.is_some() && pc.ground == Ground::Wading;
+                    return vec![on; pc.triangles.len()];
+                }
                 pc.triangles
                     .iter()
                     .map(|t| {
@@ -938,7 +1023,7 @@ impl OpenGround {
         let shapes = cut_level(g, open, 0, Some(w));
         let mut meets_out = Vec::new();
         meets(&self.0, &shapes, 0, 0, Some(w), &mut meets_out);
-        let pieces = shapes.iter().map(|sh| piece(sh, 0)).collect();
+        let pieces = shapes.iter().map(|sh| piece(sh, 0, Ground::Dry)).collect();
         Patch {
             radius: self.0.d - MARGIN - 1,
             pieces,
@@ -946,6 +1031,88 @@ impl OpenGround {
         }
     }
 }
+
+impl OpenGround {
+    /// One square's water patch (N11b, #3198): its wading ground and water pieces, each with the index of its water in
+    /// the scene's waters ([`Scene::waters`]), in that order.
+    pub fn cut_water(&self, i: i32, j: i32) -> Vec<(u32, Piece)> {
+        let sq = SQUARE as i32;
+        let w = [i * sq, j * sq, (i + 1) * sq, (j + 1) * sq];
+        let g = &self.0;
+        // What is not this water's: the cover over it, then each water before it.
+        let mut taken: Vec<Vec<P>> = g
+            .covers
+            .iter()
+            .filter(|(_, bb)| meets_box(bb, &w))
+            .map(|(r, _)| r.clone())
+            .collect();
+        let mut out = Vec::new();
+        let mut k = 0;
+        while k < g.waters.len() {
+            let (water, level) = g.wet[k];
+            let mut rings = Vec::new();
+            while k < g.waters.len() && g.wet[k].0 == water {
+                if meets_box(&g.waters[k].1, &w) {
+                    rings.push(g.waters[k].0.clone());
+                }
+                k += 1;
+            }
+            if rings.is_empty() {
+                continue;
+            }
+            let mine = op(&rings, &[square_ring(w)], OverlayRule::Intersect);
+            let mine = shapes_op(&mine, &taken, OverlayRule::Difference);
+            if mine.is_empty() {
+                continue;
+            }
+            taken.extend(mine.iter().flatten().cloned());
+            // The cells deeper than wading, in runs along x.
+            let (swim, wade) = match &self.1 {
+                None => (mine, Vec::new()),
+                Some(t) => {
+                    let n = SQUARE as i32 / CELL;
+                    let um = |v: i32| i64::from(v) * 1000;
+                    let mut deep: Vec<Vec<P>> = Vec::new();
+                    for r in 0..n {
+                        let z = w[1] + r * CELL;
+                        let mut run: Option<i32> = None;
+                        for c in 0..=n {
+                            let x = w[0] + c * CELL;
+                            let is = c < n
+                                && t.height_at(um(x) + 500_000, um(z) + 500_000)
+                                    .is_some_and(|bed| level - bed > WADE_DEPTH);
+                            match (run, is) {
+                                (None, true) => run = Some(x),
+                                (Some(x0), false) => {
+                                    deep.push(square_ring([x0, z, x, z + CELL]));
+                                    run = None;
+                                }
+                                _ => {}
+                            }
+                        }
+                    }
+                    (
+                        shapes_op(&mine, &deep, OverlayRule::Intersect),
+                        shapes_op(&mine, &deep, OverlayRule::Difference),
+                    )
+                }
+            };
+            for (shapes, y, ground) in [(swim, level, Ground::Water), (wade, 0, Ground::Wading)] {
+                if shapes.is_empty() {
+                    continue;
+                }
+                let shapes = cut_level(g, shapes, 0, Some(w));
+                out.extend(shapes.iter().map(|sh| (water, piece(sh, y, ground))));
+            }
+        }
+        out
+    }
+}
+
+/// How a commit that is not a creator's edit asks for G3's rebuild (N19, #3341): called with the tree as it stood
+/// before `part` and the part, once the part is committed, it rebuilds the ground the part touches and installs it
+/// before the next tick (`crate::walk::town::Town::rebuild` and `Town::install`, through what holds the town).
+pub type Rebuild = Box<dyn FnMut(Tree, &Part) -> Result<(), Refusal>>;
 
 /// Each node's ground version (G3, #2760): 0 until a committed part first touches it.
 #[derive(Clone, Debug, Default, PartialEq, Eq)]
@@ -970,7 +1137,9 @@ impl Versions {
 }
 
 /// The fields a scene is read from: a change to any other (a door's open field, a name) leaves the ground as it was.
-const SHAPE: [u64; 11] = [
+/// A floor's stairs, ramps and ladders (`crate::links::F_STAIRS`) are read with it: they are the map's links (G2b).
+const SHAPE: [u64; 12] = [
+    crate::links::F_STAIRS,
     scene::F_OPEN_DOOR_LINK,
     scene::F_OUTLINE,
     scene::F_SOLIDS,
@@ -1020,13 +1189,47 @@ fn grounds_of(tree: &Tree, id: Id, out: &mut BTreeSet<Id>) {
 /// The nodes whose ground the committed part `part` changes: read in `before` (the tree it was applied to) for what
 /// it moves or removes, and in `after` for what it places or moves. Motion samples change no ground.
 pub fn touched(before: &Tree, after: &Tree, part: &Part) -> BTreeSet<Id> {
+    let ids = changed(before, part);
+    let mut out = BTreeSet::new();
+    grounds(before, &ids, &mut out);
+    grounds(after, &ids, &mut out);
+    out
+}
+
+/// The nodes whose ground a change at the nodes `ids` changes, read in `tree`, added to `out`: [`touched`] is these
+/// in the tree before the part and in the tree after it.
+pub fn grounds(tree: &Tree, ids: &[Id], out: &mut BTreeSet<Id>) {
+    for &id in ids {
+        grounds_of(tree, id, out);
+    }
+}
+
+/// The nodes the committed part `part` changes in a way its ground reads (see [`touched`]), read in `before` (the tree
+/// it was applied to) for what it moves or removes.
+pub fn changed(before: &Tree, part: &Part) -> Vec<Id> {
     let mut ids = Vec::new();
     for e in &part.effects {
-        let Body::Changes(changes) = &e.body else {
-            continue;
+        let changes = match &e.body {
+            Body::Changes(changes) => changes,
+            // A thing with boxes moved to a new parent (a part seated or taken out, N19 #3341): its old ground and
+            // its new. A body or a crew's node has none, so a body's hop through a doorway touches nothing.
+            Body::Transfer(TransferRec::Leave { node, .. }) => {
+                let solid = |h| {
+                    before
+                        .node(h)
+                        .is_some_and(|n| n.fields().contains_key(&scene::F_SOLIDS))
+                };
+                if before.handle(*node).is_some_and(solid) {
+                    ids.push(*node);
+                }
+                continue;
+            }
+            _ => continue,
         };
         for c in changes {
             match &c.change {
+                // A node made with no field a scene is read from (a chalk mark set down, E4 #2772) cuts no ground.
+                Change::Create { fields, .. } if !SHAPE.iter().any(|f| fields.contains_key(f)) => {}
                 Change::Create { node, .. }
                 | Change::Remove { node }
                 | Change::Reparent { node, .. } => ids.push(*node),
@@ -1041,12 +1244,7 @@ pub fn touched(before: &Tree, after: &Tree, part: &Part) -> BTreeSet<Id> {
             }
         }
     }
-    let mut out = BTreeSet::new();
-    for id in ids {
-        grounds_of(before, id, &mut out);
-        grounds_of(after, id, &mut out);
-    }
-    out
+    ids
 }
 
 /// Patches kept per node, node version and radius (G3, #2760, rebuilds one on an edit by asking with the new version).

@@ -3,8 +3,8 @@
   "kind": "eden:rain_collector",
   "owner": "thing",
   "state": {
-    "water": { "n": 1, "type": "int", "unit": "g", "default": 0, "min": 0, "max": 4000, "audience": { "rule": "everyone" } },
-    "covered": { "n": 2, "type": "bool", "default": true, "audience": { "rule": "everyone" } }
+    "water": { "n": 28, "type": "int", "unit": "g", "default": 0, "min": 0, "max": 4000, "audience": { "rule": "everyone" } },
+    "covered": { "n": 29, "type": "bool", "default": true, "audience": { "rule": "everyone" } }
   },
   "links": {
     "place": { "n": 1, "from": "place", "most": 1, "audience": { "rule": "everyone" } }

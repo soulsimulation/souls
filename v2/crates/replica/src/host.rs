@@ -81,6 +81,8 @@ pub const F_HELD: u64 = 46;
 /// A field the world shows on a body standing on the standing spot it was granted (N9, T9c): 1. A walk to its own
 /// spot passes between such bodies.
 pub const F_SETTLED: u64 = 47;
+/// The world-assigned queue spot on a body, `[x, y, z]` in its floor frame (B7).
+pub const F_LINE: u64 = 48;
 
 /// How a skill's step ended (rule 7).
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -88,6 +90,14 @@ pub enum Progress {
     Going,
     Done,
     Failed(Name),
+}
+
+/// A walk's geometry answer. Pending is distinct from an unsupported geometry interface or no legal route.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub enum WalkPlan {
+    Pending,
+    Unplanned,
+    Legs(Vec<(Vec3, Option<Id>)>),
 }
 
 /// The one interface a skill touches the world through (rule 7). The world implements it; a test implements a fake.
@@ -109,6 +119,22 @@ pub trait Host {
     }
     /// An answer about geometry, in integers, or none.
     fn ask(&self, q: &Ask) -> Option<Answer>;
+    /// Where the body may stand within `reach` of `at` (µm, the frame of the node it stands on) to act there (C15,
+    /// #3447): `at` itself, else the nearest such place; `None` when there is none, or the world does not say.
+    fn stand_near(&self, _at: Vec3, _reach: i64) -> Option<Vec3> {
+        None
+    }
+    /// The legs of a walk to point `at` of node `node`'s frame (µm), or to the nearest place within `reach` of it
+    /// where a body may stand (C17, #3453): each leg a point (µm, the frame of the ground the body stands on then) and
+    /// the link it then crosses, the last none. Empty when there is no way there; `None` when the world does not say.
+    fn legs(&self, _node: Id, _at: Vec3, _reach: i64) -> Option<Vec<(Vec3, Option<Id>)>> {
+        None
+    }
+    /// Plans one form step; a deferred world retries Pending without restarting its deadline.
+    fn plan_walk(&self, _step: usize, node: Id, at: Vec3, reach: i64) -> WalkPlan {
+        self.legs(node, at, reach)
+            .map_or(WalkPlan::Unplanned, WalkPlan::Legs)
+    }
     /// A timer on the body, due `after` microseconds of world time from now, named for what it is for (T6 rule 15).
     fn set_timer(&mut self, after: Micros, name: Name) -> Id;
     /// Clears a timer the skill set (fired or cancelled).
@@ -133,6 +159,12 @@ pub trait Host {
 pub trait Skill {
     fn shape(&self) -> SkillShape;
     fn step(&mut self, host: &mut dyn Host) -> Progress;
+    /// This skill, if the world may step it on another thread, beside other bodies' skills (N17b, #3255): only a
+    /// skill whose step never draws and never sets a timer (both are numbered in the tick's order; such a step is
+    /// refused by a panic, at any thread count). `None`, the default, is stepped on the tick's own thread.
+    fn beside(&mut self) -> Option<&mut (dyn Skill + Send)> {
+        None
+    }
 }
 
 // --- The code hatch, shape only -----------------------------------------------------------------------------------
@@ -148,16 +180,22 @@ pub enum Read {
     Argument(Name),
 }
 
-/// What a hatch answers (rule 10): a verdict (yes, or no with a named reason) or one field's new value.
+/// The most fields one hatch may answer (rule 10).
+pub const HATCH_FIELDS_MOST: usize = 8;
+
+/// What a hatch answers (rule 10): a verdict (yes, or no with a named reason), one field's new value, or a verdict
+/// and, with a yes, the new values of up to [`HATCH_FIELDS_MOST`] fields, each once.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Answers {
     Verdict,
     Field(u64),
+    Fields(Vec<u64>),
 }
 
 /// The code hatch's shape (rule 10; SA-F9, #3000): one pure function, named by the hash of its module, its reads
 /// declared, a step limit and what it answers. `{1: module hash, 2: [read, ...], 3: steps most, 4: answers,
-/// 5: why}`, a read `{1: 1, 2: field}` or `{1: 2, 2: argument}`, answers `{1: 1}` a verdict or `{1: 2, 2: field}`.
+/// 5: why}`, a read `{1: 1, 2: field}` or `{1: 2, 2: argument}`, answers `{1: 1}` a verdict, `{1: 2, 2: field}` or
+/// `{1: 3, 2: [field, ...]}` a verdict and those fields' values.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Hatch {
     /// The module's SHA-256 multihash, 34 bytes (T3 rule 9).
@@ -223,6 +261,19 @@ impl Hatch {
             Some(Value::Map(a)) => match (a.get(&1), a.get(&2)) {
                 (Some(Value::Uint(1)), None) => Answers::Verdict,
                 (Some(Value::Uint(2)), Some(Value::Uint(f))) => Answers::Field(*f),
+                (Some(Value::Uint(3)), Some(Value::Array(fs))) => {
+                    let mut out: Vec<u64> = Vec::new();
+                    for f in fs {
+                        match f {
+                            Value::Uint(f) if !out.contains(f) => out.push(*f),
+                            _ => return not(),
+                        }
+                    }
+                    if out.is_empty() || out.len() > HATCH_FIELDS_MOST {
+                        return not();
+                    }
+                    Answers::Fields(out)
+                }
                 _ => return not(),
             },
             _ => return not(),

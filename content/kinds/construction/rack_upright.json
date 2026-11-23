@@ -4,7 +4,7 @@
  "owner": "thing",
  "state": {
   "hold_crew": {
-   "n": 1,
+   "n": 28,
    "type": "int",
    "unit": "count",
    "default": 1,
@@ -421,6 +421,12 @@
  },
  "geometry": {
   "bounds_mm": [1219, 2438, 76]
+ },
+ "children": {
+  "crew": {
+   "kind": "mars:rack_crew",
+   "most": 2
+  }
  },
  "motion": {
   "how": "two_hands"

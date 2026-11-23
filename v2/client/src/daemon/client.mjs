@@ -4,8 +4,10 @@
 // of the caller's variables but PATH.
 //
 //   node v2/client/src/daemon/client.mjs <op> [--soul <id>] [--verb <verb>]      prints the daemon's answer, as JSON
+//     [--for <message id>] (an act serving an owner's message) [--seconds <n>] (wait's, R13: a harness's reader)
 //   The home is SOULS_HOME, else the nearest .souls; the library is SOULS_REPLICA_PKG, else v2/target/wasm-load/pkg.
 
+import { isMain } from '../../../../tools/lib/is-main.mjs';
 import { spawn } from 'node:child_process';
 import { openSync } from 'node:fs';
 import { createConnection } from 'node:net';
@@ -67,7 +69,7 @@ export async function call(home, soul, req, { pkg = DEFAULT_PKG, within = 5000, 
   }
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const args = process.argv.slice(2);
   const opt = (n) => { const k = args.indexOf(n); return k >= 0 ? args[k + 1] : undefined; };
   const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir() });
@@ -75,8 +77,10 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
   const soul = opt('--soul') ?? (souls.length === 1 ? souls[0] : undefined);
   try {
     if (!soul) throw Object.assign(new Error(`name a Soul with --soul: ${souls.join(', ') || 'none has a token'}`), { code: 'which-soul' });
-    const req = { op: args[0] ?? 'status', ...(opt('--verb') ? { verb: opt('--verb') } : {}) };
-    console.log(JSON.stringify(await call(home, soul, req, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG })));
+    const req = { op: args[0] ?? 'status', ...(opt('--verb') ? { verb: opt('--verb') } : {}),
+      ...(opt('--for') ? { for: opt('--for') } : {}), ...(opt('--seconds') ? { seconds: Number(opt('--seconds')) } : {}) };
+    const ms = 5000 + (req.op === 'wait' ? 1000 * Math.min(Number(req.seconds ?? 30), 600) : 0);
+    console.log(JSON.stringify(await call(home, soul, req, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms })));
   } catch (e) {
     console.log(JSON.stringify({ ok: false, code: e.code ?? 'failed', detail: String(e.message ?? e).slice(0, 200) }));
     process.exitCode = 1;

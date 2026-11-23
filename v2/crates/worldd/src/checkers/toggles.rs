@@ -10,7 +10,7 @@ use replica::encode::{Name, Value as Cbor, encode};
 use replica::ids::{Hash, Id, Minter, Purpose, Scope};
 use replica::pose::{Frame, Pose, Quat, Support, Vec3};
 use replica::rules::json::{Value, parse};
-use replica::world_model::{Audience, parse_kinds};
+use replica::world_model::{Audience, Kind, parse_kinds};
 use std::collections::BTreeMap;
 
 /// The world's kinds; the toggle's is the one its entry names.
@@ -39,6 +39,7 @@ pub struct World {
     mint: Minter,
     /// Each body and the lamp beside it.
     pub pairs: Vec<(Id, Id)>,
+    root: Id,
 }
 
 /// The rules for the world's lamps: the lamp's entry and a press that reaches 400 mm, so a body reaches its own
@@ -49,6 +50,11 @@ pub fn rules() -> Rules {
         kinds: Value::Obj(vec![(toggle_kind(&entry), entry)]),
         moves: parse(r#"{"press": {"reach_mm": 400}}"#).unwrap_or_else(|e| panic!("moves: {e}")),
     }
+}
+
+/// The world's kinds by full name, as its header pins them: what a creator's edit is checked against (G1b, #3362).
+pub fn kinds() -> BTreeMap<String, Kind> {
+    parse_kinds(&kinds_text(&toggle_kind(&entry()))).unwrap_or_else(|e| panic!("kinds: {e}"))
 }
 
 /// The toggle's entry (R2's fixture), parsed.
@@ -78,6 +84,7 @@ pub fn toggle(id: u64, body: Id, thing: Id) -> Act {
             })
             .to_vec(),
         recheck: None,
+        spot: None,
     }
 }
 
@@ -142,6 +149,7 @@ impl World {
             kinds,
             mint,
             pairs: Vec::new(),
+            root,
         };
         for _ in 0..rooms {
             w.room(root, bodies, items);
@@ -197,6 +205,21 @@ impl World {
             .unwrap_or_else(|e| panic!("a part: {e}"))
     }
 
+    /// A thing of the item kind at the root, with this id and these fields: a node a test marks (#3700).
+    pub fn item_with(&mut self, node: Id, fields: BTreeMap<u64, Cbor>) {
+        let change = Change::Create {
+            node,
+            kind: self.kinds["souls:item"].clone(),
+            pose: pose(self.root, 0),
+            audience: Audience::Everyone,
+            fields,
+        };
+        let part = self.part(vec![(self.root, change)]);
+        self.replica
+            .apply(&part)
+            .unwrap_or_else(|e| panic!("an item applies: {e}"));
+    }
+
     fn room(&mut self, root: Id, bodies: usize, items: usize) {
         let room = self.id();
         let mut changes = vec![(root, self.create(room, "souls:room", root, 0, &[]))];
@@ -216,6 +239,55 @@ impl World {
         self.replica
             .apply(&part)
             .unwrap_or_else(|e| panic!("a room applies: {e}"));
+    }
+
+    /// The page's proof of a moving node (#3603, `worldd gateway-link --punt`): a punt 3.5 m by 1.2 m rowing a loop
+    /// (its course, field 80) beside the room, with a body in it. It is a room's kind, so a body may be in it. Returns
+    /// the punt.
+    pub fn punt(&mut self) -> Id {
+        use replica::schedule::F_COURSE;
+        use replica::schedule::course::{Course, Shape, Station};
+        const M: i64 = 1_000_000;
+        let punt = self.id();
+        let station = |x: i64, z: i64, dwell: i64| Station {
+            at: Vec3::new(x * M, 0, z * M),
+            dwell,
+        };
+        let course = Course {
+            stations: vec![
+                station(0, 3, 4 * M),
+                station(12, 3, 0),
+                station(12, -5, 0),
+                station(0, -5, 0),
+            ],
+            shape: Shape::Loop,
+            speed: 1_200_000,
+            t0: 0,
+            within: 60 * M,
+        };
+        // One solid `[cx, cz, hx, hz, yaw, y0, y1, tag, abs]` mm: the hull.
+        let hull = [0, 0, 1750, 600, 0, 0, 400, 0, 0].map(Cbor::Uint).to_vec();
+        let create = Change::Create {
+            node: punt,
+            kind: self.kinds["souls:room"].clone(),
+            pose: Pose {
+                position: Vec3::new(0, 0, 3 * M),
+                ..pose(self.root, 0)
+            },
+            audience: Audience::Everyone,
+            fields: BTreeMap::from([
+                (12, Cbor::Array(vec![Cbor::Array(hull)])),
+                (F_COURSE, course.to_value()),
+            ]),
+        };
+        // A rider born in it (a body changes its parent only by leaving and arriving, which this world does not run).
+        let rider = self.id();
+        let aboard = self.create(rider, "souls:body", punt, 0, &[]);
+        let part = self.part(vec![(self.root, create), (punt, aboard)]);
+        self.replica
+            .apply(&part)
+            .unwrap_or_else(|e| panic!("the punt applies: {e}"));
+        punt
     }
 
     /// A change to a lamp's level, as another act would make it: the lamp's stamp moves on.

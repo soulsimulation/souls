@@ -8,11 +8,11 @@
 use i_overlay::core::overlay_rule::OverlayRule;
 use replica::encode::Value;
 use replica::ids::{Id, Scope, sha256};
-use replica::pose::{Quat, Vec3};
+use replica::pose::{Frame, Quat, Vec3};
 use replica::tree::{Handle, Tree};
 use replica::world_model::plain;
 
-use super::{P, STEP, ccw, op};
+use super::{BODY_HIGH, BODY_LOW, P, STEP, ccw, op};
 
 pub const F_OPEN_DOOR_LINK: u64 = 7; // a door thing: the doorway link it stands in (N1's F_DOORWAY)
 pub const F_OUTLINE: u64 = 11;
@@ -143,6 +143,42 @@ impl Terrain {
     /// As [`Terrain::of`], only the tiles that meet the box `[x0, z0, x1, z1]` (µm): the ground under one thing.
     pub fn within(tree: &Tree, id: Id, bb: [i64; 4]) -> Result<Option<Terrain>, String> {
         Terrain::read(tree, id, Some(bb))
+    }
+
+    /// The box its tiles cover, `[x0, z0, x1, z1]` µm, read from the tiles' keys alone (#3958): `None` when node `id`
+    /// holds no terrain.
+    pub fn extent(tree: &Tree, id: Id) -> Result<Option<[i64; 4]>, String> {
+        let n = tree
+            .node(tree.handle(id).ok_or("no such node")?)
+            .ok_or("no such node")?;
+        let (Some(side), Some(rows)) = (
+            n.fields().get(&F_TILE_SIZE).and_then(int),
+            n.fields().get(&F_TILES),
+        ) else {
+            return Ok(None);
+        };
+        let side = side
+            .checked_mul(1000)
+            .filter(|s| *s > 0)
+            .ok_or("a terrain tile of no size")?;
+        let mut bb: Option<[i64; 4]> = None;
+        for r in row(rows) {
+            let (Some(tx), Some(tz)) = (row(r).first().and_then(int), row(r).get(1).and_then(int))
+            else {
+                return Err("a terrain tile is [tx, tz, heights, classes]".into());
+            };
+            let (x0, z0) = (tx.saturating_mul(side), tz.saturating_mul(side));
+            let t = [x0, z0, x0.saturating_add(side), z0.saturating_add(side)];
+            bb = Some(bb.map_or(t, |b| {
+                [
+                    b[0].min(t[0]),
+                    b[1].min(t[1]),
+                    b[2].max(t[2]),
+                    b[3].max(t[3]),
+                ]
+            }));
+        }
+        Ok(bb)
     }
 
     fn read(tree: &Tree, id: Id, bb: Option<[i64; 4]>) -> Result<Option<Terrain>, String> {
@@ -346,6 +382,35 @@ fn slot_point(tree: &Tree, h: Handle, n: u64) -> Option<Vec3> {
     })
 }
 
+/// Each slot of node `h` and its point in the frame of its ancestor `frame`, µm (none when it has no slots).
+pub fn slot_points(tree: &Tree, h: Handle, frame: Handle) -> Result<Vec<(u64, Vec3)>, String> {
+    let Some(v) = tree.node(h).and_then(|n| n.fields().get(&F_SLOTS).cloned()) else {
+        return Ok(Vec::new());
+    };
+    let x = xform_to(tree, h, frame)?;
+    let mut out = Vec::new();
+    for r in row(&v).iter().map(row) {
+        let Some(n) = r.first().and_then(int).and_then(|n| u64::try_from(n).ok()) else {
+            continue;
+        };
+        if let Some(p) = slot_point(tree, h, n) {
+            out.push((n, x.point(p)?));
+        }
+    }
+    Ok(out)
+}
+
+/// The boxes of every node of the subtree at `h`, in the frame of its ancestor `frame`.
+pub fn solids_under(tree: &Tree, h: Handle, frame: Handle) -> Result<Vec<Solid>, String> {
+    let mut out = Vec::new();
+    let mut stack = vec![h];
+    while let Some(at) = stack.pop() {
+        solids_of(tree, at, &xform_to(tree, at, frame)?, &mut out)?;
+        stack.extend(tree.children(at).unwrap_or(&[]).iter().copied());
+    }
+    Ok(out)
+}
+
 fn int(v: &Value) -> Option<i64> {
     match v {
         Value::Uint(u) => i64::try_from(*u).ok(),
@@ -480,22 +545,41 @@ fn things_below(
     frame: Handle,
     world_shapes: bool,
     s: &mut Scene,
+    footprints: Option<&mut Vec<Surface>>,
+) -> Result<(), String> {
+    let t = s.terrain.take();
+    let r = things_below_on(tree, top, frame, world_shapes, s, footprints, t.as_ref());
+    s.terrain = t;
+    r
+}
+
+/// [`things_below`] on the terrain `t` (the scene's own is not read).
+fn things_below_on(
+    tree: &Tree,
+    top: Handle,
+    frame: Handle,
+    world_shapes: bool,
+    s: &mut Scene,
     mut footprints: Option<&mut Vec<Surface>>,
+    t: Option<&Terrain>,
 ) -> Result<(), String> {
     let mut stack = vec![top];
     while let Some(h) = stack.pop() {
         let n = tree.node(h).ok_or("a node that is gone")?;
+        if carried(tree, h) {
+            continue;
+        }
         let k = plain(n.kind().as_str());
         if k == FLOOR
             && let Some(f) = footprints.as_deref_mut()
         {
-            match cover_of(tree, h, frame, s.terrain.as_ref())? {
+            match cover_of(tree, h, frame, t)? {
                 Some(c) => s.covers.extend(c),
                 None => {
                     let thing = n.parent().and_then(|p| tree.handle(p)).ok_or("a floor")?;
                     let x = xform_to(tree, thing, frame)?;
                     f.extend(surfaces_of(tree, h, &x)?);
-                    let steps = steps_of(tree, h, &x, &x, s.terrain.as_ref())?;
+                    let steps = steps_of(tree, h, &x, &x, t)?;
                     s.doorways.extend(steps);
                 }
             }
@@ -523,6 +607,100 @@ fn things_below(
         );
     }
     Ok(())
+}
+
+/// Whether node `h` rides a slot its parent gives no point for (N19, #3341): a body's hands, a crew's carry. It is
+/// carried, so neither it nor what it holds is fixed geometry; a part seated in a bay's slot (a point) is.
+fn carried(tree: &Tree, h: Handle) -> bool {
+    let Some(n) = tree.node(h) else {
+        return false;
+    };
+    let (Some(sl), Some(p)) = (n.slot(), n.parent().and_then(|p| tree.handle(p))) else {
+        return false;
+    };
+    slot_point(tree, p, sl).is_none()
+}
+
+/// Whether `p` lies within `r` of the ring `ring` (inside it, or within `r` of an edge), µm.
+pub fn within(ring: &[Xz], p: Xz, r: i64) -> bool {
+    if inside(ring, p) {
+        return true;
+    }
+    let r2 = i128::from(r) * i128::from(r);
+    (0..ring.len()).any(|k| {
+        let (a, b) = (ring[k], ring[(k + 1) % ring.len()]);
+        let (ex, ez) = (i128::from(b[0] - a[0]), i128::from(b[1] - a[1]));
+        let (px, pz) = (i128::from(p[0] - a[0]), i128::from(p[1] - a[1]));
+        let len2 = ex * ex + ez * ez;
+        let t = if len2 == 0 {
+            0
+        } else {
+            (px * ex + pz * ez).clamp(0, len2)
+        };
+        // The nearest point on the edge, as a fraction t / len2 of it.
+        let (dx, dz) = if len2 == 0 {
+            (px, pz)
+        } else {
+            (px - ex * t / len2, pz - ez * t / len2)
+        };
+        dx * dx + dz * dz <= r2
+    })
+}
+
+/// The first body standing where `part` would be with the pose `place`, `turn` in the frame `to` (N19, #3341): a
+/// node `body` says is one (by its kind), whose centre, read in the frame of `ground`, lies within `radius` mm of a
+/// box of the part whose height span meets the body's ([`BODY_LOW`] to [`BODY_HIGH`] above its feet). The seating
+/// refuses such a seat before the lift (`site.occupied`), as G2 refuses an edit that would bury a Soul.
+#[allow(clippy::too_many_arguments)]
+pub fn stands_in(
+    tree: &Tree,
+    ground: Id,
+    part: Id,
+    to: Frame,
+    place: Vec3,
+    turn: Quat,
+    radius: i64,
+    body: &dyn Fn(&str) -> bool,
+) -> Result<Option<Id>, String> {
+    let g = tree.handle(ground).ok_or("no such ground")?;
+    let th = tree.handle(to.node).ok_or("no such frame")?;
+    let ph = tree.handle(part).ok_or("no such part")?;
+    let at = match to.slot {
+        Some(sl) => slot_point(tree, th, sl).ok_or("a slot its parent does not have")?,
+        None => Vec3::ZERO,
+    };
+    let x = xform_to(tree, th, g)?.then(Xform {
+        pos: at.plus(place).map_err(|e| format!("{e:?}"))?,
+        rot: turn,
+    })?;
+    let mut boxes = Vec::new();
+    solids_of(tree, ph, &x, &mut boxes)?;
+    let mut stack = vec![g];
+    while let Some(h) = stack.pop() {
+        let n = tree.node(h).ok_or("a node that is gone")?;
+        stack.extend(
+            tree.children(h)
+                .ok_or("a node that is gone")?
+                .iter()
+                .copied(),
+        );
+        if h == g || !body(n.kind().as_str()) {
+            continue;
+        }
+        let Ok(w) = xform_to(tree, h, g) else {
+            continue;
+        };
+        let p = w.pos;
+        let hit = boxes.iter().any(|s| {
+            s.y1 > p.y + BODY_LOW * 1000
+                && s.y0 < p.y + BODY_HIGH * 1000
+                && within(&s.ring, [p.x, p.z], radius * 1000)
+        });
+        if hit {
+            return Ok(Some(n.id()));
+        }
+    }
+    Ok(None)
 }
 
 /// The doorway rows (N1's `F_DOORWAYS`, at each link's owning end) of every doorway link at `ends`, in `frame`.
@@ -751,6 +929,66 @@ fn inner_steps_of(floor: Id, own: &[Surface]) -> Vec<Doorway> {
 }
 
 impl Scene {
+    /// The part of the open ground's scene (at `ground`, on its terrain `t`) that its child `c` gives: a named place's
+    /// water or outline, or everything standing in the subtree at `c`. [`Scene::of`] is these parts in the children's
+    /// order, then the ground's own doorways ([`Scene::ground_doorways`]); G3b (#3449) reads again only the parts of
+    /// the children a change touches (`crate::ground::open`).
+    pub fn of_child(
+        tree: &Tree,
+        ground: Handle,
+        c: Handle,
+        t: Option<&Terrain>,
+    ) -> Result<Scene, String> {
+        let mut s = Scene {
+            open: true,
+            ..Scene::default()
+        };
+        let n = tree.node(c).ok_or("a node that is gone")?;
+        if plain(n.kind().as_str()) == PLACE {
+            if n.fields()
+                .get(&F_PLACE_OF)
+                .is_some_and(|v| matches!(v, Value::Text(t) if t.as_str() == WATER))
+            {
+                let f = n.fields();
+                s.waters.push(Water {
+                    place: n.id(),
+                    ring: f
+                        .get(&F_OUTLINE)
+                        .map(ring_mm)
+                        .transpose()?
+                        .unwrap_or_default(),
+                    line: f.get(&F_LINE).map(ring_mm).transpose()?.unwrap_or_default(),
+                    width: f.get(&F_LINE_WIDTH).and_then(int).unwrap_or(0) * 1000,
+                    level: f.get(&F_WATER_LEVEL).and_then(int).unwrap_or(0) * 1000,
+                });
+            } else if let Some(r) = n.fields().get(&F_OUTLINE) {
+                s.areas.push(ring_mm(r)?);
+            }
+            return Ok(s);
+        }
+        let mut footprints = Vec::new();
+        things_below_on(tree, c, ground, true, &mut s, Some(&mut footprints), t)?;
+        s.footprints = footprints;
+        Ok(s)
+    }
+
+    /// The open ground's own doorways (its gates' rows), as [`Scene::of`] reads them last.
+    pub fn ground_doorways(tree: &Tree, ground: Handle) -> Result<Vec<Doorway>, String> {
+        let mut s = Scene::default();
+        doorways_at(tree, &[ground], ground, &mut s)?;
+        Ok(s.doorways)
+    }
+
+    /// Appends `part`'s geometry to this scene's, each list after its own (the terrain is kept).
+    pub fn add(&mut self, part: Scene) {
+        self.surfaces.extend(part.surfaces);
+        self.solids.extend(part.solids);
+        self.footprints.extend(part.footprints);
+        self.covers.extend(part.covers);
+        self.doorways.extend(part.doorways);
+        self.waters.extend(part.waters);
+        self.areas.extend(part.areas);
+    }
     /// The ground of node `id`: a floor (its surfaces, everything its building holds, its doorways) or the open ground
     /// (everything on it, the footprints of its buildings, its ground cover, its doorways, its waters). Anything else
     /// has no ground, and nor has a floor that is ground cover on the open ground (`ground-cover`): it is walked as the
@@ -818,34 +1056,10 @@ impl Scene {
             GROUND => {
                 s.open = true;
                 s.terrain = Terrain::of(tree, id)?;
-                let mut footprints = Vec::new();
                 for &c in tree.children(h).ok_or("the ground")? {
-                    let n = tree.node(c).ok_or("a node that is gone")?;
-                    if plain(n.kind().as_str()) == PLACE {
-                        if n.fields()
-                            .get(&F_PLACE_OF)
-                            .is_some_and(|v| matches!(v, Value::Text(t) if t.as_str() == WATER))
-                        {
-                            let f = n.fields();
-                            s.waters.push(Water {
-                                place: n.id(),
-                                ring: f
-                                    .get(&F_OUTLINE)
-                                    .map(ring_mm)
-                                    .transpose()?
-                                    .unwrap_or_default(),
-                                line: f.get(&F_LINE).map(ring_mm).transpose()?.unwrap_or_default(),
-                                width: f.get(&F_LINE_WIDTH).and_then(int).unwrap_or(0) * 1000,
-                                level: f.get(&F_WATER_LEVEL).and_then(int).unwrap_or(0) * 1000,
-                            });
-                        } else if let Some(r) = n.fields().get(&F_OUTLINE) {
-                            s.areas.push(ring_mm(r)?);
-                        }
-                        continue;
-                    }
-                    things_below(tree, c, h, true, &mut s, Some(&mut footprints))?;
+                    let part = Scene::of_child(tree, h, c, s.terrain.as_ref())?;
+                    s.add(part);
                 }
-                s.footprints = footprints;
                 doorways_at(tree, &[h], h, &mut s)?;
             }
             k => return Err(format!("{k} has no ground of its own")),

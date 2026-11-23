@@ -50,6 +50,6 @@ export function find(rows, words, { limit = 8, within } = {}) {
     if (s) out.push({ s, row });
   }
   out.sort((a, b) => b.s - a.s || String(a.row.name).localeCompare(String(b.row.name), 'en', { numeric: true }));
-  const found = out.slice(0, limit).map(({ row }) => ({ id: row.id, name: row.name, kind: row.kind, ...(row.path?.length ? { in: row.path.slice(-2).reverse().join(', ') } : {}) }));
+  const found = out.slice(0, limit).map(({ row }) => ({ id: row.id, name: row.name, kind: row.kind, ...(row.soul ? { soul: row.soul, parent: row.parent } : {}), ...(row.path?.length ? { in: row.path.slice(-2).reverse().join(', ') } : {}) }));
   return { found, ...(out.length > limit ? { more: out.length - limit } : {}) };
 }

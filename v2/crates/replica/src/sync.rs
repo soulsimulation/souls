@@ -27,7 +27,7 @@ use crate::effects::Refusal;
 use crate::encode::{Value, decode, encode};
 use crate::ids::{Hash, Id, Purpose, Version};
 use crate::tree::{Sealed, Tree};
-use std::collections::{BTreeMap, HashMap, HashSet};
+use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 type R<T> = Result<T, Refusal>;
 
@@ -70,19 +70,107 @@ pub trait Source {
     fn records(&mut self, hashes: &[Vec<u8>]) -> R<Vec<Vec<u8>>>;
 }
 
-/// The world's records by hash: every record a seal gave (K5's checkpoint blobs are the same bytes).
+/// A replaced record this large or larger is a big one ([`BIG_SEALS`]).
+pub const BIG_RECORD: usize = 64 * 1024;
+/// How many seals a replaced big record is still served after (#1960). A record re-sealed often and big is a moving
+/// body's ancestor near the top (Eden's ground: its terrain and every child's hash, megabytes), which a descent asks
+/// for in its first rounds, right after the hashes answer.
+pub const BIG_SEALS: u64 = 16;
+/// How many seals a replaced small record (a body, a room) is still served after: a descent of a large scope asks for
+/// its leaves many rounds after the hashes answer that named them ([`wire::RECORDS_MOST`] a round).
+pub const SMALL_SEALS: u64 = 1024;
+/// At most this many bytes of replaced small records are kept; the oldest go first (never the newest seal's).
+pub const SMALL_BYTES: usize = 64 << 20;
+
+/// A record a seal replaced: when, whose, its hash and its size.
+struct Replaced {
+    seal: u64,
+    node: Id,
+    hash: Vec<u8>,
+    size: usize,
+}
+
+/// The world's records by hash: each node's record as last sealed (K5's checkpoint blobs are the same bytes), and
+/// the records seals replaced lately, for a descent still under way (#1960: a moving body re-seals itself and its
+/// ancestors at each seal, and keeping every record a seal ever gave grew worldd 5 to 9 MB a second while one Soul
+/// walked). A replaced record is kept [`BIG_SEALS`] seals if big, else [`SMALL_SEALS`] seals within
+/// [`SMALL_BYTES`]; a descent that then asks for it is refused `sync-unknown-hash`, and the client syncs again.
 #[derive(Default)]
 pub struct Records {
-    by_hash: HashMap<Vec<u8>, Vec<u8>>,
+    by_hash: BTreeMap<Vec<u8>, Vec<u8>>,
+    /// Each node's record hash as last kept.
+    current: BTreeMap<Id, Vec<u8>>,
+    /// Big and small records seals replaced, oldest first, and the small ones' bytes.
+    big: VecDeque<Replaced>,
+    small: VecDeque<Replaced>,
+    small_bytes: usize,
+    /// The last seal each replaced hash was replaced at: a hash replaced again later waits for the later entry.
+    replaced_at: BTreeMap<Vec<u8>, u64>,
+    seals: u64,
 }
 
 impl Records {
-    /// Keeps the records a seal gave.
-    pub fn keep(&mut self, sealed: &Sealed) {
-        for (h, bytes) in &sealed.nodes {
+    /// Keeps previously validated records, such as the blobs of a restored checkpoint.
+    pub fn extend<'a>(&mut self, records: impl IntoIterator<Item = (&'a [u8], &'a [u8])>) {
+        for (hash, bytes) in records {
             self.by_hash
-                .entry(h.to_bytes())
+                .entry(hash.to_vec())
+                .or_insert_with(|| bytes.to_vec());
+        }
+    }
+
+    /// Keeps the records a seal gave, and lets go of the replaced ones past their window.
+    pub fn keep(&mut self, sealed: &Sealed) {
+        self.seals += 1;
+        let seal = self.seals;
+        for ((h, bytes), id) in sealed.nodes.iter().zip(&sealed.ids) {
+            let h = h.to_bytes();
+            self.by_hash
+                .entry(h.clone())
                 .or_insert_with(|| bytes.clone());
+            if let Some(old) = self.current.insert(*id, h.clone())
+                && old != h
+            {
+                let size = self.by_hash.get(&old).map_or(0, Vec::len);
+                self.replaced_at.insert(old.clone(), seal);
+                let r = Replaced {
+                    seal,
+                    node: *id,
+                    hash: old,
+                    size,
+                };
+                if size >= BIG_RECORD {
+                    self.big.push_back(r);
+                } else {
+                    self.small_bytes += size;
+                    self.small.push_back(r);
+                }
+            }
+        }
+        while self.big.front().is_some_and(|r| r.seal + BIG_SEALS <= seal) {
+            if let Some(r) = self.big.pop_front() {
+                self.let_go(r);
+            }
+        }
+        while self.small.front().is_some_and(|r| {
+            r.seal + SMALL_SEALS <= seal || (self.small_bytes > SMALL_BYTES && r.seal < seal)
+        }) {
+            if let Some(r) = self.small.pop_front() {
+                self.small_bytes -= r.size;
+                self.let_go(r);
+            }
+        }
+    }
+
+    /// Drops a replaced record, unless it was replaced again since (the later entry lets it go) or is its node's
+    /// record again.
+    fn let_go(&mut self, r: Replaced) {
+        if self.replaced_at.get(&r.hash) != Some(&r.seal) {
+            return;
+        }
+        self.replaced_at.remove(&r.hash);
+        if self.current.get(&r.node) != Some(&r.hash) {
+            self.by_hash.remove(&r.hash);
         }
     }
 
@@ -92,6 +180,11 @@ impl Records {
 
     pub fn is_empty(&self) -> bool {
         self.by_hash.is_empty()
+    }
+
+    /// The bytes of the records held (a measure).
+    pub fn bytes(&self) -> usize {
+        self.by_hash.values().map(Vec::len).sum()
     }
 }
 
@@ -138,22 +231,30 @@ pub struct Synced {
     pub held: usize,
 }
 
-/// A sync under way ([`Copy::compare`]): the records still to ask for in this level, the next level's, and the count.
+/// A sync under way ([`Copy::compare`]): the records still to ask for in this level, the next level's, the count,
+/// the scope's new hashes (the copy's own only once it finishes), and the records it has taken so far.
 pub struct Descent {
     want: Vec<Vec<u8>>,
     next: Vec<Vec<u8>>,
     s: Synced,
+    roots: BTreeMap<Id, Vec<u8>>,
+    taken: Vec<Vec<u8>>,
 }
 
-/// A client's copy of its scope: each scope node's hash, and the records it reaches, by hash.
+/// A client's copy of its scope: each scope node's hash, and the records it reaches, by hash. A record the world
+/// withheld (empty bytes in its answer: under a closed container this asker may not see into, #3915) is held as
+/// withheld: a leaf the copy never reads.
 #[derive(Clone, Default)]
 pub struct Copy {
     roots: BTreeMap<Id, Vec<u8>>,
-    records: HashMap<Vec<u8>, Vec<u8>>,
+    records: BTreeMap<Vec<u8>, Vec<u8>>,
 }
 
 /// Checks a record against the hash that named it (rule 3) and gives its children's hashes (field 10).
 fn check(want: &[u8], bytes: &[u8]) -> R<Vec<Vec<u8>>> {
+    if bytes.is_empty() {
+        return Ok(Vec::new());
+    }
     let Ok(d) = decode(bytes) else {
         return refuse("sync-record", "not a record");
     };
@@ -195,9 +296,18 @@ impl Copy {
         &self.roots
     }
 
-    /// The record a hash names, if held.
+    /// Whether the record a hash names is held, and not withheld: a withheld one is asked for again at every sync,
+    /// since whether it may be seen is not in its hash (who may see into its container can change).
+    fn holds(&self, hash: &[u8]) -> bool {
+        self.records.get(hash).is_some_and(|b| !b.is_empty())
+    }
+
+    /// The record a hash names, if held; none for one withheld.
     pub fn record(&self, hash: &[u8]) -> Option<&[u8]> {
-        self.records.get(hash).map(Vec::as_slice)
+        self.records
+            .get(hash)
+            .filter(|b| !b.is_empty())
+            .map(Vec::as_slice)
     }
 
     /// Rule 2: the hash of each node of `scope`, then every record not held, one round per level; then rule 3's let
@@ -213,8 +323,13 @@ impl Copy {
             if asked.is_empty() {
                 return self.finish(d);
             }
-            let got = src.records(&asked)?;
-            self.take(&mut d, &asked, got)?;
+            if let Err(e) = src
+                .records(&asked)
+                .and_then(|got| self.take(&mut d, &asked, got))
+            {
+                self.abandon(d);
+                return Err(e);
+            }
         }
     }
 
@@ -236,16 +351,17 @@ impl Copy {
             if self.roots.get(id) != Some(&h) {
                 s.changed += 1;
             }
-            if !self.records.contains_key(&h) {
+            if !self.holds(&h) {
                 want.push(h.clone());
             }
             roots.insert(*id, h);
         }
-        self.roots = roots;
         Descent {
             want: Vec::new(),
             next: want,
             s,
+            roots,
+            taken: Vec::new(),
         }
     }
 
@@ -255,7 +371,7 @@ impl Copy {
         if d.want.is_empty() {
             // A child named twice in one level, or also asked for in it, is fetched once.
             d.want = std::mem::take(&mut d.next);
-            d.want.retain(|c| !self.records.contains_key(c));
+            d.want.retain(|c| !self.holds(c));
             d.want.sort();
             d.want.dedup();
         }
@@ -273,24 +389,40 @@ impl Copy {
         d.s.sent += asked.iter().map(|h| h.len() as u64).sum::<u64>();
         for (h, bytes) in asked.iter().zip(got) {
             for c in check(h, &bytes)? {
-                if !self.records.contains_key(&c) {
+                if !self.holds(&c) {
                     d.next.push(c);
                 }
             }
             d.s.got += bytes.len() as u64;
             d.s.fetched += 1;
             self.records.insert(h.clone(), bytes);
+            d.taken.push(h.clone());
         }
         Ok(())
     }
 
-    /// Rule 3's let go, once [`Copy::ask`] gives nothing more.
-    pub fn finish(&mut self, d: Descent) -> R<Synced> {
-        let mut s = d.s;
-        let reached = self.reach()?;
+    /// Rule 3's let go, once [`Copy::ask`] gives nothing more: the scope's new hashes become the copy's.
+    pub fn finish(&mut self, mut d: Descent) -> R<Synced> {
+        let reached = match self.reach_from(&d.roots) {
+            Ok(r) => r,
+            Err(e) => {
+                self.abandon(d);
+                return Err(e);
+            }
+        };
+        self.roots = std::mem::take(&mut d.roots);
         self.records.retain(|h, _| reached.contains(h));
-        s.held = reached.len();
-        Ok(s)
+        d.s.held = reached.len();
+        Ok(d.s)
+    }
+
+    /// A sync that will not finish (its socket closed, or an answer was refused): the records it took are let go and
+    /// the copy is as it was. Compare only descends from a hash it does not hold, so it must never hold a record
+    /// without the records below it, or the next sync would stop short of them (`sync-missing`, #3424).
+    pub fn abandon(&mut self, d: Descent) {
+        for h in d.taken {
+            self.records.remove(&h);
+        }
     }
 
     /// The bytes of every record held: what a snapshot of the scope (a sync from nothing) would fetch.
@@ -299,9 +431,13 @@ impl Copy {
     }
 
     /// The hashes the scope reaches, each record held and checked; refused by name if one is missing.
-    pub fn reach(&self) -> R<HashSet<Vec<u8>>> {
-        let mut seen = HashSet::new();
-        let mut stack: Vec<Vec<u8>> = self.roots.values().cloned().collect();
+    pub fn reach(&self) -> R<BTreeSet<Vec<u8>>> {
+        self.reach_from(&self.roots)
+    }
+
+    fn reach_from(&self, roots: &BTreeMap<Id, Vec<u8>>) -> R<BTreeSet<Vec<u8>>> {
+        let mut seen = BTreeSet::new();
+        let mut stack: Vec<Vec<u8>> = roots.values().cloned().collect();
         while let Some(h) = stack.pop() {
             if seen.contains(&h) {
                 continue;

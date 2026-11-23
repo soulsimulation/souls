@@ -4,6 +4,7 @@
 //! K4's log on a disk in memory.
 
 use super::*;
+use crate::edit::plan;
 use crate::log::{Log, Mem};
 use replica::edit::{Edit, Op, Ref, Spot, check, reverses};
 use replica::effects::{FIXTURE_HEADER, Header, fixture_bytes};
@@ -115,12 +116,15 @@ impl W {
 
     fn edit(&mut self, ops: Vec<Op>, step: Option<&str>) -> Committed {
         let edit = Edit {
+            claim: None,
             intent: self.intents.mint().expect("an id"),
             actor: self.creator(),
             planned: self.live.version(),
             ops,
         };
-        let checked = check(edit, &self.live.frozen(), &self.world).expect("checked");
+        let copy = self.live.frozen();
+        let checked = check(edit, &copy, &self.world).expect("checked");
+        let planned = plan(checked, &copy, None).expect("planned");
         self.at += 1_000;
         let step = step.map(|s| Step {
             build: "house".to_owned(),
@@ -128,7 +132,14 @@ impl W {
         });
         let c = self
             .history
-            .edit(&mut self.live, &mut self.minter, &checked, self.at, step)
+            .edit(
+                &mut self.live,
+                &mut self.minter,
+                &planned,
+                &[],
+                self.at,
+                step,
+            )
             .expect("committed");
         self.append(&c.part);
         c
@@ -439,6 +450,56 @@ fn a4_a_refused_or_conflicting_undo_changes_nothing() {
     assert_eq!(unchanged(&w), was);
     println!(
         "G2 stand-in refusal, a changed node and a thing put inside: each refused, nothing changed"
+    );
+}
+
+#[test]
+fn a4_a_batch_that_added_a_claim_list_is_undone_to_the_empty_list() {
+    use replica::edit::claims::F_CLAIMS;
+    let mut w = W::new(KEPT_MOST);
+    w.furnish(None);
+    let root = w.root;
+    let claim = Value::Array(vec![Value::Array(vec![
+        Value::Text(Name::new("c:a").expect("a name")),
+        Value::Text(Name::new("part:a").expect("a name")),
+        Value::Nint(9_999),
+        Value::Nint(9_999),
+        Value::Uint(10_000),
+        Value::Uint(10_000),
+    ])]);
+    // The first claim adds the root's field; a field T6 cannot unset is set back to what reads as unset.
+    w.edit(
+        vec![Op::Set {
+            node: Ref::Node(root),
+            field: F_CLAIMS,
+            to: claim,
+        }],
+        None,
+    );
+    w.undo(&mut ok()).expect("the claim's batch is undone");
+    let tree = w.live.tree();
+    let fields = tree
+        .node(tree.handle(root).expect("root"))
+        .expect("root")
+        .fields()
+        .clone();
+    assert_eq!(fields.get(&F_CLAIMS), Some(&Value::Array(Vec::new())));
+    // The older batch behind it is not blocked.
+    w.undo(&mut ok()).expect("the furnishing is undone");
+    // A field with no unset value still has no inverse.
+    let mut w = W::new(KEPT_MOST);
+    let (_, cr, _, _) = w.furnish(None);
+    w.edit(
+        vec![Op::Set {
+            node: Ref::Node(cr),
+            field: 77,
+            to: Value::Uint(1),
+        }],
+        None,
+    );
+    assert_eq!(
+        w.undo(&mut ok()).expect_err("no inverse").name,
+        "undo.no-inverse"
     );
 }
 

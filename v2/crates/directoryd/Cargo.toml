@@ -7,12 +7,17 @@ description = "The directory (Engine v2, #2635): where a world runs, when it wak
 
 [dependencies]
 replica = { path = "../replica" }
+# A Soul's picture passes G6's check and hold point (W11).
+assets = { path = "../assets" }
 # RS256 signatures (the session check), the random account and principal ids (W1); the object store's request
 # signature (AWS SigV4: SHA-256 and HMAC) and the in-memory store's ETags (W8).
 ring = "0.17"
 # The account store: one SQLite file, with SQLite's online backup for a consistent copy (W1).
 rusqlite = { version = "0.37", features = ["bundled", "backup"] }
 serde_json = "1"
+# Bounded private gateway-presence connect and overall steady I/O deadline (W15).
+socket2 = "0.6.5"
+rustix = { version = "1", default-features = false, features = ["time", "std"] }
 # The provider's public keys, fetched over HTTPS when its key id changes (W1); the object store over HTTP(S) (W8).
 ureq = { version = "3", default-features = false, features = ["rustls"] }
 

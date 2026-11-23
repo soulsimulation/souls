@@ -11,19 +11,22 @@
 //! What the rules get from the copy: the thing as `{kind, fields}`, its fields named by its kind's `state` numbers;
 //! the body as `{effector_mm}`, the body's position less the thing's, both in their parent's frame (the effector is
 //! the body's origin until bodies have hands, T4); the moves' reach from [`Rules::moves`]; and an asker who sees all
-//! (the world). A yes candidate's `set` effects become `Change::Set`; any other effect is not prepared yet, and the
-//! candidate is `no` with `effect_unsupported`.
+//! (the world). A yes candidate's effects are bound by F2's binder, the form runner's own (`skills::form_runner`),
+//! and become its changes; an effect the binder does not bind is refused by the binder's name. In a world with bodies
+//! a form's act goes to the form runner instead (C2, `crate::acts`).
 
-use replica::effects::{Actor, Cause, Change};
+use replica::effects::{Actor, Cause, Change, Refusal};
 use replica::encode::Value as Cbor;
 use replica::ids::Id;
 use replica::query::LinkAt;
 use replica::read::Read;
 use replica::rules::decide_parts;
 use replica::rules::json::Value;
+use replica::select::{Resolved, Spot};
 use replica::world_model::show;
 use sim::commit::{Checked, Checks, Verdict, off_clock};
 use sim::frozen::Publisher;
+use skills::form_runner;
 use std::cell::RefCell;
 use std::sync::mpsc::{Receiver, Sender, channel};
 use std::sync::{Arc, Mutex, PoisonError};
@@ -31,6 +34,7 @@ use std::thread;
 use std::time::Duration;
 
 pub mod budget;
+pub mod places;
 #[cfg(test)]
 mod tests;
 pub mod toggles;
@@ -59,6 +63,16 @@ pub struct Act {
     pub candidates: Vec<Candidate>,
     /// Set for the one re-check: the version the copy must stand at, or later.
     pub recheck: Option<u64>,
+    /// A move aimed at a described spot (selector 2, E2 #2709), resolved by the checker that takes the act.
+    pub spot: Option<Box<SpotAct>>,
+}
+
+/// A walk or a sit aimed at a described spot, and the checker's answer on its copy once resolved.
+#[derive(Clone, Debug)]
+pub struct SpotAct {
+    pub sit: bool,
+    pub spot: Spot,
+    pub resolved: Option<Result<Resolved, Refusal>>,
 }
 
 /// A reader that records each node it reads and the node's stamp.
@@ -146,9 +160,11 @@ fn position(record: &Cbor) -> Option<[i128; 3]> {
     v.try_into().ok()
 }
 
-/// The kind's plain name (`namespace:name`) of a node record.
+/// The plain name (`namespace:name`) of a node record's Soul Actions entry: the entry its field 27 names
+/// ([`import_eden::F_ENTRY`], from its world's map), else its kind's.
 fn plain_kind(record: &Cbor) -> Option<&str> {
-    let Cbor::Text(k) = field(record, 2)? else {
+    let named = field(record, 6).and_then(|f| field(f, import_eden::F_ENTRY));
+    let Some(Cbor::Text(k)) = named.or_else(|| field(record, 2)) else {
         return None;
     };
     Some(k.as_str().split_once('@').map_or(k.as_str(), |(p, _)| p))
@@ -163,7 +179,19 @@ fn thing(record: &Cbor, entry: &Value) -> Value {
             Value::Int(n) => u64::try_from(*n).ok(),
             _ => None,
         });
-        if let Some(v) = n.and_then(|n| field(field(record, 6)?, n)).and_then(int) {
+        let Some(v) = n.and_then(|n| field(field(record, 6)?, n)) else {
+            continue;
+        };
+        // A text field reads its words' reference (`{21: id}`, K16) once written and null once cleared (`{}`), so
+        // a need on `is: null` tells them apart (#3911's finding).
+        if def.get("type").and_then(Value::str) == Some("text") {
+            let reference = field(v, replica::audience::REFERENCE)
+                .and_then(|r| replica::effects::read_id(r).ok());
+            fields.push((
+                name.clone(),
+                reference.map_or(Value::Null, |id| Value::s(&replica::world_model::show(id))),
+            ));
+        } else if let Some(v) = int(v) {
             fields.push((name.clone(), Value::Int(v)));
         }
     }
@@ -173,43 +201,35 @@ fn thing(record: &Cbor, entry: &Value) -> Value {
     ])
 }
 
-/// A rules value as a stored field value: a flag as 0 or 1, a whole number as itself.
-fn stored(v: Option<&Value>) -> Option<Cbor> {
-    match v? {
-        Value::Bool(b) => Some(Cbor::Uint(u64::from(*b))),
-        Value::Int(n) if *n >= 0 => u64::try_from(*n).ok().map(Cbor::Uint),
-        Value::Int(n) => u64::try_from(-1 - *n).ok().map(Cbor::Nint),
-        _ => None,
+/// The changes a yes candidate's form makes: its effects as the form runner's binder binds them
+/// (`skills::form_runner`, F2 and F4), or the binder's refusal by name. A world with no bodies has no hands or runner
+/// to work out an amount, a take, a make or a remove against: those are the runner's, `effect-needs-the-runner`; a
+/// form with a code hatch is `hatch-needs-the-runner`.
+fn prepare(this: Id, entry: &Value, form: &str) -> Result<Vec<Change>, &'static str> {
+    // A code hatch runs in the form runner's path (#3713), which a world with no bodies does not have.
+    if form_runner::bind_hatch(entry, form)
+        .map_err(|r| r.name)?
+        .is_some()
+    {
+        return Err("hatch-needs-the-runner");
     }
-}
-
-/// The changes a yes candidate's form makes, or none if one of its effects is not a `set` this can prepare.
-fn prepare(this: Id, entry: &Value, form: &str) -> Option<Vec<Change>> {
-    let f = entry.get("forms")?.get(form)?;
-    let effects = f.get("effects").and_then(Value::arr).unwrap_or(&[]);
+    let effects = form_runner::bind_effects(entry, form).map_err(|r| r.name)?;
     effects
-        .iter()
-        .map(|e| {
-            if e.get("change").and_then(Value::str) != Some("set") {
-                return None;
-            }
-            let name = e.get("field").and_then(Value::str)?;
-            let n = match entry.get("state")?.get(name)?.get("n")? {
-                Value::Int(n) => u64::try_from(*n).ok()?,
-                _ => return None,
-            };
-            Some(Change::Set {
+        .into_iter()
+        .map(|e| match e {
+            form_runner::Effect::Set { field, to } => Ok(Change::Set {
                 node: this,
-                field: n,
-                to: stored(e.get("to"))?,
+                field,
+                to,
                 by: None,
-            })
+            }),
+            _ => Err("effect-needs-the-runner"),
         })
         .collect()
 }
 
 /// Checks one candidate on `copy`.
-fn candidate(copy: &impl Read, rules: &Rules, body: Id, c: &Candidate) -> Checked {
+fn candidate(copy: &impl Read, rules: &Rules, body: Id, soul: Id, c: &Candidate) -> Checked {
     off_clock();
     let r = Recording::new(copy);
     let this = r.node(c.this);
@@ -226,6 +246,14 @@ fn candidate(copy: &impl Read, rules: &Rules, body: Id, c: &Candidate) -> Checke
     let Some(entry) = plain_kind(&this).and_then(|k| rules.kinds.get(k)) else {
         return no("no_such_kind", r);
     };
+    // #3700: a private thing (its own mark or its nearest marked ancestor's) is its owner's alone. The ancestors are
+    // read on the copy, outside the read set, so a busy room does not send every act in it to a re-check; the clock
+    // thread asks again on the live tree before it commits the candidate it takes (`answers`), so a mark set since
+    // still binds.
+    if replica::who_may::refusal_of(replica::who_may::ownership_read(copy, c.this), soul).is_some()
+    {
+        return no("object.private", r);
+    }
     let (this_id, body_id) = (show(c.this), show(body));
     let mut nodes = vec![(this_id.clone(), thing(&this, entry))];
     if let (Some(a), Some(t)) = (position(&actor), position(&this)) {
@@ -250,13 +278,13 @@ fn candidate(copy: &impl Read, rules: &Rules, body: Id, c: &Candidate) -> Checke
     let verdict = decide_parts(Some(&rules.kinds), Some(&act), Some(&state), Some(&asker));
     match verdict.get("verdict").and_then(Value::str) {
         Some("yes") => match prepare(c.this, entry, &c.form) {
-            Some(changes) => Checked {
+            Ok(changes) => Checked {
                 verdict: Verdict::Yes,
                 node: c.this,
                 changes,
                 reads: r.reads(),
             },
-            None => no("effect_unsupported", r),
+            Err(reason) => no(reason, r),
         },
         Some("no") => no(
             verdict.get("reason").and_then(Value::str).unwrap_or("no"),
@@ -277,7 +305,13 @@ pub fn check(copy: &impl Read, rules: &Rules, act: &Act) -> Checks {
         candidates: act
             .candidates
             .iter()
-            .map(|c| candidate(copy, rules, act.body, c))
+            .map(|c| {
+                let soul = match act.actor {
+                    Actor::Soul(s) => s,
+                    _ => act.body,
+                };
+                candidate(copy, rules, act.body, soul, c)
+            })
             .collect(),
     }
 }
@@ -307,11 +341,14 @@ pub fn start(
             .spawn(move || {
                 loop {
                     let next = rx.lock().unwrap_or_else(PoisonError::into_inner).recv();
-                    let Ok(act) = next else { break };
+                    let Ok(mut act) = next else { break };
                     let copy = match act.recheck {
                         Some(v) => publisher.wait_for(v, RECHECK_WAIT),
                         None => publisher.latest(),
                     };
+                    if let Some(s) = act.spot.as_mut() {
+                        s.resolve(copy.tree(), act.body);
+                    }
                     let checks = check(&*copy, &rules, &act);
                     if out.send((act, checks)).is_err() {
                         break;

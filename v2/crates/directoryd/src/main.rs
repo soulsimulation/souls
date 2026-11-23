@@ -1,12 +1,16 @@
 //! The directory process (Engine v2, #2635): so far the sign-in (W1, #2704). Arguments: [`start::USAGE`]. It prints
 //! `listening on <address>` once it serves, and refuses to start, with a line saying why, on what [`start::parse`]
-//! refuses.
+//! refuses. It ships its stores to the offsite bucket (O20b, #3523: [`directoryd::backup::run`]).
 
-use directoryd::accounts::serve::{App, run};
+use directoryd::accounts::serve::{App, key_digest, now, run};
 use directoryd::accounts::session::{Jwks, Verifier};
 use directoryd::accounts::start;
 use directoryd::accounts::store::Store;
+use directoryd::accounts::view::ViewKey;
+use directoryd::backup;
+use std::collections::BTreeMap;
 use std::net::TcpListener;
+use std::path::Path;
 use std::sync::{Arc, Mutex};
 
 fn main() {
@@ -25,6 +29,29 @@ fn main() {
             std::process::exit(2);
         }
     };
+    let view_key = match &config.view_key {
+        None => None,
+        Some(path) => match std::fs::read_to_string(path)
+            .ok()
+            .and_then(|t| ViewKey::read(&t))
+        {
+            Some(k) => Some(k),
+            None => {
+                eprintln!("directoryd: refusing to start: --view-key is a file of 64 hex digits");
+                std::process::exit(2);
+            }
+        },
+    };
+    // A test person's Souls and worlds, for local and test worlds (`--test-own`, only with the test sign-in).
+    for (name, grant, follow) in &config.test_own {
+        let owned = store
+            .sign_in(start::TEST_ISSUER, name, now())
+            .and_then(|a| store.own(&a.account, grant, follow.as_deref()));
+        if let Err(e) = owned {
+            eprintln!("directoryd: refusing to start: {e}");
+            std::process::exit(2);
+        }
+    }
     let verifier = config
         .provider
         .as_ref()
@@ -40,14 +67,72 @@ fn main() {
             std::process::exit(2);
         }
     };
-    let addr = listener.local_addr().expect("a bound address");
-    println!("listening on {addr}");
-    let app = App {
+    let mailbox_key = match config.mailbox_key.as_deref().map(std::fs::read_to_string) {
+        None => None,
+        Some(Ok(k)) if !k.trim().is_empty() => Some(key_digest(k.trim())),
+        Some(_) => {
+            eprintln!("directoryd: refusing to start: --mailbox-key names no readable key");
+            std::process::exit(2);
+        }
+    };
+    let app = Arc::new(App {
         store,
         verifier,
         test_sign_in: config.test_sign_in,
+        view_key,
+        origin: Some(config.public_url.trim_end_matches('/').to_string()),
+        mailbox_key,
         pairing,
         log: Mutex::new(Box::new(std::io::stderr())),
-    };
-    run(listener, Arc::new(app));
+        worlds: match directoryd::worlds::list::from_env("directoryd") {
+            Some(Err(e)) => {
+                eprintln!(
+                    "directoryd: refusing to start: worlds: {}: {}",
+                    e.name, e.detail
+                );
+                std::process::exit(2);
+            }
+            w => w.and_then(Result::ok),
+        },
+    });
+    // O20's shipper for the directory's stores (O20b, #3523): the account store's copy is handed over by this program,
+    // which holds it exclusively; with no bucket set it says so once and ships nothing.
+    let mut stores = Vec::new();
+    let world_store = std::env::var_os("DIRECTORYD_WORLD_STORE").map(std::path::PathBuf::from);
+    let placement_backup =
+        std::env::var_os("DIRECTORYD_PLACEMENT_BACKUP").map(std::path::PathBuf::from);
+    for mut e in backup::owned_by("directoryd", &[]).unwrap_or_default() {
+        let at = match e.name.as_str() {
+            "accounts" => Some(&config.store),
+            "pairing" => config.pairing.as_ref(),
+            "gateway-tokens" => config.gateway_tokens.as_ref(),
+            "world-directory" => world_store.as_ref(),
+            "placement-backup" => placement_backup.as_ref(),
+            _ => None,
+        };
+        if let Some(at) = at.and_then(|p| std::path::absolute(p).ok()) {
+            e.path = at.to_string_lossy().into_owned();
+            stores.push(e);
+        }
+    }
+    let owner = Arc::clone(&app);
+    let hooks = BTreeMap::from([(
+        "accounts".to_owned(),
+        Box::new(move |to: &Path| owner.store.backup(to).map_err(|e| e.to_string()))
+            as backup::Hook,
+    )]);
+    let root = std::path::absolute(&config.store)
+        .ok()
+        .and_then(|p| p.parent().map(Path::to_path_buf))
+        .unwrap_or_default();
+    match backup::run("directoryd", root, stores, hooks, "") {
+        Ok(said) => eprintln!("{said}"),
+        Err(e) => {
+            eprintln!("directoryd: refusing to start: {}: {}", e.name, e.detail);
+            std::process::exit(2);
+        }
+    }
+    let addr = listener.local_addr().expect("a bound address");
+    println!("listening on {addr}");
+    run(listener, app);
 }

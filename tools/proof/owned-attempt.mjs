@@ -1,11 +1,13 @@
 // Custom-journey lifecycle enforcement. Operational records are private; none of this output is publishable by default.
 import { createHash, randomUUID } from 'node:crypto';
 import { execFileSync } from 'node:child_process';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, renameSync, rmSync, writeFileSync, readdirSync } from 'node:fs';
 import { dirname, isAbsolute, join, relative, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createRequire } from 'node:module';
 import { startWorld } from '../god-skill/dev-world.mjs';
+import { startV2AccountFixture } from './v2-account-fixture.mjs';
+import { startV2BodyFixture } from './v2-body-fixture.mjs';
 import { checkPort, portFree } from '../../e2e/local-smoke.mjs';
 import { config } from '../../e2e/config.mjs';
 import { assertImportedAttemptBudget } from './imported-attempt-budget.mjs';
@@ -19,10 +21,31 @@ const writeNew = (file, value) => writeFileSync(file, typeof value === 'string' 
 const requireThat = (ok, why) => { if (!ok) throw new Error(`proof.${why}`); };
 const git = (root, ...args) => execFileSync('git', ['-C', root, ...args], { encoding: 'utf8' }).trim();
 const loadedToolHead = git(TOOL_ROOT, 'rev-parse', 'HEAD');
-const loadedFiles = ['tools/proof/owned-attempt.mjs', 'tools/proof/imported-attempt-budget.mjs', 'tools/god-skill/dev-world.mjs', 'e2e/config.mjs', 'e2e/local-smoke.mjs', 'tools/playtest/lib/platform.mjs'].map(path => ({ path, hash: digest(readFileSync(join(TOOL_ROOT, path))) }));
+const loadedFiles = ['tools/proof/owned-attempt.mjs', 'tools/proof/imported-attempt-budget.mjs', 'tools/proof/v2-account-fixture.mjs', 'tools/proof/v2-body-fixture.mjs', 'tools/god-skill/dev-world.mjs', 'e2e/config.mjs', 'e2e/local-smoke.mjs', 'tools/playtest/lib/platform.mjs'].map(path => ({ path, hash: digest(readFileSync(join(TOOL_ROOT, path))) }));
 const source = root => { requireThat(!git(root, 'status', '--porcelain'), 'source-dirty'); return { root: resolve(root), head: git(root, 'rev-parse', 'HEAD') }; };
 const within = (root, path) => { const p = relative(root, resolve(path)); return p && p !== '..' && !p.startsWith('../') && !isAbsolute(p); };
 const sameSource = (a, b) => !!a && !!b && JSON.stringify(Object.keys(a).sort()) === JSON.stringify(Object.keys(b).sort()) && Object.keys(a).every(k => a[k].head === b[k].head && a[k].root === b[k].root);
+function expectedHttp(event, report, base) {
+  if (event.kind !== 'http') return false;
+  const url = new URL(event.url), origin = new URL(base).origin;
+  return url.origin === origin && !url.search && !url.hash && report.expectedHttp.some(e => url.pathname === e.path && event.status === e.status);
+}
+// An aborted owned-origin GET is expected only when its URL got a declared expected response, or it was in flight when the
+// driver itself called page.goto or page.reload. Every other request failure still fails the attempt.
+function expectedAbort(event, report, base) {
+  if (event.kind !== 'requestfailed' || event.method !== 'GET' || event.error !== 'net::ERR_ABORTED') return false;
+  const url = new URL(event.url);
+  if (url.origin !== new URL(base).origin || url.search || url.hash) return false;
+  return event.inFlightAtDriverNavigation === true || report.network.some(e => e.url === event.url && expectedHttp(e, report, base));
+}
+const expectedNetwork = (event, report, base) => expectedHttp(event, report, base) || expectedAbort(event, report, base);
+function expectedResourceError(event, report, base) {
+  if (event.kind !== 'error' || event.text !== 'Failed to load resource: the server responded with a status of 503 (Service Unavailable)' || !event.location?.url) return false;
+  return report.network.some(response => response.status === 503 && response.url === event.location.url && expectedHttp(response, report, base));
+}
+function unexpectedConsole(report, base) {
+  return report.console.some(event => event.kind === 'pageerror' || (event.kind === 'error' && !expectedResourceError(event, report, base)));
+}
 async function bounded(work, signal, ms, phase, onTimeout) {
   let timer, abort;
   try {
@@ -96,7 +119,7 @@ async function openBrowser(o, paths, base) {
 
 const production = { source, changed: (root, from, to) => git(root, 'diff', '--name-only', from, to).split('\n'),
   lineChanged: (root, from, to, path, line) => [...git(root, 'diff', '--unified=0', from, to, '--', path).matchAll(/^@@ .*\+(\d+)(?:,(\d+))? @@/gm)].some(m => line >= Number(m[1]) && line < Number(m[1]) + Number(m[2] ?? 1)),
-  boot: startWorld, browser: openBrowser, stop: stopChild, portFree, now: () => Date.now(), test: false };
+  boot: o => o.kind === 'v2-bodies' ? startV2BodyFixture(o) : o.kind === 'v2-account' ? startV2AccountFixture(o) : (requireThat(o.kind === undefined, 'unknown-fixture-kind'), startWorld(o)), browser: openBrowser, stop: stopChild, portFree, now: () => Date.now(), test: false };
 
 /** Exactly one invocation = one fresh owned lifecycle. A failed slot cannot be replaced by another sample id.
  * cycle.plan is fixed in advance, e.g. baseline1,baseline2,candidate1,candidate2. Each slot's repair loop is capped3.
@@ -107,9 +130,11 @@ export const runOwnedAttempt = options => run(options, production);
 export const createTestRunner = overrides => options => run(options, { ...production, lineChanged: () => true, ...overrides, test: true });
 
 async function run(o, d) {
+  requireThat(o.world?.kind === undefined || (o.world.kind === 'v2-account' || o.world.kind === 'v2-bodies'), 'unknown-fixture-kind');
   requireThat(o.owner?.trim() && o.cycle?.id && o.cycle.plan?.length && o.ledger, 'plan-and-agent-identity-required');
   requireThat(!('url' in o) && !('runDir' in o) && !('dataDir' in o) && !('profileDir' in o), 'existing-resource-override');
   for (const [value, max] of [[o.phaseTimeoutMs ?? 30000, 30000], [o.cleanupTimeoutMs ?? 8000, 8000], [o.journeyTimeoutMs ?? 90000, 90000], [o.navigationTimeoutMs ?? 30000, 30000], [o.world?.timeoutMs ?? 180000, 180000]]) requireThat(Number.isSafeInteger(value) && value > 0 && value <= max, 'timeout-out-of-bounds');
+  if (o.world.kind === 'v2-bodies') requireThat((o.world.timeoutMs ?? 30000) <= 30000, 'body-boot-timeout-out-of-bounds');
   if (!d.test) requireThat(!o.journey && o.driver?.root && o.driver?.path, 'committed-driver-required');
   const ledger = resolve(o.ledger), toolRoot = resolve(o.toolRoot ?? TOOL_ROOT), lock = ledger + '.lock';
   if (!d.test) requireThat(toolRoot === TOOL_ROOT, 'tool-checkout-mismatch');
@@ -118,6 +143,9 @@ async function run(o, d) {
   mkdirSync(dirname(ledger), { recursive: true });
   mkdirSync(lock); // exclusive; stale ownership is never stolen automatically
   writeNew(join(lock, 'owner.json'), { owner: o.owner, at: new Date(d.now()).toISOString() });
+  const children = [], transients = new Set();
+  const native = o.world.kind === 'v2-account' || o.world.kind === 'v2-bodies';
+  const healthy = () => children.every(c => transients.has(c) ? c.signalCode === null && (c.exitCode === null || c.exitCode === 0) : c.exitCode === null && c.signalCode === null);
   let state, report, paths, browser, child, childError, worldDeath, observationStop, closing = false, cleanupFailed = false, finalized = false, timedOut = false;
   const controller = new AbortController(), onAbort = () => controller.abort(o.signal?.reason ?? new Error('proof.interrupted'));
   const timeout = error => { timedOut = true; controller.abort(error); };
@@ -194,17 +222,25 @@ async function run(o, d) {
     report = { version: 1, qualified: false, injected: d.test, owner: o.owner, cycle: cycle.id, slot: cycle.cursor,
       arm: slot.arm, repeat: slot.repeat, repairAttempt: cycle.chain, cumulativeRun: state.attempts.length + 1,
       startedAt: new Date(d.now()).toISOString(), source: current, hypothesis: o.review?.hypothesis ?? o.repair?.hypothesis ?? 'predeclared measurement',
-      paths, driver: o.driver ?? null, browserStarted: false, status: 'BOOT_ABORT', assertions: [], console: [], evidence: [], teardown: {}, review: o.review ?? null };
+      paths, driver: o.driver ?? null, browserStarted: false, status: 'BOOT_ABORT', assertions: [], console: [], network: [], expectedHttp: [], evidence: [], teardown: {}, review: o.review ?? null };
     cycle.inFlight = paths.dir; save(); // a crash remains an explicit unfinished ownership record
     requireThat(!state.attempts.some(a => a.runDir === paths.dir), 'reused-run-directory');
     const world = await d.boot({ ...o.world, checkout: current.product.root, data: paths.data, fresh: false, log: paths.log,
-      signal: controller.signal, onSpawn(c) { requireThat(!child, 'multiple-world-children'); child = c;
+      signal: controller.signal, onSpawn(c, mode = {}) {
+        requireThat(!children.includes(c) && (native || !child), 'multiple-world-children');
+        requireThat(!mode.transient || o.world.kind === 'v2-bodies', 'transient-fixture-kind');
+        children.push(c); if (mode.transient) transients.add(c); else child ??= c;
         const died = e => { if (!closing) { worldDeath = e; controller.abort(e); } };
-        c.once('error', e => { childError = e; died(e); }); c.once('exit', () => died(new Error('proof.owned-world-exited'))); } });
-    requireThat(child && world.child === child && child.exitCode === null && child.signalCode === null && !childError, 'boot-not-owned');
+        c.once('error', e => { childError = e; died(e); }); c.once('exit', () => { if (!transients.has(c) || c.signalCode !== null || c.exitCode !== 0) died(new Error('proof.owned-world-exited')); }); } });
+    requireThat(child && world.child === child && healthy() && !childError, 'boot-not-owned');
+    if (o.world.kind === 'v2-account') requireThat(world.children?.length === 4 && world.children.every((c, i) => children[i] === c), 'fixture-children-mismatch');
+    if (o.world.kind === 'v2-bodies') requireThat(world.children?.length === 3 && world.children.every((c, i) => children.filter(c => !transients.has(c))[i] === c), 'fixture-children-mismatch');
+    report.ownedOrigin = new URL(world.base).origin;
     requireThat(resolve(world.dataDir) === paths.data && new URL(world.base).port === String(o.world.port), 'boot-resource-mismatch');
     controller.signal.throwIfAborted();
-    const fixture = await bounded(() => driver.prepare?.({ base: world.base, paths, signal: controller.signal, arm: slot.arm, repeat: slot.repeat }), controller.signal, o.phaseTimeoutMs ?? 30000, 'prepare', timeout);
+    const fixture = await bounded(() => driver.prepare?.({ base: world.base, paths, signal: controller.signal, recipe: world.recipe, arm: slot.arm, repeat: slot.repeat }), controller.signal, o.phaseTimeoutMs ?? 30000, 'prepare', timeout);
+    controller.signal.throwIfAborted();
+    requireThat(healthy(), 'owned-world-exited');
     let launchSettled = false, lateBrowser;
     const opening = Promise.resolve().then(() => d.browser(o, paths, world.base));
     opening.then(value => { launchSettled = true; lateBrowser = value; }, () => { launchSettled = true; });
@@ -225,17 +261,29 @@ async function run(o, d) {
     }
     report.browserStarted = true; state.captures++; report.captureOrdinal = state.historicalCaptures + state.captures;
     const page = browser.page;
-    page.on('console', m => report.console.push({ kind: m.type(), text: m.text() }));
+    page.on('console', m => report.console.push({ kind: m.type(), text: m.text(), location: m.location?.() ?? null }));
     page.on('pageerror', e => report.console.push({ kind: 'pageerror', text: String(e) }));
+    const navigation = { epoch: 0 }, requested = new WeakMap();
+    page.on('request', request => requested.set(request, navigation.epoch));
+    page.on('requestfailed', request => { const at = requested.get(request);
+      report.network.push({ kind: 'requestfailed', method: request.method(), url: request.url(), error: request.failure()?.errorText ?? 'unknown', inFlightAtDriverNavigation: at !== undefined && navigation.epoch > at }); });
+    page.on('response', response => { if (response.status() >= 400) report.network.push({ kind: 'http', status: response.status(), url: response.url() }); });
     observationStop = await bounded(() => driver.beforeNavigation?.({ page, base: world.base, paths, signal: controller.signal }), controller.signal, o.phaseTimeoutMs ?? 30000, 'before-navigation', timeout);
-    await bounded(() => page.goto(world.base + '?dev=1', { waitUntil: 'domcontentloaded', timeout: o.navigationTimeoutMs ?? 30000 }), controller.signal, o.navigationTimeoutMs ?? 30000, 'navigation', timeout);
+    await bounded(() => page.goto(o.world.kind === 'v2-bodies' ? world.viewer : o.world.kind === 'v2-account' ? new URL('/src/account/', world.base).href : world.base + '?dev=1', { waitUntil: 'domcontentloaded', timeout: o.navigationTimeoutMs ?? 30000 }), controller.signal, o.navigationTimeoutMs ?? 30000, 'navigation', timeout);
+    // From here on, a goto or reload is the driver's: requests in flight when one starts may be aborted by it.
+    for (const name of ['goto', 'reload']) if (typeof page[name] === 'function') { const call = page[name].bind(page); page[name] = (...args) => { navigation.epoch++; return call(...args); }; }
     await bounded(() => driver.default({ page, base: world.base, paths, signal: controller.signal, fixture, arm: slot.arm, repeat: slot.repeat,
+      expectHttp(path, status, reason) { requireThat(native && path.startsWith('/') && Number.isSafeInteger(status) && status >= 400 && reason?.trim(), 'expected-http-invalid'); report.expectedHttp.push({ path, status, reason }); },
       check(key, ok, detail = '') { report.assertions.push({ key, ok: !!ok, detail }); if (!ok) throw Object.assign(new Error(detail || key), { assertion: key }); } }), controller.signal, o.journeyTimeoutMs ?? 90000, 'journey', timeout);
     requireThat(report.assertions.length && report.assertions.every(a => a.ok), 'no-passing-assertions');
+    if (native) {
+      requireThat(report.network.every(event => expectedNetwork(event, report, world.base)), 'unexpected-network-error');
+      requireThat(!unexpectedConsole(report, world.base), 'unexpected-console-error');
+    }
     requireThat(new URL(page.url()).origin === new URL(world.base).origin, 'journey-left-owned-origin');
     const endSource = { product: d.source(o.sourceRoot), tool: d.source(toolRoot), ...(o.driver ? { driver: d.source(o.driver.root) } : {}) };
     requireThat(sameSource(current, endSource), 'source-changed-during-attempt');
-    requireThat(!worldDeath && child.exitCode === null && child.signalCode === null, 'owned-world-exited');
+    requireThat(!worldDeath && healthy(), 'owned-world-exited');
     report.status = 'PASS';
   } catch (error) {
     if (!report) throw error;
@@ -250,15 +298,48 @@ async function run(o, d) {
           try { const value = await bounded(capture, null, o.cleanupTimeoutMs ?? 8000, 'evidence'); if (value) evidence(name, value); else { evidence(name + '.unavailable.txt', 'Browser observation unavailable at this boundary.\n'); if (report.browserStarted) report.status = 'EVIDENCE_FAIL'; } }
           catch (e) { evidence(name + '.unavailable.txt', String(e)); if (report.browserStarted) report.status = 'EVIDENCE_FAIL'; }
         }
-        evidence('console.json', report.console);
         evidence('world-tail.log', existsSync(paths.log) ? readFileSync(paths.log, 'utf8').slice(-12000) : 'World did not write a log.\n');
         evidence('explanation.md', `${report.error ?? 'Predeclared journey passed.'}\n\n${o.explanation ?? 'See assertions and source-bound repair history.'}\n`);
       } catch (e) { report.evidenceError = String(e); report.status = 'EVIDENCE_FAIL'; }
       try { if (observationStop) await bounded(observationStop, null, o.cleanupTimeoutMs ?? 8000, 'observer-close'); } catch (e) { report.teardown.observerError = String(e); cleanupFailed = true; }
       try { if (browser) await bounded(() => browser.close(), null, o.cleanupTimeoutMs ?? 8000, 'browser-close'); report.teardown.browserClosed = !report.teardown.browserOpenPending; } catch (e) { report.teardown.browserError = String(e); cleanupFailed = true; }
-      if (report.status === 'PASS' && child && (child.exitCode !== null || child.signalCode !== null)) worldDeath ??= new Error('proof.owned-world-exited');
+      try {
+        for (const event of report.network) event.expected = expectedNetwork(event, report, report.ownedOrigin);
+        for (const event of report.console) if (event.kind === 'error') event.expected = expectedResourceError(event, report, report.ownedOrigin);
+        evidence('console.json', report.console);
+        evidence('network.json', report.network);
+        if (native && report.status === 'PASS' && (report.network.some(event => !event.expected) || unexpectedConsole(report, report.ownedOrigin))) {
+          report.status = 'FAIL'; report.error = 'proof.unexpected-error-during-finalization';
+        }
+      } catch (e) { report.evidenceError = String(e); report.status = 'EVIDENCE_FAIL'; }
+      if (report.status === 'PASS' && !healthy()) worldDeath ??= new Error('proof.owned-world-exited');
       closing = true;
-      try { await bounded(() => d.stop(child), null, o.cleanupTimeoutMs ?? 8000, 'world-stop'); report.teardown.worldStopped = true; } catch (e) { report.teardown.worldError = String(e); cleanupFailed = true; }
+      report.teardown.children = children.map(c => ({ pid: c.pid ?? null, executable: c.spawnfile ?? null, exitCode: c.exitCode, signalCode: c.signalCode, exited: c.exitCode !== null || c.signalCode !== null, error: null }));
+      try {
+        await bounded(async () => {
+          const stopped = await Promise.allSettled((children.length ? children : [child]).map(c => d.stop(c)));
+          report.teardown.children = children.map((c, i) => ({ pid: c.pid ?? null, executable: c.spawnfile ?? null, exitCode: c.exitCode, signalCode: c.signalCode,
+            exited: c.exitCode !== null || c.signalCode !== null, error: stopped[i]?.status === 'rejected' ? String(stopped[i].reason) : null }));
+          requireThat(stopped.every(r => r.status === 'fulfilled') && report.teardown.children.every(c => c.exited), 'owned-children-still-live');
+        }, null, o.cleanupTimeoutMs ?? 8000, 'world-stop');
+        report.teardown.worldStopped = true;
+      } catch (e) {
+        report.teardown.worldError = String(e); cleanupFailed = true;
+        report.teardown.children = children.map((c, i) => ({ ...report.teardown.children[i], exitCode: c.exitCode, signalCode: c.signalCode, exited: c.exitCode !== null || c.signalCode !== null }));
+      }
+      try {
+        if (existsSync(paths.log)) report.evidence.push({ file: paths.log, hash: digest(readFileSync(paths.log)) });
+        if (native) for (const file of readdirSync(paths.dir).filter(f => /^(?:command-.*\.json|accessibility-before-.*\.yml|transient-cleanup\.json)$/.test(f))) { const at = join(paths.dir, file); report.evidence.push({ file: at, hash: digest(readFileSync(at)) }); }
+        for (const file of readdirSync(paths.video)) {
+          const at = join(paths.video, file); report.evidence.push({ file: at, hash: digest(readFileSync(at)) });
+          if (!d.test && native && file.endsWith('.webm')) {
+            const seconds = Number(execFileSync('ffprobe', ['-v', 'error', '-show_entries', 'format=duration', '-of', 'default=noprint_wrappers=1:nokey=1', at], { encoding: 'utf8', timeout: 5000 }));
+            requireThat(Number.isFinite(seconds) && seconds > 0 && seconds <= 90, 'video-duration-out-of-bounds');
+            (report.videoDurations ??= []).push({ file: at, seconds });
+          }
+        }
+        if (!d.test && report.browserStarted) requireThat(report.teardown.browserClosed && readdirSync(paths.video).some(f => f.endsWith('.webm')), 'finalized-video-required');
+      } catch (e) { report.evidenceError = String(e); report.status = 'EVIDENCE_FAIL'; }
       if (cleanupFailed) report.status = 'CLEANUP_FAIL';
       else if (worldDeath) { report.status = report.browserStarted ? 'FAIL' : 'BOOT_ABORT'; report.error ??= String(worldDeath); }
       else if (controller.signal.aborted) { report.status = report.browserStarted ? timedOut ? 'FAIL' : 'INTERRUPTED' : 'BOOT_ABORT'; report.error ??= String(controller.signal.reason); }

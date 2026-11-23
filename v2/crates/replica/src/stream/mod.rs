@@ -18,7 +18,9 @@
 //!    `{1: newest, 2: period µs, 3: header hash, 4: newest's end µs, 5: anchor world µs, 6: anchor wall ms, 7: quiet
 //!    until µs}`, 1 and 4 once a part is written, 7 when quiet.
 //! 4. **Words never travel in parts.** A part is T6 bytes, whose text items are names only (T6 rule 10); free text is
-//!    a reference (T8, `{21: id}`). Words reach an entitled audience by another path (W4), not here.
+//!    a reference (T8, `{21: id}`). A public stream's words travel beside it, one text file per part
+//!    (`worldd::view_out` rule 10); the reader's event query ([`Player::events`]) gives the part's events, whose
+//!    references a page looks up in that file (V1b, #3361).
 //! 5. **The reader** ([`Player`]) applies parts in number order to R1's replica, refuses a part out of order by name,
 //!    and checks each carried hash. It keeps the part's motion samples, every one in entry order ([`Player::samples`]),
 //!    so a page draws a body through each of them, not only through its state after the part (V6, #2715).
@@ -32,7 +34,45 @@
 //!    in flight just before the arrive of its sequence, which lands it (`Replica::apply_view`). A carried record that
 //!    names no destination (revision 1) is refused as `carried-no-destination`.
 
+//!
+//! 8. **Checkpoint public observations** (#3639, [`public::PublicPlayer`]). The old constructor and fields retain
+//!    their meanings. An explicit pointer field8 is a 32-byte SHA-256 baseline/generation id. Its immutable files
+//!    are `g/<hex>/baseline`, `baseline.text`, and numbered parts/text. A baseline is
+//!    `{1: 1, 2: exact header hash, 3: authorized projection, 4: physical source cursor}`. The projection retains
+//!    exact root kind/fields, live nodes/links, public flight context, public timers/time and opaque public flying
+//!    nodes/owned links; it never includes the global arrived ledger or private ancestors. Opaque references are not nodes.
+//!    Public queries keep all six R1 shapes; unresolved frame paths refuse `frame-unavailable` without stopping
+//!    other queries. Node hashes keep their existing labeled public-node contract; observation digests are
+//!    separately SHA-256 over the authorized projection, never a private/global state hash.
+//! 9. **One canonical producer, one observer.** Only after validating the WHOLE actual canonical source Part does
+//!    the producer attach field10 context beside the unchanged R3 public effects/events. Context is
+//!    `{1: 1, 2: baseline digest, 3: prior projection digest, 4: result digest, 5: projection delta,
+//!    6: complete physical cursor, 7: [[actual duplicate-Arrive sequence, visible transfer], ...],
+//!    8: [[authorized changed node, version], ...]}`. Deltas replace scalar/time fields and upsert/remove id rows
+//!    for nodes, links, flights and timers. The trusted producer authorizes observations; a hash alone does not.
+//!    The public observer stores them atomically, preserving actual motion samples/events, public sequence gaps
+//!    and terminal private gaps, without a second engine apply, manufactured history or private transfer ledger.
+//! 10. **Continuity.** Immutable old headers/parts remain at their addresses. An optional pointer field9
+//!     `[legacy public version, legacy next-part count, legacy projection digest]` requires an open legacy reader
+//!     to drain and compare its actual public state before installing the successor baseline. The browser reconciles baseline nodes through a separate
+//!     snapshot callback with no part time, samples, events or playback counters. That terminal may
+//!     lie within a physical source Part: the producer validates the whole Part first, retains its original bytes,
+//!     and accounts for its genuine remainder once. Baseline/public and complete source cursors are distinct.
+//!     A normal restart recovers the same generation, cursor and exact public bytes from the existing private
+//!     Store; a newer ordinary checkpoint never replaces that generation's source. Missing/corrupt source is a
+//!     named refusal, never a quiet pointer or a ready stream. No epoch, core transfer or retention policy changes.
+//! 11. **Generations roll over** (#3825). Every `SOULS_STREAM_GENERATION_PARTS` parts (240 by default, 2 minutes of a busy world) the public
+//!     writer closes its generation: the next baseline is the public state at that moment, at the same source cursor,
+//!     so its digest is the old generation's last. The pointer then names the new generation (field8) with field9's
+//!     handoff for the old one and field10, the old generation's id. A new viewer installs only the newest baseline;
+//!     a live viewer on the generation field10 names drains it to field9's part count, checks the version and
+//!     digest, and installs the new baseline, so it crosses with no gap. A viewer further behind starts again from
+//!     the newest baseline. The boundary is a part count and each rollover is in the recovery chain, so a restart
+//!     publishes the same bytes. The current and previous generations are always kept; older ones are removed once
+//!     their last write is `SOULS_STREAM_PRUNE_GRACE_S` (600) seconds old. World time and the tick are untouched.
+
 pub mod lz;
+pub mod public;
 #[cfg(all(target_arch = "wasm32", not(feature = "checker")))]
 mod wasm;
 
@@ -333,6 +373,7 @@ pub struct Player {
     replica: Replica,
     next: u64,
     samples: Vec<HandOff>,
+    events: Vec<Value>,
 }
 
 impl Player {
@@ -342,6 +383,7 @@ impl Player {
             replica: Replica::start(header)?,
             next: 0,
             samples: Vec::new(),
+            events: Vec::new(),
         })
     }
 
@@ -356,6 +398,13 @@ impl Player {
     /// The motion samples of the part played last, every one, in entry order (V6, #2715).
     pub fn samples(&self) -> &[HandOff] {
         &self.samples
+    }
+
+    /// The event query (V1b, #3361): the named events of the part played last, in entry order, each as `{1: name, 2:
+    /// fields, 3: the node of its entry, 4: at µs, 5: the entry's sequence}`. A `souls:said` event's words are a
+    /// reference (`{21: id}`); the part's text file beside it holds the public words (`worldd::view_out`).
+    pub fn events(&self) -> &[Value] {
+        &self.events
     }
 
     /// Plays one part's file bytes: the next number only, whole or not at all.
@@ -385,6 +434,21 @@ impl Player {
             .filter_map(|c| match &c.change {
                 Change::Motion(h) => Some(*h),
                 _ => None,
+            })
+            .collect();
+        self.events = part
+            .effects
+            .iter()
+            .flat_map(|e| {
+                e.events.iter().flatten().map(|ev| {
+                    Value::Map(BTreeMap::from([
+                        (1, Value::Text(ev.name.clone())),
+                        (2, Value::Map(ev.fields.clone())),
+                        (3, e.envelope.node.to_value()),
+                        (4, int(e.envelope.at)),
+                        (5, Value::Uint(e.envelope.sequence)),
+                    ]))
+                })
             })
             .collect();
         let hash = match &sp.hash {

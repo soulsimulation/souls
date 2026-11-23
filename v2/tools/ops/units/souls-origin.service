@@ -9,10 +9,19 @@ Wants=network-online.target
 User=souls
 Group=souls
 Slice=souls.slice
+# Public provider fields and private ops owner/upstream settings; never receives secrets.env.
+EnvironmentFile=-/etc/souls/origin.env
+# Starts ORIGIN_PROCESSES serving processes on the one port (default: the cores less 2 for the worlds; 6 on 8 cores)
+# and starts again any that ends. Stop signals only the starter, which ends the rest; a process the kernel kills for
+# memory is started again by the starter while the others keep serving (OOMPolicy=continue).
 ExecStart=/usr/bin/env node /usr/local/lib/souls/origin/origin.mjs /var/lib/souls/views 7320 localhost
+KillMode=mixed
+OOMPolicy=continue
 Restart=always
 RestartSec=1s
-MemoryMax=256M
+# For all of them: about 55 MB each idle (7 Node processes on 8 cores), 32 MB of held buffers each, and a join wave's
+# requests in flight (#4018: 256M held one process). Inside souls.slice's 3G.
+MemoryMax=1G
 MemorySwapMax=0
 NoNewPrivileges=yes
 ProtectSystem=strict

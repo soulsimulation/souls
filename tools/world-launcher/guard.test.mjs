@@ -26,7 +26,51 @@ const pool = (range, env = {}, o = {}) => {
 };
 const world = (slug) => ({ slug, dataDir: mkdtempSync(join(tmpdir(), `l1-guard-${slug}-`)) });
 const get = (port, slug, path) => fetch(`http://127.0.0.1:${port}/w/${slug}${path}`, { signal: AbortSignal.timeout(1000) }).catch(() => null);
-test.after(async () => { for (const p of pools) await p.closeAll(); });
+const closePools = async (owned) => {
+  const results = await Promise.allSettled(owned.map((p) => p.closeAll()));
+  const failed = results.filter((r) => r.status === 'rejected').length;
+  if (failed) {
+    console.error('guard-fixture-cleanup', JSON.stringify({ failedPools: failed }));
+    const error = new Error('guard fixture pool cleanup failed');
+    error.code = 'guard.fixture-cleanup';
+    throw error;
+  }
+};
+let firstPool = 0;
+test.beforeEach(() => { firstPool = pools.length; });
+test.afterEach(async () => { await closePools(pools.slice(firstPool)); });
+test.after(async () => { await closePools(pools); });
+
+const observeTrigger = (trigger, response) => {
+  trigger.count = Math.min(8, trigger.count + 1);
+  trigger.outcome = !response ? 'no-response' : response.status === 200 ? 'http-200' : response.status === 404 ? 'http-404' : response.status === 503 ? 'http-503' : 'http-other';
+};
+const guardFailure = (p, slug, scenario, trigger) => {
+  const k = p.state(slug) ?? {}, live = k.live, now = Date.now();
+  const states = ['starting', 'running', 'restarting', 'held', 'stopped'];
+  const transitions = { halted: 0, stalled: 0, wedged: 0, exited: 0, restart: 0, held: 0, resumed: 0, other: 0 };
+  for (const line of p.lines.slice(-16)) {
+    const kind = / halted:/.test(line) ? 'halted' : / stalled:/.test(line) ? 'stalled' : / wedged \(/.test(line) ? 'wedged' : / exited \(/.test(line) ? 'exited' : / restarts in /.test(line) ? 'restart' : / held:/.test(line) ? 'held' : / resumed/.test(line) ? 'resumed' : 'other';
+    transitions[kind]++;
+  }
+  console.error('guard-fixture-evidence', JSON.stringify({
+    scenario, trigger,
+    poolStatus: states.includes(k.status) ? k.status : 'other',
+    hasChild: !!k.child, guardTimerPresent: !!p.guardTimer,
+    blocked: Object.fromEntries([
+      ['closing', p.closing], ['fenced', p.fenced], ['gate', p.gate], ['ready', k.ready], ['frozen', k.frozen],
+      ['stopped', k.stopped], ['stopping', k.stopping], ['wedging', k.wedging], ['haltRestarting', k.haltRestarting], ['looking', k.looking],
+    ].map(([name, value]) => [name, !!value])),
+    live: {
+      present: !!live, matchingChild: !!live && !!k.child && live.pid === k.child.pid,
+      halted: !!live?.halted, stalled: !!live?.stalled,
+      fresh: !!live && Number.isFinite(live.at) && now >= live.at && now - live.at <= p.g.liveStaleMs,
+      phase: !live ? 'missing' : live.phase === 'serving' ? 'serving' : typeof live.phase === 'string' && live.phase.startsWith('boot:') ? 'boot' : 'other',
+    },
+    healthFailures: Number.isSafeInteger(k.health?.fails) && k.health.fails >= 0 ? Math.min(16, k.health.fails) : 0,
+    transitions,
+  }));
+};
 
 test('full-jitter backoff: uniform under min(5 min, 1 s * 2^n); defaults are the contract numbers', () => {
   assert.equal(backoffMs(0, () => 0), 0);
@@ -78,46 +122,58 @@ test('#1150 rewound: each new rung 3 is a `rewound` problem, the world keeps run
 
 test('#1150, #1326, #2133 halted: live.json says the clock stopped; a `halted` problem and a restart every time; a halt that repeats at once ends held, named, after breakerN', async () => {
   const p = pool([P0, P0 + 2], { FAKE_LIVE: '1', FAKE_STOP_MS: '50' });
-  let port = await p.ensure(world('wh')); const pid = p.state('wh').child.pid;
-  p.startGuard();
-  await sleep(250);
-  assert.deepEqual(p.problems(), []); assert.equal(p.status('wh').halted, undefined);
-  await get(port, 'wh', '/halt');
-  await until(() => p.lines.some((l) => /world wh halted: its clock has stopped; restarting it/.test(l)), 2000, 'the guard restarts it');
-  await until(() => p.state('wh').status === 'running' && p.state('wh').child && p.state('wh').child.pid !== pid, 3000, 'running again in a new process');
-  assert.ok(p.lines.some((l) => /world wh exited .* after it halted/.test(l)), p.lines.join('\n'));
-  assert.deepEqual(p.problems().map((x) => x.code), ['halted'], 'shown for wedgeShownMs after the restart, as a wedge is');
-  assert.match(p.problems()[0].text, /halted .* ago and was restarted/);
-  // #2133: a second halt inside the window is restarted too (it used to stay halted, a frozen world, until the window passed)
-  const pid2 = p.state('wh').child.pid; port = p.state('wh').port ?? port;
-  await sleep(300); await get(port, 'wh', '/halt');
-  await until(() => p.state('wh').status === 'running' && p.state('wh').child && p.state('wh').child.pid !== pid2, 3000, 'restarted again in the same window');
-  // halting again at once, each time: never a silent loop; at breakerN failures in the window the world is held, named
-  for (let n = 0; n < 6 && p.state('wh').status !== 'held'; n++) {
-    const c = p.state('wh').child; await get(p.state('wh').port ?? port, 'wh', '/halt');
-    await until(() => p.state('wh').status === 'held' || (p.state('wh').status === 'running' && p.state('wh').child && p.state('wh').child !== c), 3000, 'restarted or held');
+  const trigger = { outcome: 'not-sent', count: 0 };
+  try {
+    let port = await p.ensure(world('wh')); const pid = p.state('wh').child.pid;
+    p.startGuard();
+    await sleep(250);
+    assert.deepEqual(p.problems(), []); assert.equal(p.status('wh').halted, undefined);
+    observeTrigger(trigger, await get(port, 'wh', '/halt'));
+    await until(() => p.lines.some((l) => /world wh halted: its clock has stopped; restarting it/.test(l)), 2000, 'the guard restarts it');
+    await until(() => p.state('wh').status === 'running' && p.state('wh').child && p.state('wh').child.pid !== pid, 3000, 'running again in a new process');
+    assert.ok(p.lines.some((l) => /world wh exited .* after it halted/.test(l)), p.lines.join('\n'));
+    assert.deepEqual(p.problems().map((x) => x.code), ['halted'], 'shown for wedgeShownMs after the restart, as a wedge is');
+    assert.match(p.problems()[0].text, /halted .* ago and was restarted/);
+    // #2133: a second halt inside the window is restarted too (it used to stay halted, a frozen world, until the window passed)
+    const pid2 = p.state('wh').child.pid; port = p.state('wh').port ?? port;
+    await sleep(300); observeTrigger(trigger, await get(port, 'wh', '/halt'));
+    await until(() => p.state('wh').status === 'running' && p.state('wh').child && p.state('wh').child.pid !== pid2, 3000, 'restarted again in the same window');
+    // halting again at once, each time: never a silent loop; at breakerN failures in the window the world is held, named
+    for (let n = 0; n < 6 && p.state('wh').status !== 'held'; n++) {
+      const c = p.state('wh').child; observeTrigger(trigger, await get(p.state('wh').port ?? port, 'wh', '/halt'));
+      await until(() => p.state('wh').status === 'held' || (p.state('wh').status === 'running' && p.state('wh').child && p.state('wh').child !== c), 3000, 'restarted or held');
+    }
+    assert.equal(p.state('wh').status, 'held');
+    assert.equal(p.lines.filter((l) => /restarting it/.test(l)).length, 5, 'one restart per halt, breakerN in all');
+    const held = p.problems().find((x) => x.code === 'held');
+    assert.ok(held, JSON.stringify(p.problems())); assert.match(held.text, /after 5 failures \(last: halted\)/);
+    await p.closeAll();
+  } catch (error) {
+    guardFailure(p, 'wh', 'halt', trigger);
+    throw error;
   }
-  assert.equal(p.state('wh').status, 'held');
-  assert.equal(p.lines.filter((l) => /restarting it/.test(l)).length, 5, 'one restart per halt, breakerN in all');
-  const held = p.problems().find((x) => x.code === 'held');
-  assert.ok(held, JSON.stringify(p.problems())); assert.match(held.text, /after 5 failures \(last: halted\)/);
-  await p.closeAll();
 });
 
 test('#1326 stalled: live.json says the clock owes ticks and has none; a `stalled` problem with the tick age, gone once it ticks again; never restarted for it', async () => {
   const p = pool([P0, P0 + 2], { FAKE_LIVE: '1' });
-  const port = await p.ensure(world('ws')); const pid = p.state('ws').child.pid;
-  p.startGuard();
-  await sleep(250);
-  assert.deepEqual(p.problems(), []);
-  await get(port, 'ws', '/stall');
-  await until(() => p.problems().some((x) => x.code === 'stalled'), 2000, 'stalled in problems');
-  assert.match(p.problems().find((x) => x.code === 'stalled').text, /ws stalled: its clock has not ticked for \d+ s/);
-  await sleep(800);
-  assert.equal(p.state('ws').child.pid, pid, 'a stall is reported, not restarted');
-  await get(port, 'ws', '/unstall');
-  await until(() => !p.problems().length, 2000, 'cleared once it ticks');
-  await p.closeAll();
+  const trigger = { outcome: 'not-sent', count: 0 };
+  try {
+    const port = await p.ensure(world('ws')); const pid = p.state('ws').child.pid;
+    p.startGuard();
+    await sleep(250);
+    assert.deepEqual(p.problems(), []);
+    observeTrigger(trigger, await get(port, 'ws', '/stall'));
+    await until(() => p.problems().some((x) => x.code === 'stalled'), 2000, 'stalled in problems');
+    assert.match(p.problems().find((x) => x.code === 'stalled').text, /ws stalled: its clock has not ticked for \d+ s/);
+    await sleep(800);
+    assert.equal(p.state('ws').child.pid, pid, 'a stall is reported, not restarted');
+    observeTrigger(trigger, await get(port, 'ws', '/unstall'));
+    await until(() => !p.problems().length, 2000, 'cleared once it ticks');
+    await p.closeAll();
+  } catch (error) {
+    guardFailure(p, 'ws', 'stall', trigger);
+    throw error;
+  }
 });
 
 test('(a) wedged, no live.json (a release before the watchdog): /healthz unanswered 6 looks in a row', async () => {

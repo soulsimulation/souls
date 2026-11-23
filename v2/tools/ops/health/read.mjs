@@ -8,7 +8,8 @@
 //   their budget and each queue's oldest item;
 // - this machine's cached copy of the world's directory record, `cache/<world>` (W8, #2729): where it runs and when a
 //   sleeping world must wake.
-// The watcher's last look (O15) and the cost (O11) have no source yet: they are `null` and read "not metered".
+// - the off-machine watcher's last look, `watcher.json` (O15, #2808), written by v2/tools/ops/watch/look.mjs.
+// The cost (O11) has no source yet: it is `null` and reads "not metered"; so does the watcher's column until a first look.
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -92,7 +93,7 @@ export function worldRow(root, world, now) {
       over_budget: h.over_budget ?? null,
       health_age_s: Number.isFinite(h.at_unix_ms) ? Math.max(0, Math.round((now - h.at_unix_ms) / 1000)) : null,
     } : null,
-    watcher: null,
+    watcher: json(join(root, 'watcher.json'))?.at_unix_ms ?? null,
     cost: null,
   };
 }
@@ -104,4 +105,31 @@ export function readWorlds(root, now = Date.now(), { cost } = {}) {
     if (cost) row.cost = cost(w) ?? null;
     return row;
   });
+}
+
+const DAY_MS = 86_400_000;
+/** The Soul clients in use on this machine over the last `windowMs` (a day): per client name and version as the
+ *  gateway's receipts hold it, how many Souls it signed in as and how many acts it made, most Souls first. Counts
+ *  only: a Soul's id, its account and any token are read to count and never returned. Files only, no world woken. */
+export function clientsInUse(root, now = Date.now(), windowMs = DAY_MS) {
+  const days = [...new Set([now - windowMs, now].map((t) => new Date(t).toISOString().slice(0, 10)))];
+  const by = new Map();
+  for (const world of worlds(root)) {
+    for (const day of days) {
+      let text;
+      try { text = readFileSync(join(root, 'worlds', world, 'receipts', `${day}.jsonl`), 'utf8'); } catch { continue; }
+      for (const line of text.split('\n')) {
+        let x;
+        try { x = JSON.parse(line); } catch { continue; }
+        if (typeof x?.soul !== 'string' || !(x.t >= now - windowMs && x.t <= now)) continue;
+        const client = typeof x.client === 'string' && x.client ? x.client : 'unknown';
+        let c = by.get(client);
+        if (!c) by.set(client, c = { client, souls: new Set(), acts: 0 });
+        c.souls.add(`${world}/${x.soul}`);
+        c.acts++;
+      }
+    }
+  }
+  return [...by.values()].map((c) => ({ client: c.client, souls: c.souls.size, acts: c.acts }))
+    .sort((a, b) => b.souls - a.souls || a.client.localeCompare(b.client));
 }

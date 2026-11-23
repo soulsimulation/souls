@@ -149,6 +149,14 @@ pub fn encode(value: &Value) -> Result<Vec<u8>, Refusal> {
     Ok(out)
 }
 
+/// The head of an item of major type `major` with argument `arg` (a length, for an array or a map), as [`encode`]
+/// writes it before the items (#3799).
+pub fn head(major: u8, arg: u64) -> Vec<u8> {
+    let mut out = Vec::new();
+    write_head(&mut out, major, arg);
+    out
+}
+
 fn write_head(out: &mut Vec<u8>, major: u8, arg: u64) {
     let m = major << 5;
     if arg < 24 {

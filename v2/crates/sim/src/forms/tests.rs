@@ -9,7 +9,7 @@ use replica::bodies::{Class, Family};
 use replica::effects::fixture_bytes;
 use replica::effects::{Actor, Body, Cause, Change, Effect};
 use replica::encode::{Name, Value, decode};
-use replica::host::{Answer, Ask, Seen};
+use replica::host::{Answer, Ask, Seen, Skill};
 use replica::ids::{Id, Minter, Scope};
 use replica::moves::{Effector, Move};
 use replica::pose::{Frame, Quat, Vec3, fixture};
@@ -26,6 +26,9 @@ use crate::host::Geometry;
 use crate::mover::Surface;
 use crate::moves::{Moves, Reach, load};
 use crate::timers::DueList;
+
+/// F11's stages (#2774), on this bench.
+mod stages;
 
 const FAMILIES: &str = include_str!("../../../replica/fixtures/bodies/families.diag");
 const KINDS: &str = include_str!("../../../replica/fixtures/world-model/kinds.diag");
@@ -87,9 +90,17 @@ struct Snap {
     things: BTreeMap<Id, (Vec3, BTreeMap<String, Vec3>)>,
     /// Every distance is this far, when set.
     far: bool,
+    defer_walk: bool,
 }
 
 impl Geometry for Snap {
+    fn plan_walk(&self, _: Id, _: usize, _: Id, _: Vec3, _: i64) -> replica::host::WalkPlan {
+        if self.defer_walk {
+            replica::host::WalkPlan::Pending
+        } else {
+            replica::host::WalkPlan::Unplanned
+        }
+    }
     fn ask(&self, _: Id, q: &Ask) -> Option<Answer> {
         match q {
             Ask::Toward { to, .. } => Some(Answer::Point(*to)),
@@ -181,6 +192,7 @@ impl Bench {
                 outline: vec![corners.clone()],
                 vertices: corners,
                 triangles: vec![[0, 2, 1], [0, 3, 2]],
+                ground: crate::gaits::Ground::Dry,
             }],
         );
         let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../replica/fixtures/moves");
@@ -229,6 +241,7 @@ impl Bench {
                 mint: &mut self.mint,
                 moves: &mut self.moves,
                 library: &self.library,
+                places: None,
                 seed: 1,
             },
             &mut self.forms,
@@ -252,7 +265,13 @@ impl Bench {
         intent: Intent,
     ) -> Result<Asked, replica::effects::Refusal> {
         let steps = bind(entry, form).expect("binds");
-        let effects = bind_effects(entry, form).unwrap_or_default();
+        // A `set ... by` (C22) needs the thing's kind and amount fields, which the bench's things (outside the tree)
+        // do not have: left out, as before C22 bound it.
+        let effects: Vec<_> = bind_effects(entry, form)
+            .unwrap_or_default()
+            .into_iter()
+            .filter(|e| !matches!(e, skills::form_runner::Effect::Add { .. }))
+            .collect();
         self.look();
         let now = self.now;
         let (mut w, forms) = self.world();
@@ -390,6 +409,108 @@ fn a3_every_run_reaches_a_named_end() {
     assert_eq!(r.name, "form-running");
 }
 
+/// C20 (#3469): a run is due by its start plus its steps' span, its walk, its move and its pause each by its own
+/// deadline as the runner sets it; a run whose walk alone is past an act's 10 s ends `done` before that.
+#[test]
+fn c20_a_run_is_due_by_its_walk_and_its_own_steps_from_its_start() {
+    let (entry, form) = entries().remove(0);
+    let limits = Limits {
+        walk: 120_000_000,
+        ..Limits::default()
+    };
+    let steps = bind(&entry, &form).expect("binds");
+    let span = super::span(&steps, &limits);
+    // A walk, a press and a 2 s pause, and two ticks for each step and the end.
+    assert_eq!(
+        span,
+        limits.walk + limits.step_move + 2_000_000 + 4 * 2 * limits.tick
+    );
+    let mut b = Bench::new();
+    b.now = 5_000_000;
+    let (body, node) = b.add(&entry, Vec3::new(0, 0, 30_000_000), Vec3::ZERO);
+    let start = b.now;
+    let run = match b
+        .ask(body, node, &entry, &form, limits, intent(body, 0))
+        .expect("started")
+    {
+        Asked::Started(run) => run,
+        other => panic!("{other:?}"),
+    };
+    assert_eq!(b.forms.due(run), Some(start + span), "from its start");
+    b.run(start + span);
+    let [e] = b.forms.ended.as_slice() else {
+        panic!("{:?}", b.forms.ended)
+    };
+    println!(
+        "a 30 m walk, a press and a pause: {} after {} µs, due after {span} µs",
+        e.how.as_str(),
+        e.at - start
+    );
+    assert_eq!(e.how.as_str(), "done");
+    assert!(e.at - start > 10_000_000, "past an act's 10 s");
+    assert!(e.at < start + span, "before its due");
+    assert_eq!(b.forms.due(run), None, "ended");
+    b.clean();
+}
+
+/// C21 (#3484) A2: a form's walk to a point past the ground's edge is cut at the edge and gains nothing more; the
+/// watch finds it within 3 s of its last gain, and the world ends it `walk.blocked`: the run ends in that tick, with
+/// no driver, timer or move left on the body.
+#[test]
+fn c21_a2_a_stalled_walk_ends_walk_blocked_and_frees_its_body_in_the_tick() {
+    use crate::walk::stall::{GAIN, WINDOW, Watch};
+    let (entry, form) = entries().remove(0);
+    let mut b = Bench::new();
+    // The ground ends at z = 30 m; the thing stands at 40 m.
+    let goal = [0, 40_000_000];
+    let (body, node) = b.add(
+        &entry,
+        Vec3::new(0, 0, 25_000_000),
+        Vec3::new(0, 0, goal[1]),
+    );
+    let limits = Limits {
+        walk: 120_000_000,
+        ..Limits::default()
+    };
+    b.start(body, node, &entry, &form, limits);
+    let mut watch = Watch::new();
+    let (mut best, mut gained, mut stalled) = (i64::MAX, 0, None);
+    while b.now < 60_000_000 && stalled.is_none() {
+        b.tick();
+        let p =
+            b.c.bodies()
+                .find(|x| x.id == body)
+                .expect("the body")
+                .pose
+                .position;
+        if goal[1] - p.z < best - GAIN {
+            (best, gained) = (goal[1] - p.z, b.now);
+        }
+        if watch.seen(body, [p.x, p.z], goal, goal, b.now) {
+            let now = b.now;
+            let (mut w, forms) = b.world();
+            assert!(
+                forms.stall(&mut w, body, "walk.blocked", now),
+                "a walk in progress"
+            );
+            stalled = Some((now, p));
+        }
+    }
+    let (at, p) = stalled.expect("found stalled");
+    println!(
+        "cut at the edge at ({:.2}, {:.2}) m; last gained 0.25 m at {gained} µs, ended at {at} µs",
+        p.x as f64 / 1e6,
+        p.z as f64 / 1e6
+    );
+    assert!(at - gained <= WINDOW, "within 3 s of its last gain");
+    let [e] = b.forms.ended.as_slice() else {
+        panic!("{:?}", b.forms.ended)
+    };
+    assert_eq!((e.how.as_str(), e.at, e.body), ("walk.blocked", at, body));
+    assert!(b.forms.is_empty());
+    b.clean();
+}
+
 // --- F2: the effect, once (#2767) ---------------------------------------------------------------------------------
 
 /// The `n`th intent of `body`, expiring at ten minutes, its digest its number.
@@ -408,7 +529,13 @@ fn intent(body: Id, n: u64) -> Intent {
 fn effecting() -> (json::Value, String) {
     entries()
         .into_iter()
-        .find(|(e, f)| bind_effects(e, f).is_ok_and(|x| !x.is_empty()))
+        .find(|(e, f)| {
+            bind_effects(e, f).is_ok_and(|x| {
+                !x.is_empty()
+                    && x.iter()
+                        .all(|e| matches!(e, skills::form_runner::Effect::Set { .. }))
+            })
+        })
         .expect("a kind whose effects bind")
 }
 
@@ -803,4 +930,51 @@ fn f6_commit_checks_who_may_before_a_run_starts() {
     );
     let ok = commit(&mut b, owner);
     assert!(matches!(ok, Ok(Asked::Started(_))), "{ok:?}");
+}
+
+#[test]
+fn pending_form_plan_holds_the_existing_walk_claim_and_cleans_up_when_replaced() {
+    let (entry, form) = entries().remove(0);
+    let mut b = Bench::new();
+    let (body, node) = b.add(&entry, Vec3::ZERO, Vec3::new(5_000_000, 0, 0));
+    let walk = skills::route::Route::sent(0, 0);
+    let old = b.c.claim(body, &walk.shape()).unwrap();
+    b.snap.defer_walk = true;
+    b.start(body, node, &entry, &form, Limits::default());
+    assert!(
+        !b.c.claims(body).unwrap().running().contains_key(&old),
+        "the previous walk is cancelled at step start"
+    );
+    let run = b.forms.by_body[&body];
+    let held = b.forms.runs[&run].walk.unwrap();
+    assert!(b.c.claims(body).unwrap().running().contains_key(&held));
+    b.snap.defer_walk = false;
+    let now = b.now;
+    let (mut w, forms) = b.world();
+    forms.tick(&mut w, now);
+    assert_eq!(
+        b.forms.runs[&run].walk,
+        Some(held),
+        "the planned route reuses the original claim"
+    );
+    let now = b.now;
+    let (mut w, forms) = b.world();
+    forms.leave(&mut w, body, now).unwrap();
+    b.clean();
+
+    b.snap.defer_walk = true;
+    b.start(body, node, &entry, &form, Limits::default());
+    let newer = b.c.claim(body, &walk.shape()).unwrap();
+    let now = b.now;
+    let (mut w, forms) = b.world();
+    forms.tick(&mut w, now);
+    assert!(
+        b.forms
+            .ended
+            .iter()
+            .any(|e| e.how.as_str() == "claim-taken")
+    );
+    assert!(b.forms.planning.is_empty());
+    b.c.release(body, newer).unwrap();
+    b.clean();
 }

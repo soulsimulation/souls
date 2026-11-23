@@ -40,13 +40,19 @@
 //!   step that meets no open ground beyond ([`Building::loose`]) but lies over another thing's floor within [`crate::ground::STEP`]
 //!   of it joins the two floors ([`floor_joins`], #3227: the botanic red bridge's east end onto the tea house's
 //!   floor); its far end is the near end carried across the edge onto that floor's patch, and its line is in the
-//!   first building's frame.
+//!   first building's frame. A flight whose top meets nothing of its own floor (a landing too small to stand on) lands
+//!   the same way on another thing's floor its top meets at its height (Eden's roof stairs onto their roofs, #1960),
+//!   and a flight's foot on the open ground is carried out along it past its own solids, onto the ground.
 //! - **Ends on the terrain.** An end on the open ground stands at the ground's height there (#3227,
 //!   `ground::scene::Terrain::ground`), as a body on it does (N11a), though N3's pieces of it are a plan at 0.
+//! - **Shores** (N11c, #3218). Where dry ground meets wading ground, a [`Kind::Wade`] (`souls:wade`); where wading
+//!   ground or dry ground meets swimming water, a [`Kind::Swim`] (`souls:swim`). No link of the tree (its id is
+//!   derived, [`shore_id`]): the routes find them along the edges the open ground's pieces share (`crate::routes`).
 //!
-//! Not here: routes (N5), the mover and walking (N6, N7), turns at a link (N8), who may pass (F6), rides (N12), a
+//! Not here: routes (N5), the mover and walking (N6, N7), turns at a link (N8), who may pass (F6), boarding a moving frame (N12, [`boarding`]), a
 //! locked door (the door's `locked` field is not read yet), the durable log (K4).
 
+pub mod boarding;
 pub mod turns;
 
 use crate::ground::scene::{DOORWAY, F_OPEN_DOOR_LINK, FLOOR, Terrain, Xform};
@@ -84,6 +90,18 @@ pub fn opened_event(kind: &str) -> &'static str {
     }
 }
 
+/// The id of the open ground `ground`'s shore link number `n` (N11c, #3218): derived, as a step's is
+/// (`ground::scene::step_id`), since a shore is no link of the tree.
+pub fn shore_id(ground: Id, n: u64) -> Id {
+    let mut input = b"souls:shore\0".to_vec();
+    input.extend_from_slice(&ground.scope().0);
+    input.extend_from_slice(&ground.counter().to_be_bytes());
+    let h = replica::ids::sha256(&input);
+    let mut scope = [0u8; 16];
+    scope.copy_from_slice(&h[..16]);
+    Id::new(replica::ids::Scope(scope), n).expect("a shore's number is below 2^53")
+}
+
 /// A link's kind: its T2 type, and the move that crosses it.
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Kind {
@@ -94,6 +112,13 @@ pub enum Kind {
     /// A low floor's open edge stepped down to the open ground, or a step between two of a floor's surfaces (N3's
     /// steps): no link of the tree, walked.
     Step,
+    /// A shore between dry ground and wading ground (N11c, #3218): no link of the tree ([`shore_id`]), waded.
+    Wade,
+    /// A shore between wading ground, or dry ground, and swimming water (N11c, #3218): no link of the tree, swum.
+    Swim,
+    /// Between the ground at a stop and a moving frame's deck, crossable only while the frame stands at that stop
+    /// ([`boarding`], N12): walked.
+    Boarding,
 }
 
 impl Kind {
@@ -110,16 +135,18 @@ impl Kind {
     /// The move that crosses it (contract T4).
     pub fn move_name(self) -> &'static str {
         match self {
-            Kind::Doorway | Kind::Ramp | Kind::Step => "souls:walk",
+            Kind::Doorway | Kind::Ramp | Kind::Step | Kind::Boarding => "souls:walk",
             Kind::Stairs => "souls:stairs",
             Kind::Ladder => "souls:climb",
+            Kind::Wade => "souls:wade",
+            Kind::Swim => "souls:swim",
         }
     }
 
     /// What its move needs of a body. Opening a shut door needs hands besides.
     pub fn needs(self) -> Abilities {
         Abilities {
-            legs: true,
+            legs: self != Kind::Swim,
             hands: self == Kind::Ladder,
         }
     }
@@ -174,6 +201,7 @@ pub struct Link {
 }
 
 /// The links of one building, with the patch of each of its floors, all in the building's frame.
+#[derive(Clone)]
 pub struct Building {
     pub thing: Id,
     pub links: Vec<Link>,
@@ -187,14 +215,27 @@ pub struct Building {
 }
 
 /// An outline step of a building's floor whose far side meets no open ground: its link, its end on the floor (the
-/// building's frame), the unit off the floor (µm per metre), its width (µm) and the radius it was cut for (mm).
-#[derive(Clone, Copy, Debug)]
+/// building's frame), the unit off the floor (µm per metre), its width (µm) and the radius it was cut for (mm). Or a
+/// flight whose top meets no floor of its own (`stair`): its lower end, and the unit along it at the top.
+#[derive(Clone, Debug)]
 pub struct Loose {
     pub link: Id,
     pub end: End,
     pub across: [i64; 2],
     pub width: i64,
     pub radius: i64,
+    pub stair: Option<LooseStair>,
+}
+
+/// A flight's top that meets no floor of its own building: its kind, its lower node, its line so far (the building's
+/// frame, from its lower end), its top (the line's end there) and its end's half-width for the centre (µm).
+#[derive(Clone, Debug)]
+pub struct LooseStair {
+    pub kind: Kind,
+    pub from: Id,
+    pub line: Vec<Vec3>,
+    pub top: Vec3,
+    pub half: i64,
 }
 
 /// Steps between two things' floors (#3227): where an outline step of one building's floor ([`Building::loose`])
@@ -207,6 +248,10 @@ pub fn floor_joins(bs: &[&Building]) -> Vec<(usize, Link)> {
     let mut out = Vec::new();
     for (i, b) in bs.iter().enumerate() {
         for s in &b.loose {
+            if let Some(st) = &s.stair {
+                out.extend(stair_join(bs, i, s, st).map(|l| (i, l)));
+                continue;
+            }
             let d = 2 * (s.radius + MARGIN + 1) * 1000;
             let over = |p: Vec3| {
                 Vec3::new(
@@ -269,6 +314,70 @@ pub fn floor_joins(bs: &[&Building]) -> Vec<(usize, Link)> {
         }
     }
     out
+}
+
+/// A flight whose top meets no floor of its own building (`bs[i]`'s loose stair `s`) lands on another building's
+/// floor that its top meets at its height, within [`crate::ground::STEP`] (a roof terrace's flight: Eden's office roof
+/// stairs, whose landing is too small to stand on and lies over the roof): the top is carried along the flight onto
+/// that floor's patch, as onto its own (its apron). The link keeps its kind and its lower end; its upper end is on the
+/// other floor, in that building's frame, and its line, in the first building's frame, ends there.
+fn stair_join(bs: &[&Building], i: usize, s: &Loose, st: &LooseStair) -> Option<Link> {
+    let b = bs[i];
+    let ahead = |p: Vec3| Vec3::new(p.x + s.across[0], p.y, p.z + s.across[1]);
+    let (wt, wd) = (
+        b.place.point(st.top).ok()?,
+        b.place.point(ahead(st.top)).ok()?,
+    );
+    let (far, place) = bs
+        .iter()
+        .enumerate()
+        .filter(|(j, _)| *j != i)
+        .find_map(|(_, c)| {
+            let (t, d) = (back(&c.place, wt).ok()?, back(&c.place, wd).ok()?);
+            let dir = unit(t, d);
+            c.floors.iter().find_map(|(&f, (_, patch))| {
+                let ys: BTreeSet<i32> = patch
+                    .pieces
+                    .iter()
+                    .filter_map(|pc| pc.vertices.first().map(|v| v[1]))
+                    .filter(|&y| (i64::from(y) * 1000 - t.y).abs() <= crate::ground::STEP * 1000)
+                    .collect();
+                ys.into_iter().find_map(|y| {
+                    let q = apron(patch, Vec3::new(t.x, i64::from(y) * 1000, t.z), dir)?;
+                    let h = st.half;
+                    let e = End {
+                        floor: f,
+                        a: Vec3::new(
+                            q.x - dir[1] * h / 1_000_000,
+                            q.y,
+                            q.z + dir[0] * h / 1_000_000,
+                        ),
+                        b: Vec3::new(
+                            q.x + dir[1] * h / 1_000_000,
+                            q.y,
+                            q.z - dir[0] * h / 1_000_000,
+                        ),
+                    };
+                    Some((e, c.place))
+                })
+            })
+        })?;
+    let there = back(&b.place, place.point(far.middle()).ok()?).ok()?;
+    let mut line = st.line.clone();
+    if line.last() != Some(&there) {
+        line.push(there);
+    }
+    Some(Link {
+        id: s.link,
+        kind: st.kind,
+        nodes: [st.from, far.floor],
+        owner: st.from,
+        width: s.width,
+        ends: [Some(s.end), Some(far)],
+        line,
+        door: None,
+        blocked: None,
+    })
 }
 
 /// A meet of one of the open ground's squares, with that square.
@@ -659,6 +768,7 @@ impl Building {
                             across: acrosses.get(&id).copied().unwrap_or([0, 0]),
                             width: widths.get(&id).copied().unwrap_or(0),
                             radius,
+                            stair: None,
                         });
                     }
                     continue;
@@ -753,19 +863,83 @@ impl Building {
                         at.z - d[0] * half / 1_000_000,
                     ),
                 };
-                let (ends, blocked) = match (lo.flatten(), hi.flatten()) {
-                    (Some(a), Some(b)) => {
-                        let (da, db) = (unit(line[0], line[1]), unit(line[k - 2], line[k - 1]));
+                // A flight whose lower floor has no surface to stand on (a raised building's outside stair, its foot on
+                // the open ground: the Mars campus's kitchen) starts on the open ground beside the building, at the
+                // ground's height there, as a doorway to the open ground ends there.
+                let foot = open.filter(|_| lo.is_none());
+                let (db, top) = (unit(line[k - 2], line[k - 1]), line[k - 1]);
+                let lower = match (lo.flatten(), foot) {
+                    (Some(a), _) => {
+                        let da = unit(line[0], line[1]);
                         if a != line[0] {
                             line.insert(0, a);
                         }
-                        if b != line[line.len() - 1] {
+                        Some(end(nodes[0], a, da))
+                    }
+                    (None, Some(o)) => {
+                        let up = unit(line[0], line[1]);
+                        // Carried out along the flight onto the open ground (past its own solids, grown by the
+                        // clearance: Eden's flights stand on a box as long as they are), as its top onto its floor.
+                        let out = unit(line[1], line[0]);
+                        let on_ground = |q: Vec3| {
+                            o.place.point(q).is_ok_and(|w| {
+                                let (x, z) = (w.x.div_euclid(1000), w.z.div_euclid(1000));
+                                let sq = (x.div_euclid(SQUARE) as i32, z.div_euclid(SQUARE) as i32);
+                                (o.on)(sq, [x, z])
+                            })
+                        };
+                        // A square's piece is met within the map's rounding (60 mm): the foot is taken 100 mm past
+                        // the first point met, on the piece itself.
+                        let along = |d: i64| {
+                            Vec3::new(
+                                line[0].x + out[0] * d / 1000,
+                                line[0].y,
+                                line[0].z + out[1] * d / 1000,
+                            )
+                        };
+                        let foot = (0..=APRON_MAX / 10)
+                            .map(|k| k * 10)
+                            .find(|&d| on_ground(along(d)))
+                            .map_or(line[0], |d| if d == 0 { line[0] } else { along(d + 100) });
+                        if foot != line[0] {
+                            line.insert(0, foot);
+                        }
+                        let e = end(nodes[0], foot, up);
+                        let on = End {
+                            floor: o.ground,
+                            a: o.place.point(e.a)?,
+                            b: o.place.point(e.b)?,
+                        };
+                        let y = on.middle().y;
+                        Some(lift(on, o.terrain, y))
+                    }
+                    (None, None) => None,
+                };
+                let (ends, blocked) = match (lower, hi.flatten()) {
+                    (Some(a), Some(b)) => {
+                        if b != top {
                             line.push(b);
                         }
-                        (
-                            [Some(end(nodes[0], a, da)), Some(end(nodes[1], b, db))],
-                            None,
-                        )
+                        ([Some(a), Some(end(nodes[1], b, db))], None)
+                    }
+                    // A flight whose top meets nothing of its own floor (a landing too small to stand on) may land on
+                    // another thing's floor at its height (the roof it leads to): kept loose for [`floor_joins`].
+                    (Some(a), None) => {
+                        loose.push(Loose {
+                            link: id,
+                            end: a,
+                            across: db,
+                            width,
+                            radius,
+                            stair: Some(LooseStair {
+                                kind,
+                                from: nodes[0],
+                                line: std::mem::take(&mut line),
+                                top,
+                                half,
+                            }),
+                        });
+                        ([None, None], Some("link-end-off-ground"))
                     }
                     _ => {
                         line.clear();
@@ -792,6 +966,14 @@ impl Building {
             place: open.map_or(Xform::IDENTITY, |o| o.place),
             loose,
         })
+    }
+
+    /// Adds a link [`floor_joins`] found, in place of the one of the same id read alone (a flight's loose top).
+    pub fn join(&mut self, l: Link) {
+        match self.links.iter_mut().find(|x| x.id == l.id) {
+            Some(x) => *x = l,
+            None => self.links.push(l),
+        }
     }
 
     pub fn link(&self, id: Id) -> Option<&Link> {

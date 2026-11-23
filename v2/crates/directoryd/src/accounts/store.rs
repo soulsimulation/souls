@@ -42,7 +42,7 @@ impl From<rusqlite::Error> for StoreError {
 }
 
 pub struct Store {
-    db: Mutex<Connection>,
+    pub(super) db: Mutex<Connection>,
 }
 
 impl Store {
@@ -69,9 +69,22 @@ impl Store {
              CREATE TABLE IF NOT EXISTS account_principals_v1(account_id TEXT PRIMARY KEY
                REFERENCES provider_accounts_v1(account_id), principal_id TEXT NOT NULL UNIQUE,
                created_at INTEGER NOT NULL);
+             CREATE TABLE IF NOT EXISTS account_grants_v1(account_id TEXT NOT NULL
+               REFERENCES provider_accounts_v1(account_id), grant_text TEXT NOT NULL, follow TEXT,
+               UNIQUE(account_id, grant_text));
+             CREATE TABLE IF NOT EXISTS revoked_sessions_v1(issuer TEXT NOT NULL, session_id TEXT NOT NULL,
+               revoked_at INTEGER NOT NULL, PRIMARY KEY(issuer, session_id));
+             CREATE TABLE IF NOT EXISTS mailbox_v1(id TEXT PRIMARY KEY, soul TEXT NOT NULL, text TEXT NOT NULL,
+               at INTEGER NOT NULL, state TEXT NOT NULL, outcome TEXT, closed_at INTEGER);
+             CREATE INDEX IF NOT EXISTS mailbox_v1_open ON mailbox_v1(state, at);
+             CREATE TABLE IF NOT EXISTS prayers_v1(id TEXT PRIMARY KEY, soul TEXT NOT NULL, scope TEXT NOT NULL,
+               text TEXT NOT NULL, at INTEGER NOT NULL, answer TEXT, answered_at INTEGER, delivered INTEGER NOT NULL);
+             CREATE INDEX IF NOT EXISTS prayers_v1_scope ON prayers_v1(scope, at);
+             CREATE INDEX IF NOT EXISTS prayers_v1_soul ON prayers_v1(soul, at);
              COMMIT;",
         )
         .map_err(owned)?;
+        db.execute_batch(super::now::SCHEMA).map_err(owned)?;
         Ok(Store { db: Mutex::new(db) })
     }
 
@@ -119,6 +132,62 @@ impl Store {
         Ok(Account { account, principal })
     }
 
+    /// Records that `account` owns `grant` (a Soul, `soul-…`, or a world it creates, `creator-…`; V13b), with the
+    /// body the page follows for it, if any.
+    pub fn own(&self, account: &str, grant: &str, follow: Option<&str>) -> Result<(), StoreError> {
+        let db = self.db.lock().expect("the store");
+        db.execute(
+            "INSERT INTO account_grants_v1(account_id, grant_text, follow) VALUES (?1, ?2, ?3)
+             ON CONFLICT(account_id, grant_text) DO UPDATE SET follow = excluded.follow",
+            params![account, grant, follow],
+        )?;
+        Ok(())
+    }
+
+    /// What `account` owns: each grant and the body the page follows for it, in the order recorded.
+    pub fn grants(&self, account: &str) -> Result<Vec<(String, Option<String>)>, StoreError> {
+        let db = self.db.lock().expect("the store");
+        let mut q = db.prepare(
+            "SELECT grant_text, follow FROM account_grants_v1 WHERE account_id = ?1 ORDER BY rowid",
+        )?;
+        let rows = q.query_map(params![account], |r| Ok((r.get(0)?, r.get(1)?)))?;
+        Ok(rows.collect::<Result<_, _>>()?)
+    }
+
+    /// Records that a session was signed out: it gets no view token again, however long its token holds.
+    pub fn revoke_session(&self, issuer: &str, session: &str, now: u64) -> Result<(), StoreError> {
+        let db = self.db.lock().expect("the store");
+        db.execute(
+            "INSERT OR IGNORE INTO revoked_sessions_v1(issuer, session_id, revoked_at) VALUES (?1, ?2, ?3)",
+            params![issuer, session, now as i64],
+        )?;
+        Ok(())
+    }
+
+    /// Whether a session was signed out.
+    pub fn revoked(&self, issuer: &str, session: &str) -> Result<bool, StoreError> {
+        let db = self.db.lock().expect("the store");
+        Ok(db
+            .query_row(
+                "SELECT 1 FROM revoked_sessions_v1 WHERE issuer = ?1 AND session_id = ?2",
+                params![issuer, session],
+                |_| Ok(()),
+            )
+            .optional()?
+            .is_some())
+    }
+
+    /// When an account was made, seconds since 1970 (W3's limits for a new account).
+    pub fn made(&self, account: &str) -> Result<u64, StoreError> {
+        let db = self.db.lock().expect("the store");
+        let at: i64 = db.query_row(
+            "SELECT created_at FROM provider_accounts_v1 WHERE account_id = ?1",
+            params![account],
+            |r| r.get(0),
+        )?;
+        Ok(at as u64)
+    }
+
     /// A consistent copy of the store at `to`, taken while it is in use (SQLite's online backup), for O20 to ship.
     pub fn backup(&self, to: &Path) -> Result<(), StoreError> {
         let db = self.db.lock().expect("the store");
@@ -126,6 +195,67 @@ impl Store {
         let b = rusqlite::backup::Backup::new(&db, &mut dst)?;
         b.run_to_completion(256, Duration::ZERO, None)?;
         Ok(())
+    }
+
+    /// The Soul X11 brought over for today's Soul `former` at `world` (`imported_souls_v1`, R18): its grant and the
+    /// account that owns it (`souls_v1`). `None` when the store holds no import or none for that Soul.
+    pub fn imported_soul(
+        &self,
+        world: &str,
+        former: &str,
+    ) -> Result<Option<(String, String)>, StoreError> {
+        let db = self.db.lock().expect("the store");
+        let tables: i64 = db.query_row(
+            "SELECT COUNT(*) FROM sqlite_master WHERE type = 'table' AND name IN ('imported_souls_v1', 'souls_v1')",
+            [],
+            |r| r.get(0),
+        )?;
+        if tables < 2 {
+            return Ok(None);
+        }
+        let row: Option<(String, String)> = db
+            .query_row(
+                "SELECT i.soul, s.account_id FROM imported_souls_v1 i JOIN souls_v1 s ON s.soul = i.soul
+                 WHERE i.world = ?1 AND i.old_soul = ?2",
+                params![world, former],
+                |r| Ok((r.get(0)?, r.get(1)?)),
+            )
+            .optional()?;
+        Ok(row.and_then(|(soul, account)| {
+            principal_from_text(&soul).map(|id| (super::view::grant_text("soul", id), account))
+        }))
+    }
+
+    /// Existing live imported Souls owned by this account, before their first v2 agent connection (W15).
+    pub fn imported_souls(
+        &self,
+        account: &str,
+    ) -> Result<Vec<(String, String, String, String)>, StoreError> {
+        let db = self.db.lock().expect("the store");
+        let tables: i64 = db.query_row("SELECT COUNT(*) FROM sqlite_master WHERE type='table' AND name IN ('imported_souls_v1','souls_v1')", [], |r| r.get(0))?;
+        if tables != 2 {
+            return Ok(Vec::new());
+        }
+        let mut query = db.prepare(
+            "SELECT i.soul,i.world,s.name,s.description FROM imported_souls_v1 i
+            JOIN souls_v1 s ON s.soul=i.soul WHERE s.account_id=?1 ORDER BY i.soul",
+        )?;
+        let rows = query.query_map(params![account], |r| {
+            Ok((r.get::<_, String>(0)?, r.get(1)?, r.get(2)?, r.get(3)?))
+        })?;
+        let mut out = Vec::new();
+        for row in rows {
+            let (soul, world, name, description) = row?;
+            if let Some(id) = principal_from_text(&soul) {
+                out.push((
+                    super::view::grant_text("soul", id),
+                    world,
+                    name,
+                    description,
+                ));
+            }
+        }
+        Ok(out)
     }
 
     /// How many accounts the store holds.

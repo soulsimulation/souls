@@ -63,7 +63,7 @@ export function useViewerInsets(root: RefObject<HTMLDivElement | null>, visible:
 
 /** VF2 (Gene): one "your camera" (drag orbits, right-drag pans, scroll zooms to the pointer, WASD/QE/RF keys;
  * WorldRtsCamera), and a split camera control beside Live: current state / one-click switching, modes and help. */
-export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationChange, worldTime, connected = true, connecting = false, worldName, followName, selectedName, slots, initial }: { handle: WorldViewerHandle | null; state: WorldViewerState | null; dt: number; navigationOpen: boolean; onNavigationChange: (open: boolean) => void; onNavigationOpen?: () => void; worldTime?: string; connected?: boolean; connecting?: boolean; worldName?: string; followName?: string | null; selectedName?: string | null; slots?: { status: HTMLElement | null; camera: HTMLElement | null }; initial?: InitialWorldProgress | null }) {
+export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationChange, worldTime, worldMinutes, connected = true, connecting = false, worldName, followName, selectedName, slots, initial }: { handle: WorldViewerHandle | null; state: WorldViewerState | null; dt: number; navigationOpen: boolean; onNavigationChange: (open: boolean) => void; onNavigationOpen?: () => void; worldTime?: string; worldMinutes?: number | null; connected?: boolean; connecting?: boolean; worldName?: string; followName?: string | null; selectedName?: string | null; slots?: { status: HTMLElement | null; camera: HTMLElement | null }; initial?: InitialWorldProgress | null }) {
   const [cameraNote, setCameraNote] = useState('');
   const previewHour = useSyncExternalStore(subscribeVisitorHour, visitorPreviewHour, visitorPreviewHour);
   const zone = useSyncExternalStore(subscribeWorldZone, worldZone, worldZone);   // #1649: a real-time world's own time zone
@@ -86,7 +86,7 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   // VF1: arriving = no frame drawn yet. It gets one calm card (not warnings); a drawn view that stops being
   // current says why only once that lasts (transient gaps never flash), and the pill never says "Held".
   const reason = state?.unavailableReason ?? null;
-  const blocked = !!reason && /graphics|3D/.test(reason);
+  const blocked = !!reason && /graphics|3D|stream is not available/.test(reason);
   const drawnOnce = useRef(false);
   if (state?.shownTick != null && !state.loading) drawnOnce.current = true;
   const arriving = !blocked && (!state || state.shownTick == null || (state.loading && !drawnOnce.current));
@@ -176,7 +176,7 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
           </div>
           {worldTime && <span className="time-preview-now" data-world-time>{previewHour != null ? `In the world: ${worldTime}` : worldTime.split(' · ')[0]}</span>}
           {zone && <span className="dim" data-world-zone={zone}>Local time in {zone.replace(/_/g, ' ')}</span>}
-          <input type="range" min={0} max={1425} step={15} value={previewHour ?? 720} aria-label="Preview hour" onChange={(e) => setVisitorPreviewHour(Number(e.target.value))} />
+          <input type="range" min={0} max={1425} step={15} value={previewHour ?? worldMinutes ?? 720} aria-label="Preview hour" onChange={(e) => setVisitorPreviewHour(Number(e.target.value))} />
           <div className="time-preview-ticks" aria-hidden="true"><span>12a</span><span>6a</span><span>12p</span><span>6p</span><span>12a</span></div>
           <div className="time-preview-foot">
             <span>Only you see this</span>

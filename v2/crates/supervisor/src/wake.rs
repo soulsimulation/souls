@@ -16,7 +16,7 @@
 //! Waking is [`Waker`]: `systemctl start --no-block worldd@<world>.service` on a machine ([`Systemd`]), or a program
 //! given the world's name ([`Program`]).
 
-use std::collections::{HashMap, VecDeque};
+use std::collections::{BTreeMap, VecDeque};
 use std::io::{BufRead, BufReader, Write};
 use std::os::unix::net::UnixListener;
 use std::path::Path;
@@ -146,7 +146,7 @@ pub fn listen(socket: &Path, to: Sender<Msg>) -> std::io::Result<()> {
 pub struct Daemon<S: Store> {
     pub record: Record<S>,
     /// Worlds woken (by alarm or intent), with when, until they set a new alarm.
-    fired: HashMap<String, i64>,
+    fired: BTreeMap<String, i64>,
     wakes: VecDeque<i64>,
 }
 
@@ -154,7 +154,7 @@ impl<S: Store> Daemon<S> {
     pub fn new(record: Record<S>) -> Daemon<S> {
         Daemon {
             record,
-            fired: HashMap::new(),
+            fired: BTreeMap::new(),
             wakes: VecDeque::new(),
         }
     }

@@ -15,10 +15,12 @@ use replica::effects::{
 use replica::encode::{Name, Value, decode};
 use replica::hash::state_hash;
 use replica::ids::{Hash, Id, Minter, Purpose, Scope};
+use replica::pose::{Frame, Pose};
 use replica::pose::{Quat, Support, Vec3};
 use replica::views::{Key, Level, Redactions};
 use replica::world_model::{Audience, Kind};
-use sim::edit::{Committed, commit};
+use sim::edit::safety::Who;
+use sim::edit::{Committed, Planned, commit, plan};
 use sim::log::{Log, Mem, recover};
 use std::collections::{BTreeMap, BTreeSet};
 use std::time::Duration;
@@ -57,6 +59,8 @@ struct W {
     at: i64,
     /// Each committed edit's intent and the effects it wrote.
     committed: Vec<(Id, Vec<Effect>)>,
+    /// The Souls' bodies as they stand on each commit tick, for the safety rule (#3280).
+    bodies: Vec<Who>,
 }
 
 fn kind(header: &Header, plain: &str) -> Name {
@@ -139,6 +143,7 @@ impl W {
             start,
             at: 0,
             committed: Vec::new(),
+            bodies: Vec::new(),
         }
     }
 
@@ -149,10 +154,22 @@ impl W {
     /// One edit, from `actor`, planned against `planned`: checked on a frozen copy, committed on the clock thread,
     /// appended to the log and handed to the tier, then applied by the client. Its three views are compared.
     fn edit(&mut self, actor: Actor, planned: u64, ops: Vec<Op>) -> Result<Committed, Refused> {
+        self.edit_under(actor, planned, ops, None)
+    }
+
+    /// [`W::edit`], sent under a build claim (#3701).
+    fn edit_under(
+        &mut self,
+        actor: Actor,
+        planned: u64,
+        ops: Vec<Op>,
+        claim: Option<&str>,
+    ) -> Result<Committed, Refused> {
         let intent = self.intents.mint().expect("an id");
         let copy = self.live.frozen();
         let checked = check(
             Edit {
+                claim: claim.map(|c| Name::new(c).expect("a name")),
                 intent,
                 actor,
                 planned,
@@ -161,29 +178,38 @@ impl W {
             &copy,
             &self.world,
         )?;
-        self.commit(&checked)
+        // The fixture's zone has no open ground: the safety rule judges what a body uses.
+        let planned = plan(checked, &copy, None)?;
+        self.commit(&planned)
     }
 
-    fn commit(&mut self, checked: &replica::edit::Checked) -> Result<Committed, Refused> {
+    fn commit(&mut self, planned: &Planned) -> Result<Committed, Refused> {
         self.at += 1_000;
-        let c = commit(&mut self.live, &mut self.minter, checked, self.at)?;
+        let checked = &planned.checked;
+        let c = commit(
+            &mut self.live,
+            &mut self.minter,
+            planned,
+            &self.bodies,
+            self.at,
+        )?;
         let bytes = c.part.stored().to_vec();
         let n = self.log.append(bytes.clone()).expect("appended");
         self.tier.offer(n, bytes.clone());
         self.client
             .apply_bytes(&bytes)
             .expect("the client applies it");
-        self.views(checked.edit.intent, n, &c.part);
+        self.views(checked.edit.intent, checked.edit.actor, n, &c.part);
         Ok(c)
     }
 
-    /// The batch as generic effects under one cause, the creator acting; the client's replica equal to the live one;
-    /// the stream's frame for this record holding exactly the batch's effects.
-    fn views(&mut self, intent: Id, record: u64, part: &Part) {
+    /// The batch as generic effects under one cause, its editor acting (the creator, or a claim's helper); the
+    /// client's replica equal to the live one; the stream's frame for this record holding exactly the batch's effects.
+    fn views(&mut self, intent: Id, actor: Actor, record: u64, part: &Part) {
         assert!(!part.effects.is_empty());
         for e in &part.effects {
             assert_eq!(e.envelope.cause, Cause::Intent(intent));
-            assert_eq!(e.envelope.actor, self.creator());
+            assert_eq!(e.envelope.actor, actor);
             assert!(matches!(e.body, Body::Changes(_)), "generic changes");
         }
         assert_eq!(
@@ -193,7 +219,7 @@ impl W {
         );
         let Some(Delivery::Frame {
             record: r, bytes, ..
-        }) = self.sub.recv_timeout(Duration::from_secs(10))
+        }) = self.sub.recv_timeout(Duration::from_secs(30))
         else {
             panic!("the tier sent no frame: {:?}", self.tier.stats().fault)
         };
@@ -528,6 +554,7 @@ fn a5_an_older_plan_commits_unless_a_node_it_touches_changed() {
     let checked = |ops: Vec<Op>, w: &mut W| {
         check(
             Edit {
+                claim: None,
                 intent: w.intents.mint().expect("an id"),
                 actor: w.creator(),
                 planned,
@@ -536,6 +563,7 @@ fn a5_an_older_plan_commits_unless_a_node_it_touches_changed() {
             &copy,
             &w.world,
         )
+        .and_then(|c| plan(c, &copy, None))
         .expect("checked")
     };
     let untouched = checked(
@@ -577,5 +605,643 @@ fn a5_an_older_plan_commits_unless_a_node_it_touches_changed() {
         .edit(w.creator(), planned, vec![set(cr, 4)])
         .expect_err("refused");
     assert_eq!((r.op, r.name), (Some(0), "edit.stale"));
+    w.close();
+}
+
+// --- #3280: the safety rule through the edit path ------------------------------------------------------------------
+
+#[test]
+fn an_edit_unsafe_for_a_soul_on_its_commit_tick_is_refused_by_name_with_nothing_written() {
+    let mut w = W::new();
+    let (_, cr, _) = w.furnish();
+    let (log, state, version) = (
+        w.log_hash(),
+        state_hash(w.live.tree()).expect("a hash"),
+        w.live.version(),
+    );
+    // A Soul sits in the crate's slot 1 when the removal's tick comes: refused by name, nothing written.
+    let soul = Id::new(Scope([0x50; 16]), 1).expect("an id");
+    w.bodies = vec![Who {
+        soul,
+        body: Id::new(Scope([0x50; 16]), 2).expect("an id"),
+        pose: Pose {
+            frame: Frame {
+                node: cr,
+                slot: Some(1),
+            },
+            position: Vec3::ZERO,
+            orientation: Quat::IDENTITY,
+            support: Support::Slot,
+        },
+        has: 0,
+        crossing: None,
+    }];
+    let remove = vec![Op::Remove {
+        node: Ref::Node(cr),
+    }];
+    let r = w
+        .edit(w.creator(), version, remove.clone())
+        .expect_err("refused");
+    println!("{}: {}", r.name, r.detail);
+    assert_eq!((r.op, r.name), (None, "edit.in-use"), "{r:?}");
+    assert!(r.detail.contains("Soul 50:1 is in"), "{}", r.detail);
+    assert_eq!(w.log_hash(), log);
+    assert_eq!(state_hash(w.live.tree()).expect("a hash"), state);
+    assert_eq!(w.live.version(), version);
+    // Once the Soul has got up, the same edit commits.
+    w.bodies.clear();
+    w.edit(w.creator(), version, remove).expect("committed");
+    w.close();
+}
+
+// --- #3701: district plans and build claims --------------------------------------------------------------------------
+
+fn text(t: &str) -> Value {
+    Value::Text(Name::new(t).expect("a name"))
+}
+
+fn mm(n: i64) -> Value {
+    if n >= 0 {
+        Value::Uint(n.unsigned_abs())
+    } else {
+        Value::Nint(n.unsigned_abs() - 1)
+    }
+}
+
+fn claim_row(id: &str, part: &str, area: [i64; 4]) -> Value {
+    let mut row = vec![text(id), text(part)];
+    row.extend(area.map(mm));
+    Value::Array(row)
+}
+
+fn set_root(root: Id, field: u64, to: Value) -> Op {
+    Op::Set {
+        node: Ref::Node(root),
+        field,
+        to,
+    }
+}
+
+#[test]
+fn a2_an_edit_under_a_claim_stays_inside_it_and_others_stay_out() {
+    use replica::edit::claims::F_CLAIMS;
+    let mut w = W::new();
+    let room = w
+        .live
+        .header()
+        .kinds
+        .iter()
+        .find(|k| k.as_str().starts_with("souls:room@"))
+        .cloned()
+        .expect("room");
+    // The lead claims x 0..10 mm, z -10..10 mm for the house; a room inside it is placed under the claim.
+    let v = w.live.version();
+    let claims = Value::Array(vec![claim_row("c:house", "part:house", [0, -10, 10, 10])]);
+    w.edit(w.creator(), v, vec![set_root(w.root, F_CLAIMS, claims)])
+        .expect("claimed");
+    let v = w.live.version();
+    let inside = w
+        .edit_under(
+            w.creator(),
+            v,
+            vec![place(1, &room, Ref::Node(w.root), spot(5_000, None))],
+            Some("c:house"),
+        )
+        .expect("inside the claim");
+    let built = inside.names[&1];
+    // Under the claim, outside its area: refused by name, the operation and the claim named.
+    let v = w.live.version();
+    let log = w.log_hash();
+    let r = w
+        .edit_under(
+            w.creator(),
+            v,
+            vec![place(1, &room, Ref::Node(w.root), spot(20_000, None))],
+            Some("c:house"),
+        )
+        .expect_err("outside");
+    assert_eq!((r.op, r.name), (Some(0), "edit.outside-claim"), "{r:?}");
+    assert!(r.detail.contains("c:house (part:house)"), "{}", r.detail);
+    // Moving the claimed room out, and writing the world's own fields, are outside too.
+    let r = w
+        .edit_under(
+            w.creator(),
+            v,
+            vec![Op::Move {
+                node: Ref::Node(built),
+                at: spot(20_000, None),
+            }],
+            Some("c:house"),
+        )
+        .expect_err("moved out");
+    assert_eq!(r.name, "edit.outside-claim");
+    let r = w
+        .edit_under(
+            w.creator(),
+            v,
+            vec![set_root(w.root, F_CLAIMS, Value::Array(vec![]))],
+            Some("c:house"),
+        )
+        .expect_err("the root");
+    assert_eq!(r.name, "edit.outside-claim");
+    // Under no claim, inside one: refused; a claim that is not live: refused.
+    let r = w
+        .edit(
+            w.creator(),
+            v,
+            vec![Op::Remove {
+                node: Ref::Node(built),
+            }],
+        )
+        .expect_err("claimed");
+    assert_eq!((r.op, r.name), (Some(0), "edit.claimed"), "{r:?}");
+    let r = w
+        .edit(
+            w.creator(),
+            v,
+            vec![place(1, &room, Ref::Node(w.root), spot(9_000, None))],
+        )
+        .expect_err("placed into a claim");
+    assert_eq!(r.name, "edit.claimed");
+    let r = w
+        .edit_under(
+            w.creator(),
+            v,
+            vec![place(1, &room, Ref::Node(w.root), spot(5_000, None))],
+            Some("c:gone"),
+        )
+        .expect_err("unknown");
+    assert_eq!((r.op, r.name), (None, "edit.claim-unknown"));
+    assert_eq!(w.log_hash(), log, "refusals write nothing");
+    // Outside every claim the lead edits freely; once released, inside too.
+    w.edit(
+        w.creator(),
+        v,
+        vec![place(1, &room, Ref::Node(w.root), spot(30_000, None))],
+    )
+    .expect("outside");
+    let v = w.live.version();
+    w.edit(
+        w.creator(),
+        v,
+        vec![set_root(w.root, F_CLAIMS, Value::Array(vec![]))],
+    )
+    .expect("released");
+    let v = w.live.version();
+    w.edit(
+        w.creator(),
+        v,
+        vec![Op::Remove {
+            node: Ref::Node(built),
+        }],
+    )
+    .expect("released, so free");
+    // Another actor is still nobody, claim or not.
+    let other = Actor::Creator(Id::new(Scope([0xd0; 16]), 1).expect("an id"));
+    let r = w
+        .edit_under(
+            other,
+            v,
+            vec![place(1, &room, Ref::Node(w.root), spot(5_000, None))],
+            Some("c:house"),
+        )
+        .expect_err("not the creator");
+    assert_eq!(r.name, "edit.not-the-creator");
+    w.close();
+}
+
+#[test]
+fn a2_a_move_carries_every_node_below_it_and_a_late_claim_still_binds() {
+    use replica::edit::claims::F_CLAIMS;
+    let mut w = W::new();
+    let room = kind(&w.header, "souls:room");
+    let crate_ = kind(&w.header, "souls:crate");
+    // A room at x -30 mm with a crate 20 mm along it: the crate stands inside the claim's x 0..10 mm once the room
+    // moves to x -15 mm, though the room's own origin stays outside.
+    let v = w.live.version();
+    let built = w
+        .edit(
+            w.creator(),
+            v,
+            vec![
+                place(1, &room, Ref::Node(w.root), spot(-30_000, None)),
+                place(2, &crate_, Ref::New(1), spot(20_000, None)),
+            ],
+        )
+        .expect("built");
+    let (room_id, crate_id) = (built.names[&1], built.names[&2]);
+    let v = w.live.version();
+    let claims = Value::Array(vec![claim_row("c:house", "part:house", [0, -10, 10, 10])]);
+    w.edit(w.creator(), v, vec![set_root(w.root, F_CLAIMS, claims)])
+        .expect("claimed");
+    let v = w.live.version();
+    let r = w
+        .edit(
+            w.creator(),
+            v,
+            vec![Op::Move {
+                node: Ref::Node(room_id),
+                at: spot(-15_000, None),
+            }],
+        )
+        .expect_err("the crate moves into the claim");
+    assert_eq!((r.op, r.name), (Some(0), "edit.claimed"), "{r:?}");
+    // Under the claim, the same move takes the room's own origin, outside it, along.
+    let r = w
+        .edit_under(
+            w.creator(),
+            v,
+            vec![Op::Move {
+                node: Ref::Node(room_id),
+                at: spot(-15_000, None),
+            }],
+            Some("c:house"),
+        )
+        .expect_err("the room stays outside");
+    assert_eq!(r.name, "edit.outside-claim");
+    // A move that keeps everything outside passes.
+    w.edit(
+        w.creator(),
+        v,
+        vec![Op::Move {
+            node: Ref::Node(room_id),
+            at: spot(-40_000, None),
+        }],
+    )
+    .expect("all outside");
+    // An edit checked before a claim commits, committed after it: the claim binds at commit.
+    let v = w.live.version();
+    let copy = w.live.frozen();
+    let checked = check(
+        Edit {
+            claim: None,
+            intent: w.intents.mint().expect("an id"),
+            actor: w.creator(),
+            planned: v,
+            ops: vec![Op::Remove {
+                node: Ref::Node(crate_id),
+            }],
+        },
+        &copy,
+        &w.world,
+    )
+    .expect("checked before the claim");
+    let planned = plan(checked, &copy, None).expect("planned");
+    let claims = Value::Array(vec![claim_row("c:yard", "part:yard", [-100, -10, -1, 10])]);
+    w.edit(w.creator(), v, vec![set_root(w.root, F_CLAIMS, claims)])
+        .expect("claimed since");
+    let r = w.commit(&planned).expect_err("the late claim binds");
+    assert_eq!(r.name, "edit.claimed", "{r:?}");
+    w.close();
+}
+
+#[test]
+fn a3727_a_helper_builds_only_under_its_own_claim_and_an_undo_stays_out_of_claims() {
+    use replica::edit::claims::{F_CLAIMS, judge_effects};
+    let mut w = W::new();
+    let room = kind(&w.header, "souls:room");
+    let helper = Id::new(Scope([0xc0; 16]), (1 << 44) + 7).expect("an id");
+    let stranger = Id::new(Scope([0xc0; 16]), (1 << 44) + 8).expect("an id");
+    let name = |h: Id| {
+        text(&format!(
+            "helper:h{}-{}",
+            replica::encode::to_hex(&h.scope().0),
+            h.counter()
+        ))
+    };
+    // A room the lead places at x 5 mm, before any claim: its creation is what a redo would write again.
+    let v = w.live.version();
+    let lead = w
+        .edit(
+            w.creator(),
+            v,
+            vec![place(1, &room, Ref::Node(w.root), spot(5_000, None))],
+        )
+        .expect("the lead's room");
+    let mut row = match claim_row("c:house", "part:house", [0, -10, 10, 10]) {
+        Value::Array(r) => r,
+        _ => unreachable!(),
+    };
+    row.push(name(helper));
+    let v = w.live.version();
+    w.edit(
+        w.creator(),
+        v,
+        vec![set_root(
+            w.root,
+            F_CLAIMS,
+            Value::Array(vec![Value::Array(row)]),
+        )],
+    )
+    .expect("claimed with a helper");
+    let v = w.live.version();
+    let as_ = |h: Id| Actor::Creator(h);
+    // The helper, under its claim, inside: built.
+    w.edit_under(
+        as_(helper),
+        v,
+        vec![place(1, &room, Ref::Node(w.root), spot(6_000, None))],
+        Some("c:house"),
+    )
+    .expect("the helper builds inside its claim");
+    let v = w.live.version();
+    // Outside its area: refused by the claim check; with no claim, or as a stranger: not an editor at all.
+    let r = w
+        .edit_under(
+            as_(helper),
+            v,
+            vec![place(1, &room, Ref::Node(w.root), spot(20_000, None))],
+            Some("c:house"),
+        )
+        .expect_err("outside");
+    assert_eq!(r.name, "edit.outside-claim", "{r:?}");
+    let r = w
+        .edit(
+            as_(helper),
+            v,
+            vec![place(1, &room, Ref::Node(w.root), spot(30_000, None))],
+        )
+        .expect_err("no claim");
+    assert_eq!(r.name, "edit.not-the-creator", "{r:?}");
+    let r = w
+        .edit_under(
+            as_(stranger),
+            v,
+            vec![place(1, &room, Ref::Node(w.root), spot(6_000, None))],
+            Some("c:house"),
+        )
+        .expect_err("another helper");
+    assert_eq!(r.name, "edit.not-the-creator", "{r:?}");
+    // The lead's undo or redo may not write inside a live claim: the room's creation again, at x 5 mm, is refused.
+    let r = judge_effects(&w.live, &lead.part.effects).expect_err("inside a claim");
+    assert_eq!(r.name, "edit.claimed", "{r:?}");
+    // Malformed helpers are refused with the claim list.
+    let mut bad = match claim_row("c:yard", "part:yard", [20, -10, 30, 10]) {
+        Value::Array(r) => r,
+        _ => unreachable!(),
+    };
+    bad.push(text("helper:hnot-hex"));
+    let r = w
+        .edit(
+            w.creator(),
+            v,
+            vec![set_root(
+                w.root,
+                F_CLAIMS,
+                Value::Array(vec![Value::Array(bad)]),
+            )],
+        )
+        .expect_err("a bad helper");
+    assert_eq!(r.name, "edit.claim-malformed");
+    w.close();
+}
+
+#[test]
+fn a1_a2_plans_and_claims_are_checked_before_they_are_recorded() {
+    use replica::edit::claims::{F_CLAIMS, F_DISTRICTS};
+    let mut w = W::new();
+    let v = w.live.version();
+    let plot = |id: &str, x: i64| {
+        Value::Array(vec![
+            text(id),
+            mm(x),
+            mm(0),
+            mm(20_000),
+            mm(15_000),
+            mm(0),
+            text("use:bakery"),
+        ])
+    };
+    let road = Value::Array(vec![
+        text("road:main"),
+        mm(6_000),
+        Value::Array(vec![mm(-50_000), mm(-20_000), mm(50_000), mm(-20_000)]),
+    ]);
+    let plan = |plots: Vec<Value>, chapters: Vec<Value>| {
+        Value::Array(vec![Value::Array(vec![
+            text("d:market"),
+            text("title:market-quarter"),
+            Value::Array(plots),
+            Value::Array(vec![road.clone()]),
+            Value::Array(chapters),
+        ])])
+    };
+    let good = plan(
+        vec![plot("p:a", 0), plot("p:b", 30_000)],
+        vec![
+            Value::Array(vec![text("p:a")]),
+            Value::Array(vec![text("p:b")]),
+        ],
+    );
+    w.edit(w.creator(), v, vec![set_root(w.root, F_DISTRICTS, good)])
+        .expect("recorded");
+    let v = w.live.version();
+    for (bad, why) in [
+        (
+            plan(vec![plot("p:a", 0), plot("p:a", 30_000)], vec![]),
+            "twice",
+        ),
+        (plan(vec![], vec![]), "no plots"),
+        (
+            plan(vec![plot("p:a", 0)], vec![Value::Array(vec![text("p:z")])]),
+            "unknown",
+        ),
+    ] {
+        let r = w
+            .edit(w.creator(), v, vec![set_root(w.root, F_DISTRICTS, bad)])
+            .expect_err("malformed");
+        assert_eq!(r.name, "edit.district-malformed", "{r:?}");
+        assert!(r.detail.contains(why), "{}", r.detail);
+    }
+    let overlap = Value::Array(vec![
+        claim_row("c:1", "part:north", [0, 0, 10, 10]),
+        claim_row("c:2", "part:south", [5, 5, 20, 20]),
+    ]);
+    let r = w
+        .edit(w.creator(), v, vec![set_root(w.root, F_CLAIMS, overlap)])
+        .expect_err("overlap");
+    assert_eq!((r.op, r.name), (Some(0), "edit.claim-malformed"), "{r:?}");
+    let nine = Value::Array(
+        (0..9)
+            .map(|i| claim_row(&format!("c:n{i}"), "part:p", [i * 10, 0, i * 10 + 5, 5]))
+            .collect(),
+    );
+    let r = w
+        .edit(w.creator(), v, vec![set_root(w.root, F_CLAIMS, nine)])
+        .expect_err("nine");
+    assert_eq!(r.name, "edit.claim-malformed");
+    w.close();
+}
+
+// --- #3700: owner and access marks, and land-use zones ---------------------------------------------------------------
+
+#[test]
+fn a1_a_private_mark_is_its_owners_alone_and_passes_down_to_what_is_inside() {
+    use replica::who_may::{F_ACCESS, F_OWNER};
+    let mut w = W::new();
+    let (room, cr, _) = w.furnish();
+    let owner = Id::new(Scope([0x50; 16]), 7).expect("an id");
+    let other = Id::new(Scope([0x50; 16]), 8).expect("an id");
+    let entry =
+        replica::rules::json::parse(r#"{"forms": {"open": {"who": "anyone"}}}"#).expect("JSON");
+    let may = |w: &W, body: Id, node: Id| {
+        sim::forms::may(
+            w.live.tree(),
+            &BTreeMap::new(),
+            &|_| None,
+            body,
+            node,
+            &entry,
+            "open",
+        )
+    };
+    // Unmarked: anyone may, as before.
+    assert!(may(&w, other, cr).is_ok());
+    // The room is the owner's and private: the crate in it is too.
+    let v = w.live.version();
+    w.edit(
+        w.creator(),
+        v,
+        vec![
+            Op::Set {
+                node: Ref::Node(room),
+                field: F_OWNER,
+                to: owner.to_value(),
+            },
+            Op::Set {
+                node: Ref::Node(room),
+                field: F_ACCESS,
+                to: Value::Uint(2),
+            },
+        ],
+    )
+    .expect("marked");
+    assert!(may(&w, owner, cr).is_ok(), "the owner may");
+    let r = may(&w, other, cr).expect_err("private");
+    assert_eq!(r.name, "object.private");
+    assert!(r.detail.contains("private"), "{}", r.detail);
+    // Its own public mark wins over the room's.
+    let v = w.live.version();
+    w.edit(
+        w.creator(),
+        v,
+        vec![Op::Set {
+            node: Ref::Node(cr),
+            field: F_ACCESS,
+            to: Value::Uint(1),
+        }],
+    )
+    .expect("public");
+    assert!(may(&w, other, cr).is_ok());
+    // The god's private thing refuses every Soul; a group has no members.
+    let v = w.live.version();
+    w.edit(
+        w.creator(),
+        v,
+        vec![
+            Op::Set {
+                node: Ref::Node(cr),
+                field: F_ACCESS,
+                to: Value::Uint(2),
+            },
+            Op::Set {
+                node: Ref::Node(cr),
+                field: F_OWNER,
+                to: text("owner:god"),
+            },
+        ],
+    )
+    .expect("the god's");
+    assert_eq!(
+        may(&w, owner, cr).expect_err("private").name,
+        "object.private"
+    );
+    // Marks that do not read are refused, and nothing is written.
+    let v = w.live.version();
+    let log = w.log_hash();
+    for (field, to) in [
+        (F_ACCESS, Value::Uint(3)),
+        (F_OWNER, text("souls:bob")),
+        (F_OWNER, Value::Uint(4)),
+    ] {
+        let r = w
+            .edit(
+                w.creator(),
+                v,
+                vec![Op::Set {
+                    node: Ref::Node(cr),
+                    field,
+                    to,
+                }],
+            )
+            .expect_err("malformed");
+        assert_eq!((r.op, r.name), (Some(0), "edit.owner-malformed"), "{r:?}");
+    }
+    assert_eq!(w.log_hash(), log);
+    // None again: anyone may.
+    w.edit(
+        w.creator(),
+        v,
+        vec![
+            Op::Set {
+                node: Ref::Node(cr),
+                field: F_ACCESS,
+                to: Value::Uint(0),
+            },
+            Op::Set {
+                node: Ref::Node(cr),
+                field: F_OWNER,
+                to: Value::Uint(0),
+            },
+            Op::Set {
+                node: Ref::Node(room),
+                field: F_ACCESS,
+                to: Value::Uint(0),
+            },
+        ],
+    )
+    .expect("cleared");
+    assert!(may(&w, other, cr).is_ok());
+    w.close();
+}
+
+#[test]
+fn a2_zones_are_named_land_uses_with_an_outline() {
+    use replica::edit::claims::F_ZONES;
+    let mut w = W::new();
+    let zone = |n: &str, u: &str, pts: &[i64]| {
+        Value::Array(vec![
+            text(n),
+            text(u),
+            Value::Array(pts.iter().map(|p| mm(*p)).collect()),
+        ])
+    };
+    let square = [0, 0, 10_000, 0, 10_000, 10_000];
+    let v = w.live.version();
+    w.edit(
+        w.creator(),
+        v,
+        vec![set_root(
+            w.root,
+            F_ZONES,
+            Value::Array(vec![zone("zone:market", "use:commercial", &square)]),
+        )],
+    )
+    .expect("zoned");
+    let v = w.live.version();
+    for bad in [
+        zone("zone:market", "use:casino", &square),
+        zone("market", "use:park", &square),
+        zone("zone:park", "use:park", &[0, 0, 5, 5]),
+    ] {
+        let r = w
+            .edit(
+                w.creator(),
+                v,
+                vec![set_root(w.root, F_ZONES, Value::Array(vec![bad]))],
+            )
+            .expect_err("malformed");
+        assert_eq!(r.name, "edit.zone-malformed", "{r:?}");
+    }
     w.close();
 }

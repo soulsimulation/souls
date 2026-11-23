@@ -23,7 +23,7 @@
 // v2/clippy.toml).
 #![allow(clippy::disallowed_methods)]
 
-use std::collections::HashMap;
+use std::collections::BTreeMap;
 use std::fmt::Write as _;
 use std::path::PathBuf;
 use std::sync::atomic::{AtomicU64, Ordering};
@@ -51,8 +51,21 @@ pub const PARTS: [&str; 6] = [
     "log.sync",  // handed -> on the disk
     "world.out", // on the disk -> its answer handed to the gateway's socket (its writer)
 ];
-/// A tick's phases, in order.
-pub const PHASES: [&str; 4] = ["commit", "deadlines", "record", "publish"];
+/// A tick's phases, in the loop's order (K18's tick, `crate::answers`; K18c #3176): a checkpoint when one is due
+/// (between ticks, so first), the intents taken, due timers, the bodies (skills and the controller), committed acts
+/// and new moves, the tick's records, the frozen copy and the hand-off to the answers thread, the auditor's slice.
+pub const PHASES: [&str; 8] = [
+    "checkpoint",
+    "take",
+    "timers",
+    "bodies",
+    "commit",
+    "record",
+    "publish",
+    "audit",
+];
+/// How many phases a tick has.
+pub const NPHASES: usize = PHASES.len();
 /// The world process's queues.
 pub const QUEUES: [&str; 4] = [
     "arrivals", // read off the socket, not yet taken by the clock thread
@@ -178,7 +191,7 @@ impl Hist {
 
 /// A queue's items by key, with the instant each entered: its oldest item's age is read by the health thread.
 #[derive(Default)]
-pub struct Queue(Mutex<HashMap<u64, u64>>);
+pub struct Queue(Mutex<BTreeMap<u64, u64>>);
 
 impl Queue {
     pub fn enter(&self, key: u64, at: u64) {
@@ -207,11 +220,11 @@ impl Queue {
 #[derive(Default)]
 pub struct Measures {
     pub parts: [Hist; 6],
-    pub phases: [Hist; 4],
+    pub phases: [Hist; NPHASES],
     pub ticks: Hist,
     pub queues: [Queue; 4],
     /// The last tick's phases, µs.
-    last: [AtomicU64; 4],
+    last: [AtomicU64; NPHASES],
     over_budget: AtomicU64,
     inverted: AtomicU64,
     /// Keys for arrivals, minted where they are read.
@@ -263,7 +276,7 @@ impl Measures {
     }
 
     /// Clock thread: a tick's phases, µs.
-    pub fn tick(&self, phases: [u64; 4]) {
+    pub fn tick(&self, phases: [u64; NPHASES]) {
         let total: u64 = phases.iter().sum();
         for (i, us) in phases.iter().enumerate() {
             self.phases[i].record(*us);
@@ -337,8 +350,59 @@ impl Measures {
                 "{sep}\"{name}\":{{\"items\":{items},\"oldest_us\":{oldest}}}"
             );
         }
-        o.push_str("}}\n");
+        o.push_str("},\"stalled\":");
+        STALLS.json(&mut o);
+        o.push_str("}\n");
         o
+    }
+}
+
+/// The clock's stalls (K7): no tick for the watchdog's soft limit, the world running on. One per process, written by
+/// the watchdog thread and read by `health.json`'s writer.
+pub struct Stalls {
+    /// ms without a tick in the stall under way; 0 while ticking.
+    now_ms: AtomicU64,
+    /// Stalls that ended, and the longest of them, ms.
+    count: AtomicU64,
+    longest_ms: AtomicU64,
+}
+
+/// This process's stalls.
+pub static STALLS: Stalls = Stalls {
+    now_ms: AtomicU64::new(0),
+    count: AtomicU64::new(0),
+    longest_ms: AtomicU64::new(0),
+};
+
+impl Stalls {
+    /// A stall began, `ms` without a tick so far.
+    pub fn began(&self, ms: i64) {
+        self.now(ms);
+    }
+
+    /// The stall under way, `ms` without a tick so far.
+    pub fn now(&self, ms: i64) {
+        self.now_ms
+            .store(u64::try_from(ms).unwrap_or(0), Ordering::Relaxed);
+    }
+
+    /// The stall ended after `ms`.
+    pub fn ended(&self, ms: i64) {
+        self.now_ms.store(0, Ordering::Relaxed);
+        self.count.fetch_add(1, Ordering::Relaxed);
+        self.longest_ms
+            .fetch_max(u64::try_from(ms).unwrap_or(0), Ordering::Relaxed);
+    }
+
+    /// `{"now_ms":n,"ended":n,"longest_ms":n}`: `now_ms` over 0 while the world is stalled.
+    pub fn json(&self, o: &mut String) {
+        let _ = write!(
+            o,
+            "{{\"now_ms\":{},\"ended\":{},\"longest_ms\":{}}}",
+            self.now_ms.load(Ordering::Relaxed),
+            self.count.load(Ordering::Relaxed),
+            self.longest_ms.load(Ordering::Relaxed)
+        );
     }
 }
 

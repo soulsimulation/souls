@@ -48,6 +48,7 @@ use replica::bodies::{Body as Claims, Class, Family, SkillShape};
 use replica::effects::Refusal;
 use replica::encode::{Name, Value};
 use replica::ids::Id;
+use replica::kinds::sizes::{Build, Size};
 use replica::pose::{ControllerInput, Frame, HandOff, Mode, Owner, Pose, Quat, Support, Vec3};
 use replica::time::Micros;
 
@@ -92,12 +93,13 @@ impl Gaze {
 }
 
 /// One utterance for a voice to carry: the reference its words are kept under, how long it lasts (from its words,
-/// `replica::speech::length_of`), and whether it replaces the one under way or waits behind it.
+/// `replica::speech::length_of`), whether it replaces the one under way or waits behind it, and its reach (E13).
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub struct Line {
     pub words: Id,
     pub length: Micros,
     pub replace: bool,
+    pub reach: replica::speech::Reach,
 }
 
 /// A body's voice: the utterance under way, until when, and those waiting, in order.
@@ -366,11 +368,19 @@ impl Track {
             node: self.to,
             slot: None,
         };
-        *body = on.place(
+        let height = match body.pose.support {
+            Support::Surface { height, .. } => height,
+            Support::Slot | Support::Volume { .. } | Support::Track | Support::None => 0,
+        };
+        *body = on.place_built(
             body.id,
             frame,
             self.arrive.unwrap_or(p),
             body.pose.orientation,
+            Build {
+                hover_mm: height / 1000,
+                ..Build::STANDARD
+            },
         )?;
         body.linear = linear;
         Ok(true)
@@ -378,6 +388,7 @@ impl Track {
 }
 
 struct Slot {
+    build: Build,
     claims: Claims,
     moved: Moved,
     input: Input,
@@ -386,6 +397,30 @@ struct Slot {
     touched: bool,
     track: Option<Track>,
     voice: Voice,
+}
+
+/// Immutable admission basis. Resource claims, input and crossing state are checked again before a change.
+#[derive(Clone, Debug, PartialEq, Eq)]
+pub struct BuildBasis {
+    pub moved: Moved,
+    pub build: Build,
+    claims: Claims,
+    input: Input,
+    track: Option<Track>,
+}
+
+/// A captured admission basis and one opaque off-clock target-triangle certificate.
+#[derive(Clone, Debug)]
+pub struct PreparedRebind {
+    pub before: BuildBasis,
+    pub triangle: crate::mover::RebindTriangle,
+}
+
+/// A certificate's outcome (B12b): the rebinds to commit, or every guard held and a body only walked on.
+#[derive(Debug)]
+pub enum Certified {
+    Ready(Vec<(BuildBasis, Moved)>),
+    WalkedOn,
 }
 
 /// Every body's claims, input and mover state; the only way any of them is moved or posed.
@@ -575,6 +610,11 @@ impl Controller {
 
     /// Adds a body of `family`, standing as the mover placed it, with the neutral input facing as it faces.
     pub fn add(&mut self, family: Family, moved: Moved) -> R<()> {
+        self.add_built(family, moved, Build::STANDARD)
+    }
+
+    /// Adds an already admitted body, using the surfaces prepared for this exact class.
+    pub fn add_built(&mut self, family: Family, moved: Moved, build: Build) -> R<()> {
         if self.get(moved.id).is_some() {
             return refuse("body-duplicate", replica::world_model::show(moved.id));
         }
@@ -583,6 +623,7 @@ impl Controller {
         self.bodies.insert(
             moved.id,
             Slot {
+                build,
                 claims: Claims::new(family),
                 moved,
                 input,
@@ -593,6 +634,17 @@ impl Controller {
             },
         );
         Ok(())
+    }
+
+    /// Takes `body` out, its claims, input and place among the near with it (a retirement, K10 #2673).
+    pub fn remove(&mut self, body: Id) -> bool {
+        self.woken.remove(&body);
+        self.near.remove_body(body);
+        let was = self
+            .bodies
+            .remove(&body)
+            .or_else(|| self.rested.remove(&body));
+        was.is_some()
     }
 
     fn slot(&mut self, body: Id) -> R<&mut Slot> {
@@ -613,6 +665,157 @@ impl Controller {
     /// The body as the mover last left it, or as it sits in its slot.
     pub fn body(&self, body: Id) -> Option<&Moved> {
         self.get(body).map(|s| &s.moved)
+    }
+
+    /// The admitted build, retained separately from the mover's position.
+    pub fn build(&self, body: Id) -> Option<Build> {
+        self.get(body).map(|s| s.build)
+    }
+
+    /// A bounded snapshot for an off-clock supported-size check.
+    pub fn build_basis(&self, body: Id) -> Option<BuildBasis> {
+        let s = self.get(body)?;
+        Some(BuildBasis {
+            moved: s.moved,
+            build: s.build,
+            claims: s.claims.clone(),
+            input: s.input.clone(),
+            track: s.track.clone(),
+        })
+    }
+
+    /// Lookup-only validation; a refused or stale change has not touched any actor state.
+    pub fn check_build(&self, basis: &BuildBasis) -> R<()> {
+        if self.build_basis(basis.moved.id).as_ref() != Some(basis) {
+            return refuse(
+                "body-change-stale",
+                "the body, claims, input or class changed",
+            );
+        }
+        if basis.track.is_some() || basis.moved.pose.support == Support::Slot {
+            return refuse("body-change-in-use", "the occupied support is in use");
+        }
+        Ok(())
+    }
+
+    /// Pairs the existing recorded write with a checked surface rebind, never a movement path.
+    pub fn commit_build<T>(
+        &mut self,
+        basis: &BuildBasis,
+        moved: Moved,
+        build: Build,
+        commit: impl FnOnce() -> R<T>,
+    ) -> R<T> {
+        self.check_build(basis)?;
+        if moved.id != basis.moved.id
+            || moved.pose.frame != basis.moved.pose.frame
+            || moved.pose.position.x != basis.moved.pose.position.x
+            || moved.pose.position.z != basis.moved.pose.position.z
+            || moved
+                .pose
+                .position
+                .y
+                .checked_sub(basis.moved.pose.position.y)
+                != build
+                    .hover_mm
+                    .checked_sub(basis.build.hover_mm)
+                    .and_then(|h| h.checked_mul(1000))
+            || moved.pose.orientation != basis.moved.pose.orientation
+            || moved.linear != basis.moved.linear
+        {
+            return refuse("body-change-moved", "a body change cannot move the actor");
+        }
+        let value = commit()?;
+        let s = self
+            .bodies
+            .get_mut(&moved.id)
+            .expect("validated surface-owned body");
+        s.moved = moved;
+        s.build = build;
+        s.touched = true;
+        Ok(value)
+    }
+
+    /// Validates every precomputed topology rebind without searching or mutating the live actor.
+    /// Validates unchanged admission state, then certifies the current point without moving it.
+    pub fn certify_rebinds(&self, prepared: &[PreparedRebind]) -> R<Vec<(BuildBasis, Moved)>> {
+        match self.certify_or_walked(prepared)? {
+            Certified::Ready(out) => Ok(out),
+            Certified::WalkedOn => refuse("edit.body-stale", "prepared triangle differs"),
+        }
+    }
+
+    /// As `certify_rebinds`, but tells apart (B12b) the one case where every guard holds and a body's current point
+    /// has only walked out of its prepared triangle: the caller may place the same bodies again off the clock.
+    pub fn certify_or_walked(&self, prepared: &[PreparedRebind]) -> R<Certified> {
+        let mut out = Vec::with_capacity(prepared.len());
+        let mut walked = false;
+        let mut seen = BTreeSet::new();
+        for target in prepared {
+            let before = &target.before;
+            let Some(current) = self.build_basis(before.moved.id) else {
+                return refuse("edit.body-stale", "prepared body missing");
+            };
+            if current.build != before.build
+                || current.claims != before.claims
+                || current.track != before.track
+                || current.track.is_some()
+                || current.moved.pose.frame != before.moved.pose.frame
+                || current.moved.pose.support != before.moved.pose.support
+                || !self.bodies.contains_key(&before.moved.id)
+                || !seen.insert(before.moved.id)
+            {
+                return refuse("edit.body-stale", "prepared body changed");
+            }
+            match target.triangle.rebind(&current.moved) {
+                Some(after) => out.push((current, after)),
+                None if !target.triangle.contains(&current.moved) => walked = true,
+                None => {
+                    return Err(Refusal {
+                        name: "edit.body-stale",
+                        detail: "prepared triangle differs".into(),
+                    });
+                }
+            }
+        }
+        if walked {
+            return Ok(Certified::WalkedOn);
+        }
+        self.check_rebinds(&out)?;
+        Ok(Certified::Ready(out))
+    }
+
+    pub fn check_rebinds(&self, prepared: &[(BuildBasis, Moved)]) -> R<()> {
+        let mut seen = BTreeSet::new();
+        for (before, after) in prepared {
+            if !seen.insert(before.moved.id)
+                || !self.bodies.contains_key(&before.moved.id)
+                || self.build_basis(before.moved.id).as_ref() != Some(before)
+                || after.id != before.moved.id
+                || after.pose != before.moved.pose
+                || after.linear != before.moved.linear
+            {
+                return refuse("edit.body-stale", "prepared body changed");
+            }
+        }
+        Ok(())
+    }
+    pub fn commit_rebinds<T>(
+        &mut self,
+        prepared: &[(BuildBasis, Moved)],
+        commit: impl FnOnce() -> R<T>,
+    ) -> R<T> {
+        self.check_rebinds(prepared)?;
+        let value = commit()?;
+        for (before, after) in prepared {
+            let slot = self
+                .bodies
+                .get_mut(&before.moved.id)
+                .expect("validated surface-owned actor");
+            slot.moved.piece = after.piece;
+            slot.moved.tri = after.tri;
+        }
+        Ok(value)
     }
 
     /// The body's input now.
@@ -768,6 +971,11 @@ impl Controller {
         self.bodies.values().map(|s| &s.moved)
     }
 
+    /// Every body the controller holds, each once: those it steps and those resting in a slot (seated, lying, rising).
+    pub fn ids(&self) -> impl Iterator<Item = Id> + '_ {
+        self.bodies.keys().chain(self.rested.keys()).copied()
+    }
+
     /// Sets one part of `body`'s input, if `driver` holds its resources (`resource-not-held`, `resource-missing`).
     pub fn set(&mut self, body: Id, driver: Driver, part: Part) -> R<()> {
         let s = self.slot(body)?;
@@ -820,6 +1028,16 @@ impl Controller {
         &mut self,
         controls: &[(Id, Driver, ControllerInput)],
     ) -> Vec<(Id, Refusal)> {
+        self.set_velocities_on(controls, 1)
+    }
+
+    /// [`Controller::set_velocities`] on `threads` threads (N17b, #3255): controls in body id order are cut into runs
+    /// that never split one body's, each run matched along its own bodies, and the refusals joined in order.
+    pub fn set_velocities_on(
+        &mut self,
+        controls: &[(Id, Driver, ControllerInput)],
+        threads: usize,
+    ) -> Vec<(Id, Refusal)> {
         let mut refused = Vec::new();
         if !controls.is_sorted_by_key(|c| c.0) {
             for &(body, driver, input) in controls {
@@ -829,20 +1047,52 @@ impl Controller {
             }
             return refused;
         }
-        let mut slots = self.bodies.iter_mut().peekable();
-        for &(body, driver, input) in controls {
-            while slots.next_if(|(id, _)| **id < body).is_some() {}
-            let set = match slots.peek_mut() {
-                Some((id, s)) if **id == body => s.steers(driver).map(|()| {
-                    s.input.velocity = input.velocity;
-                    s.input.mode = input.mode;
-                    s.touched = true;
-                }),
-                _ => refuse("body-unknown", replica::world_model::show(body)),
-            };
-            if let Err(r) = set {
-                refused.push((body, r));
+        let mut slots: Vec<(Id, &mut Slot)> =
+            self.bodies.iter_mut().map(|(&id, s)| (id, s)).collect();
+        // Runs of controls, each starting at a new body, and the bodies from its first on.
+        let mut cuts = vec![0];
+        let mut i = BODIES;
+        while i < controls.len() {
+            while i < controls.len() && controls[i].0 == controls[i - 1].0 {
+                i += 1;
             }
+            if i < controls.len() {
+                cuts.push(i);
+            }
+            i += BODIES;
+        }
+        let mut runs = Vec::with_capacity(cuts.len());
+        let mut rest: &mut [(Id, &mut Slot)] = &mut slots;
+        for (k, &c) in cuts.iter().enumerate() {
+            let end = cuts.get(k + 1).copied().unwrap_or(controls.len());
+            // This run's bodies: those before the next run's first.
+            let n = cuts.get(k + 1).map_or(rest.len(), |&n| {
+                rest.partition_point(|(id, _)| *id < controls[n].0)
+            });
+            let (mine, more) = std::mem::take(&mut rest).split_at_mut(n);
+            rest = more;
+            runs.push((&controls[c..end], mine));
+        }
+        for r in crate::par::map_mut(&mut runs, threads, 1, |(controls, slots)| {
+            let mut refused = Vec::new();
+            let mut slots = slots.iter_mut().peekable();
+            for &(body, driver, input) in controls.iter() {
+                while slots.next_if(|(id, _)| *id < body).is_some() {}
+                let set = match slots.peek_mut() {
+                    Some((id, s)) if *id == body => s.steers(driver).map(|()| {
+                        s.input.velocity = input.velocity;
+                        s.input.mode = input.mode;
+                        s.touched = true;
+                    }),
+                    _ => refuse("body-unknown", replica::world_model::show(body)),
+                };
+                if let Err(r) = set {
+                    refused.push((body, r));
+                }
+            }
+            refused
+        }) {
+            refused.extend(r);
         }
         refused
     }
@@ -871,6 +1121,30 @@ impl Controller {
     /// stepped by the mover of the surface it stands on. A body in a slot is visited only when its input changed, to
     /// log it. A body refused here is listed and stays where it was; the others go on.
     pub fn step(&mut self, surfaces: &BTreeMap<Id, Surface>, dt: Micros, at: Micros) -> Stepped {
+        self.step_on(surfaces, dt, at, 1)
+    }
+
+    /// [`Controller::step`] with the bodies on surfaces stepped on `threads` threads (N17b, #3255): each body's step
+    /// reads only itself and the surfaces, and what each gives (its log record, its sample, its refusal, its new place
+    /// in "who is near") is joined in body order, so the tick is the same at any thread count.
+    pub fn step_on(
+        &mut self,
+        surfaces: &BTreeMap<Id, Surface>,
+        dt: Micros,
+        at: Micros,
+        threads: usize,
+    ) -> Stepped {
+        self.step_on_selected(|_, _| Some(surfaces), dt, at, threads)
+    }
+
+    /// The same controller step, selecting each body's exact admitted-class surface bank.
+    pub fn step_on_selected<'a>(
+        &mut self,
+        surfaces: impl Fn(Id, Size) -> Option<&'a BTreeMap<Id, Surface>> + Sync,
+        dt: Micros,
+        at: Micros,
+        threads: usize,
+    ) -> Stepped {
         let mut out = Stepped::default();
         for id in std::mem::take(&mut self.woken) {
             if let Some(s) = self.rested.get_mut(&id) {
@@ -882,68 +1156,136 @@ impl Controller {
                 s.log(id, at, &mut self.log);
             }
         }
-        for (&id, s) in self.bodies.iter_mut() {
-            s.speak(id, at, &mut out.said);
-            s.log(id, at, &mut self.log);
-            s.moved.pose.orientation = s.input.facing;
-            if let Some(t) = s.track.as_mut() {
-                match t.advance(&mut s.moved, surfaces, dt) {
-                    Ok(true) => {
-                        s.track = None;
-                        s.input.velocity = Vec3::ZERO;
-                        // A changed input: logged at the next step (B2's `touched`).
-                        s.touched = true;
+        let mut slots: Vec<(Id, &mut Slot)> =
+            self.bodies.iter_mut().map(|(&id, s)| (id, s)).collect();
+        let step_run = |run: &mut [(Id, &mut Slot)]| {
+            let mut o = Gave::default();
+            for (id, s) in run.iter_mut() {
+                match surfaces(*id, s.build.size) {
+                    Some(on) => {
+                        let put = s.step_one(*id, on, dt, at, &mut o);
+                        o.put.push(put);
                     }
-                    Ok(false) => {}
-                    Err(r) => {
-                        s.track = None;
-                        out.refused.push((id, r));
+                    None => {
+                        o.refused.push((
+                            *id,
+                            Refusal {
+                                name: "body-class-unprepared",
+                                detail: "the admitted class has no prepared surfaces".into(),
+                            },
+                        ));
+                        o.put.push(false);
                     }
                 }
-                if s.track.as_ref().is_none_or(|t| t.link.is_none()) {
-                    self.near.put_moved(&s.moved);
-                }
-                continue;
             }
-            // Standing still with no velocity asked: the mover would leave it as it is.
-            if s.input.velocity == Vec3::ZERO && s.moved.linear == Vec3::ZERO {
-                continue;
-            }
-            let Support::Surface { surface, .. } = s.moved.pose.support else {
-                out.refused.push((
-                    id,
-                    Refusal {
-                        name: "support-not-surface",
-                        detail: replica::world_model::show(id),
-                    },
-                ));
-                continue;
-            };
-            let Some(on) = surfaces.get(&surface) else {
-                out.refused.push((
-                    id,
-                    Refusal {
-                        name: "no-surface",
-                        detail: replica::world_model::show(surface),
-                    },
-                ));
-                continue;
-            };
-            let input = ControllerInput {
-                velocity: s.input.velocity,
-                mode: s.input.mode,
-            };
-            match on.step(&mut s.moved, input, dt, at) {
-                Ok(Some(h)) => out.samples.push(h),
-                Ok(None) => {}
-                Err(r) => out.refused.push((id, r)),
-            }
-            self.near.put_moved(&s.moved);
+            o
+        };
+        let mut runs: Vec<&mut [(Id, &mut Slot)]> = slots.chunks_mut(BODIES).collect();
+        let gave = crate::par::map_mut(&mut runs, threads, 1, |run| step_run(run));
+        drop(runs);
+        drop(slots);
+        let mut put = Vec::with_capacity(self.bodies.len());
+        out.samples
+            .reserve(gave.iter().map(|g| g.samples.len()).sum::<usize>());
+        self.log
+            .reserve(gave.iter().map(|g| g.log.len()).sum::<usize>());
+        for g in gave {
+            out.said.extend(g.said);
+            self.log.extend(g.log);
+            out.samples.extend(g.samples);
+            out.refused.extend(g.refused);
+            put.extend(g.put);
         }
+        self.near.put_moved_sorted(
+            self.bodies
+                .values()
+                .zip(put)
+                .filter(|(_, put)| *put)
+                .map(|(s, _)| &s.moved),
+        );
         out
     }
 }
 
+/// The most bodies one thread steps at a time in [`Controller::step_on`].
+const BODIES: usize = 256;
+
+/// What stepping a run of bodies gave, in body order, and whether each takes its new place in "who is near".
+#[derive(Default)]
+struct Gave {
+    said: Vec<(Id, Line, Micros)>,
+    log: Vec<Logged>,
+    samples: Vec<HandOff>,
+    refused: Vec<(Id, Refusal)>,
+    put: Vec<bool>,
+}
+
+impl Slot {
+    /// One body's step on its surface, as [`Controller::step`] gives it; whether it takes its new place in "who is
+    /// near".
+    fn step_one(
+        &mut self,
+        id: Id,
+        surfaces: &BTreeMap<Id, Surface>,
+        dt: Micros,
+        at: Micros,
+        o: &mut Gave,
+    ) -> bool {
+        self.speak(id, at, &mut o.said);
+        self.log(id, at, &mut o.log);
+        self.moved.pose.orientation = self.input.facing;
+        if let Some(t) = self.track.as_mut() {
+            match t.advance(&mut self.moved, surfaces, dt) {
+                Ok(true) => {
+                    self.track = None;
+                    self.input.velocity = Vec3::ZERO;
+                    // A changed input: logged at the next step (B2's `touched`).
+                    self.touched = true;
+                }
+                Ok(false) => {}
+                Err(r) => {
+                    self.track = None;
+                    o.refused.push((id, r));
+                }
+            }
+            return self.track.as_ref().is_none_or(|t| t.link.is_none());
+        }
+        // Standing still with no velocity asked: the mover would leave it as it is.
+        if self.input.velocity == Vec3::ZERO && self.moved.linear == Vec3::ZERO {
+            return false;
+        }
+        let Support::Surface { surface, .. } = self.moved.pose.support else {
+            o.refused.push((
+                id,
+                Refusal {
+                    name: "support-not-surface",
+                    detail: replica::world_model::show(id),
+                },
+            ));
+            return false;
+        };
+        let Some(on) = surfaces.get(&surface) else {
+            o.refused.push((
+                id,
+                Refusal {
+                    name: "no-surface",
+                    detail: replica::world_model::show(surface),
+                },
+            ));
+            return false;
+        };
+        let input = ControllerInput {
+            velocity: self.input.velocity,
+            mode: self.input.mode,
+        };
+        match on.step(&mut self.moved, input, dt, at) {
+            Ok(Some(h)) => o.samples.push(h),
+            Ok(None) => {}
+            Err(r) => o.refused.push((id, r)),
+        }
+        true
+    }
+}
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -985,5 +1327,491 @@ mod tests {
                 assert_eq!(i.bytes(at, body), want, "{i:?} at {at}");
             }
         }
+    }
+}
+
+#[cfg(test)]
+mod class_tests {
+    use super::*;
+    use crate::ground::Piece;
+    use replica::bodies::{Class, Resource, Want};
+    use replica::ids::Scope;
+    fn fixture() -> (Id, Family, Surface) {
+        let id = Id::new(Scope([0x65; 16]), 1).unwrap();
+        let family = Family {
+            name: Name::new("souls:humanoid").unwrap(),
+            resources: vec![Resource {
+                name: Name::new("souls:legs").unwrap(),
+                class: Class::Locomotion,
+                slot: None,
+            }],
+        };
+        let pc = Piece {
+            outline: vec![vec![
+                [-10000, 0, -10000],
+                [10000, 0, -10000],
+                [10000, 0, 10000],
+                [-10000, 0, 10000],
+            ]],
+            vertices: vec![
+                [-10000, 0, -10000],
+                [10000, 0, -10000],
+                [10000, 0, 10000],
+                [-10000, 0, 10000],
+            ],
+            triangles: vec![[0, 1, 2], [0, 2, 3]],
+            ground: crate::gaits::Ground::Dry,
+        };
+        (id, family, Surface::new(id, vec![pc]))
+    }
+    #[test]
+    fn admitted_hover_survives_the_first_and_following_controller_ticks() {
+        let (id, family, surface) = fixture();
+        let build = Build {
+            size: Size::Large,
+            hover_mm: 900,
+            ..Build::STANDARD
+        };
+        let body = surface
+            .place_built(
+                id,
+                Frame {
+                    node: id,
+                    slot: None,
+                },
+                Vec3::ZERO,
+                Quat::IDENTITY,
+                build,
+            )
+            .unwrap();
+        let mut c = Controller::new();
+        c.add_built(family, body, build).unwrap();
+        let shape = SkillShape {
+            name: Name::new("souls:walk").unwrap(),
+            claims: vec![Want::All(Class::Locomotion)],
+            blocks: Vec::new(),
+            cancelled_by: Vec::new(),
+        };
+        let driver = c.claim(id, &shape).unwrap();
+        c.set(
+            id,
+            driver,
+            Part::Velocity(Vec3::new(1_000, 0, 0), Mode::Surface),
+        )
+        .unwrap();
+        let floors = BTreeMap::from([(id, surface)]);
+        let mut previous_x = 0;
+        for at in [50_000, 100_000] {
+            let out = c.step_on_selected(
+                |_, size| (size == Size::Large).then_some(&floors),
+                50_000,
+                at,
+                1,
+            );
+            assert!(out.refused.is_empty());
+            assert!(!out.samples.is_empty());
+            assert!(c.body(id).unwrap().pose.position.x > previous_x);
+            previous_x = c.body(id).unwrap().pose.position.x;
+            assert_eq!(c.body(id).unwrap().pose.position.y, 900_000);
+            assert_eq!(c.body(id).unwrap().pose.support, build.support(id));
+        }
+    }
+    #[test]
+    fn current_point_certificate_keeps_motion_and_refuses_changed_admission_atomically() {
+        let (id, family, surface) = fixture();
+        let pc = surface.pieces()[0].clone();
+        let mut far = pc.clone();
+        for v in &mut far.vertices {
+            v[0] -= 100_000;
+        }
+        for ring in &mut far.outline {
+            for v in ring {
+                v[0] -= 100_000;
+            }
+        }
+        let old = Surface::new(id, vec![far, pc]);
+        let moved = old
+            .place(
+                id,
+                Frame {
+                    node: id,
+                    slot: None,
+                },
+                Vec3::new(1_000_000, 0, -1_000_000),
+                Quat::IDENTITY,
+            )
+            .unwrap();
+        assert_eq!(moved.piece, 1);
+        let mut c = Controller::new();
+        c.add(family, moved).unwrap();
+        let shape = SkillShape {
+            name: Name::new("souls:walk").unwrap(),
+            claims: vec![Want::All(Class::Locomotion)],
+            blocks: vec![],
+            cancelled_by: vec![],
+        };
+        let driver = c.claim(id, &shape).unwrap();
+        c.set(
+            id,
+            driver,
+            Part::Velocity(Vec3::new(1_000, 0, 0), Mode::Surface),
+        )
+        .unwrap();
+        let target = PreparedRebind {
+            before: c.build_basis(id).unwrap(),
+            triangle: surface.rebind_triangle(0, moved.tri, 0).unwrap(),
+        };
+        c.set(
+            id,
+            driver,
+            Part::Velocity(Vec3::new(2_000, 0, 0), Mode::Surface),
+        )
+        .unwrap();
+        c.set(
+            id,
+            driver,
+            Part::Facing(Quat::from_yaw_mdeg(30_000).unwrap()),
+        )
+        .unwrap();
+        assert_eq!(
+            c.check_build(&target.before).unwrap_err().name,
+            "body-change-stale"
+        );
+        let out = c.step(&BTreeMap::from([(id, old)]), 50_000, 50_000);
+        assert!(out.refused.is_empty());
+        let current = c.build_basis(id).unwrap();
+        assert_ne!(
+            current.moved.pose.position,
+            target.before.moved.pose.position
+        );
+        assert_ne!(current.input.velocity, target.before.input.velocity);
+        assert_ne!(current.input.facing, target.before.input.facing);
+        let certified = c.certify_rebinds(std::slice::from_ref(&target)).unwrap();
+        assert_eq!(certified[0].0, current);
+        assert_eq!(certified[0].1.pose, current.moved.pose);
+        assert_eq!(certified[0].1.linear, current.moved.linear);
+        c.set(
+            id,
+            driver,
+            Part::Velocity(Vec3::new(3_000, 0, 0), Mode::Surface),
+        )
+        .unwrap();
+        let drifted = c.build_basis(id).unwrap();
+        assert_eq!(
+            c.check_rebinds(&certified).unwrap_err().name,
+            "edit.body-stale"
+        );
+        assert_eq!(c.build_basis(id).unwrap(), drifted);
+        c.set(
+            id,
+            driver,
+            Part::Velocity(current.input.velocity, current.input.mode),
+        )
+        .unwrap();
+        assert_eq!(c.build_basis(id).unwrap(), current);
+        assert_eq!(
+            c.commit_rebinds(&certified, || Err::<(), _>(Refusal {
+                name: "paired-refusal",
+                detail: String::new()
+            }))
+            .unwrap_err()
+            .name,
+            "paired-refusal"
+        );
+        assert_eq!(c.build_basis(id).unwrap(), current);
+        c.commit_rebinds(&certified, || Ok(())).unwrap();
+        let mut rebound = current.clone();
+        rebound.moved.piece = 0;
+        assert_eq!(c.build_basis(id).unwrap(), rebound);
+        assert_eq!(c.input(id), Some(&current.input));
+        assert_eq!(current.moved.piece, 1);
+        assert_eq!(certified[0].1.piece, 0);
+        for change in 0..7 {
+            let slot = c.bodies.get_mut(&id).unwrap();
+            match change {
+                0 => slot.moved.pose.position.x = 100_000_000,
+                1 => slot.moved.pose.position.y += 1,
+                2 => slot.build.size = replica::kinds::sizes::Size::Large,
+                3 => slot.moved.pose.frame.slot = Some(1),
+                4 => slot.moved.pose.support = Support::Slot,
+                5 => {
+                    slot.track = Some(Track {
+                        link: None,
+                        line: vec![],
+                        speed: 1,
+                        to: id,
+                        arrive: None,
+                    })
+                }
+                _ => slot.moved.pose.frame.node = Id::new(Scope([0x66; 16]), 2).unwrap(),
+            }
+            let changed = c.build_basis(id).unwrap();
+            assert_eq!(
+                c.certify_rebinds(std::slice::from_ref(&target))
+                    .unwrap_err()
+                    .name,
+                "edit.body-stale",
+                "case {change}"
+            );
+            assert_eq!(c.build_basis(id).unwrap(), changed);
+            let slot = c.bodies.get_mut(&id).unwrap();
+            slot.moved = current.moved;
+            slot.build = current.build;
+            slot.input = current.input.clone();
+            slot.track = current.track.clone();
+        }
+        c.claim(
+            id,
+            &SkillShape {
+                name: Name::new("souls:observe").unwrap(),
+                claims: vec![],
+                blocks: vec![],
+                cancelled_by: vec![],
+            },
+        )
+        .unwrap();
+        let changed = c.build_basis(id).unwrap();
+        assert_ne!(changed.claims, current.claims);
+        assert_eq!(
+            c.certify_rebinds(&[target]).unwrap_err().name,
+            "edit.body-stale"
+        );
+        assert_eq!(c.build_basis(id).unwrap(), changed);
+    }
+
+    #[test]
+    fn a_body_that_walked_out_of_its_prepared_triangle_is_placed_again_on_the_kept_surfaces() {
+        let (id, family, surface) = fixture();
+        let frame = Frame {
+            node: id,
+            slot: None,
+        };
+        let moved = surface
+            .place(id, frame, Vec3::new(-50_000, 0, 0), Quat::IDENTITY)
+            .unwrap();
+        let mut c = Controller::new();
+        c.add(family, moved).unwrap();
+        let shape = SkillShape {
+            name: Name::new("souls:walk").unwrap(),
+            claims: vec![Want::All(Class::Locomotion)],
+            blocks: Vec::new(),
+            cancelled_by: Vec::new(),
+        };
+        let driver = c.claim(id, &shape).unwrap();
+        c.set(
+            id,
+            driver,
+            Part::Velocity(Vec3::new(1_000_000, 0, 0), Mode::Surface),
+        )
+        .unwrap();
+        let before = c.build_basis(id).unwrap();
+        let kept = crate::walk::town::RebindSurfaces(BTreeMap::from([(
+            (before.build.size, id),
+            (surface.clone(), 0),
+        )]));
+        let prepared = kept.place(std::slice::from_ref(&before)).unwrap();
+        assert!(matches!(
+            c.certify_or_walked(&prepared).unwrap(),
+            Certified::Ready(_)
+        ));
+        let surfaces = BTreeMap::from([(id, surface)]);
+        let mut at = 0;
+        while prepared[0].triangle.contains(c.body(id).unwrap()) {
+            at += 50_000;
+            assert!(at < 100_000_000, "the body never left its triangle");
+            assert!(c.step(&surfaces, 50_000, at).refused.is_empty());
+        }
+        let current = c.build_basis(id).unwrap();
+        assert_ne!(current.moved.tri, before.moved.tri);
+        // The old certificate refuses, by its existing name; the distinct outcome only says the body walked on.
+        assert!(matches!(
+            c.certify_or_walked(&prepared).unwrap(),
+            Certified::WalkedOn
+        ));
+        assert_eq!(
+            c.certify_rebinds(&prepared).unwrap_err().name,
+            "edit.body-stale"
+        );
+        assert_eq!(c.build_basis(id).unwrap(), current);
+        // Placed again, as it stands now, on the same kept surfaces: no rebuild, map or search.
+        let again = kept.place(std::slice::from_ref(&current)).unwrap();
+        let Certified::Ready(certified) = c.certify_or_walked(&again).unwrap() else {
+            panic!("the reprepared certificate holds");
+        };
+        c.commit_rebinds(&certified, || Ok(())).unwrap();
+        let mut expected = current.clone();
+        expected.moved.piece = certified[0].1.piece;
+        expected.moved.tri = certified[0].1.tri;
+        assert_eq!(c.build_basis(id).unwrap(), expected);
+        assert_eq!(c.input(id), Some(&current.input));
+        assert_eq!(c.body(id).unwrap().pose, current.moved.pose);
+        assert_eq!(c.body(id).unwrap().linear, current.moved.linear);
+        let x = c.body(id).unwrap().pose.position.x;
+        assert!(c.step(&surfaces, 50_000, at + 50_000).refused.is_empty());
+        assert!(c.body(id).unwrap().pose.position.x > x);
+        // A changed admission still refuses by its existing name, never as walked on.
+        c.bodies.get_mut(&id).unwrap().moved.pose.position.y += 1;
+        assert_eq!(
+            c.certify_or_walked(&again).unwrap_err().name,
+            "edit.body-stale"
+        );
+    }
+
+    #[test]
+    fn prepared_topology_rebind_preserves_active_state_and_moves_on_the_next_tick() {
+        let (id, family, surface) = fixture();
+        let pc = surface.pieces()[0].clone();
+        let mut far = pc.clone();
+        for v in &mut far.vertices {
+            v[0] -= 100_000;
+        }
+        for ring in &mut far.outline {
+            for v in ring {
+                v[0] -= 100_000;
+            }
+        }
+        let old = Surface::new(id, vec![far, pc]);
+        let frame = Frame {
+            node: id,
+            slot: None,
+        };
+        let moved = old.place(id, frame, Vec3::ZERO, Quat::IDENTITY).unwrap();
+        assert_eq!(moved.piece, 1);
+        let mut c = Controller::new();
+        c.add(family, moved).unwrap();
+        let shape = SkillShape {
+            name: Name::new("souls:walk").unwrap(),
+            claims: vec![Want::All(Class::Locomotion)],
+            blocks: Vec::new(),
+            cancelled_by: Vec::new(),
+        };
+        let driver = c.claim(id, &shape).unwrap();
+        c.set(
+            id,
+            driver,
+            Part::Velocity(Vec3::new(1_000, 0, 0), Mode::Surface),
+        )
+        .unwrap();
+        let before = c.build_basis(id).unwrap();
+        let mut after = surface
+            .place(id, frame, Vec3::ZERO, Quat::IDENTITY)
+            .unwrap();
+        after.linear = moved.linear;
+        assert_eq!(after.piece, 0);
+        let prepared = vec![(before.clone(), after)];
+        assert_eq!(
+            c.commit_rebinds(&prepared, || Err::<(), _>(Refusal {
+                name: "paired-refusal",
+                detail: String::new()
+            }))
+            .unwrap_err()
+            .name,
+            "paired-refusal"
+        );
+        assert_eq!(c.build_basis(id).unwrap(), before);
+        c.set(
+            id,
+            driver,
+            Part::Velocity(Vec3::new(2_000, 0, 0), Mode::Surface),
+        )
+        .unwrap();
+        let changed = c.build_basis(id).unwrap();
+        assert_eq!(
+            c.commit_rebinds(&prepared, || Ok(())).unwrap_err().name,
+            "edit.body-stale"
+        );
+        assert_eq!(c.build_basis(id).unwrap(), changed);
+        let current = vec![(changed.clone(), after)];
+        c.commit_rebinds(&current, || Ok(())).unwrap();
+        let mut expected = changed;
+        expected.moved.piece = after.piece;
+        expected.moved.tri = after.tri;
+        assert_eq!(c.build_basis(id).unwrap(), expected);
+        let out = c.step(&BTreeMap::from([(id, surface)]), 50_000, 50_000);
+        assert!(out.refused.is_empty());
+        assert!(!out.samples.is_empty());
+        assert!(c.body(id).unwrap().pose.position.x > 0);
+        c.slot_in(
+            id,
+            driver,
+            Frame {
+                node: id,
+                slot: Some(1),
+            },
+            100_000,
+        )
+        .unwrap();
+        let slot = c.build_basis(id).unwrap();
+        let called = std::cell::Cell::new(false);
+        assert_eq!(
+            c.commit_rebinds(&[(slot.clone(), slot.moved)], || {
+                called.set(true);
+                Ok(())
+            })
+            .unwrap_err()
+            .name,
+            "edit.body-stale"
+        );
+        assert!(!called.get());
+        assert_eq!(c.build_basis(id).unwrap(), slot);
+    }
+
+    #[test]
+    fn refused_and_stale_build_commits_preserve_all_controller_state() {
+        let (id, family, surface) = fixture();
+        let moved = surface
+            .place(
+                id,
+                Frame {
+                    node: id,
+                    slot: None,
+                },
+                Vec3::ZERO,
+                Quat::IDENTITY,
+            )
+            .unwrap();
+        let mut c = Controller::new();
+        c.add(family, moved).unwrap();
+        let basis = c.build_basis(id).unwrap();
+        let small = Build {
+            size: Size::Small,
+            ..Build::STANDARD
+        };
+        let refusal = c
+            .commit_build(&basis, moved, small, || {
+                Err::<(), _>(Refusal {
+                    name: "paired-refusal",
+                    detail: String::new(),
+                })
+            })
+            .unwrap_err();
+        assert_eq!(refusal.name, "paired-refusal");
+        assert_eq!(c.build_basis(id).unwrap(), basis);
+        let shape = SkillShape {
+            name: Name::new("souls:walk").unwrap(),
+            claims: vec![Want::All(Class::Locomotion)],
+            blocks: Vec::new(),
+            cancelled_by: Vec::new(),
+        };
+        let driver = c.claim(id, &shape).unwrap();
+        c.set(
+            id,
+            driver,
+            Part::Velocity(Vec3::new(1000, 0, 0), Mode::Surface),
+        )
+        .unwrap();
+        let current = c.build_basis(id).unwrap();
+        let called = std::cell::Cell::new(false);
+        assert_eq!(
+            c.commit_build(&basis, moved, small, || {
+                called.set(true);
+                Ok(())
+            })
+            .unwrap_err()
+            .name,
+            "body-change-stale"
+        );
+        assert!(!called.get());
+        assert_eq!(c.build_basis(id).unwrap(), current);
     }
 }

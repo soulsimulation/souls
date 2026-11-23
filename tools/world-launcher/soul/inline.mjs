@@ -2,6 +2,7 @@
 // Worlds serve eden.mjs as one file and many tools copy it alone, so the CLI's modules are inlined into a generated
 // block of it. Edit the module; CI, eden-sync.yml and the release stamp run this, and a PR does not carry the rebuilt file
 // (docs/testing.md#the-soul-client-file). `--check` changes nothing and fails on a stale block.
+import { isMain } from "../../lib/is-main.mjs";
 import { readFileSync, writeFileSync } from "node:fs";
 import { fileURLToPath } from "node:url";
 import { stripTypeScriptTypes } from "node:module";
@@ -66,7 +67,7 @@ export function withBlocks(cli, read = (f) => { const text = readFileSync(here(f
   return out;
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const file = here("eden.mjs"), cli = readFileSync(file, "utf8"), next = withBlocks(cli);
   if (process.argv.includes("--check")) { if (next !== cli) { console.error("eden.mjs is stale: run node tools/world-launcher/soul/inline.mjs"); process.exit(1); } }
   else writeFileSync(file, next);

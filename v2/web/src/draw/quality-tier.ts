@@ -1,6 +1,8 @@
 // Device tiers (V5, #2714), copied from apps/web/src/quality-tier.ts (not imported) and cut to what this page draws:
 // a phone (touch-first, short side ≤ 820 CSS px, or 2 GB) gets the `phone` tier, everything else `full`. The tier
 // changes only how the view is drawn, never what the world is.
+import { PHONE_STAND_INS, type StandInOptions } from '../things/standins.ts';
+
 export type QualityTier = 'phone' | 'full';
 export type QualitySettings = { tier: QualityTier; reason: string; maxPixelRatio: number; antialias: boolean };
 export type QualityEnvironment = { coarsePointer: boolean; screen: readonly [number, number]; deviceMemory?: number };
@@ -22,4 +24,57 @@ export function browserQuality(renderer: string | null = null): QualitySettings 
   if (softwareGl(renderer)) return { tier: 'phone', reason: `software GL (${renderer})`, maxPixelRatio: 1, antialias: false };
   const coarse = typeof matchMedia === 'function' && matchMedia('(pointer: coarse)').matches;
   return pickQualityTier({ coarsePointer: coarse, screen: [screen.width, screen.height], deviceMemory: (navigator as { deviceMemory?: number }).deviceMemory });
+}
+
+/** C12 (#3683): today's distance detail (apps/web quality-tier.ts, copied): a part under `minRadiusPx` CSS pixels of
+ *  radius is not drawn; a small part (radius under `shadowMaxRadius` m) beyond `shadowNear + shadowPerMetre·radius`
+ *  metres casts no shadow. Phones: today's PHONE_DETAIL; desktops: today's default, DESKTOP_DETAIL_FAST. */
+export type DistanceDetail = { minRadiusPx: number; shadowNear: number; shadowPerMetre: number; shadowMaxRadius: number };
+export const PHONE_DETAIL: DistanceDetail = Object.freeze({ minRadiusPx: 1.25, shadowNear: 24, shadowPerMetre: 14, shadowMaxRadius: 6 });
+export const DESKTOP_DETAIL: DistanceDetail = Object.freeze({ minRadiusPx: 1, shadowNear: 40, shadowPerMetre: 20, shadowMaxRadius: 6 });
+
+/** The detail for a tier; `?detail=0` turns it off (the measure's other arm), and `?detailMinPx=` /
+ *  `?detailShadowNear=` tune it for measurements (today's `?phoneMinPx=` / `?phoneShadowNear=`). */
+export function detailFor(tier: QualityTier, search = ''): DistanceDetail | null {
+  const q = new URLSearchParams(search);
+  if (q.get('detail') === '0') return null;
+  const base = tier === 'phone' ? PHONE_DETAIL : DESKTOP_DETAIL, num = (k: string, d: number) => (q.has(k) && Number(q.get(k)) >= 0 ? Number(q.get(k)) : d);
+  return q.has('detailMinPx') || q.has('detailShadowNear') ? { ...base, minRadiusPx: num('detailMinPx', base.minRadiusPx), shadowNear: num('detailShadowNear', base.shadowNear) } : base;
+}
+
+/** #3786: today's far stand-ins are a phone's (LiveWorld: phone tier with distance detail); `?cards=0` turns them off
+ *  (today's `?phoneOff=cards`). */
+export function standInsFor(tier: QualityTier, search = ''): StandInOptions | null {
+  const q = new URLSearchParams(search);
+  return tier === 'phone' && q.get('detail') !== '0' && q.get('cards') !== '0' ? PHONE_STAND_INS : null;
+}
+
+/** The page's stand-ins (browser only). */
+export function pageStandIns(): StandInOptions | null {
+  if (typeof window === 'undefined' || typeof screen === 'undefined') return null;
+  return standInsFor(browserQuality().tier, location.search);
+}
+
+/** The page's detail (browser only; null elsewhere, so tests choose their own). */
+export function pageDetail(): DistanceDetail | null {
+  if (typeof window === 'undefined' || typeof screen === 'undefined') return null;
+  return detailFor(browserQuality().tier, location.search);
+}
+
+/** #3785: today's mesh levels (apps/web WorldMeshLod.ts PHONE_MESH_LOD / DESKTOP_MESH_LOD): a level is drawn where its
+ *  error is under `maxErrorPx` CSS pixels, one on a phone, half on a desktop. Off with distance detail (`?detail=0`) or
+ *  alone with `?lod=0` (today's `?phoneOff=lod`). */
+export type MeshLod = { maxErrorPx: number };
+export const PHONE_MESH_LOD: MeshLod = Object.freeze({ maxErrorPx: 1 });
+export const DESKTOP_MESH_LOD: MeshLod = Object.freeze({ maxErrorPx: 0.5 });
+export function meshLodFor(tier: QualityTier, search = ''): MeshLod | null {
+  const q = new URLSearchParams(search);
+  if (q.get('detail') === '0' || q.get('lod') === '0') return null;
+  return tier === 'phone' ? PHONE_MESH_LOD : DESKTOP_MESH_LOD;
+}
+
+/** The page's mesh levels (browser only). */
+export function pageMeshLod(): MeshLod | null {
+  if (typeof window === 'undefined' || typeof screen === 'undefined') return null;
+  return meshLodFor(browserQuality().tier, location.search);
 }

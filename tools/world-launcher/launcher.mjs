@@ -95,6 +95,7 @@
 // and takes them over one at a time (handover below), so the port never closes and no world has two writers.
 //
 // Local only: binds 127.0.0.1, edge minds (owners' agents think; the world pays for none), no credentials, no tunnels.
+import { isMain } from '../lib/is-main.mjs';
 import { authorizedPartiesOverride, publicAuthEnvironment } from './clerk-public-env.mjs';
 import { satelliteSettings, primarySignInPage } from './clerk-satellite.mjs';
 import { execFileSync } from 'node:child_process';
@@ -116,11 +117,12 @@ import { createReadStream, existsSync, mkdirSync, readFileSync, renameSync, rmSy
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { brotliCompressSync, brotliDecompressSync, gunzipSync, gzipSync, constants as zlibConstants } from 'node:zlib';
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { FORK_SLUGS, RESERVED, Registry, SLUG_RE, cachedTemplates, isTimeZone, readWorkersOf, slugFor, worldHeapMb, worldIdOf } from './registry.mjs';
 import { ChildPool, PSS_EVERY_MS, UNLOADED, compileCacheDir, defaultCommand, forkCommand, worldState } from './children.mjs';
 import { canonicalRequest } from './world-urls.mjs';
+import { cutoverFence } from './cutover.mjs';
 import { legacyWorldFor, redirectSwitch } from './redirects.mjs';
 import { verifiedCreator } from './creator-auth.mjs';
 import { creationPolicy, checkAccountCreation } from './creation-policy.mjs';
@@ -322,6 +324,7 @@ export async function openLauncher(cfg = {}) {
   if (oldRoot && !authEnvFile) throw new Error('launcher: --old-worlds-root needs --auth-env (the original worlds sign in with Clerk)');
   const redirects = oldRoot ? redirectSwitch(join(dataDir, 'redirects.json'), log) : null;
   const registry = new Registry(dataDir);
+  const cutover = cutoverFence({ binding: cfg.cutoverBinding, ...(cfg.cutoverBindingFile ? { file: cfg.cutoverBindingFile } : {}) });
   const accountPolicy = creationPolicy(cfg);
   /** Handover state (keeper.mjs): 'active' → 'preparing' → 'retired' (or back to 'active' when the next one fails). */
   let phase = 'active', retiredTo = null, gate = null, retiredPidFile = null, handBack = null;
@@ -1090,6 +1093,7 @@ export async function openLauncher(cfg = {}) {
   }
   async function toWorld(req, res, slug, url, retried = false) {
     const w = registry.get(slug);
+    if (cutover?.handle(req, res, w, url)) return;
     if (w && closing.has(slug)) { json(res, 503, { ok: false, code: 'world.closing', slug }, { 'retry-after': '5' }); return; }
     if (!w) {
       if ((req.headers.accept ?? '').includes('text/html')) { res.writeHead(404, { 'content-type': 'text/html; charset=utf-8' }).end(`<!doctype html><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1"><title>No such world</title><body style="font:16px system-ui;max-width:640px;margin:12vh auto;padding:0 20px"><h1>No world called “${slug.replace(/[<>&"]/g, '')}” here</h1><p><a href="${B}/">See the worlds here</a>, or make a new one.</p>`); return; }
@@ -1224,6 +1228,8 @@ export async function openLauncher(cfg = {}) {
     // #2299: the last event id a resident's stream was sent (the cursor it holds if its world unloads under it)
     const onData = unloadStill && ask?.kind === 'events' ? (c) => { const m = String(c).match(/(?:^|\n)id: ?([^\r\n]*)/g); if (m) res.simLastId = m.at(-1).replace(/^\n?id: ?/, ''); } : undefined;
     const opts = { tee, path, retry: again, soul: gated?.soul, slug, onData, keep, maxBody: rest.startsWith('/v1/edge/') && !rest.startsWith('/v1/edge/body/uploads') ? lim.maxBodyKb * 1024 : 0 };
+    // Boot, throttling and pool waits may have crossed the switch. Admission is checked again before forwarding.
+    if (cutover?.handle(req, res, w, url)) return;
     // Stage B (lane B-port): a C2 read the world's read workers answer goes to their port (only with read workers on)
     const rp = retried ? null : readTarget(slug, w, rest, req.method, url.search);
     if (rp) { proxyRead(req, res, slug, rp, p, { ...opts, worldDeferred: !!gated?.worldDeferred }); return; }
@@ -1379,6 +1385,14 @@ export async function openLauncher(cfg = {}) {
     }
     dash.noteWatch(req);   // lane DASH: sim-watch's last check (and what it saw down)
     try {
+      if (path === '/__sim/op/cutover' && req.method === 'GET') {
+        if (!direct(req)) { json(res, 403, { ok: false, code: 'operator-only' }); return; }
+        try { json(res, 200, { ok: true, ...(cutover?.inspect(registry) ?? { configured: false }) }); }
+        catch (e) { json(res, 503, { ok: false, code: e.message }); }
+        return;
+      }
+      const cutoverSlug = /^\/(?:w|__sim\/worlds)\/([^/]+)(?:\/|$)/.exec(path)?.[1];
+      if (cutoverSlug && cutover?.handle(req, res, registry.get(registry.resolveSlug(cutoverSlug)), url)) return;
       if (url.pathname === '/ops' || path === '/ops' || url.pathname.startsWith('/ops/') || path.startsWith('/ops/')) {
         await overview.handle(req, res, url); return;
       }
@@ -1659,6 +1673,8 @@ export async function openLauncher(cfg = {}) {
       // Anything else a world page asks for (Mars assets, engine files, …): any running world serves it (base stripped).
       // Original worlds at the root: the world the laptop proxy sent that path to (woken if asleep), as before the move.
       const p = oldRoot ? await oldWorldPort(path) : anyRunning();
+      const rootWorld = p && registry.worlds.find(w => pool.status(w.slug).port === p);
+      if (rootWorld && cutover?.handle(req, res, rootWorld, url)) return;
       // #894: whichever world answers a root path (it may be unlisted) is never indexed under the site's root
       if (p) { proxyHttp(req, res, p, { path: B ? path + url.search : undefined, noindex: true }); return; }
       json(res, 404, { ok: false, code: 'not-found' });
@@ -1950,7 +1966,7 @@ function serveKeeper(l, stop) {
   process.send({ t: 'ready', build: l.build, pid: process.pid });
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (isMain(import.meta.url)) {
   const argv = process.argv.slice(2);
   const flag = (k) => { const i = argv.indexOf(`--${k}`); return i >= 0 ? argv[i + 1] : undefined; };
   const range = flag('range')?.split('-').map(Number);

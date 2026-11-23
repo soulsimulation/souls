@@ -1,0 +1,26 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Cold meal (from #1690): with a wrap on the bench's board, a Soul adds greens, tomato and beans, one portion each; each act moves that ingredient and one mouthful from the bench into the wrap (two transfers, each two sets summing to zero). The wrap is taken and bitten (3 mouthfuls to 2). Bitten, it sets `bitten`; put back on the board, it is not topped up (partly eaten).",
+  "cases": [
+    {
+      "name": "add_three_portions_take_and_bite",
+      "state": {"actor": "b1", "nodes": {"room": {"loose": ["b1", "m1"]}, "m1": {"kind": "eden:cold_meal_bench", "slots": {"out": ["w1"]}}, "w1": {"kind": "eden:cold_wrap"}, "b1": {"hands": {"left": null, "right": null}}}},
+      "do": [
+        {"act": {"this": "m1", "form": "add_greens", "args": {"wrap": "w1"}}, "receipt": "rm1", "expect": {"verdict": "yes", "changes": [{"change": "set", "node": "m1", "field": "greens", "n": 1, "to": 2, "by": -1}, {"change": "set", "node": "w1", "field": "greens", "n": 1, "to": 1, "by": 1}, {"change": "set", "node": "m1", "field": "portions", "n": 4, "to": 8, "by": -1}, {"change": "set", "node": "w1", "field": "portions", "n": 4, "to": 1, "by": 1}], "events": [{"event": "eden:greens_added", "node": "m1", "changes": [0, 1]}, {"event": "eden:portion_added", "node": "m1", "changes": [2, 3]}], "timers": []}},
+        {"act": {"this": "m1", "form": "add_tomato", "args": {"wrap": "w1"}}, "receipt": "rm2", "expect": {"verdict": "yes", "changes": [{"change": "set", "node": "m1", "field": "tomato", "n": 2, "to": 2, "by": -1}, {"change": "set", "node": "w1", "field": "tomato", "n": 2, "to": 1, "by": 1}, {"change": "set", "node": "m1", "field": "portions", "n": 4, "to": 7, "by": -1}, {"change": "set", "node": "w1", "field": "portions", "n": 4, "to": 2, "by": 1}], "events": [{"event": "eden:tomato_added", "node": "m1", "changes": [0, 1]}, {"event": "eden:portion_added", "node": "m1", "changes": [2, 3]}], "timers": []}},
+        {"act": {"this": "m1", "form": "add_beans", "args": {"wrap": "w1"}}, "receipt": "rm3", "expect": {"verdict": "yes", "changes": [{"change": "set", "node": "m1", "field": "beans", "n": 3, "to": 2, "by": -1}, {"change": "set", "node": "w1", "field": "beans", "n": 3, "to": 1, "by": 1}, {"change": "set", "node": "m1", "field": "portions", "n": 4, "to": 6, "by": -1}, {"change": "set", "node": "w1", "field": "portions", "n": 4, "to": 3, "by": 1}], "events": [{"event": "eden:beans_added", "node": "m1", "changes": [0, 1]}, {"event": "eden:portion_added", "node": "m1", "changes": [2, 3]}], "timers": []}},
+        {"act": {"this": "w1", "form": "take"}, "receipt": "rm4", "expect": {"verdict": "yes", "changes": [{"change": "reparent", "node": "w1", "to": {"node": "b1", "hand": "left"}}], "events": [{"event": "eden:taken", "node": "w1", "changes": [0]}], "timers": []}},
+        {"act": {"this": "w1", "form": "bite"}, "receipt": "rm5", "expect": {"verdict": "yes", "changes": [{"change": "set", "node": "w1", "field": "portions", "n": 4, "to": 2}, {"change": "set", "node": "w1", "field": "bitten", "n": 5, "to": 1}], "events": [{"event": "eden:bitten", "node": "w1", "changes": [0]}, {"event": "eden:eaten_into", "node": "w1", "changes": [1]}], "timers": []}}
+      ],
+      "after": {"m1": {"kind": "eden:cold_meal_bench", "fields": {"greens": 2, "tomato": 2, "beans": 2, "portions": 6}, "slots": {"out": []}}, "w1": {"kind": "eden:cold_wrap", "fields": {"greens": 1, "tomato": 1, "beans": 1, "portions": 2, "bitten": 1}}, "b1": {"hands": {"left": "w1", "right": null}}}
+    },
+    {
+      "name": "bitten_wrap_back_on_the_board_is_not_topped_up",
+      "state": {"actor": "b1", "nodes": {"room": {"loose": ["b1", "m1"]}, "m1": {"kind": "eden:cold_meal_bench", "slots": {"out": ["w1"]}}, "w1": {"kind": "eden:cold_wrap", "fields": {"greens": 1, "portions": 1, "bitten": 1}}, "b1": {"hands": {"left": null, "right": null}}}},
+      "do": [
+        {"act": {"this": "m1", "form": "add_tomato", "args": {"wrap": "w1"}}, "receipt": "rm6", "expect": {"verdict": "no", "reason": "field_differs", "need": 3, "says": "finish_first"}}
+      ],
+      "after": {"w1": {"kind": "eden:cold_wrap", "fields": {"greens": 1, "portions": 1, "bitten": 1}}}
+    }
+  ]
+}

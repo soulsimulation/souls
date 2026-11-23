@@ -20,7 +20,7 @@ use replica::ids::{Hash, Id, Minter, Purpose, Scope, Version};
 use replica::pose::{Frame, Pose, Quat, Support, Vec3};
 use replica::tree::Tree;
 use replica::world_model::{Audience, End, show};
-use sim::checkpoint::fork::{EPOCH, Forked, Request, fork};
+use sim::checkpoint::fork::{EPOCH, Forked, Request, fork, fork_with_kinds};
 use sim::checkpoint::{Blobs, Checkpoints, replay, restore, resume_minter};
 use sim::log::{FileStore, HEADER_LEN, Log};
 
@@ -183,6 +183,60 @@ fn request(through: Id, scope: u8) -> Request {
         build: Hash::of(Purpose::Fixture, b"souls/k6-test/1").to_bytes(),
         every: 1 << 20,
     }
+}
+
+#[test]
+fn w3b_public_boot_pins_precede_sealing_and_empty_is_ordinary_fork() {
+    let h = Header::read(&fixture_bytes(HEADER).unwrap()).unwrap();
+    let mut tree = Tree::start(h.zone, h.kinds[0].clone());
+    let d = dir("w3b-public-boot");
+    checkpoint(&mut tree, h.lineage, &d.join("parent"));
+    let before = files(&d.join("parent"));
+    let ordinary = fork(
+        &d.join("parent"),
+        &d.join("ordinary"),
+        request(id(X.0, X.1), 0x31),
+    )
+    .unwrap();
+    let empty = fork_with_kinds(
+        &d.join("parent"),
+        &d.join("empty"),
+        request(id(X.0, X.1), 0x31),
+        &[],
+    )
+    .unwrap();
+    assert_eq!(ordinary.header.stored(), empty.header.stored());
+    assert_eq!(ordinary.head, empty.head);
+    let body = kind(&h, "souls:body");
+    let served = fork_with_kinds(
+        &d.join("parent"),
+        &d.join("served"),
+        request(id(X.0, X.1), 0x32),
+        std::slice::from_ref(&body),
+    )
+    .unwrap();
+    assert!(served.header.kinds.contains(&body));
+    assert_eq!(served.header.zone, h.zone);
+    assert_eq!(served.header.lineage, Scope([0x32; 16]));
+    let part = Part::read(&served.head).unwrap();
+    assert_eq!(part.header, served.header.hash().to_bytes());
+    assert_eq!(before, files(&d.join("parent")));
+    let rejected = d.join("rejected");
+    assert!(
+        fork_with_kinds(
+            &d.join("parent"),
+            &rejected,
+            request(id(X.0, X.1), 0x33),
+            &[Name::new("souls:body").unwrap()]
+        )
+        .is_err()
+    );
+    assert!(
+        !rejected.exists(),
+        "malformed pins refuse before output creation"
+    );
+    drop((ordinary, empty, served));
+    fs::remove_dir_all(d).unwrap();
 }
 
 /// Every file under `d`, by name.

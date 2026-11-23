@@ -9,8 +9,12 @@ use import_eden::{
     F_PLACE_OF, F_SILL, F_STAIRS, F_TILE_SIZE, F_TILES, F_WIDTH, FLOOR, Import, PLACE, ROOM,
     WINDOW, base64, count, load, world_of,
 };
-use replica::encode::Value;
+use replica::effects::{Header, Part};
+use replica::encode::{Name, Value};
+use replica::sky::{self, Mist, Presentation};
+use replica::tree::Tree;
 use replica::world_model::plain;
+use sim::audit::Auditor;
 
 fn kind_of(im: &Import, key: &str) -> String {
     let h = im.tree.handle(im.nodes[key]).expect("a node");
@@ -162,6 +166,47 @@ fn a_small_world_loads_through_commit_with_its_rooms_doorways_windows_stairs_and
     assert_eq!(g.fields().get(&F_TILES), Some(&want));
 }
 
+/// V19c (#3521) A1, A3: Eden's sky settings (its presentation date, palette and morning mist) land on the world node,
+/// and a copy built from the import's log alone reads the same; facts without `sky` write none.
+#[test]
+fn the_sky_settings_land_on_the_world_node_and_a_replay_reads_the_same() {
+    let head = "\"format\": \"souls/import-eden/1\",";
+    let sky = "\"sky\": {\"calendar\": \"06-05\", \"palette\": \"eden-summer\", \"mist\": [390, 150, 100]},";
+    let im = load(&SMALL.replacen(head, &format!("{head} {sky}"), 1))
+        .expect("the small world with its sky loads");
+    let want = Presentation {
+        date: Some([6, 5]),
+        palette: Name::new("souls:eden-summer"),
+        mist: Some(Mist {
+            peak: 390 * 60_000_000,
+            half: 150 * 60_000_000,
+            strength: 100,
+        }),
+    };
+    let world = im.tree.node(im.tree.root()).unwrap();
+    assert_eq!(Presentation::read(world.fields()), want);
+    let (header, part) = &im.log;
+    let mut copy = Tree::start(world.id(), world.kind().clone());
+    copy.apply(&Header::read(header).unwrap(), &Part::read(part).unwrap())
+        .expect("the log applies");
+    let replayed = copy.node(copy.root()).unwrap();
+    assert_eq!(Presentation::read(replayed.fields()), want);
+    assert_eq!(replayed.fields(), world.fields());
+
+    let none = load(SMALL).unwrap();
+    let f = none.tree.node(none.tree.root()).unwrap().fields().clone();
+    assert!(
+        ![sky::F_SKY_DATE, sky::F_PALETTE, sky::F_MIST]
+            .iter()
+            .any(|k| f.contains_key(k))
+    );
+    let bad = "\"sky\": {\"calendar\": \"02-30\"},";
+    assert!(
+        load(&SMALL.replacen(head, &format!("{head} {bad}"), 1)).is_err(),
+        "a date no year has is refused"
+    );
+}
+
 /// N1b (#3197) A1: every terrain tile's heights and classes, read back from the tree, are the exported bytes.
 fn tiles_round_trip(im: &Import, facts: &Json) -> usize {
     let t = &im.tree;
@@ -201,6 +246,11 @@ fn eden_2026_loads_with_the_bakes_counts_and_its_poses_compose_to_the_world() {
     let text = std::fs::read_to_string(&path)
         .unwrap_or_else(|e| panic!("{path}: {e}; run the exporter first"));
     let im = load(&text).expect("Eden 2026 loads through commit");
+    // V19c (#3521): Eden's sky is drawn on 5 June, in its summer palette, with today's morning mist.
+    let shown = Presentation::read(im.tree.node(im.tree.root()).unwrap().fields());
+    assert_eq!(shown.date, Some([6, 5]));
+    assert_eq!(shown.palette, Name::new("souls:eden-summer"));
+    assert_eq!(shown.mist.map(|m| m.strength), Some(100));
     let (rows, by_ref, extra) = count(&im);
     for r in &rows {
         println!("{}: tree {}, bake {}", r.what, r.tree, r.bake);
@@ -296,4 +346,169 @@ fn eden_2026_loads_with_the_bakes_counts_and_its_poses_compose_to_the_world() {
     let tiles = tiles_round_trip(&im, &f);
     println!("{tiles} terrain tiles read back byte for byte");
     assert_eq!(tiles, 256);
+
+    // C27 (#3509): a stall in the market pavilion stands in its room, the podium on the commons deck's floor, and a
+    // roof terrace's table on its hotel's roof floor; a stall on the open ground stays there.
+    assert_eq!(parent_key(&im, "e_baf7b2e1"), "e_26f30b38/pavilion");
+    assert_eq!(kind_of(&im, &parent_key(&im, "e_01496dba")), FLOOR);
+    assert_eq!(parent_key(&im, "e_090ced77"), "e_ad082d88/floor-3");
+    assert_eq!(parent_key(&im, "e_0ed9ffad"), "ground");
+
+    // C9 (#3397): one full pass of K11's auditor over the seeded tree finds no slot holding two things.
+    let mut a = Auditor::new();
+    let mut faults = Vec::new();
+    loop {
+        let s = a.slice(&im.tree, 4096);
+        faults.extend(s.faults);
+        if s.pass_ended {
+            break;
+        }
+    }
+    let over = faults.iter().filter(|f| f.name == "slot-over-full").count();
+    println!(
+        "auditor, one pass: {} faults, {over} slot-over-full; left out of a full slot: {}",
+        faults.len(),
+        im.left_out.len()
+    );
+    for l in &im.left_out {
+        println!("  {l}");
+    }
+    assert_eq!(over, 0, "{faults:?}");
+    assert_eq!(im.left_out.len(), 29, "every thing left out is reported");
+}
+
+/// C9 (#3397): two things today puts in the house's one porch slot. The first keeps the slot; the second is reported
+/// and stays a plain child of the house at its own place, so no slot holds two.
+#[test]
+fn a_second_thing_in_a_held_slot_is_left_out_of_it_and_reported() {
+    let text = SMALL
+        .replace(
+            r#"{"ref": "core-chair@1", "hash": "cc", "name": "core:chair", "form": "point"},"#,
+            r#"{"ref": "core-chair@1", "hash": "cc", "name": "core:chair", "form": "point"},
+    {"ref": "core-crate@1", "hash": "ee", "name": "core:crate", "form": "point"},"#,
+        )
+        .replace(
+            r#"    {"id": "e_lake","#,
+            r#"    {"id": "e_crate1", "def": "core-crate@1", "ref": "core-crate@1", "parent": "e_house", "slot": {"n": 4, "id": "porch"},
+     "pose": [0, 0, 4000, 0], "world": [14000, 0, 20000, 90000], "scale_ppm": 1000000},
+    {"id": "e_crate2", "def": "core-crate@1", "ref": "core-crate@1", "parent": "e_house", "slot": {"n": 4, "id": "porch"},
+     "pose": [500, 0, 4000, 0], "world": [14000, 0, 19500, 90000], "scale_ppm": 1000000},
+    {"id": "e_lake","#,
+        );
+    let im = load(&text).expect("loads");
+    let slot = |key: &str| {
+        let h = im.tree.handle(im.nodes[key]).unwrap();
+        im.tree.node(h).unwrap().slot()
+    };
+    assert_eq!(slot("e_crate1"), Some(4));
+    assert_eq!(slot("e_crate2"), None);
+    assert_eq!(parent_key(&im, "e_crate2"), "e_house");
+    assert_eq!(im.left_out.len(), 1, "{:?}", im.left_out);
+    assert!(
+        im.left_out[0]
+            .starts_with("e_crate2 (core-crate@1): slot 4 of e_house already holds e_crate1"),
+        "{:?}",
+        im.left_out
+    );
+    // Both poses are from the house's origin, 500 mm apart: out of the slot, the second keeps its own place.
+    let (p1, p2) = (
+        world_of(&im, im.nodes["e_crate1"]).unwrap(),
+        world_of(&im, im.nodes["e_crate2"]).unwrap(),
+    );
+    let (dx, dy, dz) = (p2.x - p1.x, p2.y - p1.y, p2.z - p1.z);
+    assert_eq!(dy, 0);
+    assert!(
+        ((dx * dx + dz * dz) as f64).sqrt().round() as i64 == 500_000,
+        "{p1:?} {p2:?}"
+    );
+    let mut a = Auditor::new();
+    let s = a.slice(&im.tree, 1 << 20);
+    assert!(s.pass_ended && s.faults.is_empty(), "{:?}", s.faults);
+}
+
+#[test]
+fn a_stair_from_a_floor_to_itself_is_noted_not_linked() {
+    // A step between two surfaces of one level (the Mars campus's Chiba deck) once refused the whole import (link-self).
+    let text = SMALL.replace(
+        r#"{"id": "stairs", "kind": "stairs", "from": 0, "to": 1, "path": [[3000, -2000], [3000, 2000]], "width": 900, "y0": 100, "y1": 2900}"#,
+        r#"{"id": "stairs", "kind": "stairs", "from": 0, "to": 1, "path": [[3000, -2000], [3000, 2000]], "width": 900, "y0": 100, "y1": 2900},
+     {"id": "step", "kind": "stairs", "from": 1, "to": 1, "path": [[0, 0], [0, 500]], "width": 900, "y0": 2900, "y1": 2916}"#,
+    );
+    assert_ne!(text, SMALL);
+    let im = load(&text).expect("loads");
+    assert_eq!(
+        im.notes,
+        vec!["e_house: a stair on floor 1 to itself, not linked".to_owned()]
+    );
+    let (rows, ..) = count(&im);
+    let stairs = rows.iter().find(|r| r.what == "stairs (links)").unwrap();
+    assert_eq!(stairs.tree, 1);
+}
+
+/// A thing that names another kind's entry (field 27, from its world's map: a Mars sofa borrows `eden:sofa`) is found
+/// by that entry, and its seats are at its own slots (its def's geometry) with the entry's stand offsets; an entry seat
+/// it has no slot for is not offered. A thing naming no entry keeps its kind's name and the entry's own geometry.
+#[test]
+fn a_thing_borrowing_an_entry_sits_at_its_own_slots() {
+    let text = SMALL.replace(
+        r#""slot": {"room": "kitchen"},
+     "pose": [1000, 0, 500, 0], "world": [10500, 100, 21000, 90000], "scale_ppm": 1000000},"#,
+        r#""slot": {"room": "kitchen"},
+     "pose": [1000, 0, 500, 0], "world": [10500, 100, 21000, 90000], "scale_ppm": 1000000, "entry": "eden:sofa",
+     "slots": [{"n": 1, "id": "seat-1", "kind": "seat", "at": [-655, 300, 100], "yaw": 0},
+               {"n": 2, "id": "seat-2", "kind": "seat", "at": [0, 300, 100], "yaw": 0}]},"#,
+    );
+    assert_ne!(text, SMALL);
+    let im = load(&text).expect("loads");
+    let n = im
+        .tree
+        .node(im.tree.handle(im.nodes["e_chair"]).unwrap())
+        .unwrap();
+    assert_eq!(
+        import_eden::entry_name(n.kind().as_str(), n.fields()),
+        "eden:sofa"
+    );
+    let sofa = replica::rules::json::parse(
+        r#"{"kind": "eden:sofa", "slots": {
+            "seat_1": {"admits": "body", "posture": "sit", "at_mm": [-600, 520, 100], "stand": "f1"},
+            "seat_2": {"admits": "body", "posture": "sit", "at_mm": [0, 520, 100], "stand": "f2"},
+            "seat_3": {"admits": "body", "posture": "sit", "at_mm": [600, 520, 100], "stand": "f3"}},
+          "points": {"f1": {"role": "stand", "at_mm": [-600, 0, 740]}, "f2": {"role": "stand", "at_mm": [0, 0, 740]},
+                     "f3": {"role": "stand", "at_mm": [600, 0, 740]}}}"#,
+    )
+    .unwrap();
+    let (seats, all) = import_eden::body_slots(&im.tree, &[("eden:sofa".into(), sofa.clone())]);
+    assert_eq!(all, 3);
+    let got: Vec<_> = seats.iter().map(|s| (s.slot, s.at, s.stand)).collect();
+    let v = |x: i64, y: i64, z: i64| replica::pose::Vec3::new(x * 1000, y * 1000, z * 1000);
+    assert_eq!(
+        got,
+        vec![
+            (1, v(-655, 300, 100), v(-655, 0, 740)),
+            (2, v(0, 300, 100), v(0, 0, 740)),
+        ]
+    );
+    // One thing alone (a god edit's moved seat) is read the same way, from its own fields.
+    let one = import_eden::body_slots_of(
+        n.id(),
+        n.kind().as_str(),
+        n.fields(),
+        &[("eden:sofa".into(), sofa.clone())],
+    );
+    assert_eq!(one, seats);
+    // The same thing without field 27 is a `core:chair`, found by its own name: the sofa entry is not its.
+    let im = load(SMALL).expect("loads");
+    let n = im
+        .tree
+        .node(im.tree.handle(im.nodes["e_chair"]).unwrap())
+        .unwrap();
+    assert_eq!(
+        import_eden::entry_name(n.kind().as_str(), n.fields()),
+        "eden:chair"
+    );
+    assert!(
+        import_eden::body_slots(&im.tree, &[("eden:sofa".into(), sofa)])
+            .0
+            .is_empty()
+    );
 }

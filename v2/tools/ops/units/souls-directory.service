@@ -21,7 +21,13 @@ NoNewPrivileges=yes
 ProtectSystem=strict
 ProtectHome=yes
 PrivateTmp=yes
-ReadWritePaths=/var/lib/souls/directory
+ReadWritePaths=/var/lib/souls/directory /var/lib/souls/worlds/directory /var/lib/souls/worlds/worlds /etc/souls/placement-data/requests
+Environment=DIRECTORYD_TEMPLATES=/usr/local/lib/souls/templates
+Environment=DIRECTORYD_PLACEMENT_BACKUP=/var/lib/souls/directory/placement-backup
+Environment=DIRECTORYD_WORLD_STORE=/var/lib/souls/worlds/directory
+Environment=DIRECTORYD_PLACEMENT=/etc/souls/placement-data
+Environment=DIRECTORYD_PLACEMENT_CONFIG=/etc/souls/placement.json
+Environment=DIRECTORYD_AUTHORITY_MAP=/etc/souls/placement-data/authority.json
 
 [Install]
 WantedBy=multi-user.target

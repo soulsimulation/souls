@@ -20,7 +20,9 @@
 //!    wore (a child in one of its slots) is set down where the body stood, and the body is removed. Setting down is
 //!    T1's leave and arrive inside the zone, onto the parent of the first node up from the body that sits in no slot
 //!    (the body, or the seat it sits in), at that node's position on the surface that supported it. Removing the
-//!    body releases its slot, ends its links and drops its timers (T2 rule 3).
+//!    body releases its slot, ends its links and drops its timers (T2 rule 3). Every other link naming that body's
+//!    Soul (a player, a member) ends too (G9). The fork's header lists the kinds of the nodes it carries, so a
+//!    replica or the view tier can apply what the fork makes afterwards.
 //!
 //! Not here: templates and the web flow (G9, W3), travel (X9), merging forks, deleting worlds. Subtrees in flight
 //! at the checkpoint stay in flight (their arrive belongs to the parent's lineage).
@@ -34,7 +36,7 @@ use replica::effects::{
     Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Header, Part, Rest, TransferRec,
     schema_hash,
 };
-use replica::encode::{Value, encode};
+use replica::encode::{Name, Value, encode};
 use replica::ids::{Id, Minter, Scope, Version};
 use replica::pose::{Frame, Pose};
 use replica::time::{Line, Mapping, Micros, TimeEffect, TimeRefusal};
@@ -97,14 +99,14 @@ fn io(p: &Path, e: std::io::Error) -> replica::effects::Refusal {
 }
 
 /// The fork's header: the build, the schema, the fork's lineage, the zone and its epoch. Its head names no kind.
-fn header(build: &[u8], lineage: Scope, zone: Id) -> R<Header> {
+fn header(build: &[u8], lineage: Scope, zone: Id, kinds: Vec<Value>) -> R<Header> {
     let v = Value::Map(BTreeMap::from([
         (1, Value::Bytes(build.to_vec())),
         (2, Value::Bytes(schema_hash().to_bytes())),
         (3, Value::Bytes(lineage.0.to_vec())),
         (4, zone.to_value()),
         (5, Value::Uint(EPOCH)),
-        (6, Value::Array(Vec::new())),
+        (6, Value::Array(kinds)),
         (7, Value::Array(Vec::new())),
     ]));
     Header::read(&encode(&v).or_else(|e| refuse("encoding", e.to_string()))?)
@@ -149,6 +151,13 @@ impl Head {
 
 /// Forks the newest good checkpoint in `parent` into `dir` (new or empty) through `req.through` (rules 1 to 4).
 pub fn fork(parent: &Path, dir: &Path, req: Request) -> R<Forked> {
+    fork_with_kinds(parent, dir, req, &[])
+}
+
+/// A served fork also retains explicitly approved public runtime pins. The caller validates their exact
+/// identities against its trusted public template manifest and registered definitions; no definition bytes are
+/// accepted here. Pins are checked and unioned before any output is created. An empty set is the ordinary fork.
+pub fn fork_with_kinds(parent: &Path, dir: &Path, req: Request, boot_pins: &[Name]) -> R<Forked> {
     if fs::read_dir(dir).is_ok_and(|mut d| d.next().is_some()) {
         return refuse("fork-dir-not-empty", dir.display().to_string());
     }
@@ -169,7 +178,20 @@ pub fn fork(parent: &Path, dir: &Path, req: Request) -> R<Forked> {
         .node(tree.root())
         .map(|n| n.id())
         .unwrap_or_else(|| unreachable!("a root"));
-    let header = header(&req.build, req.scope, zone)?;
+    // The kinds the fork's nodes rest on, so its readers (a replica, the view tier) can apply what it makes (G9).
+    let mut kinds: BTreeSet<_> = tree
+        .to_state()
+        .nodes
+        .into_values()
+        .map(|n| n.kind)
+        .collect();
+    kinds.extend(boot_pins.iter().cloned());
+    let header = header(
+        &req.build,
+        req.scope,
+        zone,
+        kinds.into_iter().map(Value::Text).collect(),
+    )?;
     let version = Version {
         lineage: req.scope,
         zone,
@@ -299,6 +321,28 @@ pub fn fork(parent: &Path, dir: &Path, req: Request) -> R<Forked> {
                 rest: Rest::new(),
             }]),
         );
+    }
+    // A Soul is in one world (G9): every other link naming the Soul of a removed body ends too (a player, a member).
+    let souls: BTreeSet<Id> = state
+        .links
+        .values()
+        .filter(|l| plain(l.ty.as_str()) == "souls:body-of")
+        .flat_map(|l| l.ends)
+        .filter(|e| tree.handle(*e).is_none())
+        .collect();
+    for (&link, l) in &state.links {
+        if l.ends.iter().any(|e| souls.contains(e)) && !l.ends.iter().any(|e| bodies.contains(e)) {
+            let at = l
+                .ends
+                .into_iter()
+                .find(|e| tree.handle(*e).is_some())
+                .unwrap_or(zone);
+            let rec = ChangeRec {
+                change: Change::Unlink { link },
+                rest: Rest::new(),
+            };
+            head.push(at, l.audience, Body::Changes(vec![rec]));
+        }
     }
     let head_part = part(&header, &head.effects)?;
     tree.apply(&header, &head_part)?;

@@ -39,7 +39,8 @@ and rolling builds (O1, O7) are not here.
    claim itself is what makes it safe.
 7. **The store refuses a stale writer's record write.** The stores are asked for only two conditions, which S3 and R2
    both offer atomically: create if absent (`If-None-Match: *`) and replace if unchanged (`If-Match`). There is no
-   plain write. A writer whose claim was taken, a paused one that resumes included, may still write to its own disk,
+   plain write. A create whose answer is a 5xx or never comes is read back: the same bytes there count as created,
+   other bytes as the condition failing, and a store that cannot be read stays out of reach (#4014). A writer whose claim was taken, a paused one that resumes included, may still write to its own disk,
    and the store accepts the parts it creates under its own claim's token, but its move of the mark is refused: it
    writes the record on condition of the version it read, and only while the claim in force there carries its token.
    So it acknowledges nothing that waits for the mark, and readers ignore its parts (rule 8). A writer refused because
@@ -83,16 +84,41 @@ and rolling builds (O1, O7) are not here.
     alarm, pinned build, a Soul's place and the claim holder's ship, each decided by the store, never the cache; a
     real S3-compatible store client) and the records in `v2/crates/replica/src/directory`.
 13. **Checkpoints are taken by amount of log,** so restart time does not grow with the world. K5 builds them in
-    `v2/crates/sim/src/checkpoint/`: one file per checkpoint, the last two kept, the log never cut; the hashes in
+    `v2/crates/sim/src/checkpoint/`: one file per checkpoint, the last two kept; the hashes in
     `v2/crates/replica/src/tree/seal.rs`. Trimming the takeovers (rule 8) waits for the real directory (W8). Each
     checkpoint also keeps the log's durable place and the writer's minter (K4b), so a restart opens the log from
-    there and mints no id twice.
+    there and mints no id twice. A served world (#3837) restarts its towns and views from the newest checkpoint too,
+    and compacts its log (`sim::log` rule 9, `v2/crates/worldd/src/compactor.rs`): once the oldest checkpoint kept,
+    the public stream's published parts and, with a store, the shipper's mark and the archive's closed objects have
+    all passed 64 MiB of it, those bytes become a hole in the file (the same offsets after it) and `log.cut` names
+    where it is read from. The log's copy off the machine (O3) and the archive stay the world's whole history.
 
 **Step 0, the paused writer as a timeline** (`a2_...`): a holds epoch 1, writes 0 to 2 and ships them (mark 2); a
 pauses past its lease; b claims epoch 2 from sequence 3, writes 3 and ships it (mark 3); a resumes and writes 3 to its
 own disk, unacknowledged; a ships, and the store refuses the mark (`precondition-failed`); a reader keeps epoch 1's 0
 to 2 and epoch 2's 3, and ignores epoch 1's 3 as `superseded-epoch`; c then claims epoch 3, and the reader keeps and
 ignores the same. The modelled store refuses the stale writer.
+
+## What a served world syncs, and when
+
+14. **The clock thread never waits for a disk** (#4134; `v2/crates/worldd/src/answers.rs`). Each sync is on a
+    thread of its own, and the first point of rule 1 is reached in this order:
+    - **Words** (K16's text store, `log.text/`): the clock queues an intent's words and goes on with the reference;
+      the store's writer thread appends and syncs what has queued, once per batch.
+    - **The tick's records** (the log): the answers thread first waits until every word the tick queued is on the
+      disk, then appends the tick's input record and part, and the log's writer thread syncs them, once per batch.
+      So the log never holds a reference to words a crash would lose.
+    - **The answers** leave only after both. The tick's parts reach the views and the follower once its words are
+      on the disk. A failed sync of either file is final (`sim::log` rule 6): nothing more is answered, and a world
+      process ends with `disk-failed` (exit 87, `answers::EXIT_DISK_FAILED`), so its unit starts it again from its
+      log rather than leave a world that ticks and answers nothing.
+    - **Checkpoints** are written and synced by their own writer thread (rule 13), each from a tick whose records
+      are all on the disk.
+
+    A tick never waits for a sync, so a busy disk delays answers, never the world. A tick's words read as
+    `text-unknown` until they are on the disk; the directory's word for a Soul (W11b) waits, a tick at a time, for
+    the words queued when that Soul was first put off, its own birth's name among them. A lockstep run waits for
+    every queued word before each tick, so whether such a Soul waits or is taken is the same in every run.
 
 ## What would quietly break this
 
@@ -114,5 +140,6 @@ ignores the same. The modelled store refuses the stale writer.
 - **Comparing clocks across machines** for a lease, or counting it from the reply. A stale writer acknowledges late.
 - **Acknowledging travel at the disk.** A dead machine loses a Soul between worlds.
 - **A store that ignores the conditions.** Test each S3-compatible store; one that accepts a stale `If-Match` lets
-  two writers write.
+  two writers write. `cargo run -p directoryd --example store-check -- --env-file <unit's settings>` checks the
+  store a unit uses on one scratch key under `diag/`. R2 matches `If-Match` only on the bare ETag, without quotes.
 - **Checkpoints by time rather than by amount of log.** A busy world's restart grows without bound.

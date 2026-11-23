@@ -3,9 +3,9 @@
   "kind": "eden:exercise_chair",
   "owner": "thing",
   "state": {
-    "sets": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1000000000, "audience": { "rule": "everyone" } },
-    "rises": { "n": 2, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1000000000, "audience": { "rule": "everyone" } },
-    "last_set": { "n": 3, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 5, "audience": { "rule": "everyone" } }
+    "sets": { "n": 28, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1000000000, "audience": { "rule": "everyone" } },
+    "rises": { "n": 29, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 1000000000, "audience": { "rule": "everyone" } },
+    "last_set": { "n": 30, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 5, "audience": { "rule": "everyone" } }
   },
   "points": {
     "front": { "role": "stand", "at_mm": [0, 0, 450], "yaw_mdeg": 180000 }

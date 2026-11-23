@@ -4,6 +4,7 @@
 // rule's name, or the check itself is broken. Then the tree. Rules and what they do not prove: README.md.
 //
 //   node v2/tools/arch/check.mjs          (from anywhere; exit 1 on a broken rule)
+import { isMain } from '../../../tools/lib/is-main.mjs';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync } from 'node:fs';
 import { dirname, join, relative, resolve } from 'node:path';
@@ -45,23 +46,33 @@ export const problem = (rule, where, what) => `${rule}: ${where}: ${what} [${RUL
 
 /** The dependencies each crate under v2/crates may have (normal, dev and build alike). A crate not listed fails. */
 export const ALLOWED = {
-  replica: ['wasm-bindgen'],
+  // wasmi: the code hatch's one interpreter, metered by its own fuel the same in every build (F8, #2823).
+  // sha2: SHA-256 with the processor's SHA instructions where it has them, native builds only; replica itself keeps
+  // `forbid(unsafe_code)`, and the WASM build keeps the SHA-256 written out in `ids.rs` (#1960, follow-up of #4080).
+  replica: ['wasm-bindgen', 'wasmi', 'sha2'],
   // skills: the world wakes the form runner and steps the walk it starts (F1, #2766; K13a, #2676).
   sim: ['replica', 'i_overlay', 'i_triangle', 'import-eden', 'testworld', 'skills'],
-  // import-eden: E1's Eden measures load Eden 2026's tree in a test (#2708; dev only). rustix: the machine's steady
-  // clock (CLOCK_MONOTONIC) without unsafe, one clock for the world and its gateway across their local socket, so an
-  // act's stamps form one chain (O4, #2694). skills: the world runs the built-in walk for a move intent; the test
-  // world in its tests (I4b, #3156).
-  worldd: ['replica', 'sim', 'import-eden', 'rustix', 'skills', 'testworld'],
+  // O3 (#2732): the shipper writes pieces to the object store and moves the directory's mark. import-eden: E1's Eden
+  // measures load Eden 2026's tree in a test (#2708; dev only). rustix: the machine's steady clock (CLOCK_MONOTONIC)
+  // without unsafe, one clock for the world and its gateway across their local socket, so an act's stamps form one
+  // chain (O4, #2694). skills: the world runs the built-in walk for a move intent; the test world in its tests (I4b,
+  // #3156). archive, supervisor: `serve` archives its history (V3's archiver) into O9's folder store (O3b, #3458).
+  // backup: O20's restore reads a served world's shipped stores back in its tests (O20b, #3523; dev only).
+  worldd: ['replica', 'sim', 'directoryd', 'import-eden', 'rustix', 'skills', 'testworld', 'archive', 'supervisor', 'backup'],
   // Agents' sockets (I1, #2683): WebSocket on tokio through axum, a constant-time compare, the OS random source.
-  gatewayd: ['replica', 'axum', 'tokio', 'subtle', 'getrandom', 'tokio-tungstenite', 'futures-util', 'rustix'],
+  // worldd and sim: the world's view tier in the view subscription tests (#3292), and a real world behind the gateway
+  // for a creator's edits end to end (G1b, #3362; dev only).
+  gatewayd: ['replica', 'axum', 'tokio', 'subtle', 'getrandom', 'tokio-tungstenite', 'futures-util', 'rustix', 'worldd', 'sim', 'miniz_oxide'],
   // The built-in skills reach the world through replica's host interface alone (T9, #2663).
   skills: ['replica'],
   // W8 (#2729): the object store's SigV4 signature (ring) and HTTP (ureq); sim's tick loop in a test (dev only).
   // W1 (#2704): RS256 checks and random ids (ring), the one-file account store (rusqlite), JWKS (serde_json, ureq).
-  directoryd: ['replica', 'ring', 'rusqlite', 'serde_json', 'ureq', 'sim'],
+  // W11 (#2749): a Soul's picture passes G6's check and hold point (assets).
+  // W15 (#3582): socket2 bounds Unix connect; rustix supplies the monotonic lookup deadline.
+  directoryd: ['replica', 'ring', 'rusqlite', 'serde_json', 'ureq', 'sim', 'assets', 'socket2', 'rustix'],
   // O1 (#2730): the launcher reads a world's pin from its directory record.
-  supervisor: ['replica', 'directoryd'],
+  // O7 (#2804): the rehearsal reads a world's log and writes its scratch copy (K4's log).
+  supervisor: ['replica', 'directoryd', 'sim'],
   // Uploads (G6, #2747): PNG pixel data inflated with a bound on its output; the child's rlimits on Linux; G1's commit
   // and K4's log in its tests.
   assets: ['replica', 'miniz_oxide', 'libc', 'sim'],
@@ -91,6 +102,10 @@ export function floats(file, src) {
   return out;
 }
 
+// G1e (#3532): the served-edit test drives a real gateway. These dependencies stay test-only;
+// listing them here never permits them in worldd's normal or build dependencies, or in another crate.
+export const DEV_ALLOWED = { worldd: ['gatewayd', 'tokio', 'tokio-tungstenite', 'futures-util', 'axum'] };
+
 /** The crates under v2/crates and their dependencies, from `cargo metadata`, against ALLOWED. */
 export function dependencies(packages) {
   const out = [];
@@ -101,8 +116,8 @@ export function dependencies(packages) {
       out.push(problem('crate-dependency', p.name, `a crate under v2/crates with no allowed list (${deps.join(', ') || 'no dependencies'})`));
       continue;
     }
-    for (const d of deps.filter(d => !allowed.includes(d))) {
-      out.push(problem('crate-dependency', p.name, `depends on \`${d}\`, which is not on its list`));
+    for (const d of p.dependencies.filter(d => !allowed.includes(d.name) && !(d.kind === 'dev' && DEV_ALLOWED[p.name]?.includes(d.name)))) {
+      out.push(problem('crate-dependency', p.name, `depends on \`${d.name}\`, which is not on its list`));
     }
   }
   return out;
@@ -140,11 +155,15 @@ async function selfTest() {
     ['float-in-replica', 'a float in a selector', floats('crates/replica/src/selectors.rs', read('selector.rs'))],
     ['float-in-replica', 'a float in a form rule', floats('crates/replica/src/form_rules.rs', read('form_rule.rs'))],
     ['crate-dependency', 'replica gains a dependency', dependencies(JSON.parse(read('metadata.json')).packages)],
+    ...DEV_ALLOWED.worldd.flatMap(name => [null, 'build'].map(kind =>
+      ['crate-dependency', `worldd gains ${name} as ${kind ?? 'normal'}`, dependencies([{ name: 'worldd', dependencies: [{ name, kind }] }])])),
+    ...DEV_ALLOWED.worldd.map(name =>
+      ['crate-dependency', `sim gains worldd's test dependency ${name}`, dependencies([{ name: 'sim', dependencies: [{ name, kind: 'dev' }] }])]),
     ['v2-imports-today', 'a v2 crate imports today\'s packages', today('crates/sim/src/ground/legacy.rs', read('imports_today.rs'))],
     ['t1-check-wired', 'T1\'s planted systems removed', t1Wired('crates/replica/tests/zones.rs', 'fn a1_only() {}')],
     ['import from v2/', 'a file outside v2/ imports from it', scrubLine(read('outside_v2.ts').trim(), 'apps/web/src/seeded.ts')],
   ];
-  const out = [];
+  const out = dependencies([{ name: 'worldd', dependencies: DEV_ALLOWED.worldd.map(name => ({ name, kind: 'dev' })) }]);
   for (const [rule, what, got] of cases) {
     const hit = got.some(g => g.startsWith(rule));
     console.log(`  seeded: ${what}: ${hit ? got.find(g => g.startsWith(rule)) : 'NOT CAUGHT'}`);
@@ -173,4 +192,4 @@ async function main() {
   return problems.length ? 1 : 0;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = await main();
+if (isMain(import.meta.url)) process.exitCode = await main();

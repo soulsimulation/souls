@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { isMain } from '../lib/is-main.mjs';
 import { createHash } from 'node:crypto';
 import { isUtf8 } from 'node:buffer';
 import { execFileSync, spawn } from 'node:child_process';
@@ -766,7 +767,9 @@ export const CI_COVERED = {
   'V1-types': { jobs: ['types-web'], command: 'pnpm typecheck', defs: ['package.json#typecheck'], tests: false },
   'V2-build-root': { jobs: ['types-web'], command: 'pnpm --filter @souls/web build', defs: [], tests: false },
   'V3-client-cli': { jobs: ['client-cli'], command: 'pnpm test:client', defs: ['package.json#test:client'], tests: true },
-  'V3-launcher-unit': { jobs: ['launcher'], command: 'node --test --test-concurrency=1 tools/world-launcher/*.test.mjs tools/world-launcher/soul/*.test.mjs', defs: [], tests: true },
+  // every launcher leg (TEST_LEGS.launcher.legs at the candidate, .github/scripts/test-legs.mjs), each running its share
+  'V3-launcher-unit': { jobs: ['launcher-*'], command: ['node .github/scripts/test-legs.mjs launcher "$TEST_LEG"', 'node --test --test-concurrency=1 "${files[@]}"'],
+    defs: ['.github/scripts/test-legs.mjs'], tests: true },
   'V4-web': { jobs: ['web'], command: 'bash tools/test-harness/web-suite.sh', defs: ['tools/test-harness/web-suite.sh', 'tools/test-harness/web-loader.mjs'], tests: true },
   // every server shard (SERVER_SHARDS at the candidate, .github/scripts/server-test-files.mjs) plus the latency job
   'V5-server-full': { jobs: ['server-*', 'latency'], command: "import { serverTestFiles, serverShardPlan, SERVER_TEST_CONCURRENCY } from './.github/scripts/server-test-files.mjs';",
@@ -846,6 +849,8 @@ export function ciEvidence(sha, { repo, api = ghApi, log = id => ghLog(repo, id)
   const conclusion = Object.fromEntries(jobs.map(j => [j.name, j.conclusion])), jobId = Object.fromEntries(jobs.map(j => [j.name, j.id]));
   const ciYml = ciDefinition('ci.yml', file) || '';
   const shards = Number(/export const SERVER_SHARDS = (\d+)/.exec(file('.github/scripts/server-test-files.mjs') || '')?.[1]);
+  const launcherLegs = Number(/launcher: \{ legs: (\d+)/.exec(file('.github/scripts/test-legs.mjs') || '')?.[1]);
+  const count = { 'server-*': shards, 'launcher-*': launcherLegs };
   const drifted = name => { const now = ciDefinition(name, file), then = ciDefinition(name, baselineFile); return now === null || then === null || now !== then; };
   const logs = new Map(), readLog = name => {
     if (!logs.has(name)) { try { logs.set(name, ciLogSkips(log(jobId[name]))); } catch (e) { logs.set(name, { error: String(e.message).split('\n')[0] }); } }
@@ -856,11 +861,12 @@ export function ciEvidence(sha, { repo, api = ghApi, log = id => ghLog(repo, id)
   for (const step of REQUIRED_STEPS) {
     const c = CI_COVERED[step];
     if (!c) { notCovered[step] = 'CI does not run this step with the gate command'; continue; }
-    if (!ciYml.includes(c.command)) { notCovered[step] = `the commit's ci.yml does not run \`${c.command}\``; continue; }
+    const missing = [c.command].flat().find(line => !ciYml.includes(line));
+    if (missing) { notCovered[step] = `the commit's ci.yml does not run \`${missing}\``; continue; }
     const changed = [...CI_COMMON_DEFINITIONS, ...c.defs].filter(drifted);
     if (changed.length) { notCovered[step] = `CI definitions differ from the baseline's: ${changed.join(', ')}`; continue; }
-    const names = c.jobs.flatMap(j => j === 'server-*' ? (Number.isInteger(shards) && shards > 0 ? Array.from({ length: shards }, (_, i) => `server-${i}`) : [null]) : [j]);
-    if (names.includes(null)) { notCovered[step] = 'SERVER_SHARDS unreadable at the commit'; continue; }
+    const names = c.jobs.flatMap(j => !(j in count) ? [j] : Number.isInteger(count[j]) && count[j] > 0 ? Array.from({ length: count[j] }, (_, i) => j.replace('*', i)) : [null]);
+    if (names.includes(null)) { notCovered[step] = `${c.jobs.includes('server-*') ? 'SERVER_SHARDS' : 'the launcher leg count (test-legs.mjs)'} unreadable at the commit`; continue; }
     const bad = names.filter(n => conclusion[n] !== 'success');
     if (bad.length) { notCovered[step] = `job(s) not successful in run ${run.id}: ${bad.map(n => `${n}=${conclusion[n] ?? 'absent'}`).join(', ')}`; continue; }
     if (c.tests) {
@@ -1077,4 +1083,4 @@ export async function main(args = process.argv.slice(2), deps = {}) {
   return receipt.status === 'blocked' ? 1 : 0;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = await main();
+if (isMain(import.meta.url)) process.exitCode = await main();

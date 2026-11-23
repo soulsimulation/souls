@@ -3,8 +3,8 @@
   "kind": "eden:hall_lecture",
   "owner": "thing",
   "state": {
-    "phase": { "n": 1, "type": "enum", "values": ["announced", "speaking"], "default": "announced", "audience": { "rule": "everyone" } },
-    "left_us": { "n": 2, "type": "timed", "unit": "us", "default": { "value": 3600000000, "per_s": -1000000, "set_us": 0 }, "min": 0, "audience": { "rule": "everyone" } }
+    "phase": { "n": 28, "type": "enum", "values": ["announced", "speaking"], "default": "announced", "audience": { "rule": "everyone" } },
+    "left_us": { "n": 29, "type": "timed", "unit": "us", "default": { "value": 3600000000, "per_s": -1000000, "set_us": 0 }, "min": 0, "audience": { "rule": "everyone" } }
   },
   "links": {
     "speaker": { "n": 1, "from": "body", "most": 1, "audience": { "rule": "everyone" } },

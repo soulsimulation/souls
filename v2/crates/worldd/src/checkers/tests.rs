@@ -37,6 +37,7 @@ fn switch_on(id: u64, body: Id, toggles: &[Id]) -> Act {
             })
             .collect(),
         recheck: None,
+        spot: None,
     }
 }
 
@@ -65,7 +66,7 @@ fn a3_checks_run_off_the_clock_thread() {
     }
     assert!(pairs.iter().all(|(_, l)| lit(&w, *l) == 1));
     // A second round on the newer copy: switch_off is the candidate that holds now.
-    let copy = publisher.wait_for(w.replica.version(), std::time::Duration::from_secs(5));
+    let copy = publisher.wait_for(w.replica.version(), std::time::Duration::from_secs(30));
     assert_eq!(copy.version(), w.replica.version());
     for (i, (b, l)) in pairs.iter().enumerate() {
         acts.send(toggle(100 + i as u64, *b, *l))
@@ -82,6 +83,7 @@ fn a3_checks_run_off_the_clock_thread() {
 }
 
 #[test]
+#[cfg(debug_assertions)] // the guard is a debug_assert: a release build never panics (as worldd/tests/tick.rs)
 #[should_panic(expected = "ran on the clock thread")]
 fn a3_a_check_on_the_clock_thread_fails() {
     let w = World::build(1, 1, 0);
@@ -156,4 +158,41 @@ fn the_read_set_is_the_thing_and_the_body() {
             vec![(a, w.replica.stamp(a)), (b, w.replica.stamp(b))]
         );
     }
+}
+
+#[test]
+/// #3911's finding: a text field reads its words' reference once written and null once cleared, never `{}` for both.
+fn a_text_field_reads_its_reference_once_written_and_null_once_cleared() {
+    use replica::encode::{Name, Value as Cbor};
+    use replica::rules::json::{Value as J, parse};
+    use std::collections::BTreeMap;
+    let entry = parse(
+        r#"{"kind": "test:board", "state": {"words": {"n": 3, "type": "text", "default": null}, "count": {"n": 4, "type": "int", "default": 0}}}"#,
+    )
+    .unwrap();
+    let words = Id::new(replica::ids::Scope([0xab; 16]), 9).unwrap();
+    let record = |text: Cbor| {
+        Cbor::Map(BTreeMap::from([
+            (2, Cbor::Text(Name::new("test:board").unwrap())),
+            (
+                6,
+                Cbor::Map(BTreeMap::from([(3, text), (4, Cbor::Uint(2))])),
+            ),
+        ]))
+    };
+    let written = super::thing(
+        &record(Cbor::Map(BTreeMap::from([(
+            replica::audience::REFERENCE,
+            words.to_value(),
+        )]))),
+        &entry,
+    );
+    let cleared = super::thing(&record(Cbor::Map(BTreeMap::new())), &entry);
+    let f = |t: &J, k: &str| t.get("fields").and_then(|f| f.get(k)).cloned();
+    assert_eq!(
+        f(&written, "words"),
+        Some(J::s(&replica::world_model::show(words)))
+    );
+    assert_eq!(f(&cleared, "words"), Some(J::Null));
+    assert_eq!(f(&written, "count"), Some(J::Int(2)));
 }

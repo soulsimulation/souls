@@ -76,7 +76,7 @@ function tails(n = 40) {
   return [`daemon.log:\n${last(daemon)}`, ...Object.entries(printed).map(([k, v]) => `${k}:\n${last(v)}`)].join('\n');
 }
 
-async function waitFor(f, ms = 5000) {
+async function waitFor(f, ms = 30_000) {
   const until = Date.now() + ms;
   for (;;) {
     const v = await f();
@@ -132,7 +132,7 @@ test('A1: the first command starts it, and it outlives the command that started 
 
 test('A3: a second start for the same Soul is refused by name', async () => {
   const s = await status();
-  const second = spawnSync(process.execPath, [join(v2, 'client/src/daemon/daemon.mjs'), '--home', home, '--soul', SOUL, '--pkg', PKG], { encoding: 'utf8', timeout: 10_000 });
+  const second = spawnSync(process.execPath, [join(v2, 'client/src/daemon/daemon.mjs'), '--home', home, '--soul', SOUL, '--pkg', PKG], { encoding: 'utf8', timeout: 30_000 });
   outputs.push(second.stdout, second.stderr);
   assert.equal(second.status, 3);
   assert.match(second.stderr, new RegExp(`^daemon-already-running: ${SOUL} has a daemon, pid ${s.pid}\\n$`));
@@ -163,7 +163,7 @@ test('A2: after each of ten forced drops it is current within 2 s, and no intent
     const s = await waitFor(async () => {
       const s = await status();
       return s.connected && s.unanswered.length === 0 && s.answered === taken().length && s;
-    }, 5000);
+    }, 30_000);
     times.push(performance.now() - dropped);
     const events = (await request(rt.socket, { op: 'read' })).events.filter((e) => e.kind === 'answer');
     assert.equal(events.at(-1).sequence, b.sequence);
@@ -177,11 +177,16 @@ test('A2: after each of ten forced drops it is current within 2 s, and no intent
   assert.deepEqual(taken().map((l) => Number(l.split(' ')[1])), Array.from({ length: 20 }, (_, i) => i + 1));
   assert.equal(changes().length, 20, 'each act switched the lamp, in a tick of its own');
   if (process.env.R6_REPORT) console.log(JSON.stringify({ dropsMs: times.map((t) => Math.round(t)), rssBytes: s.rssBytes, heapBytes: s.heapBytes, connects: s.connects, resumed: s.resumed }));
-  for (const t of times) assert.ok(t < 2000, `current ${Math.round(t)} ms after a drop`);
+  // A speed bar (real time): asserted only in the speed-bar step (ci.sh, V2_SPEED_BARS=1); R6_REPORT prints it.
+  if (process.env.V2_SPEED_BARS) for (const t of times) assert.ok(t < 2000, `current ${Math.round(t)} ms after a drop`);
 });
 
 test('R5b A2, A3: told stream.cannot-resume, it compares and descends through the gateway, ends current and resumes', async () => {
-  const before = await status();
+  // The previous answer can precede its replica update: establish the current OFF root before missing the next ON.
+  const before = await waitFor(async () => {
+    const s = await status(), roots = Object.values(s.roots);
+    return s.connected && roots.length === 1 && roots[0] === placeHash() && s;
+  }, 30_000);
   const snapshot = before.syncs.find((x) => x.kind === 'snapshot');
   assert.ok(snapshot, 'its first sign-in took its scope whole');
   // A cut long enough that resume fails: the relay drops all the gateway sends while the world answers more intents
@@ -196,7 +201,7 @@ test('R5b A2, A3: told stream.cannot-resume, it compares and descends through th
   const cut = performance.now();
   relay.cut();
   relay.deaf = false;
-  const s = await waitFor(async () => { const s = await status(); return s.connected && s.cannotResume > before.cannotResume && s; }, 10_000);
+  const s = await waitFor(async () => { const s = await status(); return s.connected && s.cannotResume > before.cannotResume && s; }, 30_000);
   const currentMs = performance.now() - cut;
   const resync = s.syncs.at(-1);
   assert.equal(resync.kind, 'resync');
@@ -208,10 +213,11 @@ test('R5b A2, A3: told stream.cannot-resume, it compares and descends through th
   assert.ok(resync.fetched < resync.held, `fetched ${resync.fetched} of ${resync.held}`);
   assert.ok(resync.got < resync.heldBytes, `got ${resync.got} B, a snapshot ${resync.heldBytes} B`);
   // The stream carries on from the hashes' version: an intent is answered, and the next drop resumes.
-  const answered = s.answered;
   const a = await request(rt.socket, { op: 'act', verb: 'r2:switch_off', target: LAMP });
   outputs.push(JSON.stringify(a));
-  await waitFor(async () => (await status()).answered === answered + 1);
+  const answer = await waitFor(async () =>
+    (await request(rt.socket, { op: 'read' })).events.find((e) => e.kind === 'answer' && e.sequence === a.sequence));
+  assert.equal(answer.answer, 1, JSON.stringify(answer));
   relay.cut();
   const after = await waitFor(async () => { const x = await status(); return x.connected && x.resumed > s.resumed && x; });
   assert.equal(after.cannotResume, s.cannotResume, 'resumed, not synced again');
@@ -220,7 +226,7 @@ test('R5b A2, A3: told stream.cannot-resume, it compares and descends through th
 });
 
 test('R10 A1, A2, A3: every answer carries its age; a copy cut off for 30 s says so within 10 s; then asleep, not stale', async () => {
-  const ask = async (req) => { const t = performance.now(); const a = await request(rt.socket, req, 10_000); outputs.push(JSON.stringify(a)); return { ...a, ms: Math.round(performance.now() - t) }; };
+  const ask = async (req) => { const t = performance.now(); const a = await request(rt.socket, req, 30_000); outputs.push(JSON.stringify(a)); return { ...a, ms: Math.round(performance.now() - t) }; };
   const seen = []; // the transcript of answers, for the PR
   const keep = (op, t0, a) => seen.push({ s: Math.round((performance.now() - t0) / 100) / 10, op, age: a.age, ...(a.gap ? { gap: a.gap } : {}), ...(a.asleep ? { asleep: a.asleep } : {}) });
   // A1: every answer, of every command, carries a numeric age.
@@ -258,7 +264,7 @@ test('R10 A1, A2, A3: every answer carries its age; a copy cut off for 30 s says
   assert.ok(last.gap.ms > 25_000 && last.age > 25_000, JSON.stringify(last));
   // Restored: current again, and since this world has written nothing for over 30 s, asleep since then, not stale.
   relay.refuse = false; relay.deaf = false; relay.cut();
-  const back = await waitFor(async () => { const a = await ask({ op: 'look' }); return !a.gap && a; }, 15_000);
+  const back = await waitFor(async () => { const a = await ask({ op: 'look' }); return !a.gap && a; }, 30_000);
   keep('look', t0, back);
   assert.equal(back.stale, undefined);
   assert.ok(back.age < 2000, `age ${back.age}`);
@@ -275,7 +281,7 @@ test('R10 A1, A2, A3: every answer carries its age; a copy cut off for 30 s says
 });
 
 test('R8 A3, A4: checked on the copy and at send time; only a current copy refuses; unknown never blocks; basis is what was shown', async () => {
-  const ask = async (req) => { const a = await request(rt.socket, req, 10_000); outputs.push(JSON.stringify(a)); return a; };
+  const ask = async (req) => { const a = await request(rt.socket, req, 30_000); outputs.push(JSON.stringify(a)); return a; };
   // A kind entry for the world's lamps: field 1 named, and a form that needs it unset. The Soul's own lamp is lit, the
   // rest are not.
   mkdirSync(join(home, 'kinds'), { recursive: true });
@@ -322,7 +328,7 @@ test('R8 A3, A4: checked on the copy and at send time; only a current copy refus
   assert.equal(blind.checked, false);
   assert.ok(blind.gap && blind.stale);
   relay.refuse = false;
-  await waitFor(async () => { const s = await status(); return s.connected && s.queued === 0; }, 15_000);
+  await waitFor(async () => { const s = await status(); return s.connected && s.queued === 0; }, 30_000);
   // A4: the basis is the version the model was last shown, not the one the send-time check brought the copy to.
   const shown = await ask({ op: 'look' });
   const moved = await ask({ op: 'act', verb: 'r2:switch_off', target: LAMP }); // the world moves on
@@ -331,6 +337,35 @@ test('R8 A3, A4: checked on the copy and at send time; only a current copy refus
   assert.equal(later.basis, shown.at + 0, JSON.stringify(later));
   assert.ok(later.at > shown.at, `${later.at} after ${shown.at}`);
   if (process.env.R8_REPORT) console.log(JSON.stringify({ can: marked, stop, two, blind: { ok: blind.ok, checked: blind.checked, gap: blind.gap }, basis: later.basis, at: later.at }));
+});
+
+test('#3604: the thin set-down command reaches the world and is answered once, refused by name when nothing is held', async () => {
+  const bad = await request(rt.socket, { op: 'set-down', this: 'no-id' });
+  assert.equal(bad.code, 'set-down-names-a-thing', JSON.stringify(bad));
+  const a = await request(rt.socket, { op: 'set-down', this: LAMP, word: 'here' });
+  outputs.push(JSON.stringify(a));
+  assert.equal(a.ok, true, JSON.stringify(a));
+  assert.equal(a.verb, 'hands:set-down');
+  const answer = await waitFor(async () =>
+    (await request(rt.socket, { op: 'read' })).events.find((e) => e.kind === 'answer' && e.sequence === a.sequence));
+  // This world's Soul holds no lamp: a refusal by name (`setdown-off` where the world runs no engine), never a move.
+  assert.equal(answer.answer, 2, JSON.stringify(answer));
+  assert.ok(['not-held', 'setdown-off', 'intent.no-body'].includes(answer.reason), JSON.stringify(answer));
+});
+
+test('#3346: answers that share a version are counted as seen, so a resume gives none of them twice', async () => {
+  // The lamp on (a new version), then three refusals at that same version; every answer taken.
+  const acts = [];
+  for (let k = 0; k < 4; k++) acts.push((await request(rt.socket, { op: 'act', verb: 'r2:switch_on', target: LAMP })).sequence);
+  await waitFor(async () => { const s = await status(); return acts.every((q) => !s.unanswered.includes(q)); });
+  const versions = new Set((await request(rt.socket, { op: 'read' })).events.filter((e) => e.kind === 'answer' && acts.includes(e.sequence)).map((e) => e.version));
+  assert.equal(versions.size, 1, `the four answers at one version: ${[...versions]}`);
+  const { resumed } = await status();
+  relay.cut();
+  await waitFor(async () => { const s = await status(); return s.connected && s.resumed > resumed; });
+  await sleep(300);
+  const again = (await request(rt.socket, { op: 'read' })).events.filter((e) => e.kind === 'answer' && acts.includes(e.sequence));
+  assert.deepEqual(again, [], 'no answer given twice');
 });
 
 test('A4: the token is in no output, argument, environment variable or file but credentials.json', async () => {

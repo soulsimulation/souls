@@ -36,6 +36,7 @@ use replica::pose::{
 };
 use replica::time::Micros;
 use std::collections::BTreeMap;
+use std::sync::Arc;
 
 /// Slides a step may take before it stops where it stands.
 pub const PASSES: u32 = 4;
@@ -72,7 +73,80 @@ fn orient(a: [i128; 2], b: [i128; 2], p: [i128; 2]) -> i128 {
 /// A triangle: its corners counter-clockwise (µm, x and z), their vertex indices, and what lies across each edge.
 type Tri = ([[i128; 2]; 3], [u32; 3], [u32; 3]);
 
+/// An off-clock prepared triangle: no search or geometry construction is needed to certify a current point.
+#[derive(Clone, Debug)]
+pub struct RebindTriangle {
+    node: Id,
+    vertices: [[i128; 2]; 3],
+    heights: [i128; 3],
+    terrain: Option<Arc<Terrain>>,
+    piece: u32,
+    tri: u32,
+}
+
+fn triangle_height(
+    v: &[[i128; 2]; 3],
+    y: [i128; 3],
+    terrain: Option<&Terrain>,
+    p: [i128; 2],
+) -> i64 {
+    if let Some(h) = terrain.and_then(|ground| ground.height_at(p[0] as i64, p[1] as i64)) {
+        return h;
+    }
+    let a = orient(v[0], v[1], v[2]);
+    if a == 0 {
+        return y[0] as i64;
+    }
+    let w = [
+        orient(v[1], v[2], p),
+        orient(v[2], v[0], p),
+        orient(v[0], v[1], p),
+    ];
+    div_round(w[0] * y[0] + w[1] * y[1] + w[2] * y[2], a) as i64
+}
+
+impl RebindTriangle {
+    /// Certifies only the current point against this exact prepared triangle and authoritative terrain.
+    pub fn permits(&self, body: &Body) -> bool {
+        let Support::Surface { surface, height } = body.pose.support else {
+            return false;
+        };
+        if surface != self.node
+            || body.pose.frame.node != self.node
+            || body.pose.frame.slot.is_some()
+        {
+            return false;
+        }
+        let p = [
+            i128::from(body.pose.position.x),
+            i128::from(body.pose.position.z),
+        ];
+        (0..3).all(|k| orient(self.vertices[k], self.vertices[(k + 1) % 3], p) >= 0)
+            && triangle_height(&self.vertices, self.heights, self.terrain.as_deref(), p)
+                .checked_add(height)
+                == Some(body.pose.position.y)
+    }
+    /// Whether the body's current point (x, z) lies in this triangle, its height not judged (B12b: a body that
+    /// walked on is told apart from one whose support changed).
+    pub fn contains(&self, body: &Body) -> bool {
+        let p = [
+            i128::from(body.pose.position.x),
+            i128::from(body.pose.position.z),
+        ];
+        (0..3).all(|k| orient(self.vertices[k], self.vertices[(k + 1) % 3], p) >= 0)
+    }
+    /// Returns the unchanged current body with only the certified target indices substituted.
+    pub fn rebind(&self, body: &Body) -> Option<Body> {
+        self.permits(body).then_some(Body {
+            piece: self.piece,
+            tri: self.tri,
+            ..*body
+        })
+    }
+}
+
 /// The walkable pieces of one node, in its frame, ready to walk on.
+#[derive(Clone)]
 pub struct Surface {
     pub node: Id,
     pieces: Vec<Piece>,
@@ -100,57 +174,62 @@ fn cell(v: i128) -> i64 {
     (v as i64).div_euclid(SQUARE * 1000)
 }
 
+/// Piece `q`'s triangles, counter-clockwise, with the triangle across each edge, the piece put in `cells`.
+fn tris_of(pc: &Piece, q: u32, cells: &mut BTreeMap<(i64, i64), Vec<u32>>) -> Vec<Tri> {
+    let um = |k: u32| {
+        let v = pc.vertices[k as usize];
+        [i128::from(v[0]) * 1000, i128::from(v[2]) * 1000]
+    };
+    let mut list = Vec::with_capacity(pc.triangles.len());
+    let mut edges: BTreeMap<(u32, u32), (u32, usize)> = BTreeMap::new();
+    for (t, tri) in pc.triangles.iter().enumerate() {
+        let mut idx = *tri;
+        if orient(um(idx[0]), um(idx[1]), um(idx[2])) < 0 {
+            idx.swap(1, 2);
+        }
+        for k in 0..3 {
+            edges.insert((idx[k], idx[(k + 1) % 3]), (t as u32, k));
+        }
+        list.push(([um(idx[0]), um(idx[1]), um(idx[2])], idx, [NONE; 3]));
+    }
+    for tr in list.iter_mut() {
+        let idx = tr.1;
+        for k in 0..3 {
+            if let Some(&(o, _)) = edges.get(&(idx[(k + 1) % 3], idx[k])) {
+                tr.2[k] = o;
+            } else {
+                let (a, b) = (tr.0[k], tr.0[(k + 1) % 3]);
+                let on = |u: i128, v: i128| u == v && u % (i128::from(SQUARE) * 1000) == 0;
+                if on(a[0], b[0]) || on(a[1], b[1]) {
+                    tr.2[k] = SEAM;
+                }
+            }
+        }
+    }
+    let (mut lo, mut hi) = ([i128::MAX; 2], [i128::MIN; 2]);
+    for (v, ..) in &list {
+        for p in v {
+            lo = [lo[0].min(p[0]), lo[1].min(p[1])];
+            hi = [hi[0].max(p[0]), hi[1].max(p[1])];
+        }
+    }
+    if !list.is_empty() {
+        for i in cell(lo[0])..=cell(hi[0]) {
+            for j in cell(lo[1])..=cell(hi[1]) {
+                cells.entry((i, j)).or_default().push(q);
+            }
+        }
+    }
+    list
+}
+
 impl Surface {
     /// The pieces of node `node` (one floor's patch, or every square of the open ground), in its frame.
     pub fn new(node: Id, pieces: Vec<Piece>) -> Surface {
         let mut tris = Vec::with_capacity(pieces.len());
         let mut cells: BTreeMap<(i64, i64), Vec<u32>> = BTreeMap::new();
         for (q, pc) in pieces.iter().enumerate() {
-            let um = |k: u32| {
-                let v = pc.vertices[k as usize];
-                [i128::from(v[0]) * 1000, i128::from(v[2]) * 1000]
-            };
-            let mut list = Vec::with_capacity(pc.triangles.len());
-            let mut edges: BTreeMap<(u32, u32), (u32, usize)> = BTreeMap::new();
-            for (t, tri) in pc.triangles.iter().enumerate() {
-                let mut idx = *tri;
-                if orient(um(idx[0]), um(idx[1]), um(idx[2])) < 0 {
-                    idx.swap(1, 2);
-                }
-                for k in 0..3 {
-                    edges.insert((idx[k], idx[(k + 1) % 3]), (t as u32, k));
-                }
-                list.push(([um(idx[0]), um(idx[1]), um(idx[2])], idx, [NONE; 3]));
-            }
-            for tr in list.iter_mut() {
-                let idx = tr.1;
-                for k in 0..3 {
-                    if let Some(&(o, _)) = edges.get(&(idx[(k + 1) % 3], idx[k])) {
-                        tr.2[k] = o;
-                    } else {
-                        let (a, b) = (tr.0[k], tr.0[(k + 1) % 3]);
-                        let on = |u: i128, v: i128| u == v && u % (i128::from(SQUARE) * 1000) == 0;
-                        if on(a[0], b[0]) || on(a[1], b[1]) {
-                            tr.2[k] = SEAM;
-                        }
-                    }
-                }
-            }
-            let (mut lo, mut hi) = ([i128::MAX; 2], [i128::MIN; 2]);
-            for (v, ..) in &list {
-                for p in v {
-                    lo = [lo[0].min(p[0]), lo[1].min(p[1])];
-                    hi = [hi[0].max(p[0]), hi[1].max(p[1])];
-                }
-            }
-            if !list.is_empty() {
-                for i in cell(lo[0])..=cell(hi[0]) {
-                    for j in cell(lo[1])..=cell(hi[1]) {
-                        cells.entry((i, j)).or_default().push(q as u32);
-                    }
-                }
-            }
-            tris.push(list);
+            tris.push(tris_of(pc, q as u32, &mut cells));
         }
         Surface {
             node,
@@ -161,11 +240,81 @@ impl Surface {
         }
     }
 
+    /// Placement by the same mover, retaining the admitted support offset above its surface.
+    pub fn place_built(
+        &self,
+        id: Id,
+        frame: Frame,
+        at: Vec3,
+        orientation: Quat,
+        build: replica::kinds::sizes::Build,
+    ) -> R<Body> {
+        let mut body = self.place(id, frame, at, orientation)?;
+        body.pose.position.y = body
+            .pose
+            .position
+            .y
+            .checked_add(build.hover_mm.checked_mul(1000).ok_or_else(|| Refusal {
+                name: "out-of-range",
+                detail: "support height".into(),
+            })?)
+            .ok_or_else(|| Refusal {
+                name: "out-of-range",
+                detail: "support height".into(),
+            })?;
+        body.pose.support = build.support(self.node);
+        Ok(body)
+    }
+
+    /// Replaces the pieces `drop` with `add` (G3b, #3449: the open ground's squares cut again after a change): the
+    /// dropped pieces are left empty, so no body stands on them and every other piece keeps its number; the new ones
+    /// follow the last, each with whether each of its triangles lies on the terrain (`on`, when the surface has one).
+    /// Returns the first new piece's number.
+    pub fn replace(&mut self, drop: &[u32], add: Vec<Piece>, on: Vec<Vec<bool>>) -> u32 {
+        for &q in drop {
+            let Some(pc) = self.pieces.get_mut(q as usize) else {
+                continue;
+            };
+            pc.outline.clear();
+            pc.vertices.clear();
+            pc.triangles.clear();
+            self.tris[q as usize].clear();
+            if let Some((_, flags)) = &mut self.terrain
+                && let Some(f) = flags.get_mut(q as usize)
+            {
+                f.clear();
+            }
+        }
+        if !drop.is_empty() {
+            for list in self.cells.values_mut() {
+                list.retain(|q| !drop.contains(q));
+            }
+        }
+        let first = self.pieces.len() as u32;
+        for (k, pc) in add.iter().enumerate() {
+            let t = tris_of(pc, first + k as u32, &mut self.cells);
+            self.tris.push(t);
+        }
+        if let Some((_, flags)) = &mut self.terrain {
+            let mut on = on.into_iter();
+            for pc in &add {
+                flags.push(on.next().unwrap_or_else(|| vec![false; pc.triangles.len()]));
+            }
+        }
+        self.pieces.extend(add);
+        first
+    }
+
     /// The same surface on terrain `t` (the open ground's, `crate::ground::OpenGround::terrain`): inside a triangle
     /// that `on` marks (per piece, per triangle: `crate::ground::OpenGround::on_terrain`), the height is the
     /// terrain's, read at the point; elsewhere (a pier over water, a floor) it is the triangle's.
-    pub fn on_terrain(mut self, t: Terrain, on: Vec<Vec<bool>>) -> Surface {
-        self.terrain = Some((std::sync::Arc::new(t), on));
+    pub fn on_terrain(self, t: Terrain, on: Vec<Vec<bool>>) -> Surface {
+        self.on_terrain_shared(Arc::new(t), on)
+    }
+
+    /// Uses the authoritative immutable terrain without cloning its tile storage.
+    pub fn on_terrain_shared(mut self, t: Arc<Terrain>, on: Vec<Vec<bool>>) -> Surface {
+        self.terrain = Some((t, on));
         self
     }
 
@@ -213,28 +362,49 @@ impl Surface {
 
     /// The surface's height at `p` in triangle `t` of piece `q`, µm.
     fn height(&self, q: u32, t: u32, p: [i128; 2]) -> i64 {
-        if let Some((ground, on)) = &self.terrain
-            && on
-                .get(q as usize)
+        let (v, idx, _) = &self.tris[q as usize][t as usize];
+        let heights = std::array::from_fn(|k| {
+            i128::from(self.pieces[q as usize].vertices[idx[k] as usize][1]) * 1000
+        });
+        let terrain = self.terrain.as_ref().and_then(|(ground, on)| {
+            on.get(q as usize)
                 .and_then(|l| l.get(t as usize))
                 .copied()
                 .unwrap_or(false)
-            && let Some(h) = ground.height_at(p[0] as i64, p[1] as i64)
-        {
-            return h;
+                .then_some(ground.as_ref())
+        });
+        triangle_height(v, heights, terrain, p)
+    }
+
+    /// Captures a fixed triangle off-clock, retaining only its authoritative terrain handle.
+    pub fn rebind_triangle(&self, q: u32, t: u32, piece_offset: u32) -> R<RebindTriangle> {
+        crate::commit::off_clock();
+        let Some((v, idx, _)) = self.tris.get(q as usize).and_then(|l| l.get(t as usize)) else {
+            return refuse("edit.body-stale", "prepared triangle missing");
+        };
+        if orient(v[0], v[1], v[2]) <= 0 {
+            return refuse("edit.body-stale", "prepared triangle orientation");
         }
-        let (v, idx, _) = &self.tris[q as usize][t as usize];
-        let y = |k: usize| i128::from(self.pieces[q as usize].vertices[idx[k] as usize][1]) * 1000;
-        let a = orient(v[0], v[1], v[2]);
-        if a == 0 {
-            return y(0) as i64;
-        }
-        let w = [
-            orient(v[1], v[2], p),
-            orient(v[2], v[0], p),
-            orient(v[0], v[1], p),
-        ];
-        div_round(w[0] * y(0) + w[1] * y(1) + w[2] * y(2), a) as i64
+        let piece = q.checked_add(piece_offset).ok_or_else(|| Refusal {
+            name: "out-of-range",
+            detail: "piece index".into(),
+        })?;
+        Ok(RebindTriangle {
+            piece,
+            tri: t,
+            node: self.node,
+            vertices: *v,
+            heights: std::array::from_fn(|k| {
+                i128::from(self.pieces[q as usize].vertices[idx[k] as usize][1]) * 1000
+            }),
+            terrain: self.terrain.as_ref().and_then(|(ground, on)| {
+                on.get(q as usize)
+                    .and_then(|l| l.get(t as usize))
+                    .copied()
+                    .unwrap_or(false)
+                    .then(|| Arc::clone(ground))
+            }),
+        })
     }
 
     /// A body standing at `at` (its frame's position, µm) on this surface, at rest: `off-surface` when no piece
@@ -403,7 +573,11 @@ impl Surface {
         } else {
             self.walk(body.piece, body.tri, p, [p[0] + want[0], p[1] + want[1]])
         };
-        let mut y = i128::from(self.height(q, t, e));
+        let offset = match body.pose.support {
+            Support::Surface { height, .. } => i128::from(height),
+            Support::Slot | Support::Volume { .. } | Support::Track | Support::None => 0,
+        };
+        let mut y = i128::from(self.height(q, t, e)) + offset;
         // Speed is along the surface (N11a, #2735): on a slope the move is walked again, shortened by the cosine of
         // the line just walked (its length on the plan over its length on the surface), once.
         let dy = y - i128::from(body.pose.position.y);
@@ -414,7 +588,7 @@ impl Surface {
             if h > 0 {
                 let w = [div_round(want[0] * h, l), div_round(want[1] * h, l)];
                 (q, t, e) = self.walk(body.piece, body.tri, p, [p[0] + w[0], p[1] + w[1]]);
-                y = i128::from(self.height(q, t, e));
+                y = i128::from(self.height(q, t, e)) + offset;
             }
         }
         let fit = |v: i128| i64::try_from(v).map_err(|_| ());
@@ -489,4 +663,20 @@ pub fn cross(
             },
         ],
     ))
+}
+
+/// Already-prepared support surfaces selected by the body's admitted build.
+pub trait Floors {
+    fn for_build(
+        &self,
+        build: replica::kinds::sizes::Build,
+    ) -> Option<&std::collections::BTreeMap<Id, Surface>>;
+}
+impl Floors for std::collections::BTreeMap<Id, Surface> {
+    fn for_build(
+        &self,
+        build: replica::kinds::sizes::Build,
+    ) -> Option<&std::collections::BTreeMap<Id, Surface>> {
+        (build.size == replica::kinds::sizes::Size::Standard).then_some(self)
+    }
 }

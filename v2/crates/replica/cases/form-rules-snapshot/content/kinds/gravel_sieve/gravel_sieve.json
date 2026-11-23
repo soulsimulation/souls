@@ -1,0 +1,95 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:gravel_sieve",
+  "owner": "thing",
+  "state": {
+    "mixed": { "n": 1, "type": "int", "unit": "count", "default": 3, "min": 0, "max": 3, "audience": { "rule": "everyone" } },
+    "coarse": { "n": 2, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 3, "audience": { "rule": "everyone" } },
+    "fine": { "n": 3, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 6, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "grip_left": { "role": "grip", "at_mm": [-265, 70, 0] },
+    "grip_right": { "role": "grip", "at_mm": [265, 70, 0] },
+    "work": { "role": "stand", "at_mm": [0, 0, 650], "yaw_mdeg": 180000 }
+  },
+  "geometry": { "bounds_mm": [560, 140, 380] },
+  "forms": {
+    "sieve": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "mixed", "at_least": 1 },
+        { "need": "hand", "free": true }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "work" },
+        { "step": "wait", "us": 3000000 }
+      ],
+      "effects": [
+        { "change": "set", "field": "mixed", "by": -1, "event": "batch_sieved" },
+        { "change": "set", "field": "coarse", "by": 1, "event": "coarse_separated" },
+        { "change": "set", "field": "fine", "by": 2, "event": "fine_separated" }
+      ]
+    },
+    "remix": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "coarse", "at_least": 1 },
+        { "need": "state", "field": "fine", "at_least": 2 },
+        { "need": "hand", "free": true }
+      ],
+      "steps": [
+        { "step": "walk_to", "point": "work" },
+        { "step": "wait", "us": 3000000 }
+      ],
+      "effects": [
+        { "change": "set", "field": "coarse", "by": -1, "event": "coarse_returned" },
+        { "change": "set", "field": "fine", "by": -2, "event": "fine_returned" },
+        { "change": "set", "field": "mixed", "by": 1, "event": "batch_remixed" }
+      ]
+    }
+  },
+  "motion": { "how": "two_hands" },
+  "loose": { "ever": true },
+  "looks": {
+    "model": "look:gravel_sieve",
+    "table": [
+      { "part": "fill", "field": "mixed", "do": "scale", "axis": "y", "range": [0, 3], "to": [0, 1000] },
+      { "part": "head", "field": "coarse", "do": "scale", "axis": "y", "range": [0, 3], "to": [0, 1000] },
+      { "part": "tail", "field": "fine", "do": "scale", "axis": "y", "range": [0, 6], "to": [0, 1000] }
+    ],
+    "shape": {
+      "round": 4,
+      "shapes": [
+        { "kind": "box", "at": [0, 10, 0], "size": [520, 20, 360], "tint": "wood" },
+        { "kind": "box", "at": [0, 65, -175], "size": [520, 110, 14], "tint": "wood" },
+        { "kind": "box", "at": [0, 65, 175], "size": [520, 110, 14], "tint": "wood" },
+        { "kind": "box", "at": [-255, 65, 0], "size": [14, 110, 360], "tint": "wood" },
+        { "kind": "box", "at": [255, 65, 0], "size": [14, 110, 360], "tint": "wood" },
+        { "kind": "box", "at": [-85, 60, 0], "size": [10, 100, 340], "tint": "wood" },
+        { "kind": "box", "at": [85, 60, 0], "size": [10, 100, 340], "tint": "wood" },
+        { "kind": "box", "at": [-170, 112, -150], "size": [150, 8, 8], "tint": "mesh" },
+        { "kind": "box", "at": [-170, 112, 150], "size": [150, 8, 8], "tint": "mesh" },
+        { "kind": "box", "at": [-262, 70, 0], "size": [30, 24, 120], "tint": "wood" },
+        { "kind": "box", "at": [262, 70, 0], "size": [30, 24, 120], "tint": "wood" },
+        { "kind": "box", "at": [-170, 75, 0], "size": [150, 110, 320], "tint": "mixed", "role": "fill", "pivot": [-170, 20, 0] },
+        { "kind": "box", "at": [0, 75, 0], "size": [150, 110, 320], "tint": "coarse", "role": "head", "pivot": [0, 20, 0] },
+        { "kind": "box", "at": [170, 75, 0], "size": [150, 110, 320], "tint": "fine", "role": "tail", "pivot": [170, 20, 0] }
+      ],
+      "palette": { "wood": "#8a6a45", "mesh": "#5d6266", "mixed": "#9c8f7c", "coarse": "#4a4642", "fine": "#e2cf9f" },
+      "tags": ["camping", "tool", "item", "sieve", "gravel", "object"]
+    }
+  },
+  "text": {
+    "card": "A camp sieve of three mixed gravel batches: sieve one apart, or remix it.",
+    "gravel": "gravel",
+    "sieve": "sieve",
+    "riddle": "riddle",
+    "howto_sieve": "Sieve one mixed batch into one coarse and two fine units; remix puts exactly that back. Nine units in all, never more or fewer."
+  },
+  "card": { "text": "card", "category": "gravel", "synonyms": ["sieve", "riddle"] },
+  "howtos": {
+    "sieve_and_remix": { "text": "howto_sieve", "steps": [{ "form": "sieve" }, { "form": "remix" }] }
+  }
+}

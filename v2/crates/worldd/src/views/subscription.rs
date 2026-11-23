@@ -23,10 +23,19 @@
 //!    the set or from outside it, E13): sent first, never merged and never dropped. One that does not fit this second
 //!    waits for the next. Grants, scope changes and gaps travel in the same queue. An utterance (`souls:said`, B11) is
 //!    addressed by the hub itself from the log's part (#3231): its whole entry, to each subscription that follows one
-//!    of the hearers the entry records, and to no other; nothing is worked out again.
+//!    of the hearers the entry records, and to no other; nothing is worked out again. It goes as `{1: 9, 2: entry, 3:
+//!    words}`, the words read from K16 for that subscriber's audiences, and left out when it may not read them (C6,
+//!    #3390). An entry that records no hearers (a `say` on a world whose tick does not work them out yet, C5 #3369) is
+//!    heard by the bodies within its reach in the tier's own index, the one interest sets read.
+//!
+//! 6. **Audience** (T7 rule 5, T8): a subscriber is sent the public entries and those of the audience ids it is in
+//!    ([`Hub::subscribe_as`]; the gateway resolves them for its grant), never another audience's. An activity's
+//!    audience (a turn into it, E26a #3504) is read by the subscribers one of whose ids is a member's body at that
+//!    point of the log: the hub keeps the `souls:member` links (B5) from the log's parts and the world as built, so a
+//!    subscriber reads it while it is a member and stops when it leaves, and a replay reads the same.
 //!
 //! Every item is a map whose field 1 names it ([`Kind`]). The hub reads only the log's parts; the view tier's thread
-//! runs it, never the clock thread.
+//! runs it, never the clock thread (`served.rs`, fed by the world's committed parts once they are on the disk).
 //!
 //! Not here: the socket and its request format (gatewayd), the world-wide index and finding a Soul (E1), speech and
 //! who hears (B11's `sim::speech`, E13), words beside references (K16).
@@ -34,19 +43,29 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 use std::sync::Arc;
 
-use replica::effects::{Body, Change, Effect, Part, Refusal};
+use replica::activity::MEMBER;
+use replica::effects::{Body, Change, Effect, Part, Refusal, read_id};
 use replica::encode::{Value, encode};
 use replica::ids::Id;
 use replica::pose::Vec3;
-use replica::speech::{SAID, Said};
+use replica::speech::{HEARD_WORDS, SAID, Said};
+use replica::tree::Tree;
 use replica::views::{Grant, Level, ORDER, SAMPLE_US, Scope as ViewScope, Subscription, grant};
+use replica::world_model::{Audience, End};
+use sim::text::Store;
 
 use super::interest::{Interest, Places, Table};
 
 type R<T> = Result<T, Refusal>;
 
-/// A tick's entries of each body, each encoded once, and whether `sampled` keeps it in any second.
-type ByBody = BTreeMap<Id, Vec<(Arc<[u8]>, bool)>>;
+/// Who may read an item, as the hub read it: `None` everyone; else the ids one of which a subscriber must be in, its
+/// audience id and, when that is an activity, the bodies that were its members at that point of the log.
+type Readers = Option<Arc<BTreeSet<Id>>>;
+/// A tick's entries of each body, each encoded once, whether `sampled` keeps it in any second, and who may read it.
+type ByBody = BTreeMap<Id, Vec<(Arc<[u8]>, bool, Readers)>>;
+/// An utterance of a tick: its entry encoded once, its hearers, who may read it and its words' reference (none for
+/// an offer, addressed like speech: C2).
+type Utterance = (Arc<[u8]>, BTreeSet<Id>, Readers, Option<Id>);
 
 /// The budget a client starts with, bytes a world second.
 pub const START_BUDGET: u64 = 8_000;
@@ -97,6 +116,39 @@ pub struct Request {
     pub scopes: Vec<Scope>,
     pub level: Level,
     pub budget: u64,
+}
+
+impl Request {
+    /// Reads a request as a client sends it: `{1: [scope, ...], 2: level number, 3: budget}`, a scope `{1: node}`
+    /// held for good or `{2: body}` followed.
+    pub fn from_value(v: &Value) -> R<Request> {
+        let bad = |d: &str| fault("subscribe-unread", d.to_owned());
+        let Value::Map(m) = v else {
+            return Err(bad("not a map"));
+        };
+        let Some(Value::Array(scopes)) = m.get(&1) else {
+            return Err(bad("field 1 is not an array of scopes"));
+        };
+        let scopes = scopes
+            .iter()
+            .map(|s| match s {
+                Value::Map(s) if s.len() == 1 => match s.iter().next() {
+                    Some((1, id)) => Ok(Scope::Node(read_id(id)?)),
+                    Some((2, id)) => Ok(Scope::Follow(read_id(id)?)),
+                    _ => Err(bad("a scope is {1: node} or {2: body}")),
+                },
+                _ => Err(bad("a scope is {1: node} or {2: body}")),
+            })
+            .collect::<R<Vec<Scope>>>()?;
+        let (Some(Value::Uint(level)), Some(Value::Uint(budget))) = (m.get(&2), m.get(&3)) else {
+            return Err(bad("fields 2 and 3 are a level number and a budget"));
+        };
+        Ok(Request {
+            scopes,
+            level: Level::from_number(*level)?,
+            budget: *budget,
+        })
+    }
 }
 
 /// What an item of the stream is: its field 1.
@@ -162,6 +214,8 @@ fn rank(l: Level) -> usize {
 
 struct Sub {
     scopes: Vec<Scope>,
+    /// The audience ids it is in, besides everyone.
+    audiences: BTreeSet<Id>,
     /// The nodes held now, in the order added.
     held: Vec<Id>,
     /// The node held for the followed body, if any.
@@ -187,12 +241,27 @@ struct Sub {
 }
 
 impl Sub {
+    fn sees(&self, r: &Readers) -> bool {
+        match r {
+            None => true,
+            Some(ids) => ids.iter().any(|id| self.audiences.contains(id)),
+        }
+    }
+
     fn address(&mut self, bytes: &[u8]) -> R<()> {
         self.stats.addressed_in += 1;
         self.push_urgent(
             Kind::Addressed,
             map(vec![(1, Value::Uint(9)), (2, Value::Bytes(bytes.to_vec()))]),
         )
+    }
+
+    /// An utterance this subscriber heard, with its words when it may read them: `{1: 9, 2: entry, 3: words}`.
+    fn address_said(&mut self, bytes: &[u8], words: Option<Vec<u8>>) -> R<()> {
+        self.stats.addressed_in += 1;
+        let mut v = vec![(1, Value::Uint(9)), (2, Value::Bytes(bytes.to_vec()))];
+        v.extend(words.map(|w| (HEARD_WORDS, Value::Bytes(w))));
+        self.push_urgent(Kind::Addressed, map(v))
     }
 
     fn push_urgent(&mut self, kind: Kind, v: Value) -> R<()> {
@@ -309,12 +378,21 @@ struct NodeSecond {
 /// The subscriptions of one zone, run by the view tier on the log's parts.
 #[derive(Default)]
 pub struct Hub {
+    /// Closed containers and what is in them (#3915): such an entry is sent to its actor alone.
+    inside: crate::closed::Inside,
     places: Places,
     subs: Vec<Option<Sub>>,
     second: Option<i64>,
     nodes: BTreeMap<Id, NodeSecond>,
     /// Every node's counts by cell at the last world second, and the grid's size.
     tables: BTreeMap<Id, (i64, Table)>,
+    /// K16's text store, where an utterance's words are read for each subscriber that hears it (C6).
+    words: Option<Arc<Store>>,
+    /// The `souls:member` links held now: link → (body, activity) (B5, E26a).
+    member_links: BTreeMap<Id, (Id, Id)>,
+    /// Authoritative C3 links, indexed both ways; multiple owners fail closed.
+    owner_links: BTreeMap<Id, (Id, Id)>,
+    body_owners: BTreeMap<Id, BTreeMap<Id, Id>>,
 }
 
 impl Hub {
@@ -322,13 +400,149 @@ impl Hub {
         Hub::default()
     }
 
+    /// A hub that sends an utterance's words with it, read from `words` for each subscriber's audiences (C6, #3390).
+    pub fn with_words(words: Arc<Store>) -> Hub {
+        Hub {
+            words: Some(words),
+            ..Hub::default()
+        }
+    }
+
+    /// The world's closed kinds (#3915): an entry that puts a thing into one, or touches one in it, is sent to its
+    /// actor alone. Called before [`Hub::seed`].
+    pub fn closed(&mut self, closed: &crate::closed::Closed) {
+        self.inside = crate::closed::Inside::new(closed);
+    }
+
+    /// Enters the bodies of the world as built, which no record creates (C6), and its activities' members (E26a).
+    pub fn seed(&mut self, tree: &Tree) {
+        self.inside.seed(tree);
+        self.places.seed(tree);
+        let mut todo = vec![tree.root()];
+        while let Some(h) = todo.pop() {
+            todo.extend(tree.children(h).unwrap_or_default());
+            for e in tree.links_of(h).unwrap_or_default() {
+                if let Some((ty, ends, owner, _)) = tree.link(e.link) {
+                    if ty.as_str() == MEMBER {
+                        self.member_links.insert(e.link, (ends[0], ends[1]));
+                    } else if ty.as_str() == "souls:body-of" {
+                        self.ownership(e.link, ends, owner);
+                    }
+                }
+            }
+        }
+    }
+
+    fn unown(&mut self, link: Id) {
+        if let Some((body, _)) = self.owner_links.remove(&link)
+            && let Some(owners) = self.body_owners.get_mut(&body)
+        {
+            owners.remove(&link);
+            if owners.is_empty() {
+                self.body_owners.remove(&body);
+            }
+        }
+    }
+
+    fn ownership(&mut self, link: Id, ends: [Id; 2], owner: End) {
+        self.unown(link);
+        if owner != End::First || ends[0] == ends[1] || !self.places.is_body(ends[0]) {
+            return;
+        }
+        self.owner_links.insert(link, (ends[0], ends[1]));
+        self.body_owners
+            .entry(ends[0])
+            .or_default()
+            .insert(link, ends[1]);
+    }
+
+    /// Keeps the membership links an entry makes and ends (E26a).
+    fn members_apply(&mut self, e: &Effect) {
+        let Body::Changes(cs) = &e.body else { return };
+        for c in cs {
+            match &c.change {
+                Change::Link { link, ty, ends, .. } if ty.as_str() == MEMBER => {
+                    self.member_links.insert(*link, (ends[0], ends[1]));
+                }
+                Change::Link {
+                    link,
+                    ty,
+                    ends,
+                    owner,
+                    ..
+                } if ty.as_str() == "souls:body-of" => {
+                    self.ownership(*link, *ends, *owner);
+                }
+                Change::Unlink { link } => {
+                    self.member_links.remove(link);
+                    self.unown(*link);
+                }
+                Change::Remove { node } => {
+                    self.member_links.retain(|_, (b, a)| b != node && a != node);
+                    let gone: Vec<_> = self
+                        .owner_links
+                        .iter()
+                        .filter(|(_, (b, principal))| b == node || principal == node)
+                        .map(|(link, _)| *link)
+                        .collect();
+                    for link in gone {
+                        self.unown(link);
+                    }
+                }
+                _ => {}
+            }
+        }
+    }
+
+    /// Who may read what audience `a` holds now ([`Readers`]).
+    fn readers(&self, a: Audience) -> Readers {
+        let Audience::Of(id) = a else { return None };
+        let mut ids: BTreeSet<Id> = self
+            .member_links
+            .values()
+            .filter(|(_, act)| *act == id)
+            .map(|(body, _)| *body)
+            .collect();
+        ids.insert(id);
+        let principals: Vec<_> = ids
+            .iter()
+            .filter_map(|body| {
+                let owners = self.body_owners.get(body)?;
+                (owners.len() == 1).then(|| *owners.values().next().unwrap())
+            })
+            .collect();
+        ids.extend(principals);
+        Some(Arc::new(ids))
+    }
+
+    /// The bodies within `reach_mm` of `speaker` on the node it stands on, itself included: who hears an utterance
+    /// that records no hearers (C6; until the world records them in its tick, C5 #3369).
+    fn within_reach(&self, speaker: Id, reach_mm: u64) -> BTreeSet<Id> {
+        let Some((node, p)) = self.places.of(speaker) else {
+            return BTreeSet::new();
+        };
+        let reach = i64::try_from(reach_mm.saturating_mul(1_000)).unwrap_or(i64::MAX);
+        self.places
+            .index()
+            .bodies_within(node, p, reach)
+            .into_iter()
+            .filter(|&(_, d)| d <= reach)
+            .map(|(id, _)| id)
+            .collect()
+    }
+
     pub fn places(&self) -> &Places {
         &self.places
     }
 
-    /// Subscribes; the subscription's number. A budget below the least for its scopes is refused
-    /// (`budget-below-minimum`); an accepted one is never dropped.
+    /// Subscribes to the public entries alone; the subscription's number. A budget below the least for its scopes is
+    /// refused (`budget-below-minimum`); an accepted one is never dropped.
     pub fn subscribe(&mut self, r: Request) -> R<usize> {
+        self.subscribe_as(r, BTreeSet::new())
+    }
+
+    /// Subscribes as one who is in `audiences` (besides everyone): it is sent their entries and the public ones.
+    pub fn subscribe_as(&mut self, r: Request, audiences: BTreeSet<Id>) -> R<usize> {
         if r.scopes.is_empty() {
             return Err(fault("no-scope", "a subscription holds at least one scope"));
         }
@@ -341,6 +555,7 @@ impl Hub {
         let g = grant(&ask, views, |_| 0)?;
         let mut s = Sub {
             scopes: r.scopes.clone(),
+            audiences,
             held: Vec::new(),
             follow: None,
             asked: r.level,
@@ -373,6 +588,8 @@ impl Hub {
                 }
             }
         }
+        // Initial grants and scopes use the same urgent budget without waiting for another world commit.
+        s.send(Vec::new());
         self.subs.push(Some(s));
         Ok(self.subs.len() - 1)
     }
@@ -436,20 +653,50 @@ impl Hub {
         let second = at.div_euclid(SAMPLE_US);
         // The entries of bodies, each encoded once: (bytes, whether `sampled` keeps it whatever the second).
         let mut by_body: ByBody = BTreeMap::new();
-        // The utterances: each entry's bytes and the hearers it records.
-        let mut said: Vec<(Arc<[u8]>, BTreeSet<Id>)> = Vec::new();
+        // The utterances: each entry's bytes, its hearers, its audience and its words' reference.
+        let mut said: Vec<Utterance> = Vec::new();
         for e in &part.effects {
             self.places.apply(e);
+            self.members_apply(e);
+            let mut readers = self.readers(e.envelope.audience);
+            if self.inside.apply(e) {
+                // A thing hidden in a closed container (#3915): its entry goes to its actor alone.
+                let actor: BTreeSet<Id> = match e.envelope.actor {
+                    replica::effects::Actor::Soul(id) | replica::effects::Actor::Creator(id) => {
+                        BTreeSet::from([id])
+                    }
+                    replica::effects::Actor::World => BTreeSet::new(),
+                };
+                let kept = match &readers {
+                    None => actor,
+                    Some(r) => actor.intersection(r).copied().collect(),
+                };
+                readers = Some(Arc::new(kept));
+            }
             if let Some((body, keep)) = self.body_of(e) {
                 let bytes = bytes_of(map(vec![(1, Value::Uint(1)), (2, e.to_value())]))?;
-                by_body.entry(body).or_default().push((bytes, keep));
+                by_body
+                    .entry(body)
+                    .or_default()
+                    .push((bytes, keep, readers.clone()));
             }
             for ev in e.events.iter().flatten() {
                 if ev.name.as_str() == SAID {
                     let s = Said::read(&ev.to_value(), e.envelope.audience)?;
-                    if !s.hearers.is_empty() {
-                        said.push((bytes_of(e.to_value())?, s.hearers));
+                    let hearers = if s.hearers.is_empty() {
+                        self.within_reach(e.envelope.node, s.reach_mm)
+                    } else {
+                        s.hearers
+                    };
+                    if !hearers.is_empty() {
+                        let b = bytes_of(e.to_value())?;
+                        said.push((b, hearers, readers.clone(), Some(s.words)));
                     }
+                } else if let Some(to) = replica::activity::addressed(ev.name.as_str(), &ev.fields)
+                    && !to.is_empty()
+                {
+                    // An offer to each body asked, its decline or lapse to the asker (E8, C2): addressed like speech.
+                    said.push((bytes_of(e.to_value())?, to, readers.clone(), None));
                 }
             }
         }
@@ -463,14 +710,26 @@ impl Hub {
             self.second = Some(second);
             self.nodes = self.node_seconds(second)?;
         }
-        for (bytes, hearers) in &said {
+        for (bytes, hearers, readers, words) in &said {
             for s in self.subs.iter_mut().flatten() {
-                let hears = s
-                    .scopes
-                    .iter()
-                    .any(|sc| matches!(sc, Scope::Follow(b) if hearers.contains(b)));
+                let hears = s.sees(readers)
+                    && s.scopes
+                        .iter()
+                        .any(|sc| matches!(sc, Scope::Follow(b) if hearers.contains(b)));
                 if hears {
-                    s.address(bytes)?;
+                    // Its words as this subscriber may read them (T8 rule 6): none when it may not, or none are kept. A
+                    // member reads an activity's words as its audience (E26a).
+                    let reader: Vec<Id> = s
+                        .audiences
+                        .iter()
+                        .chain(readers.iter().flat_map(|r| r.iter()))
+                        .copied()
+                        .collect();
+                    let text = self
+                        .words
+                        .as_ref()
+                        .and_then(|t| t.read((*words)?, &reader).ok());
+                    s.address_said(bytes, text)?;
                 }
             }
         }
@@ -575,7 +834,10 @@ impl Hub {
         let mut full: Vec<Out> = Vec::new();
         let mut sampled: Vec<Out> = Vec::new();
         for id in &s.interest.set {
-            for (bytes, keep) in by_body.get(id).into_iter().flatten() {
+            for (bytes, keep, readers) in by_body.get(id).into_iter().flatten() {
+                if !s.sees(readers) {
+                    continue;
+                }
                 let o = Out {
                     kind: Kind::Entry,
                     bytes: bytes.clone(),
@@ -703,4 +965,158 @@ pub fn cell_bytes(
 ) -> R<(usize, Option<usize>)> {
     let ns = node_second(node, second, now, prev)?;
     Ok((ns.cells.len(), ns.changes.map(|c| c.len())))
+}
+
+#[cfg(test)]
+mod ownership_tests {
+    use super::*;
+    use replica::effects::{Actor, Cause, ChangeRec, Envelope, Header, Rest, schema_hash};
+    use replica::encode::Name;
+    use replica::ids::{Hash, Purpose, Scope as IdScope};
+    use replica::pose::{Frame, Pose, Quat, Support};
+
+    fn id(n: u64) -> Id {
+        Id::new(IdScope([0x65; 16]), n).unwrap()
+    }
+    fn name(s: &str) -> Name {
+        Name::new(s).unwrap()
+    }
+    fn effect(changes: Vec<Change>) -> Effect {
+        Effect {
+            envelope: Envelope {
+                sequence: 0,
+                at: 0,
+                cause: Cause::World,
+                actor: Actor::World,
+                audience: Audience::Everyone,
+                node: id(1),
+            },
+            body: Body::Changes(
+                changes
+                    .into_iter()
+                    .map(|change| ChangeRec {
+                        change,
+                        rest: Rest::new(),
+                    })
+                    .collect(),
+            ),
+            events: None,
+            rest: Rest::new(),
+        }
+    }
+    fn owned(link: Id, soul: Id, owner: End) -> Change {
+        Change::Link {
+            link,
+            ty: name("souls:body-of"),
+            ends: [id(2), soul],
+            owner,
+            audience: Audience::Everyone,
+        }
+    }
+
+    #[test]
+    fn ownership_replays_and_never_comes_from_follow_targets() {
+        let body_kind = name(&format!("souls:body@1220{}", "00".repeat(32)));
+        let ground_kind = name(&format!("test:ground@1220{}", "00".repeat(32)));
+        let mut kinds = vec![body_kind.clone(), ground_kind.clone()];
+        kinds.sort();
+        let header = Header::read(
+            &encode(&Value::Map(BTreeMap::from([
+                (
+                    1,
+                    Value::Bytes(Hash::of(Purpose::Fixture, b"c30/ownership").to_bytes()),
+                ),
+                (2, Value::Bytes(schema_hash().to_bytes())),
+                (3, Value::Bytes(id(1).scope().0.to_vec())),
+                (4, id(1).to_value()),
+                (5, Value::Uint(0)),
+                (
+                    6,
+                    Value::Array(kinds.into_iter().map(Value::Text).collect()),
+                ),
+                (7, Value::Array(vec![])),
+            ])))
+            .unwrap(),
+        )
+        .unwrap();
+        let mut tree = Tree::start(id(1), ground_kind);
+        let mut live = Hub::new();
+        live.seed(&tree);
+        let birth = effect(vec![
+            Change::Create {
+                node: id(2),
+                kind: body_kind,
+                pose: Pose {
+                    frame: Frame {
+                        node: id(1),
+                        slot: None,
+                    },
+                    position: Vec3::ZERO,
+                    orientation: Quat::IDENTITY,
+                    support: Support::Surface {
+                        surface: id(1),
+                        height: 0,
+                    },
+                },
+                audience: Audience::Everyone,
+                fields: BTreeMap::new(),
+            },
+            owned(id(3), id(4), End::First),
+        ]);
+        let part = replica::views::entry_part(&header, &birth).unwrap();
+        tree.apply(&header, &part).unwrap();
+        live.tick(&part).unwrap();
+        let mut replay = Hub::new();
+        replay.seed(&tree);
+        assert_eq!(
+            live.readers(Audience::Of(id(2))),
+            replay.readers(Audience::Of(id(2)))
+        );
+        let reader = |h: &mut Hub, principal| {
+            let sub = h
+                .subscribe_as(
+                    Request {
+                        scopes: vec![Scope::Follow(id(2))],
+                        level: Level::Full,
+                        budget: 10_000_000,
+                    },
+                    BTreeSet::from([principal]),
+                )
+                .unwrap();
+            h.subs[sub]
+                .as_ref()
+                .unwrap()
+                .sees(&h.readers(Audience::Of(id(2))))
+        };
+        assert!(
+            reader(&mut live, id(4)),
+            "the body's owner reads its private audience"
+        );
+        assert!(
+            !reader(&mut live, id(5)),
+            "following another body confers no private authority"
+        );
+        assert!(
+            reader(&mut live, id(2)),
+            "legacy direct body audiences remain valid"
+        );
+        live.members_apply(&effect(vec![owned(id(6), id(5), End::First)]));
+        assert!(
+            !reader(&mut live, id(4)) && !reader(&mut live, id(5)),
+            "ambiguous ownership fails closed"
+        );
+        live.members_apply(&effect(vec![Change::Unlink { link: id(3) }]));
+        assert!(
+            !reader(&mut live, id(4)) && reader(&mut live, id(5)),
+            "replacement revokes the prior principal"
+        );
+        live.members_apply(&effect(vec![owned(id(6), id(4), End::Second)]));
+        assert!(
+            !reader(&mut live, id(4)) && !reader(&mut live, id(5)),
+            "invalid ownership revokes aliases"
+        );
+        live.members_apply(&effect(vec![owned(id(7), id(4), End::First)]));
+        live.members_apply(&effect(vec![Change::Remove { node: id(2) }]));
+        assert!(!reader(&mut live, id(4)), "removal revokes the alias");
+    }
 }

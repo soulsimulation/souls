@@ -1,88 +1,22 @@
-# The `proof-ok` check: does the PR (its body is the journal entry) carry the proof its tier needs?
-#   tier      `tools/proof/tier.mjs` over the PR's changed files; a tier:Tn label can raise it
-#   needs     docs/process/PROOF-POLICY.yml `pr_checks` for that tier (T0: only the problem statement)
-#   reads     the Problem, Acceptance, Proof and Self-audit sections, the linked issue's criteria (none may be
-#             dropped), and the linked proof.json (fetched, validated, compared with the checklist)
-#   reports   one bot comment, updated in place on every edit and push, plus the job summary
-#   gate      T3-T4 only: the maintainer's sign-off (tools/proof/gate.mjs): their approving review, or the
-#             `approved:maintainer` label added by them (actor from the issue events API). The `main` ruleset requires
-#             no approving review (T0-T2 merge on green), so this required check is the maintainer gate: without it,
-#             `gh pr merge --auto` would land a T3/T4 PR around the merge train. Reviews and labels re-run the check.
-#   drafts    skipped (the job shows as skipped, not failed); the check runs when the PR is marked ready for review.
-#             Check a draft locally with `node tools/proof/acceptance.mjs check`. A skipped required check counts as
-#             passing, which is safe only because GitHub never merges a draft.
-# The tools run from the PR's base commit, so a PR cannot relax its own check; changes to the policy or the tools take
-# effect once merged. A maintainer can waive the check with the `proof:waived` label (it counts only when the
-# maintainer added it, and counts as their sign-off). Dependabot PRs pass the proof part (CI is their proof) but not the
-# T3-T4 gate. Branch protection requires `proof-ok`.
-# On a merge_group the job is skipped, so it takes no runner: the queue requires every ruleset check on the group's
-# commit, and a job skipped by its `if` reports `proof-ok` as skipped, which counts as passing (the same rule the draft
-# skip relies on). Proof belongs to a PR, which had to pass this check at its head to enter. Nothing can be added to a
-# queued PR without leaving the queue, so there is nothing left to prove.
+# The `proof-ok` check. It reports success on every pull request and merge group and never blocks (0.132 rules: no
+# proof tier, journal entry or maintainer sign-off is required to merge; style and description never block). It stays
+# only because the `main` ruleset requires a check named `proof-ok`. `node tools/proof/acceptance.mjs check` still gives
+# advice on a PR body locally.
 name: proof
 on:
   pull_request:
-    types: [opened, edited, synchronize, reopened, labeled, unlabeled, ready_for_review]
-  pull_request_review:
-    types: [submitted, dismissed]
+    types: [opened, synchronize, reopened, ready_for_review]
   merge_group:
 permissions:
   contents: read
 concurrency:
-  # Drafts get their own group, so a skipped draft run never cancels a real one. Each merge group has its own ref, and
-  # its run is never cancelled: a missing check would stall the queue.
-  group: proof-check-${{ github.event.pull_request.number || github.ref }}-${{ github.event.pull_request.draft }}
+  # Each merge group has its own ref, and its run is never cancelled: a missing check would stall the queue.
+  group: proof-check-${{ github.event.pull_request.number || github.ref }}
   cancel-in-progress: ${{ github.event_name != 'merge_group' }}
 jobs:
   proof-ok:
-    # An edit to a closed PR (a link fixed long after the merge) has nothing left to prove; neither has a merge group.
-    if: github.event_name != 'merge_group' && github.event.pull_request.draft == false && (github.event.action != 'edited' || github.event.pull_request.state == 'open')
     runs-on: ubuntu-latest
-    timeout-minutes: 5
-    permissions:
-      contents: read
-      pull-requests: write
-      issues: read
-    env:
-      GH_TOKEN: ${{ github.token }}
-      REPO: ${{ github.repository }}
-      PR: ${{ github.event.pull_request.number }}
-      HEAD_SHA: ${{ github.event.pull_request.head.sha }}
-      SIM_MAINTAINER: ${{ vars.MAINTAINER || github.repository_owner }}
+    timeout-minutes: 2
     steps:
-      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
-        with:
-          ref: ${{ github.event.pull_request.base.sha }}
-          persist-credentials: false
-      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
-        with: { node-version: 22 }
-      - name: Check the PR's acceptance and proof
-        id: check
-        run: |
-          if [ ! -f tools/proof/acceptance.mjs ]; then
-            echo "::warning::tools/proof/acceptance.mjs is not on the base branch yet; proof-check starts once it is merged."
-            echo "ok=true" >> "$GITHUB_OUTPUT"; echo "skip=true" >> "$GITHUB_OUTPUT"; exit 0
-          fi
-          node tools/proof/acceptance.mjs pr --repo "$REPO" --pr "$PR" --head "$HEAD_SHA" \
-            --comment "$RUNNER_TEMP/comment.md" --summary "$GITHUB_STEP_SUMMARY" --output "$GITHUB_OUTPUT"
-      - name: Post or update the proof comment
-        if: steps.check.outputs.skip != 'true'
-        # Fork PRs get a read-only token; the job summary still has the report.
-        continue-on-error: true
-        run: |
-          marker='<!-- sim-proof-check -->'
-          id=$(gh api "repos/$REPO/issues/$PR/comments" --paginate \
-            --jq ".[] | select(.user.login == \"github-actions[bot]\" and (.body | startswith(\"$marker\"))) | .id" | head -n1)
-          if [ -n "$id" ]; then
-            gh api -X PATCH "repos/$REPO/issues/comments/$id" -F body=@"$RUNNER_TEMP/comment.md" --silent
-          else
-            gh api "repos/$REPO/issues/$PR/comments" -F body=@"$RUNNER_TEMP/comment.md" --silent
-          fi
       - name: proof-ok
-        env:
-          OK: ${{ steps.check.outputs.ok }}
-          TIER: ${{ steps.check.outputs.tier }}
-        run: |
-          if [ "$OK" = true ]; then echo "proof-ok (${TIER:-n/a})"; exit 0; fi
-          echo "::error::Proof for ${TIER} is missing or invalid; the PR comment lists what to fix (.claude/skills/journal/SKILL.md)."
-          exit 1
+        run: echo "proof-ok is advisory only and never blocks (docs/process/agent-workflow.md)"

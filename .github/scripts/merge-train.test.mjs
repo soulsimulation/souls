@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { awaitHead, blocker, releaseFreeze, dropped, enqueueArgs, fullScope, HEAD_WAIT_MS, holdAction, landingMode, mainCiState, maintainerApproved, MIXED_CAP, next, parseChecks, queued, queueRequired, summarizeChecks, wait, DEFAULT_CHECKS } from './merge-train.mjs';
+import { awaitHead, blocker, releaseFreeze, dropped, DROPPED, failingGroupRun, reportDrop, staleAutoMerge, STALE_AUTO_MERGE_MS, enqueueArgs, fullScope, HEAD_WAIT_MS, holdAction, landingMode, mainCiState, maintainerApproved, MIXED_CAP, next, parseChecks, queued, queueRequired, summarizeChecks, wait, DEFAULT_CHECKS } from './merge-train.mjs';
 import { JOBS } from './ci-scope.mjs';
 
 const M = 'owner';
@@ -501,8 +501,8 @@ test('workflow: every required check reports on merge_group, and queue entries n
   const proof = read('proof-check.yml');
   assert.match(proof, /group: proof-check-\$\{\{ github\.event\.pull_request\.number \|\| github\.ref \}\}/);
   assert.match(proof, /cancel-in-progress: \$\{\{ github\.event_name != 'merge_group' \}\}/);
-  // On a merge group proof-ok reports as skipped (a job skipped by its `if` counts as passing) and takes no runner.
-  assert.match(proof, /if: github\.event_name != 'merge_group' && github\.event\.pull_request\.draft == false/);
+  // F1: proof-ok and fragment report on every event and never fail
+  for (const f of ['proof-check.yml', 'changelog-check.yml']) assert.doesNotMatch(read(f), /exit 1\s*$|^\s+if: .*draft/m, f);
 });
 
 test('workflow: only a label being added starts the train or the kick; removing one does not', async () => {
@@ -582,4 +582,77 @@ test('a pinned-sha release (release.yml -f sha) sets no freeze: the train keeps 
   const r = during.run();
   assert.deepEqual([r.pr, r.mode, r.frozen], [22, 'queue', undefined]);
   assert.deepEqual(during.reads.held, [], 'nothing is dequeued or has its auto-merge disabled');
+});
+
+// #3737: auto-merge on, checks green, yet GitHub never put it in the queue; the train skipped it as queued for 6 hours.
+test('queue: auto-merge on with green checks but not in the queue after 10 minutes is re-enqueued, and logged', () => {
+  const T = Date.parse('2026-11-21T08:00:00Z'), ago = min => new Date(T - min * 60_000).toISOString();
+  assert.equal(STALE_AUTO_MERGE_MS, 10 * 60_000);
+  assert.equal(staleAutoMerge({ autoMergeRequest: { enabledAt: ago(11) } }, 'pass', T), true);
+  assert.equal(staleAutoMerge({ autoMergeRequest: { enabledAt: ago(9) } }, 'pass', T), false, 'GitHub gets 10 minutes');
+  assert.equal(staleAutoMerge({ autoMergeRequest: { enabledAt: ago(60) } }, 'pending', T), false, 'auto-merge waiting on checks is not stale');
+  assert.equal(staleAutoMerge({ autoMergeRequest: { enabledAt: ago(60) } }, 'fail', T), false, 'a failed check is reported, not re-enqueued');
+  assert.equal(staleAutoMerge({ isInMergeQueue: true, autoMergeRequest: { enabledAt: ago(60) } }, 'pass', T), false);
+  assert.equal(staleAutoMerge({}, 'pass', T), false);
+  const green = path => path.includes('/check-runs') ? [{ check_runs: DEFAULT_CHECKS.map((name, id) => ({ id, name, status: 'completed', conclusion: 'success' })) }] : null;
+  const pass = min => {
+    const t = queueTrain({ prs: { 20: {} }, state: { 20: { id: 'P20', autoMergeRequest: { enabledAt: ago(min) } } } });
+    const ghAll = t.api.ghAll; t.api.ghAll = path => green(path) ?? ghAll(path);
+    t.api.now = () => T;
+    return { r: t.run(), reads: t.reads };
+  };
+  const stale = pass(11);
+  assert.deepEqual([stale.r.pr, stale.r.mode, stale.r.queue], [20, 'queue', true], 'picked: the merge step enqueues it again');
+  assert.deepEqual(stale.reads.held, [20], 'its auto-merge is disabled first');
+  assert.match(stale.r.requeued, /not in the merge queue: disabled and re-enqueued/);
+  const fresh = pass(5);
+  assert.deepEqual([fresh.r.pr, fresh.r.skipped.map(s => s.why), fresh.reads.held], ['', ['queued'], []]);
+});
+
+// #3657 left the queue on a failed merge group and nobody noticed for 2.5 hours (and the drop comment came twice).
+test('queue: a drop ejects with queue:dropped and one comment linking the failed merge-group run', () => {
+  const runs = [
+    { id: 1, head_branch: 'gh-readonly-queue/main/pr-3657-aaa', conclusion: 'failure', created_at: '2026-11-21T06:20:00Z', html_url: 'https://github.com/o/r/actions/runs/1' },
+    { id: 2, head_branch: 'gh-readonly-queue/main/pr-3657-bbb', conclusion: 'failure', created_at: '2026-11-21T06:30:00Z', html_url: 'https://github.com/o/r/actions/runs/2' },
+    { id: 3, head_branch: 'gh-readonly-queue/main/pr-3657-bbb', conclusion: 'cancelled', created_at: '2026-11-21T06:40:00Z', html_url: 'u3' },
+    { id: 4, head_branch: 'gh-readonly-queue/main/pr-36570-ccc', conclusion: 'failure', created_at: '2026-11-21T06:50:00Z', html_url: 'u4' },
+  ];
+  assert.equal(failingGroupRun(runs, 3657, 'main').id, 2, 'newest failed run of this PR, not a cancelled one or #36570');
+  assert.equal(failingGroupRun(runs, 3658, 'main'), null);
+  const drop = (state, { comments = [], freeze = null, runsRead = () => ({ workflow_runs: runs }) } = {}) => {
+    const did = { held: 0, ejects: [] };
+    const api = {
+      queueState: () => ({ id: 'P', headRefOid: 'h1', baseRefName: 'main', labels: { nodes: [{ name: 'merge:ready' }] }, ...state }),
+      hold: () => { did.held++; },
+      gh: runsRead,
+      ghAll: () => comments,
+      eject: e => { did.ejects.push(e); if (e.message) comments.push({ body: e.message }); },
+    };
+    return { line: reportDrop({ repo: 'o/r', pr: 3657, reason: 'CI_FAILURE', freeze, api }), did, comments };
+  };
+  const first = drop({});
+  assert.equal(first.did.held, 1);
+  assert.equal(first.did.ejects.length, 1);
+  assert.equal(first.did.ejects[0].label, DROPPED);
+  assert.equal(DROPPED, 'queue:dropped');
+  assert.match(first.did.ejects[0].message, /CI_FAILURE/);
+  assert.match(first.did.ejects[0].message, /https:\/\/github\.com\/o\/r\/actions\/runs\/2/);
+  // The same drop relayed again: label applied again (idempotent), no second comment.
+  const again = drop({}, { comments: first.comments });
+  assert.equal(again.did.ejects[0].message, null);
+  assert.equal(again.comments.length, 1);
+  // Runs unreadable: the comment still goes, pointing at the Actions tab.
+  const blind = drop({}, { runsRead: () => { throw new Error('HTTP 403'); } });
+  assert.match(blind.did.ejects[0].message, /No failed merge-group run was found/);
+  // Merged, back in the queue, unlabelled, or a release freeze: nothing is posted or labelled.
+  for (const s of [{ merged: true }, { isInMergeQueue: true }, { labels: { nodes: [] } }]) assert.deepEqual(drop(s).did, { held: 0, ejects: [] });
+  assert.deepEqual(drop({}, { freeze: { sha: 'abc' } }).did, { held: 0, ejects: [] });
+});
+
+test('workflow: a PR\'s queue exits of one kind run one at a time, never cancelled', async () => {
+  const { readFileSync } = await import('node:fs');
+  const yml = readFileSync(new URL('../workflows/merge-train.yml', import.meta.url), 'utf8');
+  const job = yml.slice(yml.indexOf('  queue-exit:'), yml.indexOf('  train:'));
+  assert.match(job, /group: merge-train-exit-\$\{\{ inputs\.pr \}\}-\$\{\{ inputs\.exit \}\}/);
+  assert.match(job, /cancel-in-progress: false/);
 });

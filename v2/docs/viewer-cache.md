@@ -11,6 +11,17 @@ price are the owner's (C4 on #2636).
 1. **A plain file server over the stream writer's directory**, apart from the world process: `node
    v2/tools/origin/origin.mjs <dir> [port] [host]`. The world writes files (whole, then renamed); the origin only reads
    them. A world that stops or restarts never stops the origin, and an origin under load never slows the world.
+   Every request for one immutable file shares one buffer of it (the newest 64 MB stay held, `ORIGIN_CACHE_MB`), so
+   a join wave all asking for a 9 MB baseline costs the origin one copy, not one per request (#4018). Each request
+   still checks the file on disk; the pointer is read afresh every time.
+   **Several processes share its port** (Linux, Node 22.12 or later: `listen({ reusePort })`), so the kernel spreads
+   viewers' connections across them and no process sits in their path; one thread saturated near 1,000 viewers
+   (#4018). `ORIGIN_PROCESSES` sets how many; the default is the host's cores less `ORIGIN_RESERVE_CORES` (2, what
+   the worlds and gateway need at goal load, [machines](machines.md)): 6 on the 8-core production host. Elsewhere
+   the default is 1. The process started by the unit only starts them and starts again, a second later, any that
+   ends, while the others serve. Each holds its own buffers (`ORIGIN_CACHE_MB`, 32 a process when there are
+   several). `ORIGIN_STATS` gets `bytes` summed over the processes and `processes`, one row each: pid, requests by
+   kind, disk reads, bytes, processor seconds, resident bytes and restarts.
 2. **Three kinds of answer, and nothing else:**
 
    | Request | Status | `Cache-Control` |
@@ -30,6 +41,32 @@ price are the owner's (C4 on #2636).
 5. **No query strings.** A query string would multiply a cache's keys; the origin answers it with a 404.
 
 `v2/tools/origin/origin.test.mjs` asserts the table (CI's `v2` job, step `origin-headers`).
+
+## Checkpoint continuity
+
+Checkpoint-backed public streams use the explicit generation/baseline extension in `replica::stream` (#3639).
+The pointer selects immutable `g/<baseline digest>/baseline`, `baseline.text` and numbered part/text files. These
+files use the same immutable cache treatment as earlier parts; old numbered files and headers remain unchanged.
+A public baseline preserves the actual pinned root, authorized local frames, motion, slots and timers. It is
+reconciled as a non-advancing snapshot, with no fabricated part timestamp, motion samples or replayed events. An opaque
+reference to a private frame supplies no transform: it remains queryable while drawing waits for a real public
+frame chain. It never supplies private ancestor records or the world's private arrival ledger.
+
+The canonical producer validates whole durable source parts before publishing public observations beside their
+original effects and events. The browser and native reader share the observer implementation. A protocol handoff
+drains an open legacy reader to its exact public terminal version and digest before installing the new baseline;
+physical record and public-effect cursors are checked independently. Ordinary restarts retain one generation.
+Exact source/checkpoint/public objects reach the world's existing private Store before a conditional recovery head
+and then the public pointer. A Store-only restore reconstructs those immutable bytes, even when the ordinary
+checkpoint has advanced. This private recovery data is outside the origin's exported views; missing or corrupt
+required source produces a named refusal instead of a false-ready stream. History archives remain a separate
+required release prerequisite (#3634).
+
+Each rollover to a new generation (every 240 parts, #3825) starts a new recovery chain from a seed that holds the
+canonical copy and what the writer carries at that place, so a restart reads only the newest generation and its
+time does not grow with the world's age (#3833). Chains of generations before the previous one are deleted from the
+Store once they closed longer than the grace ago (`SOULS_STREAM_PRUNE_GRACE_S`, 10 minutes), a few objects after
+each part.
 
 ## What a cache in front must do
 

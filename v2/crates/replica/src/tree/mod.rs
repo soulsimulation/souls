@@ -19,6 +19,10 @@
 //! - **Each node keeps its hash** (K5, #2669; `seal`): every step that changes what a node's hash covers marks the
 //!   node and its ancestors, so a checkpoint hashes and writes only what changed.
 
+// The repeat rule's map ban (K12, v2/clippy.toml) is `sim`'s: these maps are lookups by id and name, never iterated
+// into state, a hash or the log.
+#![allow(clippy::disallowed_types)]
+
 mod check;
 mod seal;
 
@@ -30,7 +34,7 @@ use crate::effects::{
     TimerState, TransferRec,
 };
 use crate::encode::{Name, Value};
-use crate::ids::{Hash, Id, Scope};
+use crate::ids::{Hash, Id, Scope, Sha256};
 use crate::pose::{Frame, Owner, Pose, Quat, Support, Vec3};
 use crate::time::{Micros, TimeEffect};
 use crate::world_model::{Audience, DEPTH_LIMIT, End};
@@ -147,6 +151,9 @@ struct NodeRec {
     at: Where,
     /// Its hash as last sealed (K5); `None` once changed. A node without one has no ancestor with one.
     hash: Option<Hash>,
+    /// The same hash as the state hash last worked it out (K20, `seal`): marked with `hash`, kept apart from it so a
+    /// tick's state hash never takes a node's record from the next checkpoint. Set whenever `hash` is.
+    state: Option<Hash>,
 }
 
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -299,6 +306,15 @@ pub struct Tree {
     carried_met: usize,
     node_reads: Reads,
     link_reads: Reads,
+    /// Parts applied or refused, and keep_seen calls: what a tick's state hash is kept against (K20, `seal`).
+    changes: u64,
+    /// The state hashes as last worked out, and `changes` then.
+    kept: Option<(u64, Vec<(Audience, Hash)>)>,
+    /// Nodes the state hash has hashed again since the tree was built (a measure; `seal`).
+    rehashed: u64,
+    /// The state hash's SHA-256 of a node's record up to its children (`seal`, #1960), by slot, for nodes whose
+    /// record is large: kept while only what is below the node changes, let go when the node itself does.
+    heads: HashMap<u32, Sha256>,
 }
 
 /// A read counter. A load and a store, not an atomic add: one thread reads a live tree. A frozen copy (K8, #2671),
@@ -339,6 +355,10 @@ impl Tree {
             carried_met: 0,
             node_reads: Reads(Some(AtomicU64::new(0))),
             link_reads: Reads(Some(AtomicU64::new(0))),
+            changes: 0,
+            kept: None,
+            rehashed: 0,
+            heads: HashMap::new(),
         };
         let kind = t.intern(&kind);
         t.nodes.push(NodeRec {
@@ -355,6 +375,7 @@ impl Tree {
             fields: BTreeMap::new(),
             at: Where::Root,
             hash: None,
+            state: None,
         });
         t.by_id.insert(root, 0);
         t
@@ -463,6 +484,10 @@ impl Tree {
             carried_met: 0,
             node_reads: Reads(None),
             link_reads: Reads(None),
+            changes: self.changes,
+            kept: self.kept.clone(),
+            rehashed: 0,
+            heads: HashMap::new(),
         }
     }
 
@@ -499,6 +524,7 @@ impl Tree {
     /// checkpoint and not a change: drops every node whose audience `seen` refuses, with its subtree and every link
     /// with an end in them, then every link `seen` refuses, and the timers of nodes gone. The sequence stays.
     pub fn keep_seen(&mut self, seen: &dyn Fn(Audience) -> bool) {
+        self.changes += 1;
         let unseen: Vec<u32> = (0..self.nodes.len() as u32)
             .filter(|s| *s != self.root && !seen(self.nodes[*s as usize].audience))
             .collect();
@@ -579,11 +605,26 @@ impl Tree {
     }
 
     /// Marks a node changed, and its ancestors: up to the first already marked, whose ancestors are marked too. A
-    /// refused part leaves its marks; the next seal hashes those nodes again and finds what they were.
+    /// refused part leaves its marks; the next seal hashes those nodes again and finds what they were. The node's own
+    /// record changed, so its kept head goes too (`seal`).
     fn touch(&mut self, slot: u32) {
+        if !self.heads.is_empty() {
+            self.heads.remove(&slot);
+        }
+        self.touch_below(slot);
+    }
+
+    /// [`Tree::touch`] for a change to a node's children only (one attached or taken out): its record up to its
+    /// children is as it was, so its kept head stays.
+    fn touch_below(&mut self, slot: u32) {
         let mut s = slot;
-        while s != NONE && self.nodes[s as usize].hash.take().is_some() {
-            s = self.nodes[s as usize].parent;
+        while s != NONE {
+            let rec = &mut self.nodes[s as usize];
+            let (sealed, stated) = (rec.hash.take(), rec.state.take());
+            if sealed.is_none() && stated.is_none() {
+                break;
+            }
+            s = rec.parent;
         }
     }
 
@@ -610,14 +651,14 @@ impl Tree {
             .partition_point(|h| self.nodes[h.slot as usize].id < id);
         let h = self.handle_of(c);
         self.nodes[p].children.insert(at, h);
-        self.touch(p as u32);
+        self.touch_below(p as u32);
         self.log(move |t| t.unattach(c));
     }
 
     fn unattach(&mut self, c: u32) {
         let p = self.nodes[c as usize].parent as usize;
         self.nodes[p].children.retain(|h| h.slot != c);
-        self.touch(p as u32);
+        self.touch_below(p as u32);
     }
 
     fn detach(&mut self, c: u32) {
@@ -796,6 +837,7 @@ impl Tree {
         let id = rec.id;
         let slot = match self.free.pop() {
             Some(s) => {
+                self.heads.remove(&s);
                 let generation = self.nodes[s as usize].generation;
                 self.nodes[s as usize] = NodeRec { generation, ..rec };
                 s
@@ -825,6 +867,7 @@ impl Tree {
             self.moving[ix as usize] = None;
             self.moving_free.push(ix);
         }
+        self.heads.remove(&slot);
         self.free.push(slot);
     }
 
@@ -931,6 +974,21 @@ impl Tree {
         self.transact(header, part, Some(rules))
     }
 
+    /// The same bounded transaction, finalized only when the paired writer succeeds. A refused callback rolls
+    /// back this tree through its existing undo, including removals and independently changed fields.
+    pub fn commit_then<T>(
+        &mut self,
+        header: &Header,
+        part: &Part,
+        rules: &Rules,
+        then: impl FnOnce() -> R<T>,
+    ) -> R<T> {
+        if part.header != header.hash().to_bytes() {
+            return refuse("header-mismatch", "the part names another header");
+        }
+        self.run_then(header, &part.effects, Some(rules), then)
+    }
+
     fn transact(&mut self, header: &Header, part: &Part, rules: Option<&Rules>) -> R<()> {
         if part.header != header.hash().to_bytes() {
             return refuse("header-mismatch", "the part names another header");
@@ -945,7 +1003,18 @@ impl Tree {
         effects: &[Effect],
         rules: Option<&Rules>,
     ) -> R<()> {
+        self.run_then(header, effects, rules, || Ok(()))
+    }
+
+    fn run_then<T>(
+        &mut self,
+        header: &Header,
+        effects: &[Effect],
+        rules: Option<&Rules>,
+        then: impl FnOnce() -> R<T>,
+    ) -> R<T> {
         debug_assert!(self.undo.is_empty() && self.dead.is_empty());
+        self.changes += 1;
         let mut result = Ok(());
         for e in effects {
             result = self.entry(header, e, rules);
@@ -974,18 +1043,25 @@ impl Tree {
                 ),
             );
         }
-        if result.is_err() {
+        let mut value = None;
+        if result.is_ok() {
+            match then() {
+                Ok(v) => value = Some(v),
+                Err(e) => result = Err(e),
+            }
+        }
+        if let Err(e) = result {
             while let Some(u) = self.undo.pop() {
                 u(self);
             }
             self.dead.clear();
-            return result;
+            return Err(e);
         }
         self.undo.clear();
         for slot in std::mem::take(&mut self.dead) {
             self.release(slot);
         }
-        Ok(())
+        Ok(value.expect("a successful transaction ran its paired writer"))
     }
 
     fn entry(&mut self, header: &Header, e: &Effect, rules: Option<&Rules>) -> R<()> {
@@ -1170,6 +1246,7 @@ impl Tree {
                     fields: fields.clone(),
                     at: Where::Still(Place::of(pose)),
                     hash: None,
+                    state: None,
                 });
                 if !self.nodes[slot as usize].links.is_empty() {
                     let id = *node;
@@ -1525,6 +1602,7 @@ impl Tree {
                 at: Where::Still(place),
                 // Never sealed (K5): a node put in flight is new to this tree.
                 hash: None,
+                state: None,
             });
             if !self.nodes[slot as usize].links.is_empty() {
                 self.log(move |t| {
@@ -1677,8 +1755,50 @@ impl Tree {
         }
     }
 
+    /// The transfers that have arrived here.
+    pub fn arrived(&self) -> &BTreeSet<Id> {
+        &self.arrived
+    }
+
+    /// One transfer in flight from here, as [`Tree::to_state`] writes it.
+    pub fn flight(&self, transfer: Id) -> Option<Flight> {
+        self.in_flight.get(&transfer).map(|f| self.flight_of(f))
+    }
+
+    fn flight_of(&self, f: &Away) -> Flight {
+        Flight {
+            root: self.nodes[f.root as usize].id,
+            lineage: f.lineage,
+            zone: f.zone,
+            pose: f.pose,
+            nodes: f
+                .nodes
+                .iter()
+                .map(|s| {
+                    let r = &self.nodes[*s as usize];
+                    let mut n = self.node_state(r);
+                    if *s == f.root {
+                        n.parent = Some(f.from);
+                    }
+                    (r.id, n)
+                })
+                .collect(),
+            links: f
+                .links
+                .iter()
+                .map(|(id, l)| (*id, self.link_state(l)))
+                .collect(),
+        }
+    }
+
     /// The tree in T6's fixture form, so that its `souls/fixture/1` hash can be compared with the harness's
     /// (`effects.md` rule 11). Links are written once; the indexes are derived and appear nowhere.
+    /// One live node as [`Tree::to_state`] holds it (#3799): what a reader of one row needs, without the whole state.
+    pub fn node_state_of(&self, id: Id) -> Option<NodeState> {
+        let slot = self.live(id).ok()?;
+        Some(self.node_state(&self.nodes[slot as usize]))
+    }
+
     pub fn to_state(&self) -> State {
         let nodes = self
             .nodes
@@ -1694,32 +1814,7 @@ impl Tree {
         let in_flight = self
             .in_flight
             .iter()
-            .map(|(id, f)| {
-                let flight = Flight {
-                    root: self.nodes[f.root as usize].id,
-                    lineage: f.lineage,
-                    zone: f.zone,
-                    pose: f.pose,
-                    nodes: f
-                        .nodes
-                        .iter()
-                        .map(|s| {
-                            let r = &self.nodes[*s as usize];
-                            let mut n = self.node_state(r);
-                            if *s == f.root {
-                                n.parent = Some(f.from);
-                            }
-                            (r.id, n)
-                        })
-                        .collect(),
-                    links: f
-                        .links
-                        .iter()
-                        .map(|(id, l)| (*id, self.link_state(l)))
-                        .collect(),
-                };
-                (*id, flight)
-            })
+            .map(|(id, f)| (*id, self.flight_of(f)))
             .collect();
         State {
             root: self.nodes[self.root as usize].id,

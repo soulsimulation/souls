@@ -6,6 +6,7 @@
 //! computes views for real (R3) reads K2's tree and must give the same bytes on these fixtures. No runtime, no
 //! subscription transport (R4), no files (V1).
 
+use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet};
 
 use crate::effects::{
@@ -392,13 +393,68 @@ impl Second {
     }
 }
 
+/// What a view reads of the state just before or just after an entry (rule 4): a node's parent, one transfer in
+/// flight and, for counts, the nodes alive. T6's [`State`] and K2's [`Tree`](crate::tree::Tree) both answer it, so a
+/// tier that keeps a tree builds no whole state per entry (#3667).
+pub trait Read {
+    /// The node's parent: none when the node is not here, `Some(None)` for a node with no parent.
+    fn parent_of(&self, node: Id) -> Option<Option<Id>>;
+    /// A transfer in flight from here, in T6's state layout.
+    fn flight(&self, transfer: Id) -> Option<Cow<'_, Flight>>;
+    /// How many nodes here are of `audience` and are `top` or under it.
+    fn live(&self, audience: Audience, top: Id) -> u64;
+}
+
+impl Read for State {
+    fn parent_of(&self, node: Id) -> Option<Option<Id>> {
+        self.nodes.get(&node).map(|n| n.parent)
+    }
+
+    fn flight(&self, transfer: Id) -> Option<Cow<'_, Flight>> {
+        self.in_flight.get(&transfer).map(Cow::Borrowed)
+    }
+
+    fn live(&self, audience: Audience, top: Id) -> u64 {
+        let n = self
+            .nodes
+            .iter()
+            .filter(|(id, n)| n.audience == audience && under(self, **id, top))
+            .count();
+        u64::try_from(n).unwrap_or(u64::MAX)
+    }
+}
+
+impl Read for crate::tree::Tree {
+    fn parent_of(&self, node: Id) -> Option<Option<Id>> {
+        self.handle(node)
+            .and_then(|h| self.node(h))
+            .map(|n| n.parent())
+    }
+
+    fn flight(&self, transfer: Id) -> Option<Cow<'_, Flight>> {
+        crate::tree::Tree::flight(self, transfer).map(Cow::Owned)
+    }
+
+    fn live(&self, audience: Audience, top: Id) -> u64 {
+        let mut count = 0u64;
+        let mut stack: Vec<_> = self.handle(top).into_iter().collect();
+        while let Some(h) = stack.pop() {
+            if self.node(h).is_some_and(|n| n.audience() == audience) {
+                count += 1;
+            }
+            stack.extend(self.children(h).unwrap_or(&[]).iter().copied());
+        }
+        count
+    }
+}
+
 /// Whether `node` is `top` or under it, in `state`. The walk is a loop of at most T2's depth.
-fn under(state: &State, node: Id, top: Id) -> bool {
+fn under(state: &(impl Read + ?Sized), node: Id, top: Id) -> bool {
     let mut at = Some(node);
     for _ in 0..=crate::world_model::DEPTH_LIMIT {
         match at {
             Some(n) if n == top => return true,
-            Some(n) => at = state.nodes.get(&n).and_then(|s| s.parent),
+            Some(n) => at = state.parent_of(n).flatten(),
             None => return false,
         }
     }
@@ -434,9 +490,9 @@ impl View {
     /// view's position, seen or not.
     pub fn step(
         &mut self,
-        before: &State,
+        before: &(impl Read + ?Sized),
         entry: &Effect,
-        after: &State,
+        after: &(impl Read + ?Sized),
         redactions: &Redactions,
     ) -> R<()> {
         let env = entry.envelope;
@@ -455,9 +511,8 @@ impl View {
                 Body::Transfer(TransferRec::Arrive { transfer, .. }),
             ) = (self.key.level, &entry.body)
                 && let Some(r) = before
-                    .in_flight
-                    .get(transfer)
-                    .and_then(|f| carried(&seq, f, self.key.audience))
+                    .flight(*transfer)
+                    .and_then(|f| carried(&seq, &f, self.key.audience))
             {
                 self.out.records.push((env.at, redactions.scrub(r)));
             }
@@ -479,9 +534,8 @@ impl View {
                             if !self.left.remove(transfer) =>
                         {
                             if let Some(r) = before
-                                .in_flight
-                                .get(transfer)
-                                .and_then(|f| carried(&seq, f, self.key.audience))
+                                .flight(*transfer)
+                                .and_then(|f| carried(&seq, &f, self.key.audience))
                             {
                                 self.out.records.push((env.at, redactions.scrub(r)));
                             }
@@ -497,10 +551,15 @@ impl View {
                 let mine = |r: &Vec<(u64, Value)>| {
                     let gone = matches!(r.first(), Some((2, Value::Uint(2 | 3))));
                     let node = r.iter().find(|(k, _)| *k == 3).map(|(_, v)| v);
-                    let at = if gone { before } else { after };
-                    at.nodes
-                        .keys()
-                        .any(|i| node == Some(&i.to_value()) && under(at, *i, self.key.node))
+                    let Some(id) = node.and_then(|v| read_id(v).ok()) else {
+                        return false;
+                    };
+                    let top = self.key.node;
+                    if gone {
+                        before.parent_of(id).is_some() && under(before, id, top)
+                    } else {
+                        after.parent_of(id).is_some() && under(after, id, top)
+                    }
                 };
                 for r in outline(entry, before, after).into_iter().filter(mine) {
                     let mut m = vec![(1, seq.clone())];
@@ -510,14 +569,7 @@ impl View {
             }
             Level::Counts => {
                 let sec = env.at.div_euclid(1_000_000);
-                let live = after
-                    .nodes
-                    .iter()
-                    .filter(|(id, n)| {
-                        n.audience == self.key.audience && under(after, **id, self.key.node)
-                    })
-                    .count();
-                let live = u64::try_from(live).unwrap_or(u64::MAX);
+                let live = after.live(self.key.audience, self.key.node);
                 let entries = match self.second {
                     Some(s) if s.second == sec => s.entries + 1,
                     _ => {
@@ -576,6 +628,93 @@ impl View {
     /// each record once, #2697).
     pub fn take(&mut self) -> Vec<(Micros, Value)> {
         std::mem::take(&mut self.out.records)
+    }
+
+    /// What the view carries from one entry to the next (#3833), its records taken: `{1: last sequence, 2: [[node,
+    /// last kept sample], ...], 3: [transfer that left, ...], 4: [second, entries, live, at]}`, 1 and 4 when it has
+    /// them. A view built at a later state and given this with [`View::carry`] goes on as one fed every entry before.
+    pub fn carried(&self) -> Value {
+        let mut m = vec![
+            (
+                2,
+                Value::Array(
+                    self.kept
+                        .iter()
+                        .map(|(n, at)| Value::Array(vec![n.to_value(), int(*at)]))
+                        .collect(),
+                ),
+            ),
+            (
+                3,
+                Value::Array(self.left.iter().map(|t| t.to_value()).collect()),
+            ),
+        ];
+        if let Some(s) = self.out.position.sequence {
+            m.push((1, Value::Uint(s)));
+        }
+        if let Some(s) = self.second {
+            m.push((
+                4,
+                Value::Array(vec![
+                    int(s.second),
+                    Value::Uint(s.entries),
+                    Value::Uint(s.live),
+                    int(s.at),
+                ]),
+            ));
+        }
+        map(m)
+    }
+
+    /// Takes back what [`View::carried`] gave (#3833).
+    pub fn carry(&mut self, v: &Value) -> R<()> {
+        let bad = || Refusal {
+            name: "view-carried",
+            detail: "not what a view carries".into(),
+        };
+        let read_int = |v: &Value| {
+            match v {
+                Value::Uint(u) => i64::try_from(*u).ok(),
+                Value::Nint(n) => i64::try_from(*n).ok().map(|n| -1 - n),
+                _ => None,
+            }
+            .ok_or_else(bad)
+        };
+        let Value::Map(m) = v else { return Err(bad()) };
+        let sequence = match m.get(&1) {
+            None => None,
+            Some(Value::Uint(s)) => Some(*s),
+            Some(_) => return Err(bad()),
+        };
+        let (Some(Value::Array(kept)), Some(Value::Array(left))) = (m.get(&2), m.get(&3)) else {
+            return Err(bad());
+        };
+        let kept = kept
+            .iter()
+            .map(|row| match row {
+                Value::Array(p) if p.len() == 2 => Ok((read_id(&p[0])?, read_int(&p[1])?)),
+                _ => Err(bad()),
+            })
+            .collect::<R<BTreeMap<Id, Micros>>>()?;
+        let left = left.iter().map(read_id).collect::<R<BTreeSet<Id>>>()?;
+        let second = match m.get(&4) {
+            None => None,
+            Some(Value::Array(p)) => match p.as_slice() {
+                [s, Value::Uint(entries), Value::Uint(live), at] => Some(Second {
+                    second: read_int(s)?,
+                    entries: *entries,
+                    live: *live,
+                    at: read_int(at)?,
+                }),
+                _ => return Err(bad()),
+            },
+            Some(_) => return Err(bad()),
+        };
+        self.out.position.sequence = sequence;
+        self.kept = kept;
+        self.left = left;
+        self.second = second;
+        Ok(())
     }
 
     /// The view so far (rule 2). A counts view's current second is its last record until a later second closes it.
@@ -742,7 +881,7 @@ impl Carried {
 
 /// The nodes an entry creates or brings in (rule 4): its creates, the root of a subtree that arrives from this zone,
 /// and the creates an arrive from another zone carries.
-fn brought(entry: &Effect, before: &State) -> Vec<Id> {
+fn brought(entry: &Effect, before: &(impl Read + ?Sized)) -> Vec<Id> {
     let creates = |cs: &[crate::effects::ChangeRec]| -> Vec<Id> {
         cs.iter()
             .filter_map(|c| match &c.change {
@@ -755,33 +894,35 @@ fn brought(entry: &Effect, before: &State) -> Vec<Id> {
         Body::Changes(cs) => creates(cs),
         Body::Transfer(TransferRec::Arrive { transfer, carried }) => {
             let mut out = creates(carried);
-            out.extend(before.in_flight.get(transfer).map(|f| f.root));
+            out.extend(before.flight(*transfer).map(|f| f.root));
             out
         }
         _ => Vec::new(),
     }
 }
 
-fn created(node: Id, kind: &crate::encode::Name, after: &State) -> Vec<(u64, Value)> {
+fn created(
+    node: Id,
+    kind: &crate::encode::Name,
+    after: &(impl Read + ?Sized),
+) -> Vec<(u64, Value)> {
     let mut r = vec![
         (2, Value::Uint(1)),
         (3, node.to_value()),
         (4, Value::Text(kind.clone())),
     ];
-    r.extend(
-        after
-            .nodes
-            .get(&node)
-            .and_then(|n| n.parent)
-            .map(|p| (5, p.to_value())),
-    );
+    r.extend(after.parent_of(node).flatten().map(|p| (5, p.to_value())));
     r
 }
 
 /// An entry's outline records (rule 3): `{2: 1 created, 3: node, 4: kind, 5: parent}`, `{2: 2 removed, 3: node}`,
 /// `{2: 3 left, 3: node}`, `{2: 4 arrived, 3: node, 5: parent}` and `{2: 5 back, 3: node}` (a return). An arrive
 /// from another zone also writes each node it carries as created. A change of slot under one parent is not in it.
-fn outline(entry: &Effect, before: &State, after: &State) -> Vec<Vec<(u64, Value)>> {
+fn outline(
+    entry: &Effect,
+    before: &(impl Read + ?Sized),
+    after: &(impl Read + ?Sized),
+) -> Vec<Vec<(u64, Value)>> {
     let creates = |cs: &[crate::effects::ChangeRec]| -> Vec<Vec<(u64, Value)>> {
         cs.iter()
             .filter_map(|c| match &c.change {
@@ -791,7 +932,7 @@ fn outline(entry: &Effect, before: &State, after: &State) -> Vec<Vec<(u64, Value
             })
             .collect()
     };
-    let root = |t: &Id| before.in_flight.get(t).map(|f| f.root);
+    let root = |t: &Id| before.flight(*t).map(|f| f.root);
     match &entry.body {
         Body::Changes(cs) => creates(cs),
         Body::Transfer(TransferRec::Leave { node, .. }) => {
@@ -801,13 +942,7 @@ fn outline(entry: &Effect, before: &State, after: &State) -> Vec<Vec<(u64, Value
             let mut out = creates(carried);
             if let Some(n) = root(transfer) {
                 let mut r = vec![(2, Value::Uint(4)), (3, n.to_value())];
-                r.extend(
-                    after
-                        .nodes
-                        .get(&n)
-                        .and_then(|s| s.parent)
-                        .map(|p| (5, p.to_value())),
-                );
+                r.extend(after.parent_of(n).flatten().map(|p| (5, p.to_value())));
                 out.push(r);
             }
             out

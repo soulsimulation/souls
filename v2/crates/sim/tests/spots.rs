@@ -13,8 +13,9 @@ use replica::ids::Id;
 use replica::pose::Vec3;
 use replica::world_model::show;
 use sim::host::Runner;
+use sim::links::Kind;
 use sim::spots::{CLEAR, Entry, Target, to_segment};
-use sim::walk::town::Town;
+use sim::walk::town::{Town, level_part};
 use std::collections::BTreeMap;
 
 const SPEED: i64 = 1_400_000; // µm a second: today's walking pace
@@ -243,7 +244,8 @@ fn inside(p: Vec3, r: [i64; 4]) -> bool {
 }
 
 /// A3's check on every table a town holds: no place within `CLEAR` of a link's end on its node, nor within half the
-/// link's width and half `CLEAR` of its line.
+/// link's width and half `CLEAR` of its line (#4072: a step's line within half `CLEAR`, its ends holding its width; on
+/// a building's floor, a flight's line where it lies from a step below the place to a body's height above it).
 /// Returns how many places it checked.
 fn no_place_in_a_passage(t: &Town) -> usize {
     let mut n = 0;
@@ -268,16 +270,29 @@ fn no_place_in_a_passage(t: &Town) -> usize {
                                 "A3: a place at a link's end"
                             );
                         }
+                        let reach = if l.kind == Kind::Step {
+                            CLEAR / 2
+                        } else {
+                            l.width / 2 + CLEAR / 2
+                        };
+                        let flight = matches!(l.kind, Kind::Stairs | Kind::Ramp | Kind::Ladder);
                         for s in l.line.windows(2) {
                             let (a, c) = if *node == t.ground {
                                 (b.place.point(s[0]).unwrap(), b.place.point(s[1]).unwrap())
                             } else {
                                 (s[0], s[1])
                             };
-                            assert!(
-                                to_segment(p.at, a, c) >= l.width / 2 + CLEAR / 2,
-                                "A3: a place on a link's line"
-                            );
+                            let part = if flight && *node != t.ground {
+                                level_part(a, c, p.at.y)
+                            } else {
+                                Some((a, c))
+                            };
+                            if let Some((a, c)) = part {
+                                assert!(
+                                    to_segment(p.at, a, c) >= reach,
+                                    "A3: a place on a link's line"
+                                );
+                            }
                         }
                     }
                 }
@@ -674,5 +689,86 @@ fn a5_a_spot_is_released_when_its_holder_leaves() {
                 show(*who)
             );
         }
+    }
+}
+
+/// C8 (#3396): the building boxes skip only what is in no passage. On the open ground, at every point on a 100 mm grid
+/// over each building's box widened by 1 m, the passage test with the boxes gives the same answer as without them.
+#[test]
+fn c8_the_boxes_give_the_same_passages() {
+    use sim::walk::town::{ground_boxes, in_passage};
+    let (t, _) = town();
+    let boxes = ground_boxes(&t.buildings, t.ground);
+    let (mut checked, mut inside) = (0, 0);
+    for r in boxes.iter().flatten() {
+        for x in ((r[0] - 1_000_000)..=(r[2] + 1_000_000)).step_by(100_000) {
+            for z in ((r[1] - 1_000_000)..=(r[3] + 1_000_000)).step_by(100_000) {
+                let p = Vec3::new(x, 0, z);
+                let full = in_passage(&t.buildings, &[], t.ground, t.ground, p);
+                assert_eq!(
+                    in_passage(&t.buildings, &boxes, t.ground, t.ground, p),
+                    full,
+                    "C8: the boxes changed the passage test at {p:?}"
+                );
+                checked += 1;
+                inside += usize::from(full);
+            }
+        }
+    }
+    println!("C8: {checked} points, {inside} in a passage, the same with and without the boxes");
+    assert!(inside > 0 && checked > inside);
+}
+
+/// #1960 (#3688's class): a move at a door aimed in its wall, short of the doorway, from a room on either side. Every
+/// floor place within an arm of the aim lies within [`CLEAR`] of the doorway's ends, so the plain search finds none
+/// (the bedroom close's `out-of-reach` on served Eden, 783 mm against 600). With the move's own door, its doorway
+/// counts and each side gets a place on its own side, within the arm; another thing's id changes nothing.
+#[test]
+fn a_door_is_reached_from_a_room_on_either_side() {
+    let (mut t, nodes) = town();
+    let f0 = nodes["building/floor-0"];
+    let door = nodes["door-building-a-b"];
+    let ends: Vec<_> = t
+        .buildings
+        .iter()
+        .flat_map(|b| &b.links)
+        .find(|l| l.door == Some(door))
+        .expect("the doorway a-b")
+        .ends
+        .iter()
+        .flatten()
+        .map(|e| e.middle().x)
+        .collect();
+    let (west, east) = (ends[0].min(ends[1]), ends[0].max(ends[1]));
+    let (aim, reach) = (Vec3::new((west + east) / 2, 0, -3_400_000), 600_000);
+    for (side, from) in [("west", west - 1_000_000), ("east", east + 1_000_000)] {
+        let body = stand(&t, id(1), f0, Vec3::new(from, 0, -3_000_000));
+        let v = t.view();
+        assert_eq!(
+            v.stand_near(f0, aim, reach, Some(&body)),
+            None,
+            "{side}: no place out of the doorway"
+        );
+        assert_eq!(
+            v.stand_near_door(f0, aim, reach, Some(&body), Some(f0)),
+            None,
+            "{side}: another thing's id frees no doorway"
+        );
+        let p = v
+            .stand_near_door(f0, aim, reach, Some(&body), Some(door))
+            .unwrap_or_else(|| panic!("{side}: a place in the door's own doorway"));
+        assert!(
+            flat(p, aim) <= reach,
+            "{side}: {p:?} within an arm of {aim:?}"
+        );
+        let near_side = if side == "west" {
+            p.x <= west
+        } else {
+            p.x >= east
+        };
+        assert!(
+            near_side,
+            "{side}: {p:?} on the body's own side of the door"
+        );
     }
 }

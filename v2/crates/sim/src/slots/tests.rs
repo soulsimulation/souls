@@ -14,7 +14,10 @@ use replica::moves::{Effector, Move, Place};
 use replica::pose::{Frame, Quat, Support, Vec3, fixture};
 use replica::world_model::show;
 
-use super::{PlaceAt, Request, Slots, clear_spot, seated_shape};
+use super::{
+    PlaceAt, Request, STANDARD_BUILD, STANDARD_REACH, Slots, clear_spot, seated_shape,
+    standing_reach,
+};
 use crate::controller::{Controller, Part, Stance};
 use crate::ground::Piece;
 use crate::mover::Surface;
@@ -76,15 +79,24 @@ struct World {
     floors: BTreeMap<Id, Surface>,
     chair: Id,
     bodies: Vec<Id>,
+    /// Reach on the floor's plane, as the served world asks it (#3600): see [`World::geo`].
+    flat: bool,
 }
 
 const FLOOR: i64 = 5_000_000;
 
 fn world(place: Place) -> World {
+    let point = Vec3::new(0, place.height, 0);
+    world_with(place, point, -5_000, 300_000)
+}
+
+/// A chair of `place` with its slot at `point` on a floor from z `front` mm to 5 m (the floor's walkable piece, as
+/// clearance cut it), with two bodies at z `at` µm, 100 mm either side of the chair's line.
+fn world_with(place: Place, point: Vec3, front: i32, at: i64) -> World {
     let floor = fixture(1);
     let corners = vec![
-        [-5_000, 0, -5_000],
-        [5_000, 0, -5_000],
+        [-5_000, 0, front],
+        [5_000, 0, front],
         [5_000, 0, 5_000],
         [-5_000, 0, 5_000],
     ];
@@ -94,6 +106,7 @@ fn world(place: Place) -> World {
             outline: vec![corners.clone()],
             vertices: corners,
             triangles: vec![[0, 2, 1], [0, 3, 2]],
+            ground: crate::gaits::Ground::Dry,
         }],
     );
     let mut mint = Minter::new(Scope([0xb3; 16]));
@@ -108,7 +121,7 @@ fn world(place: Place) -> World {
             slot: None,
         };
         let placed = surface
-            .place(id, frame, Vec3::new(x, 0, 300_000), Quat::IDENTITY)
+            .place(id, frame, Vec3::new(x, 0, at), Quat::IDENTITY)
             .expect("placed");
         c.add(family(), placed).expect("added");
         bodies.push(id);
@@ -117,7 +130,7 @@ fn world(place: Place) -> World {
     slots
         .add(PlaceAt {
             thing: chair,
-            point: Vec3::new(0, place.height, 0),
+            point,
             place,
             facing: Quat::IDENTITY,
             floor,
@@ -132,11 +145,27 @@ fn world(place: Place) -> World {
         floors: BTreeMap::from([(floor, surface)]),
         chair,
         bodies,
+        flat: false,
     }
 }
 
 impl World {
+    /// Each body's and named point's distance; with `flat`, on the floor's plane: the served world's reach is
+    /// horizontal, from the body to the seat's stand point (`worldd::bodies` asks it at height 0), so a seat's height
+    /// is the standing reach's alone (#3600).
     fn geo(&self) -> Geo {
+        let Geo(bodies, points) = self.geo3();
+        if !self.flat {
+            return Geo(bodies, points);
+        }
+        let flat = |p: Vec3| Vec3::new(p.x, 0, p.z);
+        Geo(
+            bodies.into_iter().map(|(b, p)| (b, flat(p))).collect(),
+            points.into_iter().map(|(n, p)| (n, flat(p))).collect(),
+        )
+    }
+
+    fn geo3(&self) -> Geo {
         let at = self.slots.place(self.chair).expect("the chair");
         let stand = at.stand().expect("a stand point");
         let points = BTreeMap::from([("souls:slot", at.point), ("souls:stand", stand)]);
@@ -188,6 +217,7 @@ impl World {
             .map(|&i| Request {
                 body: self.bodies[i],
                 thing: self.chair,
+                slot: None,
                 mv: m,
                 stance: Stance::Sit,
             })
@@ -199,6 +229,7 @@ impl World {
             &mut w.mint,
             &mut w.moves,
             &geo,
+            &w.floors,
             &reqs,
             0,
         )
@@ -207,6 +238,29 @@ impl World {
 
 fn chair() -> Place {
     Place::from_value(&value(CHAIR)).expect("the chair's place")
+}
+
+#[test]
+fn edited_places_retire_only_when_unoccupied_and_preserve_hold_indexes() {
+    let mut w = world(chair());
+    let original = w.slots.place(w.chair).unwrap().clone();
+    w.slots.replace(w.chair, Vec::new()).unwrap();
+    assert!(w.slots.place(w.chair).is_none());
+    w.slots.replace(w.chair, vec![original.clone()]).unwrap();
+    w.sit(&[0], &mv("souls:sit"))[0].1.as_ref().unwrap();
+    let body = w.bodies[0];
+    assert_eq!(
+        w.slots.replace(w.chair, Vec::new()).unwrap_err().name,
+        "place-taken"
+    );
+    assert_eq!(
+        w.slots.replace(w.chair, vec![original]).unwrap_err().name,
+        "place-taken"
+    );
+    assert_eq!(w.slots.holder_in(w.chair, 1), Some(body));
+    assert_eq!(w.slots.held_by(body), Some(w.chair));
+    assert_eq!(w.slots.held_place(body).unwrap().place.slot, 1);
+    assert_eq!(w.slots.places(), 1);
 }
 
 #[test]
@@ -264,7 +318,7 @@ fn a_sit_cancelled_before_contact_frees_the_seat() {
 fn a_seat_above_standing_reach_is_refused_by_name() {
     let sit = mv("souls:sit");
     let mut w = world(Place {
-        height: sit.reach + 1,
+        height: STANDARD_REACH + 1,
         ..chair()
     });
     let r = w.sit(&[0], &sit).remove(0).1.expect_err("refused");
@@ -417,4 +471,342 @@ fn the_nearest_clear_spot_is_clear_and_nearest() {
         clear_spot(floor, [FLOOR + 1_000_000, 0], &[], 1, 50_000, 500_000).is_none(),
         "off the floor"
     );
+}
+
+/// Reach that every point is within: the test of which slot is taken, not of reach.
+struct Near;
+
+impl Reach for Near {
+    fn distance(&self, _: Id, _: &Effector, _: Option<&Name>, _: Id, _: &Name) -> Option<i64> {
+        Some(0)
+    }
+}
+
+/// C19 (#3457) A2: a thing with three seats (the chair's slot 1 in the middle, slots 2 and 3 600 mm either side) and
+/// four bodies asking for it in one tick, naming only the thing. Whatever the order they come in, each of the first
+/// three in the stable order takes the free slot whose stand point is nearest it, and the fourth is refused
+/// `place-taken`, naming the three holders. Each sits in its own slot.
+#[test]
+fn c19_three_bodies_share_a_thing_each_in_its_own_slot() {
+    let sit = mv("souls:sit");
+    for reversed in [false, true] {
+        let mut w = world(chair());
+        for (slot, x) in [(2, -600_000), (3, 600_000)] {
+            let mut place = chair();
+            place.slot = slot;
+            w.slots
+                .add(PlaceAt {
+                    thing: w.chair,
+                    point: Vec3::new(x, place.height, 0),
+                    place,
+                    facing: Quat::IDENTITY,
+                    floor: fixture(1),
+                })
+                .expect("a place");
+        }
+        // Bodies at x -100 and 100 mm (the world's), then 600 and -600 mm, 300 mm in front: minted in that order.
+        for x in [600_000, -600_000] {
+            let id = w.mint.mint().expect("id");
+            let frame = Frame {
+                node: fixture(1),
+                slot: None,
+            };
+            let placed = w.floors[&fixture(1)]
+                .place(id, frame, Vec3::new(x, 0, 300_000), Quat::IDENTITY)
+                .expect("placed");
+            w.c.add(family(), placed).expect("added");
+            w.bodies.push(id);
+        }
+        let mut reqs: Vec<Request> = w
+            .bodies
+            .iter()
+            .map(|&body| Request {
+                body,
+                thing: w.chair,
+                slot: None,
+                mv: &sit,
+                stance: Stance::Sit,
+            })
+            .collect();
+        if reversed {
+            reqs.reverse();
+        }
+        let out = w.slots.commit(
+            &mut w.c,
+            &mut w.due,
+            &mut w.mint,
+            &mut w.moves,
+            &Near,
+            &w.floors,
+            &reqs,
+            0,
+        );
+        let b = w.bodies.clone();
+        assert_eq!(
+            out.iter().map(|o| o.0).collect::<Vec<_>>(),
+            b,
+            "the stable order"
+        );
+        let r = out[3].1.as_ref().expect_err("the fourth is refused");
+        assert_eq!(r.name, "place-taken");
+        for &h in &b[..3] {
+            assert!(r.detail.contains(&show(h)), "names every holder: {r}");
+        }
+        while let Some(t) = w.due.fire(i64::MAX) {
+            w.slots
+                .fire(
+                    &mut w.c,
+                    &mut w.due,
+                    &mut w.mint,
+                    &mut w.moves,
+                    &Near,
+                    &w.floors,
+                    &t,
+                )
+                .expect("a move's timer");
+        }
+        // -100 mm takes the middle; 100 mm the nearest free, slot 3 (500 mm off); 600 mm the last, slot 2.
+        for (&body, slot) in b.iter().zip([1, 3, 2]) {
+            let p = w.c.body(body).expect("a body").pose;
+            assert_eq!(p.support, Support::Slot);
+            assert_eq!(
+                p.frame,
+                Frame {
+                    node: w.chair,
+                    slot: Some(slot)
+                },
+                "reversed {reversed}"
+            );
+            assert_eq!(w.slots.holder_in(w.chair, slot), Some(body));
+        }
+        assert_eq!(w.slots.holders(w.chair), vec![b[0], b[2], b[1]]);
+        assert_eq!(w.slots.held_by(b[3]), None);
+    }
+}
+
+#[test]
+fn seat_ownership_changes_wake_once_for_take_and_release() {
+    let mut w = world(chair());
+    assert!(w.slots.changes().is_empty());
+    let sit = mv("souls:sit");
+    w.sit(&[0], &sit)[0].1.as_ref().expect("taken");
+    assert_eq!(w.slots.changes(), vec![w.chair]);
+    assert!(w.slots.changes().is_empty(), "taking events drains them");
+    w.c.claim(w.bodies[0], &seated_shape())
+        .expect("cancel before contact");
+    w.run(i64::MAX);
+    assert_eq!(
+        w.slots.changes(),
+        vec![w.chair],
+        "phase release wakes the line"
+    );
+    assert!(w.slots.changes().is_empty());
+    w.sit(&[1], &sit)[0].1.as_ref().expect("taken again");
+    assert_eq!(w.slots.changes(), vec![w.chair]);
+    w.slots
+        .release_body(w.bodies[1])
+        .expect("retirement releases slot");
+    assert_eq!(w.slots.changes(), vec![w.chair]);
+}
+
+/// Eden's chair `e_3403bec8` (B7c, #3593): its slot [0, 470, 20] mm and its stand point [0, 0, 509] mm, which lies 19 mm
+/// inside the clearance of the chair's own collider: the walkable floor starts at z 528 mm. Bodies wait at z `at` µm.
+fn clearance_chair(front: i32, at: i64) -> World {
+    let place = Place {
+        height: 470_000,
+        stand: [0, 489_000],
+        ..chair()
+    };
+    world_with(place, Vec3::new(0, 470_000, 20_000), front, at)
+}
+
+/// #1960 (B7c's stuck Soul): a body seated in a chair whose stand point lies in the chair's own clearance rises onto
+/// the first supported point out along the chair's exit, stands on the floor, frees the seat, and walks the next tick.
+#[test]
+fn a_body_rises_from_a_chair_whose_stand_point_is_in_its_own_clearance() {
+    let (sit, rise) = (mv("souls:sit"), mv("souls:rise"));
+    let mut w = clearance_chair(528, 700_000);
+    let b = w.bodies[0];
+    let stand = w.slots.place(w.chair).unwrap().stand().unwrap();
+    assert_eq!(
+        (stand.x, stand.z),
+        (0, 509_000),
+        "the chair's own stand point"
+    );
+    let frame = Frame {
+        node: fixture(1),
+        slot: None,
+    };
+    assert!(
+        w.floors[&fixture(1)]
+            .place(b, frame, stand, Quat::IDENTITY)
+            .is_err(),
+        "the exact stand point is off the floor"
+    );
+    // Reach is not what this tests: every point is within it (the served world measures it to the stand point).
+    let run = |w: &mut World, until: i64| {
+        while let Some(t) = w.due.fire(until) {
+            w.slots
+                .fire(
+                    &mut w.c,
+                    &mut w.due,
+                    &mut w.mint,
+                    &mut w.moves,
+                    &Near,
+                    &w.floors,
+                    &t,
+                )
+                .expect("a move's timer");
+        }
+    };
+    let req = Request {
+        body: b,
+        thing: w.chair,
+        slot: None,
+        mv: &sit,
+        stance: Stance::Sit,
+    };
+    let r = w
+        .slots
+        .commit(
+            &mut w.c,
+            &mut w.due,
+            &mut w.mint,
+            &mut w.moves,
+            &Near,
+            &w.floors,
+            &[req],
+            0,
+        )
+        .remove(0)
+        .1;
+    r.expect("the sit is admitted");
+    run(&mut w, i64::MAX);
+    assert_eq!(w.c.body(b).unwrap().pose.support, Support::Slot);
+    let n = w
+        .slots
+        .rise(
+            &mut w.c,
+            &mut w.due,
+            &mut w.mint,
+            &mut w.moves,
+            &Near,
+            b,
+            &rise,
+            2_000_000,
+        )
+        .expect("rising");
+    let contact = w.moves.record(n).expect("in progress").contact_at();
+    run(&mut w, contact + 1);
+    let p = w.c.body(b).unwrap().pose;
+    assert!(
+        matches!(p.support, Support::Surface { .. }),
+        "on the floor: {p:?}"
+    );
+    assert_eq!(
+        (p.position.x, p.position.z),
+        (0, 529_000),
+        "the first supported point out"
+    );
+    let off = (p.position.z - stand.z).abs() + (p.position.x - stand.x).abs();
+    assert!(
+        off <= super::rise_bound(replica::kinds::sizes::Build::STANDARD),
+        "within the body's clearance radius of the stand point: {off} µm"
+    );
+    assert_eq!(w.c.input(b).unwrap().stance, Stance::Stand);
+    assert_eq!(w.slots.holder(w.chair), None, "the slot is free");
+    run(&mut w, i64::MAX);
+    let d = w.c.claim(b, &walk_shape()).expect("a walk takes the legs");
+    walks_away(&mut w, b, d);
+}
+
+/// #1960: a seat with no supported point within the body's clearance radius (280 mm, standard) of its stand point (the
+/// floor starts 311 mm out from it) is refused up front by name, so no body sits where it cannot rise; nothing changes.
+#[test]
+fn a_sit_with_nowhere_to_rise_within_reach_is_refused_up_front() {
+    let sit = mv("souls:sit");
+    let mut w = clearance_chair(820, 900_000);
+    let b = w.bodies[0];
+    let before = w.c.body(b).unwrap().pose;
+    let e = w.sit(&[0], &sit).remove(0).1.expect_err("refused");
+    assert_eq!(e.name, "place-no-stand-point", "{e}");
+    assert!(e.detail.contains("within 280000 µm"), "{e}");
+    assert!(w.moves.is_empty() && w.slots.is_empty() && w.due.is_empty());
+    assert_eq!(w.c.body(b).unwrap().pose, before);
+}
+
+/// #3600 A1: the standing reach is the admitted build's overhead reach (today's `seatReach`): 2.06 m for the standard
+/// 1.75 m body, scaled by height, and unscaled for a hovering body.
+#[test]
+fn standing_reach_is_the_builds_overhead_reach() {
+    assert_eq!(standing_reach(STANDARD_BUILD), 2_060_000);
+    let of = |height_mm, hover_mm| {
+        standing_reach(replica::kinds::sizes::Build {
+            height_mm,
+            hover_mm,
+            ..STANDARD_BUILD
+        })
+    };
+    assert_eq!(of(1_850, 0), 2_177_714);
+    assert_eq!(of(1_000, 0), 1_177_142);
+    assert_eq!(of(1_000, 300), STANDARD_REACH, "a hovering body, unscaled");
+}
+
+/// #3600 A1: a standard body takes ordinary seats above the sit move's 0.6 m contact reach and up to its standing
+/// reach (C22's rows at 0.65 to 1.60 m: stool, guitar stool, hammock, wagon), and is seated in the slot.
+#[test]
+fn a_standard_body_takes_seats_up_to_its_standing_reach() {
+    let sit = mv("souls:sit");
+    for height in [650_000, 1_000_000, 1_600_000, STANDARD_REACH] {
+        assert!(height > sit.reach || height == 650_000);
+        let mut w = world(Place { height, ..chair() });
+        let b = w.bodies[0];
+        w.flat = true;
+        let r = w.sit(&[0], &sit).remove(0).1;
+        assert!(r.is_ok(), "a sit {height} µm up: {r:?}");
+        w.run(i64::MAX);
+        assert_eq!(w.c.body(b).expect("a body").pose.support, Support::Slot);
+        assert_eq!(w.slots.holder(w.chair), Some(b));
+    }
+}
+
+/// #3600 A2: a smaller body is refused a seat above its own standing reach by name, its body and the seat as they were;
+/// at its reach it is seated. The cable car's cabins (19 m and 33.9 m above their stops) stay refused for every body.
+#[test]
+fn a_seat_above_the_bodys_own_standing_reach_is_refused_and_nothing_changes() {
+    let sit = mv("souls:sit");
+    let small = replica::kinds::sizes::Build {
+        size: replica::kinds::sizes::Size::Small,
+        height_mm: 1_000,
+        hover_mm: 0,
+    };
+    let reach = standing_reach(small);
+    for (height, admitted) in [(reach, true), (reach + 1, false), (1_600_000, false)] {
+        let mut w = world(Place { height, ..chair() });
+        let b = w.bodies[0];
+        w.slots.admit(b, small);
+        let before = w.c.body(b).expect("a body").pose;
+        w.flat = true;
+        let r = w.sit(&[0], &sit).remove(0).1;
+        if admitted {
+            assert!(r.is_ok(), "at its reach: {r:?}");
+            continue;
+        }
+        let e = r.expect_err("refused");
+        assert_eq!(e.name, "place-out-of-reach");
+        assert!(
+            e.detail.contains(&format!("standing reach {reach} µm")),
+            "{e}"
+        );
+        assert!(w.moves.is_empty() && w.slots.is_empty() && w.due.is_empty());
+        assert_eq!(w.c.body(b).expect("a body").pose, before);
+        assert_eq!(w.slots.holder(w.chair), None);
+    }
+    for height in [19_000_000, 33_900_000] {
+        let mut w = world(Place { height, ..chair() });
+        w.flat = true;
+        let e = w.sit(&[0], &sit).remove(0).1.expect_err("refused");
+        assert_eq!(e.name, "place-out-of-reach", "a cabin {height} µm up");
+        assert!(w.slots.is_empty());
+    }
 }

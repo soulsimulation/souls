@@ -1,6 +1,6 @@
 //! The object store the directory's truth lives in (`v2/docs/durability.md` rules 7 and 12): objects by key, each
 //! with an ETag, written only on one of two conditions. [`Memory`] is an in-memory store with the same refusals, for
-//! tests; [`super::s3::S3`] is a real one over HTTP.
+//! tests; [`super::s3::S3`] is a real one over HTTP, and [`super::stand_in`] a local S3 stand-in for its tests.
 
 use std::collections::BTreeMap;
 use std::sync::Mutex;
@@ -41,6 +41,22 @@ pub trait Store {
     fn get(&self, key: &str) -> R<Option<Object>>;
     /// Writes `bytes` at `key` if `when` holds, atomically; returns the new ETag.
     fn put(&self, key: &str, bytes: &[u8], when: When) -> R<String>;
+    /// Every key that starts with `prefix`, in order (O3c, #3529). A store that cannot list refuses,
+    /// `store-cannot-list`.
+    fn list(&self, prefix: &str) -> R<Vec<String>> {
+        refuse(
+            "store-cannot-list",
+            format!("{prefix}: this store does not list"),
+        )
+    }
+    /// Removes the object at `key`; none there is no refusal (#3833). A store that cannot delete refuses,
+    /// `store-cannot-delete`.
+    fn delete(&self, key: &str) -> R<()> {
+        refuse(
+            "store-cannot-delete",
+            format!("{key}: this store does not delete"),
+        )
+    }
 }
 
 /// Several machines' directories over one store.
@@ -51,6 +67,14 @@ impl<T: Store + ?Sized> Store for &T {
 
     fn put(&self, key: &str, bytes: &[u8], when: When) -> R<String> {
         (**self).put(key, bytes, when)
+    }
+
+    fn list(&self, prefix: &str) -> R<Vec<String>> {
+        (**self).list(prefix)
+    }
+
+    fn delete(&self, key: &str) -> R<()> {
+        (**self).delete(key)
     }
 }
 
@@ -124,5 +148,21 @@ impl Store for Memory {
             },
         );
         Ok(etag)
+    }
+
+    fn list(&self, prefix: &str) -> R<Vec<String>> {
+        self.reach()?;
+        Ok(self
+            .lock()
+            .keys()
+            .filter(|k| k.starts_with(prefix))
+            .cloned()
+            .collect())
+    }
+
+    fn delete(&self, key: &str) -> R<()> {
+        self.reach()?;
+        self.lock().remove(key);
+        Ok(())
     }
 }

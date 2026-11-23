@@ -153,3 +153,54 @@ and the requested rain kind, amount and intensity on the single immediate cache 
 response and separately require its convergence within the same bound. This matters when E1's final convergence read
 has just primed the unchanged URL with pre-weather state. The owner Rain note and absence of page errors remain required;
 a note alone cannot prove weather changed. The regression covers this exact Redo-to-weather ordering with primed caches.
+
+### Native v2 account recipe
+
+For the isolated account approval/adoption journey, the literal `world.kind: 'v2-account'` selects
+`tools/proof/v2-account-fixture.mjs`; it does not boot an unrelated old-engine world. Its pinned
+`world.artifacts: {file, hash}` receipt uses schema `v2-account-proof-artifacts/1`: committed `sourceHead`,
+repository-relative `source` hashes, fixed `directoryd`/`gatewayd` binary paths and hashes, built `web`
+path/file hashes, and the selected Caddy executable path/hash. Only the five committed proof-adapter/driver/doc
+files may differ from that artifact head. No URL or arbitrary command is a recipe option.
+
+The helper registers and monitors all four native service children, checks every derived port, creates fresh
+synthetic stores/homes, and stops all registered children within one global cleanup deadline. Every child death,
+partial boot, failed cleanup, console/page error and failed-request/HTTP-error observation remains in the private
+report. The committed `tools/proof/drivers/v2-account-login.mjs` declares expected negative HTTP outcomes by path,
+status and reason; unexpected network failures and page errors fail the native recipe. It uses visible browser controls and the real client/native account boundaries. Desktop and
+phone are separate predeclared functional slots with fresh lifecycles. The source-bound native/bundle artifacts
+may be reused for proof-only changes. This local synthetic proof establishes no public provider, world-body
+admission, real-user release walk or release qualification. Keep the existing immutable failure history and caps.
+
+The native account driver takes an accessibility snapshot before choosing each interactive control. Finalized
+raw video is hashed and its duration is checked with the installed `ffprobe`; a clip over 90 seconds fails
+without truncation or speed changes. Snapshot and command transcripts remain private, immutable evidence.
+
+The native recipe honors a smaller owner boot deadline (up to 30 seconds). It observes actual private native
+control disconnection through a tracked, finite read-only child before one ordinary adoption; no fixed settle
+delay or adoption retry establishes readiness. CLI transcripts retain exit/signal truth and reject abnormal
+termination even if partial stdout contains success JSON. Observer cleanup attempts sockets and transient
+children concurrently and preserves all failures. Expected browser resource errors require the exact owned
+origin, path, status and matching response evidence; unrelated console errors fail the attempt.
+
+The literal `world.kind: 'v2-bodies'` recipe uses `v2-body-fixture.mjs` and the committed
+`drivers/v2-body-presets.mjs`. Its descriptor pins the existing synthetic world generator, matching native world,
+consumer-bound gateway, WASM, actual prepared catalogue and bundled page. It seeds through existing native callers,
+then owns the world, gateway and static public-file origin. Only views and public history exports are served beside
+the exact built page. Seed/generator and ordinary CLI commands are registered finite children: successful exit is
+expected for them, while signal, error or nonzero exit fails. Long-lived services and the explicitly registered
+resident agent must remain alive through finalization; every child is included in teardown evidence. The original
+and account recipes keep their existing child semantics.
+
+The two predeclared functional slots are all twenty live preset renders and agent changes, then named birth,
+old/new history through the real slider, return to live and named refusal retaining the current rendered body.
+Each uses a fresh owned lifecycle and at most ninety seconds of uncut video. Existing renderer/crowd state is read
+only; camera/replay controls use real input. The prepared native corridor test separately proves the fit refusal;
+a local viewer result does not qualify public provider input or the release walks. No arbitrary running URL,
+command recipe, personal profile, state injection or fallback model can qualify this proof.
+
+The body component fixture supplies only a public placement `live` locator derived from the native
+`views/world.json` full-zone, everyone stream. It writes no header, part, body pose or private-audience data.
+This supplied metadata tests the existing Back to live consumer; deployed locator production remains unproved
+and is tracked separately in #3661. The fixture's exact favicon route returns 204. Neither behavior qualifies
+deployed replay or public release input.

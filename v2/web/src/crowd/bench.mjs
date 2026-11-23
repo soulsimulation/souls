@@ -156,7 +156,7 @@ async function main() {
     const gl = await probe.evaluate(() => { const g = document.createElement('canvas').getContext('webgl2'); const x = g.getExtension('WEBGL_debug_renderer_info'); return g.getParameter(x.UNMASKED_RENDERER_WEBGL); });
     await probe.close();
     log(`renderer ${gl}`);
-    const url = `http://127.0.0.1:${port}/src/crowd/bench.html?bodies=/.local/bodies/&n=${o.n}&walking=${o.walking}${kind}&area=${o.area}`;
+    const url = `http://127.0.0.1:${port}/src/crowd/bench.html?bodies=/.local/bodies/&n=${o.n}&walking=${o.walking}${kind}&area=${o.area}${a.sky ? '&sky=1' : ''}`;
     const res = { ...o, kind: a.kind ? basename(a.kind) : null, gl, rows: [] };
     for (let rep = 1; rep <= o.repeats; rep++) for (const tier of tiers) {
       log(`${tier} rep ${rep}`);

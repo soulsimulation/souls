@@ -5,6 +5,7 @@
 
 use std::time::Duration;
 
+use replica::effects::Refusal;
 use replica::encode::to_hex;
 use ring::{digest, hmac};
 
@@ -27,7 +28,13 @@ pub struct S3 {
     prefix: String,
 }
 
-/// The settings [`S3::from_env`] reads.
+/// The directory's store as one setting in the offsite bucket's form (O3c, #3529):
+/// `s3:https://<host>/<bucket>[/<prefix>]`, its keys in `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY`. `worldd serve`
+/// ships to it too when `--store` and `WORLDD_STORE` are not given, so the directory and the worlds' history share one
+/// bucket.
+pub const URL_ENV: &str = "DIRECTORY_STORE_URL";
+
+/// The settings [`S3::from_env`] reads when [`URL_ENV`] is not set.
 pub const ENV: [&str; 6] = [
     "DIRECTORY_STORE_ENDPOINT",
     "DIRECTORY_STORE_BUCKET",
@@ -57,6 +64,10 @@ impl S3 {
         if host.is_empty() || host.contains('/') || bucket.is_empty() {
             return refuse("store-settings", "an endpoint is a host, with a bucket");
         }
+        // Keys come from the environment, never from the address (O3c, #3529); the refusal does not repeat it.
+        if host.contains('@') {
+            return refuse("store-settings", "the endpoint carries no credentials");
+        }
         let agent: ureq::Agent = ureq::Agent::config_builder()
             .timeout_global(Some(TIMEOUT))
             .http_status_as_error(false)
@@ -74,11 +85,21 @@ impl S3 {
         })
     }
 
-    /// The store the environment names ([`ENV`]; the region defaults to `auto`, R2's, and the prefix to none), or
-    /// `None` when `DIRECTORY_STORE_ENDPOINT` is not set.
+    /// The store the environment names: [`URL_ENV`] in the offsite form ([`S3::from_url`], O3c #3529), else [`ENV`]
+    /// (the region defaults to `auto`, R2's, and the prefix to none); `None` when neither `DIRECTORY_STORE_URL` nor
+    /// `DIRECTORY_STORE_ENDPOINT` is set.
     pub fn from_env() -> Option<R<S3>> {
-        let var = |k: &str| std::env::var(k).unwrap_or_default();
-        let endpoint = std::env::var(ENV[0]).ok()?;
+        S3::from_vars(|k| std::env::var(k).ok())
+    }
+
+    /// [`S3::from_env`] over settings read through `get` (`register-world`'s settings files, #1960 B3), so an operator
+    /// command picks the store the directory's own environment picks.
+    pub fn from_vars(get: impl Fn(&str) -> Option<String>) -> Option<R<S3>> {
+        let var = |k: &str| get(k).unwrap_or_default();
+        if let Some(url) = get(URL_ENV).filter(|u| !u.trim().is_empty()) {
+            return Some(S3::from_url(url.trim(), var));
+        }
+        let endpoint = get(ENV[0])?;
         let region = Some(var(ENV[2])).filter(|r| !r.is_empty());
         Some(S3::new(
             &endpoint,
@@ -90,6 +111,42 @@ impl S3 {
         ))
     }
 
+    /// The bucket a URL names, in the offsite bucket's form (`BACKUP_OFFSITE_URL`'s, and O20b's `SOULS_BACKUP_URL`):
+    /// `[s3:]http(s)://<host>/<bucket>[/<prefix>]`, its keys from `AWS_ACCESS_KEY_ID` and `AWS_SECRET_ACCESS_KEY` and
+    /// its region from `AWS_DEFAULT_REGION` (default `auto`, R2's), read through `var` (O3c, #3529). A refusal never
+    /// repeats the URL: its host is a machine's address.
+    pub fn from_url(url: &str, var: impl Fn(&str) -> String) -> R<S3> {
+        let form = || {
+            refuse(
+                "store-settings",
+                "a bucket is s3:https://<host>/<bucket>[/<prefix>]",
+            )
+        };
+        let u = url.strip_prefix("s3:").unwrap_or(url);
+        let Some((scheme, rest)) = u.split_once("://") else {
+            return form();
+        };
+        let mut parts = rest.splitn(3, '/');
+        let (Some(host), Some(bucket)) = (parts.next(), parts.next()) else {
+            return form();
+        };
+        let prefix = match parts.next().map(|p| p.trim_matches('/')) {
+            Some(p) if !p.is_empty() => format!("{p}/"),
+            _ => String::new(),
+        };
+        let region = Some(var("AWS_DEFAULT_REGION"))
+            .filter(|r| !r.is_empty())
+            .unwrap_or_else(|| "auto".to_owned());
+        S3::new(
+            &format!("{scheme}://{host}"),
+            bucket,
+            &region,
+            &var("AWS_ACCESS_KEY_ID"),
+            &var("AWS_SECRET_ACCESS_KEY"),
+            &prefix,
+        )
+    }
+
     /// The request path: `/<bucket>/<prefix><key>`, each segment percent-encoded.
     fn path(&self, key: &str) -> String {
         let full = format!("{}/{}{}", self.bucket, self.prefix, key);
@@ -98,11 +155,22 @@ impl S3 {
 
     /// The headers that sign one request (SigV4): `x-amz-date`, `x-amz-content-sha256` and `authorization`.
     fn sign(&self, method: &str, path: &str, payload: &[u8]) -> [(&'static str, String); 3] {
+        self.sign_query(method, path, "", payload)
+    }
+
+    /// [`S3::sign`] with a canonical query string (its pairs encoded and sorted by name).
+    fn sign_query(
+        &self,
+        method: &str,
+        path: &str,
+        query: &str,
+        payload: &[u8],
+    ) -> [(&'static str, String); 3] {
         let (date, stamp) = now();
         let body = to_hex(digest::digest(&digest::SHA256, payload).as_ref());
         let signed = "host;x-amz-content-sha256;x-amz-date";
         let canonical = format!(
-            "{method}\n{path}\n\nhost:{}\nx-amz-content-sha256:{body}\nx-amz-date:{stamp}\n\n{signed}\n{body}",
+            "{method}\n{path}\n{query}\nhost:{}\nx-amz-content-sha256:{body}\nx-amz-date:{stamp}\n\n{signed}\n{body}",
             self.host
         );
         let scope = format!("{date}/{}/s3/aws4_request", self.region);
@@ -132,6 +200,58 @@ impl S3 {
             ),
         ]
     }
+
+    /// After a 5xx or a lost answer to a create-only write, reads `key` back (#4014): the same bytes there count as
+    /// applied (their ETag), other bytes as the key existing (`precondition-failed`, what a 412 says), and nothing
+    /// there or no answer to the read leave the write `lost`, `store-unreachable`, so nothing is decided on it.
+    fn read_back(&self, key: &str, bytes: &[u8], lost: Refusal) -> R<String> {
+        match self.get(key) {
+            Ok(Some(o)) if o.bytes == bytes => Ok(o.etag),
+            Ok(Some(_)) => refuse(
+                "precondition-failed",
+                format!(
+                    "{key}: exists, other bytes, read back after {}",
+                    lost.detail
+                ),
+            ),
+            Ok(None) | Err(_) => Err(lost),
+        }
+    }
+}
+
+/// One page of a bucket listing (ListObjectsV2): its keys, and the token for the next page when it is cut short.
+fn listing(xml: &str) -> (Vec<String>, Option<String>) {
+    let tag = |s: &str, name: &str| -> Vec<String> {
+        let (open, close) = (format!("<{name}>"), format!("</{name}>"));
+        let mut out = Vec::new();
+        let mut rest = s;
+        while let Some(i) = rest.find(&open) {
+            let after = &rest[i + open.len()..];
+            let Some(j) = after.find(&close) else { break };
+            out.push(after[..j].to_owned());
+            rest = &after[j + close.len()..];
+        }
+        out
+    };
+    let truncated = tag(xml, "IsTruncated").first().is_some_and(|t| t == "true");
+    let next = tag(xml, "NextContinuationToken")
+        .first()
+        .map(|t| unescape(t));
+    let keys = tag(xml, "Contents")
+        .iter()
+        .flat_map(|c| tag(c, "Key"))
+        .map(|k| unescape(&k))
+        .collect();
+    (keys, next.filter(|_| truncated))
+}
+
+/// XML's five escapes, `&amp;` last.
+fn unescape(s: &str) -> String {
+    s.replace("&lt;", "<")
+        .replace("&gt;", ">")
+        .replace("&quot;", "\"")
+        .replace("&apos;", "'")
+        .replace("&amp;", "&")
 }
 
 /// Percent-encodes one path segment: all but `A-Z a-z 0-9 - . _ ~`.
@@ -219,11 +339,77 @@ impl Store for S3 {
         }
         req = match when {
             When::Absent => req.header("if-none-match", "*"),
-            When::Is(e) => req.header("if-match", format!("\"{e}\"")),
+            // The ETag bare, without quotes: R2 refuses a quoted `If-Match` on PutObject (412 even when it is the
+            // object's ETag) and takes the bare one (#1960).
+            When::Is(e) => req.header("if-match", e),
         };
-        let res = req.send(bytes).or_else(|e| unreachable(key, e))?;
-        status(res.status().as_u16(), key)?;
-        etag(&res, key)
+        let answered = req
+            .send(bytes)
+            .or_else(|e| unreachable(key, e))
+            .and_then(|res| status(res.status().as_u16(), key).map(|()| res));
+        match answered {
+            Ok(res) => etag(&res, key),
+            // A create-only write the store may have applied, though its answer was a 5xx or never came (#4014).
+            Err(e) if e.name == "store-unreachable" && when == When::Absent => {
+                self.read_back(key, bytes, e)
+            }
+            Err(e) => Err(e),
+        }
+    }
+
+    /// DeleteObject; a key that is not there is no refusal.
+    fn delete(&self, key: &str) -> R<()> {
+        let path = self.path(key);
+        let mut req = self.agent.delete(format!("{}{path}", self.endpoint));
+        for (k, v) in self.sign("DELETE", &path, b"") {
+            req = req.header(k, v);
+        }
+        let res = req.call().or_else(|e| unreachable(key, e))?;
+        match res.status().as_u16() {
+            404 => Ok(()),
+            code => status(code, key),
+        }
+    }
+
+    /// ListObjectsV2 under the store's prefix and `prefix`, page by page; the keys without the store's prefix.
+    fn list(&self, prefix: &str) -> R<Vec<String>> {
+        let path = format!("/{}", encode(&self.bucket));
+        let full = format!("{}{prefix}", self.prefix);
+        let mut keys = Vec::new();
+        let mut token: Option<String> = None;
+        loop {
+            let mut pairs = vec![("list-type", "2".to_owned()), ("prefix", full.clone())];
+            if let Some(t) = &token {
+                pairs.push(("continuation-token", t.clone()));
+            }
+            pairs.sort();
+            let query = pairs
+                .iter()
+                .map(|(k, v)| format!("{k}={}", encode(v)))
+                .collect::<Vec<_>>()
+                .join("&");
+            let mut req = self.agent.get(format!("{}{path}?{query}", self.endpoint));
+            for (k, v) in self.sign_query("GET", &path, &query, b"") {
+                req = req.header(k, v);
+            }
+            let mut res = req.call().or_else(|e| unreachable(prefix, e))?;
+            status(res.status().as_u16(), prefix)?;
+            let xml = res
+                .body_mut()
+                .read_to_string()
+                .or_else(|e| refuse("store-unreachable", format!("{prefix}: {e}")))?;
+            let (page, next) = listing(&xml);
+            keys.extend(
+                page.into_iter()
+                    .filter_map(|k| k.strip_prefix(&self.prefix).map(str::to_owned)),
+            );
+            match next {
+                Some(t) => token = Some(t),
+                None => break,
+            }
+        }
+        keys.sort();
+        Ok(keys)
     }
 }
 

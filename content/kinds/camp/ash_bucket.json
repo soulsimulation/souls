@@ -3,7 +3,7 @@
   "kind": "eden:ash_bucket",
   "owner": "thing",
   "state": {
-    "ash": { "n": 1, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 4, "audience": { "rule": "everyone" } }
+    "ash": { "n": 28, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 4, "audience": { "rule": "everyone" } }
   },
   "points": {
     "grip": { "role": "grip", "at_mm": [0, 400, 0] }

@@ -30,10 +30,15 @@ fn not<T>(what: &str) -> R<T> {
 /// The most bytes a first frame may have, checked the same way (rule 12).
 pub const HELLO_MOST: u64 = 256;
 pub const INTENT_MOST: u64 = 4096;
+/// The most bytes a creator's bulk edit may have (#3695): a landform's ground tiles, an imported world's part. Only a
+/// creator's edit is read over [`INTENT_MOST`]; it reaches the world by the gateway's creator route alone, as the
+/// agents' socket takes no message over the frame limit.
+pub const BULK_MOST: u64 = 8 << 20;
 /// The most fallbacks an intent may rank (rule 6).
 pub const FALLBACKS_MOST: u64 = 4;
-/// This protocol's version (rule 12). A change to any frame after the first raises it.
-pub const PROTOCOL: u64 = 1;
+/// This protocol's version (rule 12). A change to any frame after the first raises it: 2 added field 12, the reflex
+/// marker (#3764).
+pub const PROTOCOL: u64 = 2;
 
 /// The verbs that are the engine's own (rule 4): a move inside a joint activity, a cancel, and the orders.
 pub const MOVE: &str = "souls:move";
@@ -52,6 +57,8 @@ pub enum Kind {
     Order,
     /// A cancel of an earlier intent of the same actor, named by `replaces`.
     Cancel,
+    /// A creator's edit: a batch of place, move, set and remove operations under one cause (rule 15).
+    Edit,
 }
 
 /// A target (rule 3): a node, or a selector from a closed list (E2 fills it) that the engine binds at commit and
@@ -81,7 +88,8 @@ pub struct Fallback {
 }
 
 /// An intent's envelope (rules 2 and 3): `{1: actor, 2: verb, 3: target, 4: parameters, 5: sequence, 6: basis,
-/// 7: expiry, 8: resources, 9: fallbacks, 10: replaces, 11: body}`. 3, 4, 8, 9, 10 and 11 are left out when empty;
+/// 7: expiry, 8: resources, 9: fallbacks, 10: replaces, 11: body, 12: reflex}`. 3, 4, 8, 9, 10, 11 and 12 are left
+/// out when empty (12 is `1` when there);
 /// 11, the world-owned body a creator drives, is there exactly when the actor is a creator (proposed for the owner's
 /// decision at the trunk stop, rule 3). There is no field for a start time or a condition.
 #[derive(Clone, Debug, PartialEq, Eq)]
@@ -101,6 +109,10 @@ pub struct Intent {
     pub replaces: Option<u64>,
     /// The world-owned body a creator drives; none for a Soul, whose body is its own.
     pub body: Option<Id>,
+    /// Sent by the Soul's client on its own standing consent (an R9 reflex), not by its agent (#3764): it does not
+    /// count as the agent acting, so it neither keeps a body from going idle nor wakes it (B16). Left out (`false`)
+    /// for an agent's act and by every client older than protocol 2.
+    pub reflex: bool,
 }
 
 fn map(pairs: Vec<(u64, Value)>) -> Value {
@@ -272,24 +284,44 @@ impl Intent {
     /// (`intent-too-large`); then the record (`intent-not-a-record`, unknown fields included, `not-canonical`), the
     /// verb (`order-unknown` for an engine verb outside the closed list), the fallbacks (`fallbacks-too-many`,
     /// `fallback-not-an-act`, `fallbacks-not-on-an-act`), each kind's shape (`order-without-target`,
-    /// `cancel-without-replaces`, `cancel-not-bare`) and the driven body (`creator-without-body`,
-    /// `body-not-a-creators`).
+    /// `cancel-without-replaces`, `cancel-not-bare`, `edit-not-bare`, `edit-not-a-batch`) and the driven body
+    /// (`creator-without-body`, `body-not-a-creators`; an edit drives none).
+    /// Over [`INTENT_MOST`] bytes, only a creator's edit of at most [`BULK_MOST`] is read (#3695); anything else is
+    /// `intent-too-large`, whatever else is wrong with it.
     pub fn read(bytes: &[u8]) -> R<Intent> {
         let size = u64::try_from(bytes.len()).unwrap_or(u64::MAX);
-        if size > INTENT_MOST {
-            return refuse(
-                "intent-too-large",
-                format!("{size} bytes; at most {INTENT_MOST}"),
-            );
+        if size <= INTENT_MOST {
+            return Intent::parse(bytes);
         }
+        let too = || {
+            refuse(
+                "intent-too-large",
+                format!("{size} bytes; at most {INTENT_MOST}, or {BULK_MOST} for a creator's edit"),
+            )
+        };
+        if size > BULK_MOST {
+            return too();
+        }
+        match Intent::parse(bytes) {
+            Ok(i)
+                if matches!(i.actor, Actor::Creator(_))
+                    && i.verb.as_str() == crate::edit::wire::VERB =>
+            {
+                Ok(i)
+            }
+            _ => too(),
+        }
+    }
+
+    fn parse(bytes: &[u8]) -> R<Intent> {
         let v = decode(bytes)
             .or_else(|e| refuse("encoding", e.to_string()))?
             .value;
         let Value::Map(m) = &v else {
             return not("an intent");
         };
-        if m.keys().any(|k| *k == 0 || *k > 11) {
-            return not("an intent's fields are 1 to 11; none is a start time or a condition");
+        if m.keys().any(|k| *k == 0 || *k > 12) {
+            return not("an intent's fields are 1 to 12; none is a start time or a condition");
         }
         let fallbacks = match m.get(&9) {
             None => Vec::new(),
@@ -331,6 +363,11 @@ impl Intent {
                 Some(_) => return not("replaces"),
             },
             body: m.get(&11).map(read_id).transpose()?,
+            reflex: match m.get(&12) {
+                None => false,
+                Some(Value::Uint(1)) => true,
+                Some(_) => return not("a reflex marker is 1, or left out"),
+            },
         };
         let kind = intent.kind()?;
         if kind != Kind::Act && !intent.fallbacks.is_empty() {
@@ -350,8 +387,20 @@ impl Intent {
                 return refuse("cancel-not-bare", "a cancel carries only what it ends");
             }
         }
+        if kind == Kind::Edit {
+            // An edit drives no body, and the world decides who may send one (`edit.not-the-creator`).
+            if intent.target.is_some()
+                || !intent.resources.is_empty()
+                || intent.replaces.is_some()
+                || intent.body.is_some()
+            {
+                return refuse("edit-not-bare", "an edit carries only its batch");
+            }
+            crate::edit::wire::asked(&intent.parameters)
+                .or_else(|why| refuse("edit-not-a-batch", why))?;
+        }
         match (intent.actor, intent.body) {
-            (Actor::Creator(_), None) => {
+            (Actor::Creator(_), None) if kind != Kind::Edit => {
                 return refuse(
                     "creator-without-body",
                     "a creator names the world's body it drives",
@@ -368,14 +417,16 @@ impl Intent {
         Ok(intent)
     }
 
-    /// The intent's kind, by its verb (rule 4): an engine verb (`souls:`) is a move, a cancel or one of the closed
-    /// orders, or `order-unknown`; any other verb is an act.
+    /// The intent's kind, by its verb (rule 4): an engine verb (`souls:`) is a move, a cancel, an edit (rule 15) or
+    /// one of the closed orders, or `order-unknown`; any other verb is an act.
     pub fn kind(&self) -> R<Kind> {
         let v = self.verb.as_str();
         if v == MOVE {
             Ok(Kind::Move)
         } else if v == CANCEL {
             Ok(Kind::Cancel)
+        } else if v == crate::edit::wire::VERB {
+            Ok(Kind::Edit)
         } else if ORDERS.contains(&v) {
             Ok(Kind::Order)
         } else if v.starts_with("souls:") {
@@ -383,6 +434,12 @@ impl Intent {
         } else {
             Ok(Kind::Act)
         }
+    }
+
+    /// Whether this intent is its Soul's agent acting (#3764): a Soul's intent not marked as a reflex. What the idle
+    /// and wind-down rule (B16) counts; a creator's intent is not a Soul's agent.
+    pub fn agent_act(&self) -> bool {
+        matches!(self.actor, Actor::Soul(_)) && !self.reflex
     }
 
     pub fn to_value(&self) -> Value {
@@ -408,6 +465,9 @@ impl Intent {
         }
         m.extend(self.replaces.map(|r| (10, Value::Uint(r))));
         m.extend(self.body.map(|b| (11, b.to_value())));
+        if self.reflex {
+            m.push((12, Value::Uint(1)));
+        }
         map(m)
     }
 }
@@ -429,21 +489,25 @@ pub const ANSWER_TIMES: u64 = 3;
 /// actor and a sequence are read get the unread answer.
 #[derive(Clone, Debug, PartialEq, Eq)]
 pub enum Answer {
-    /// `{1: actor, 2: sequence, 3: 1, 4: intent id, 5: [log sequence, ...]}`.
+    /// `{1: actor, 2: sequence, 3: 1, 4: intent id, 5: [log sequence, ...], 6: {name: id}}`: 6, an edit's map from
+    /// each placed node's temporary name to the id the engine minted (rule 15), left out when empty.
     Receipt {
         actor: Actor,
         sequence: u64,
         intent: Id,
         entries: Vec<u64>,
+        names: BTreeMap<u64, Id>,
     },
-    /// `{1: actor, 2: sequence, 3: 2, 4: reason, 5: version now, 6: [node, ...] changed since the basis}`, 6 left out
-    /// when empty.
+    /// `{1: actor, 2: sequence, 3: 2, 4: reason, 5: version now, 6: [node, ...] changed since the basis, 7: the
+    /// failing operation}`: 6 left out when empty; 7, an edit's operation by its place in the batch (rule 15), left
+    /// out when none.
     Refused {
         actor: Actor,
         sequence: u64,
         reason: Name,
         now: Value,
         changed: Vec<Id>,
+        op: Option<u64>,
     },
     /// `{1: actor, 2: sequence, 3: 3, 4: intent id}`: a move accepted, to be resolved.
     Accepted {
@@ -472,6 +536,7 @@ impl Answer {
                 sequence,
                 intent,
                 entries,
+                names,
             } => {
                 let mut m = head(a, sequence, 1);
                 m.push((4, intent.to_value()));
@@ -479,6 +544,12 @@ impl Answer {
                     5,
                     Value::Array(entries.iter().map(|e| Value::Uint(*e)).collect()),
                 ));
+                if !names.is_empty() {
+                    m.push((
+                        6,
+                        Value::Map(names.iter().map(|(n, id)| (*n, id.to_value())).collect()),
+                    ));
+                }
                 map(m)
             }
             Answer::Refused {
@@ -487,6 +558,7 @@ impl Answer {
                 reason,
                 now,
                 changed,
+                op,
             } => {
                 let mut m = head(a, sequence, 2);
                 m.push((4, Value::Text(reason.clone())));
@@ -497,6 +569,7 @@ impl Answer {
                         Value::Array(changed.iter().map(|i| i.to_value()).collect()),
                     ));
                 }
+                m.extend(op.map(|o| (7, Value::Uint(o))));
                 map(m)
             }
             Answer::Accepted {
@@ -680,7 +753,7 @@ impl Checker {
 // --- The fixtures -------------------------------------------------------------------------------------------------
 
 /// The golden intents, as diagnostic notation (rule 14).
-pub const FIXTURES: [(&str, &str); 8] = [
+pub const FIXTURES: [(&str, &str); 10] = [
     ("act", include_str!("../fixtures/intents/act.diag")),
     ("move", include_str!("../fixtures/intents/move.diag")),
     (
@@ -692,6 +765,8 @@ pub const FIXTURES: [(&str, &str); 8] = [
     ("queue", include_str!("../fixtures/intents/queue.diag")),
     ("cancel", include_str!("../fixtures/intents/cancel.diag")),
     ("replace", include_str!("../fixtures/intents/replace.diag")),
+    ("edit", include_str!("../fixtures/intents/edit.diag")),
+    ("reflex", include_str!("../fixtures/intents/reflex.diag")),
 ];
 
 /// The intents goldens, one per line, `name kind hex`, as `fixtures/intents/goldens.txt` holds them: the native test

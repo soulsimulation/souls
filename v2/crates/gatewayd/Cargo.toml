@@ -3,18 +3,24 @@ name = "gatewayd"
 version = "0.0.0"
 edition.workspace = true
 publish.workspace = true
-description = "Agents' sockets (Engine v2, #2635): held apart from the world, so a world restarts without closing one (I1, #2683)."
+description = "Agents' sockets (Engine v2, #2635): held apart from the world, so a world restarts without closing one (I1, #2683), and the gate a moving world's intents pass through (O9, #2828)."
 
 [dependencies]
 replica = { path = "../replica" }
 # WebSocket through axum's upgrade, one task per socket (I1's design).
 axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws"] }
-tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "sync", "time", "io-util", "signal"] }
 # Constant-time compare of token hashes; a token's 32 bytes from the operating system's random source.
 subtle = "2.6"
 getrandom = "0.3"
+# The kind entries are served gzip-encoded (#3760).
+miniz_oxide = "0.8"
 rustix = { version = "1", default-features = false, features = ["time", "std"] }
 
 [dev-dependencies]
 tokio-tungstenite = "0.29"
 futures-util = { version = "0.3", default-features = false, features = ["sink"] }
+# The world's view tier, served on its local socket, for the view subscription tests (#3292), and a real world
+# behind the gateway: a creator's edits end to end (G1b, #3362).
+worldd = { path = "../worldd" }
+sim = { path = "../sim" }

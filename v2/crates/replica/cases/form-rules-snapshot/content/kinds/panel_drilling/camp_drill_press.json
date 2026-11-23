@@ -1,0 +1,244 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:camp_drill_press",
+  "owner": "thing",
+  "state": {
+    "cutter_uses": {
+      "n": 1,
+      "type": "int",
+      "unit": "count",
+      "default": 4,
+      "min": 0,
+      "max": 4,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        1100
+      ],
+      "yaw_mdeg": 180000
+    },
+    "handle": {
+      "role": "grip",
+      "at_mm": [
+        200,
+        1350,
+        -290
+      ]
+    }
+  },
+  "slots": {
+    "bed": {
+      "admits": "thing",
+      "kinds": [
+        "eden:drilling_panel"
+      ],
+      "most": 1,
+      "at_mm": [
+        0,
+        990,
+        0
+      ],
+      "stand": "front"
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      900,
+      1390,
+      800
+    ]
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:camp_drill_press",
+    "table": [
+      {
+        "part": "fill",
+        "field": "cutter_uses",
+        "do": "scale",
+        "axis": "y",
+        "range": [
+          0,
+          4
+        ],
+        "to": [
+          0,
+          1000
+        ]
+      }
+    ],
+    "shape": {
+      "round": 0,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            965,
+            0
+          ],
+          "size": [
+            900,
+            30,
+            800
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            475,
+            0
+          ],
+          "size": [
+            200,
+            950,
+            500
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1170,
+            -290
+          ],
+          "size": [
+            70,
+            390,
+            70
+          ],
+          "tint": "metal"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            1350,
+            -200
+          ],
+          "size": [
+            90,
+            60,
+            240
+          ],
+          "tint": "metal"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            0,
+            1200,
+            -100
+          ],
+          "r": 12,
+          "h": 240,
+          "segments": 8,
+          "tint": "metal"
+        },
+        {
+          "kind": "box",
+          "at": [
+            100,
+            1350,
+            -290
+          ],
+          "size": [
+            400,
+            25,
+            25
+          ],
+          "tint": "metal"
+        },
+        {
+          "kind": "cyl",
+          "at": [
+            300,
+            1350,
+            -290
+          ],
+          "r": 30,
+          "h": 40,
+          "segments": 8,
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -330,
+            1050,
+            -330
+          ],
+          "size": [
+            40,
+            140,
+            40
+          ],
+          "tint": "dark"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -330,
+            1050,
+            -330
+          ],
+          "size": [
+            46,
+            130,
+            46
+          ],
+          "tint": "charge",
+          "role": "fill",
+          "pivot": [
+            -330,
+            985,
+            -330
+          ]
+        }
+      ],
+      "palette": {
+        "wood": "#765a3e",
+        "metal": "#7e878b",
+        "dark": "#2e2a26",
+        "charge": "#dfb54f"
+      },
+      "tags": [
+        "camping",
+        "tool",
+        "table",
+        "drill",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "card": "A hand drill press with four cutter uses: bore holes in a wooden panel on it.",
+    "drill": "drill",
+    "bore": "bore",
+    "workshop": "workshop"
+  },
+  "card": {
+    "text": "card",
+    "category": "drill",
+    "synonyms": [
+      "bore",
+      "workshop"
+    ]
+  }
+}

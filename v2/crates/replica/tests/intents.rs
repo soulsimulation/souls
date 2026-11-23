@@ -31,6 +31,8 @@ fn a1_golden_envelopes_for_every_kind_of_intent() {
         ("queue", Kind::Order),
         ("cancel", Kind::Cancel),
         ("replace", Kind::Act),
+        ("edit", Kind::Edit),
+        ("reflex", Kind::Act),
     ];
     for (name, kind) in want {
         let (bytes, i) = intent(name);
@@ -242,6 +244,104 @@ fn a4_an_order_outside_the_list_and_an_oversized_intent_are_refused_by_name() {
     assert_eq!(r, Err("fallbacks-too-many"));
 }
 
+/// G1b (#3362), rule 15: the edit golden reads to its batch of four operations, its basis as the planned version, and
+/// writes back to the same parameters; answers to every other kind keep their bytes (fields 6 and 7 left out).
+#[test]
+fn g1b_an_edit_reads_to_its_batch_and_other_answers_keep_their_bytes() {
+    use replica::edit::Op;
+    use replica::edit::wire::{edit_of, parameters};
+    use replica::effects::Actor;
+    use replica::ids::{Id, Scope};
+    use replica::intents::Answer;
+    let (_, i) = intent("edit");
+    let id = Id::new(Scope([9; 16]), 1).expect("an id");
+    let e = edit_of(&i, id).expect("an edit");
+    let kinds: Vec<&str> = e
+        .ops
+        .iter()
+        .map(|o| match o {
+            Op::Place { .. } => "place",
+            Op::Move { .. } => "move",
+            Op::Set { .. } => "set",
+            Op::Remove { .. } => "remove",
+            Op::Doorway { .. } => "doorway",
+        })
+        .collect();
+    println!(
+        "edit: actor {:?}, planned {}, ops {kinds:?}",
+        e.actor, e.planned
+    );
+    assert_eq!(kinds, ["place", "move", "set", "remove"]);
+    assert_eq!((e.planned, e.intent), (42, id));
+    assert!(matches!(e.actor, Actor::Creator(_)));
+    assert!(
+        matches!(&e.ops[0], Op::Place { kind, .. } if kind.as_str().starts_with("souls:crate@1220"))
+    );
+    assert_eq!(parameters(&e.ops), i.parameters);
+    // A Soul's edit reads too: the world, not the decoder, refuses it (`edit.not-the-creator`).
+    let mut soul = i.clone();
+    soul.actor = Actor::Soul(Id::new(Scope([0xdd; 16]), 100).expect("an id"));
+    let bytes = encode(&soul.to_value()).expect("bytes");
+    assert_eq!(Intent::read(&bytes).map(|s| s.kind()), Ok(Ok(Kind::Edit)));
+    // A receipt without names and a refusal without an operation are the answers they were.
+    let keys = |a: &Answer| match a.to_value() {
+        Value::Map(m) => m.keys().copied().collect::<Vec<_>>(),
+        _ => Vec::new(),
+    };
+    let receipt = Answer::Receipt {
+        actor: e.actor,
+        sequence: 1,
+        intent: id,
+        entries: vec![3],
+        names: Default::default(),
+    };
+    let refused = Answer::Refused {
+        actor: e.actor,
+        sequence: 1,
+        reason: replica::encode::Name::new("act.refused").expect("a name"),
+        now: i.basis.clone(),
+        changed: Vec::new(),
+        op: None,
+    };
+    assert_eq!(keys(&receipt), [1, 2, 3, 4, 5]);
+    assert_eq!(keys(&refused), [1, 2, 3, 4, 5]);
+}
+
+#[test]
+fn g1f_doorway_wire_roundtrip_keeps_owned_geometry_under_strict_i2() {
+    use replica::edit::wire::{parameters, read};
+    use replica::edit::{Op, Ref};
+    use replica::ids::{Id, Scope};
+    let node = |n| Ref::Node(Id::new(Scope([0xdd; 16]), n).unwrap());
+    let row = |n| Value::Array(vec![Value::Uint(n); 9]);
+    let ops = vec![Op::Doorway {
+        name: 7,
+        door: node(1),
+        from: node(2),
+        to: node(3),
+        at: [-500, 0],
+        yaw: 90000,
+        width: 1200,
+        height: 2100,
+        wall: node(4),
+        closed: vec![row(1)],
+        open: vec![row(2), row(3)],
+    }];
+    let (_, mut i) = intent("edit");
+    i.parameters = parameters(&ops);
+    let bytes = encode(&i.to_value()).unwrap();
+    let decoded = replica::intent_decode::decode(&bytes).unwrap();
+    assert_eq!(read(&decoded.parameters).unwrap(), ops);
+    let Value::Array(batch) = i.parameters.get_mut(&1).unwrap() else {
+        panic!("batch")
+    };
+    let Value::Map(op) = &mut batch[0] else {
+        panic!("operation")
+    };
+    op.insert(11, Value::Uint(0));
+    assert!(replica::intent_decode::decode(&encode(&i.to_value()).unwrap()).is_err());
+}
+
 /// The checker artifact itself (rule 13): when CI has built it (`CHECKER_WASM`, the `checker-artifact` step of
 /// `v2/tools/ci.sh`), it loads by its own hash. Without the variable this test says so and checks nothing.
 #[test]
@@ -255,4 +355,95 @@ fn the_built_checker_artifact_loads_by_its_hash() {
     let r = Checker::load(&bytes, &want).map(|c| to_hex(&c.build));
     println!("{} bytes: {r:?}", bytes.len());
     assert!(r.is_ok(), "{r:?}");
+}
+
+/// #3764: a reflex is marked (field 12 is 1) and an agent's act is not; a reflex is not its agent acting, and a
+/// marker other than 1 is refused.
+#[test]
+fn reflex_a1_a_reflex_is_marked_and_an_agents_act_is_not() {
+    let (act_bytes, act) = intent("act");
+    let (reflex_bytes, reflex) = intent("reflex");
+    assert!(!act.reflex && act.agent_act(), "an agent's act: unmarked");
+    assert!(reflex.reflex && !reflex.agent_act(), "a reflex: marked");
+    // The same act but for the marker, which is the envelope's last field: `12: 1`, two bytes, and one more field.
+    assert_eq!(reflex_bytes[0], act_bytes[0] + 1);
+    assert_eq!(&reflex_bytes[1..reflex_bytes.len() - 2], &act_bytes[1..]);
+    assert_eq!(&reflex_bytes[reflex_bytes.len() - 2..], &[0x0c, 0x01]);
+    let mut unmarked = reflex.clone();
+    unmarked.reflex = false;
+    assert_eq!(unmarked, act);
+    // Only `1` marks a reflex: `12: 0` and `12: 2` are not records.
+    for bad in [0x00, 0x02] {
+        let mut b = reflex_bytes.clone();
+        *b.last_mut().expect("a byte") = bad;
+        let r = Intent::read(&b).expect_err("refused");
+        assert_eq!(r.name, "intent-not-a-record", "12: {bad}");
+    }
+    println!(
+        "reflex: {} (an agent's act: {})",
+        to_hex(&reflex_bytes),
+        to_hex(&act_bytes)
+    );
+}
+
+/// #3695: over the frame limit, only a creator's edit is read (a landform's ground tiles), up to `BULK_MOST`; the same
+/// bytes from a Soul, or a creator's edit over `BULK_MOST`, are `intent-too-large`.
+#[test]
+fn a_creators_bulk_edit_is_read_over_the_frame_limit_and_nothing_else_is() {
+    use replica::edit::wire::{VERB, parameters};
+    use replica::edit::{Op, Ref};
+    use replica::effects::Actor;
+    use replica::encode::Name;
+    use replica::ids::{Id, Scope, Version};
+    use replica::intents::BULK_MOST;
+    let ground = Id::new(Scope([0x0a; 16]), 3).expect("an id");
+    let edit = |actor: Actor, bytes: usize| {
+        let ops = [Op::Set {
+            node: Ref::Node(ground),
+            field: 25,
+            to: Value::Array(vec![Value::Bytes(vec![7; bytes])]),
+        }];
+        let i = Intent {
+            actor,
+            verb: Name::new(VERB).expect("a name"),
+            target: None,
+            parameters: parameters(&ops),
+            sequence: 1,
+            basis: Version {
+                lineage: Scope([0x0a; 16]),
+                zone: Id::new(Scope([0x0a; 16]), 0).expect("an id"),
+                epoch: 1,
+                sequence: 1,
+            }
+            .to_value(),
+            expiry: i64::MAX,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+            reflex: false,
+        };
+        encode(&i.to_value()).expect("bytes")
+    };
+    let creator = Actor::Creator(Id::new(Scope([0xc0; 16]), 1).expect("an id"));
+    let soul = Actor::Soul(Id::new(Scope([0x50; 16]), 1).expect("an id"));
+    let tiles = edit(creator, 64 << 10);
+    assert!(tiles.len() as u64 > INTENT_MOST);
+    let read = Intent::read(&tiles).expect("a creator's bulk edit is read");
+    assert_eq!(read.actor, creator);
+    let r = Intent::read(&edit(soul, 64 << 10)).map_err(|r| r.name);
+    assert_eq!(r.err(), Some("intent-too-large"), "a Soul's is not");
+    let over = edit(creator, usize::try_from(BULK_MOST).expect("small"));
+    assert_eq!(
+        Intent::read(&over).map_err(|r| r.name).err(),
+        Some("intent-too-large")
+    );
+    // The gateway's creator route reads it the same way; its socket keeps the frame limit.
+    assert!(replica::intent_decode::decode_bulk(&tiles).is_ok());
+    assert_eq!(
+        replica::intent_decode::decode(&tiles)
+            .map_err(|r| r.name)
+            .err(),
+        Some("intent.too-large")
+    );
 }

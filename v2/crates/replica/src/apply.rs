@@ -16,7 +16,7 @@ use crate::encode::{Name, Value, encode};
 use crate::hash::{Chain, state_hash, step_hash};
 use crate::ids::Id;
 use crate::tree::{Sealed, Tree};
-use std::collections::{BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet};
 
 type R<T> = Result<T, Refusal>;
 
@@ -33,7 +33,7 @@ pub struct Replica {
     header: Header,
     version: u64,
     /// The version each node last changed at, removed nodes included. Lookup only: never walked.
-    pub(crate) changed_at: HashMap<Id, u64>,
+    pub(crate) changed_at: BTreeMap<Id, u64>,
     /// The same, ordered by version and then id, so that what changed since a version is a range.
     pub(crate) by_version: BTreeSet<(u64, Id)>,
 }
@@ -92,9 +92,55 @@ impl Replica {
             tree,
             header,
             version: 0,
-            changed_at: HashMap::new(),
+            changed_at: BTreeMap::new(),
             by_version: BTreeSet::new(),
         })
+    }
+
+    /// A copy from a tree read back from a checkpoint (K5's `restore`) at `version`, the number of log entries it
+    /// holds (K18c, #3176). Each node's last change is taken as `version`: a reader asking what changed since an
+    /// older version is given every node, never too few.
+    pub fn restored(header: Header, tree: Tree, version: u64) -> Replica {
+        let mut changed_at = BTreeMap::new();
+        let mut by_version = BTreeSet::new();
+        let mut stack = vec![tree.root()];
+        while let Some(h) = stack.pop() {
+            if let Some(n) = tree.node(h) {
+                changed_at.insert(n.id(), version);
+                by_version.insert((version, n.id()));
+            }
+            stack.extend(tree.children(h).unwrap_or_default().iter().copied());
+        }
+        Replica {
+            tree,
+            header,
+            version,
+            changed_at,
+            by_version,
+        }
+    }
+
+    /// As [`Replica::restored`], with each node's last change as it was (#3833): a copy carried across a restart
+    /// answers what changed, and a node's version, as the copy that applied every entry does.
+    pub fn restored_at(
+        header: Header,
+        tree: Tree,
+        version: u64,
+        changed_at: BTreeMap<Id, u64>,
+    ) -> Replica {
+        let by_version = changed_at.iter().map(|(id, v)| (*v, *id)).collect();
+        Replica {
+            tree,
+            header,
+            version,
+            changed_at,
+            by_version,
+        }
+    }
+
+    /// Each node's last change (#3833), for [`Replica::restored_at`].
+    pub fn changed_at(&self) -> &BTreeMap<Id, u64> {
+        &self.changed_at
     }
 
     pub fn header(&self) -> &Header {
@@ -103,6 +149,12 @@ impl Replica {
 
     pub fn tree(&self) -> &Tree {
         &self.tree
+    }
+
+    /// The tree for K5's checkpoint to seal and for the tick's state hash (K20; each hashes the nodes marked changed
+    /// and clears its marks; neither changes a node). Nothing else writes through it (K18, #3160).
+    pub fn tree_for_seal(&mut self) -> &mut Tree {
+        &mut self.tree
     }
 
     /// Seals the tree ([`Tree::seal`]): a world serving R5's sync answers from its last seal (R5b, #3164).
@@ -246,7 +298,7 @@ impl Replica {
     /// records, the node that writes it and the subtree that leaves; T5's and timers', the node that writes them.
     fn touched(&self, e: &Effect) -> Vec<Id> {
         let mut out = vec![e.envelope.node];
-        let mut new_links: HashMap<Id, [Id; 2]> = HashMap::new();
+        let mut new_links: BTreeMap<Id, [Id; 2]> = BTreeMap::new();
         match &e.body {
             Body::Changes(changes) => {
                 for c in changes {

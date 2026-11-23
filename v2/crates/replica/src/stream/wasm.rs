@@ -1,6 +1,7 @@
 //! The stream reader's WASM bindings (Engine v2 V1, #2710): a page passes a pointer's or a part's file bytes in and
 //! gets JSON back; the replica stays inside WASM memory. Every method calls the same Rust the native build runs.
 
+use super::public::PublicPlayer;
 use super::{Player, Pointer, StreamPart};
 use crate::effects::Refusal;
 use wasm_bindgen::prelude::{JsError, wasm_bindgen};
@@ -12,7 +13,50 @@ fn js(r: Refusal) -> JsError {
 /// A pointer file's bytes as JSON ([`Pointer::to_json`]).
 #[wasm_bindgen(js_name = readPointer)]
 pub fn read_pointer(bytes: &[u8]) -> Result<String, JsError> {
-    Pointer::read(bytes).map(|p| p.to_json()).map_err(js)
+    let p = Pointer::read(bytes).map_err(js)?;
+    let mut json = p.to_json();
+    let m = super::read_map(bytes, "pointer").map_err(js)?;
+    if let Some(crate::encode::Value::Bytes(hash)) = m.get(&8) {
+        if hash.len() != 32 {
+            return Err(JsError::new("public baseline hash"));
+        }
+        json.pop();
+        json.push_str(&format!(
+            ",\"baseline\":\"{}\",\"generation\":\"{}\"}}",
+            crate::encode::to_hex(hash),
+            crate::encode::to_hex(hash)
+        ));
+    }
+    if let Some(crate::encode::Value::Array(h)) = m.get(&9) {
+        let [
+            crate::encode::Value::Uint(version),
+            crate::encode::Value::Uint(next),
+            crate::encode::Value::Bytes(hash),
+        ] = h.as_slice()
+        else {
+            return Err(JsError::new("legacy handoff"));
+        };
+        if hash.len() != 32 {
+            return Err(JsError::new("handoff digest"));
+        }
+        json.pop();
+        json.push_str(&format!(
+            ",\"legacyVersion\":{version},\"legacyNext\":{next},\"legacyHash\":\"{}\"}}",
+            crate::encode::to_hex(hash)
+        ));
+    }
+    // #3825: the generation the field-9 handoff closes, when it is a generation rather than the legacy stream.
+    if let Some(crate::encode::Value::Bytes(from)) = m.get(&10) {
+        if from.len() != 32 {
+            return Err(JsError::new("handoff generation"));
+        }
+        json.pop();
+        json.push_str(&format!(
+            ",\"handoffFrom\":\"{}\"}}",
+            crate::encode::to_hex(from)
+        ));
+    }
+    Ok(json)
 }
 
 /// A part file's number and world times, as JSON (`{"number", "from", "to", "entries"}`), without playing it.
@@ -27,24 +71,67 @@ pub fn read_part(bytes: &[u8]) -> Result<String, JsError> {
 
 /// One stream's reader, held in WASM memory.
 #[wasm_bindgen(js_name = StreamPlayer)]
-pub struct WasmPlayer(Player);
+pub struct WasmPlayer(Copy);
+enum Copy {
+    Legacy(Box<Player>),
+    Public(Box<PublicPlayer>),
+}
 
 #[wasm_bindgen(js_class = StreamPlayer)]
 impl WasmPlayer {
     /// A reader at the stream's start, from the header file's bytes.
     #[wasm_bindgen(constructor)]
     pub fn new(header: &[u8]) -> Result<WasmPlayer, JsError> {
-        Player::start(header).map(WasmPlayer).map_err(js)
+        Player::start(header)
+            .map(|p| WasmPlayer(Copy::Legacy(Box::new(p))))
+            .map_err(js)
+    }
+
+    /// A validated public observation, retaining exact root kinds and opaque frame references.
+    #[wasm_bindgen(js_name = fromBaseline)]
+    pub fn from_baseline(header: &[u8], baseline: &[u8]) -> Result<WasmPlayer, JsError> {
+        PublicPlayer::start(header, baseline)
+            .map(|p| WasmPlayer(Copy::Public(Box::new(p))))
+            .map_err(js)
     }
 
     /// Plays the next part's file bytes; what it did, as JSON ([`super::Played::to_json`]).
     pub fn play(&mut self, bytes: &[u8]) -> Result<String, JsError> {
-        self.0.play(bytes).map(|p| p.to_json()).map_err(js)
+        match &mut self.0 {
+            Copy::Legacy(p) => p.play(bytes),
+            Copy::Public(p) => p.play(bytes),
+        }
+        .map(|p| p.to_json())
+        .map_err(js)
+    }
+
+    /// [`WasmPlayer::play`] for a part a joiner far behind will not show (#3822): every check but the next state's
+    /// digest, which [`WasmPlayer::verify`] or the next part played with `play` works out once. A legacy copy plays it
+    /// checked.
+    #[wasm_bindgen(js_name = playDeferred)]
+    pub fn play_deferred(&mut self, bytes: &[u8]) -> Result<String, JsError> {
+        match &mut self.0 {
+            Copy::Legacy(p) => p.play(bytes),
+            Copy::Public(p) => p.play_deferred(bytes),
+        }
+        .map(|p| p.to_json())
+        .map_err(js)
+    }
+
+    /// Refuses (`stream-digest`) unless the state the deferred parts made has the digest the newest part claimed.
+    pub fn verify(&mut self) -> Result<(), JsError> {
+        match &mut self.0 {
+            Copy::Legacy(_) => Ok(()),
+            Copy::Public(p) => p.verify().map_err(js),
+        }
     }
 
     /// The number of the part it expects next.
     pub fn next(&self) -> u64 {
-        self.0.next()
+        match &self.0 {
+            Copy::Legacy(p) => p.next(),
+            Copy::Public(p) => p.next(),
+        }
     }
 
     /// The motion samples of the part played last, every one in entry order (V6, #2715), as JSON:
@@ -53,9 +140,11 @@ impl WasmPlayer {
         let key = |id: crate::ids::Id| {
             format!("{}.{}", crate::encode::to_hex(&id.scope().0), id.counter())
         };
-        let rows: Vec<String> = self
-            .0
-            .samples()
+        let samples = match &self.0 {
+            Copy::Legacy(p) => p.samples(),
+            Copy::Public(p) => p.samples(),
+        };
+        let rows: Vec<String> = samples
             .iter()
             .map(|h| {
                 let p = h.pose.position;
@@ -77,9 +166,56 @@ impl WasmPlayer {
         format!("[{}]", rows.join(","))
     }
 
+    /// The event query (V1b, #3361): the named events of the part played last, as `[{1: name, 2: fields, 3: node, 4:
+    /// at, 5: sequence}, ...]` in T0's profile ([`Player::events`]).
+    pub fn events(&self) -> Result<Vec<u8>, JsError> {
+        crate::encode::encode(&crate::encode::Value::Array(
+            match &self.0 {
+                Copy::Legacy(p) => p.events(),
+                Copy::Public(p) => p.events(),
+            }
+            .to_vec(),
+        ))
+        .map_err(|e| JsError::new(&e.to_string()))
+    }
+
+    /// Continues on the next generation, both given in hex, without its baseline ([`PublicPlayer::cross`], #3825).
+    pub fn cross(&mut self, generation: &str, digest: &str) -> Result<(), JsError> {
+        let hex = |h: &str| crate::encode::from_hex(h).map_err(|e| JsError::new(&e));
+        match &mut self.0 {
+            Copy::Legacy(_) => Err(JsError::new("a legacy copy does not cross")),
+            Copy::Public(p) => p.cross(&hex(generation)?, &hex(digest)?).map_err(js),
+        }
+    }
+
+    /// Exact public projection digest, including unresolved references, for an explicit legacy handoff.
+    #[wasm_bindgen(js_name = publicHash)]
+    pub fn public_hash(&self) -> Result<String, JsError> {
+        let hash = match &self.0 {
+            Copy::Legacy(p) => super::public::digest(
+                &super::public::project(p.replica().header(), &p.replica().tree().to_state())
+                    .map_err(js)?,
+            ),
+            Copy::Public(p) => p.hash(),
+        }
+        .map_err(js)?;
+        Ok(crate::encode::to_hex(&hash))
+    }
+    /// Complete authorized live public node records, including unresolved local frames.
+    pub fn snapshot(&self) -> Result<Vec<u8>, JsError> {
+        match &self.0 {
+            Copy::Public(p) => p.snapshot().map_err(js),
+            Copy::Legacy(_) => Err(JsError::new("legacy snapshot unavailable")),
+        }
+    }
+
     /// Answers one query on the copy it has played (R1's `query.rs`, Engine v2 V5 #2714).
     pub fn query(&self, query: &[u8]) -> Result<Vec<u8>, JsError> {
-        self.0.replica().query(query).map_err(js)
+        match &self.0 {
+            Copy::Legacy(p) => p.replica().query(query),
+            Copy::Public(p) => p.query(query),
+        }
+        .map_err(js)
     }
 }
 

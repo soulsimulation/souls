@@ -3,22 +3,30 @@
 //!
 //! - **The launcher** ([`pin`], [`build_path`]): the unit's `ExecStart`. It reads the world's pin from its directory
 //!   record (W8), through this machine's cached copy when the store is out of reach, so an unreachable store holds no
-//!   world down, and runs `builds/<hash>/worldd`. A build that is not on the machine is a failed start like any other,
-//!   `build.missing`, and is retried.
+//!   world down, and runs `builds/<hash>/worldd serve` on the world's folder (C1, #3365). A build that is not on the
+//!   machine is a failed start like any other, `build.missing`, and is retried.
 //! - **The restart record and the health record** ([`health`]): a world that cannot start writes nothing, so the
 //!   supervisor keeps its own. A world started five times in five minutes and not serving is `restart-loop`, with
 //!   its count, its last exit and its next try.
 //!
+//! - **Deploy and roll back** ([`deploy`], O7 #2804): a rehearsal on a scratch copy, a canary watch, and a rollback
+//!   the machine takes on a fault, refused when the old build cannot read what the new one wrote.
+//!
 //! There is no start limit, no breaker and no resting state: systemd retries every failure, with a delay that grows
 //! from [`RESTART_SEC_MS`] to [`RESTART_MAX_MS`].
+//!
+//! Moving a live world to another machine (O9, #2828) is [`moving`].
 //!
 //! - **Sleep and wake** (O2, #2731; [`sleep`], [`alarm`], [`wake`]): a still world with nothing due for a minute
 //!   checkpoints, leaves its next due time in the directory and exits; the machine's alarm daemon wakes it before
 //!   that time, or at once for an intent the gateway holds. Runbook: `v2/docs/runbook/sleep-and-wake.md`.
 
 pub mod alarm;
+pub mod bucket;
+pub mod deploy;
 pub mod folder;
 pub mod health;
+pub mod moving;
 pub mod sleep;
 pub mod wake;
 
@@ -141,6 +149,30 @@ pub fn set_pin<S: Store>(store: S, world: &World, build: &[u8]) -> Result<(), St
 /// The supervisor only reads records and pins builds, which name no machine.
 fn machine() -> Name {
     Name::new("souls:supervisor").unwrap_or_else(|| unreachable!("a name"))
+}
+
+/// A known local archive fence wins even during a Store outage. An unavailable Store otherwise leaves the
+/// established pin-cache path intact; the caller still requires its ordinary valid cached pin/build.
+pub fn archive_guard<S: Store>(store: S, fences: &Path, world: &World) -> Result<(), String> {
+    let fence = fences.join(world.name());
+    match std::fs::symlink_metadata(&fence) {
+        Ok(meta) => {
+            if !meta.is_file() || meta.file_type().is_symlink() {
+                return Err("archive-fence-invalid".into());
+            }
+            let bytes = std::fs::read(&fence).map_err(|_| "archive-fence-unreadable")?;
+            return directoryd::worlds::list::archive::check_fence(&bytes, &world.name())
+                .map_err(|e| e.name.to_owned());
+        }
+        Err(e) if e.kind() == std::io::ErrorKind::NotFound => {}
+        Err(_) => return Err("archive-fence-unreadable".into()),
+    }
+    match directoryd::worlds::list::archive::instance_blocked(&store, &world.lineage, world.zone) {
+        Ok(false) => Ok(()),
+        Ok(true) => Err("world-archived".into()),
+        Err(e) if e.name == "store-unreachable" || e.name == "store-error" => Ok(()),
+        Err(e) => Err(e.name.to_owned()),
+    }
 }
 
 #[cfg(test)]

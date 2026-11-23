@@ -917,6 +917,8 @@ pub struct Header {
     pub moves: Vec<Name>,
     pub rest: Rest,
     stored: Vec<u8>,
+    /// [`Header::hash`], worked out once from `stored` when read: a world names it in every tick's record (#1960).
+    hash: Hash,
 }
 
 impl Header {
@@ -953,6 +955,7 @@ impl Header {
             moves: names(r.take(7, "a header")?, "a header's moves")?,
             rest: std::mem::take(&mut r.0),
             stored: bytes.to_vec(),
+            hash: Hash::of(Purpose::Header, bytes),
         })
     }
 
@@ -978,7 +981,7 @@ impl Header {
 
     /// The `souls/header/1` hash of the stored bytes, which every part of the bundle names.
     pub fn hash(&self) -> Hash {
-        Hash::of(Purpose::Header, &self.stored)
+        self.hash
     }
 }
 
@@ -989,6 +992,37 @@ pub struct Part {
     pub effects: Vec<Effect>,
     pub rest: Rest,
     stored: Vec<u8>,
+}
+
+/// [`Part::of_effects`]' check of a motion effect the world built: `None` when `e` is not one (any other body or
+/// change, events, or unknown fields), else what reading its value would refuse of it.
+fn motion_checked(e: &Effect) -> Option<R<()>> {
+    if e.events.is_some() || !e.rest.is_empty() {
+        return None;
+    }
+    let checked = match &e.body {
+        Body::Changes(changes) if !changes.is_empty() => {
+            let mut out = Ok(());
+            for c in changes {
+                if !c.rest.is_empty() {
+                    return None;
+                }
+                let r = match &c.change {
+                    Change::Motion(h) => h.check(),
+                    Change::Reparent { pose, .. } => pose.check(),
+                    _ => return None,
+                };
+                if out.is_ok() {
+                    out = r;
+                }
+            }
+            out
+        }
+        Body::Transfer(TransferRec::Leave { pose, .. }) => pose.check(),
+        Body::Transfer(TransferRec::Arrive { carried, .. }) if carried.is_empty() => Ok(()),
+        _ => return None,
+    };
+    Some(checked.map_err(pose_refusal))
 }
 
 impl Part {
@@ -1008,9 +1042,50 @@ impl Part {
             rest: r.0,
             stored: bytes.to_vec(),
         };
-        if let Some(t) = texts(&part.to_value()).into_iter().find(|t| !is_name(t)) {
+        if let Some(t) = not_a_name(&part.to_value()) {
             return refuse("text-not-a-name", t);
         }
+        Ok(part)
+    }
+
+    /// The part of `effects` under the header hash `header`, as its writer built them: the part
+    /// `Part::read(&encode(&value))` gives for the value `{1: header, 2: [effect, ...]}`, or the refusal it gives,
+    /// without decoding the bytes it has just encoded when every effect is a motion one (0.132 scaling, #1960: the
+    /// world's motion samples, about 150 a tick at 500 walking Souls, spent most of their write in that round trip).
+    ///
+    /// A motion effect ([`motion_checked`]: motion samples, reparents, a leave and an empty arrive, with no events
+    /// and no unknown fields) is checked in every build for what [`Part::read`] refuses of one built in memory: each
+    /// pose's support against its frame ([`Pose::check`]) and an island owner ([`HandOff::check`]); every other
+    /// field (ids, times, velocities, a unit orientation, closed enums) holds by construction. Names are checked as
+    /// [`Part::read`] checks them. A part with any other effect is encoded and read back as before. A debug build
+    /// also reads every built part back and asserts it is the same.
+    pub fn of_effects(header: Vec<u8>, effects: Vec<Effect>) -> R<Part> {
+        let mut part = Part {
+            header,
+            effects,
+            rest: Rest::new(),
+            stored: Vec::new(),
+        };
+        let v = part.to_value();
+        for e in &part.effects {
+            match motion_checked(e) {
+                Some(Ok(())) => {}
+                Some(Err(r)) => return Err(r),
+                None => {
+                    let bytes = encode(&v).or_else(|e| refuse("encoding", e.to_string()))?;
+                    return Part::read(&bytes);
+                }
+            }
+        }
+        if let Some(t) = not_a_name(&v) {
+            return refuse("text-not-a-name", t);
+        }
+        part.stored = encode(&v).or_else(|e| refuse("encoding", e.to_string()))?;
+        debug_assert_eq!(
+            Part::read(&part.stored).as_ref(),
+            Ok(&part),
+            "a built part reads back as itself"
+        );
         Ok(part)
     }
 
@@ -1040,6 +1115,21 @@ impl Part {
         let bytes = encode(&p.to_value()).or_else(|e| refuse("encoding", e.to_string()))?;
         Part::read(&bytes)
     }
+}
+
+/// The first text in `v`, depth first, that is not a name (rule 10): what [`Part::read`] refuses as
+/// `text-not-a-name`. A writer runs this on anything it logs, so the log never holds what its reader refuses (#3765).
+pub fn not_a_name(v: &Value) -> Option<String> {
+    let mut stack = vec![v];
+    while let Some(v) = stack.pop() {
+        match v {
+            Value::Text(t) if !is_name(t.as_str()) => return Some(t.as_str().to_owned()),
+            Value::Array(a) => stack.extend(a.iter().rev()),
+            Value::Map(m) => stack.extend(m.values().rev()),
+            _ => {}
+        }
+    }
+    None
 }
 
 /// Every text item in a value, depth first. Each must be a name (rule 10).
@@ -1195,6 +1285,11 @@ fn link_value(l: &LinkState) -> Value {
 }
 
 impl NodeState {
+    /// The node in the state layout (`State::to_value`'s row value), as [`NodeState::read`] reads it.
+    pub fn to_value(&self) -> Value {
+        node_value(self)
+    }
+
     /// A node in the state layout (`State::to_value`), as a view's carried record holds it (T7 rule 4).
     pub fn read(v: &Value) -> R<NodeState> {
         let mut r = Rec::of(v.clone(), "a node")?;

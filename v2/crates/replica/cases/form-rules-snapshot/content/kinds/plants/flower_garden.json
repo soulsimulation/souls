@@ -1,0 +1,87 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:flower_garden",
+  "owner": "place",
+  "geometry": {
+    "bounds_mm": [
+      6000,
+      600,
+      3000
+    ]
+  },
+  "forms": {
+    "wander": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "path"
+        },
+        {
+          "step": "wait",
+          "us": 30000000
+        }
+      ],
+      "effects": []
+    }
+  },
+  "areas": {
+    "beds_left": {
+      "at_mm": [
+        -1700,
+        0,
+        0
+      ],
+      "radius_mm": 1200,
+      "forbids": [
+        "sit",
+        "lie"
+      ]
+    },
+    "beds_right": {
+      "at_mm": [
+        1700,
+        0,
+        0
+      ],
+      "radius_mm": 1200,
+      "forbids": [
+        "sit",
+        "lie"
+      ]
+    },
+    "path": {
+      "at_mm": [
+        0,
+        0,
+        0
+      ],
+      "radius_mm": 500,
+      "allows": {
+        "stand": "on"
+      }
+    }
+  },
+  "looks": {
+    "model": "look:flower_garden",
+    "shape": {"round":10,"shapes":[{"kind":"box","at":[-1700,100,0],"size":[2400,200,2400],"round":0,"tint":"edging"},{"kind":"box","at":[-1700,205,0],"size":[2200,10,2200],"round":0,"tint":"soil"},{"kind":"cyl","at":[-2580,340,-800],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-2580,470,-800],"r":60,"segments":6,"tint":"petal","scale":[1000,600,1000]},{"kind":"cyl","at":[-2140,340,-800],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-2140,470,-800],"r":60,"segments":6,"tint":"petal2","scale":[1000,600,1000]},{"kind":"cyl","at":[-1700,340,-800],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-1700,470,-800],"r":60,"segments":6,"tint":"petal3","scale":[1000,600,1000]},{"kind":"cyl","at":[-1260,340,-800],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-1260,470,-800],"r":60,"segments":6,"tint":"petal","scale":[1000,600,1000]},{"kind":"cyl","at":[-820,340,-800],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-820,470,-800],"r":60,"segments":6,"tint":"petal2","scale":[1000,600,1000]},{"kind":"cyl","at":[-2580,340,-270],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-2580,470,-270],"r":60,"segments":6,"tint":"petal2","scale":[1000,600,1000]},{"kind":"cyl","at":[-2140,340,-270],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-2140,470,-270],"r":60,"segments":6,"tint":"petal3","scale":[1000,600,1000]},{"kind":"cyl","at":[-1700,340,-270],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-1700,470,-270],"r":60,"segments":6,"tint":"petal","scale":[1000,600,1000]},{"kind":"cyl","at":[-1260,340,-270],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-1260,470,-270],"r":60,"segments":6,"tint":"petal2","scale":[1000,600,1000]},{"kind":"cyl","at":[-820,340,-270],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-820,470,-270],"r":60,"segments":6,"tint":"petal3","scale":[1000,600,1000]},{"kind":"cyl","at":[-2580,340,260],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-2580,470,260],"r":60,"segments":6,"tint":"petal3","scale":[1000,600,1000]},{"kind":"cyl","at":[-2140,340,260],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-2140,470,260],"r":60,"segments":6,"tint":"petal","scale":[1000,600,1000]},{"kind":"cyl","at":[-1700,340,260],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-1700,470,260],"r":60,"segments":6,"tint":"petal2","scale":[1000,600,1000]},{"kind":"cyl","at":[-1260,340,260],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-1260,470,260],"r":60,"segments":6,"tint":"petal3","scale":[1000,600,1000]},{"kind":"cyl","at":[-820,340,260],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-820,470,260],"r":60,"segments":6,"tint":"petal","scale":[1000,600,1000]},{"kind":"cyl","at":[-2580,340,790],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-2580,470,790],"r":60,"segments":6,"tint":"petal","scale":[1000,600,1000]},{"kind":"cyl","at":[-2140,340,790],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-2140,470,790],"r":60,"segments":6,"tint":"petal2","scale":[1000,600,1000]},{"kind":"cyl","at":[-1700,340,790],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-1700,470,790],"r":60,"segments":6,"tint":"petal3","scale":[1000,600,1000]},{"kind":"cyl","at":[-1260,340,790],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-1260,470,790],"r":60,"segments":6,"tint":"petal","scale":[1000,600,1000]},{"kind":"cyl","at":[-820,340,790],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[-820,470,790],"r":60,"segments":6,"tint":"petal2","scale":[1000,600,1000]},{"kind":"box","at":[1700,100,0],"size":[2400,200,2400],"round":0,"tint":"edging"},{"kind":"box","at":[1700,205,0],"size":[2200,10,2200],"round":0,"tint":"soil"},{"kind":"cyl","at":[820,340,-800],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[820,470,-800],"r":60,"segments":6,"tint":"petal","scale":[1000,600,1000]},{"kind":"cyl","at":[1260,340,-800],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[1260,470,-800],"r":60,"segments":6,"tint":"petal2","scale":[1000,600,1000]},{"kind":"cyl","at":[1700,340,-800],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[1700,470,-800],"r":60,"segments":6,"tint":"petal3","scale":[1000,600,1000]},{"kind":"cyl","at":[2140,340,-800],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[2140,470,-800],"r":60,"segments":6,"tint":"petal","scale":[1000,600,1000]},{"kind":"cyl","at":[2580,340,-800],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[2580,470,-800],"r":60,"segments":6,"tint":"petal2","scale":[1000,600,1000]},{"kind":"cyl","at":[820,340,-270],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[820,470,-270],"r":60,"segments":6,"tint":"petal2","scale":[1000,600,1000]},{"kind":"cyl","at":[1260,340,-270],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[1260,470,-270],"r":60,"segments":6,"tint":"petal3","scale":[1000,600,1000]},{"kind":"cyl","at":[1700,340,-270],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[1700,470,-270],"r":60,"segments":6,"tint":"petal","scale":[1000,600,1000]},{"kind":"cyl","at":[2140,340,-270],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[2140,470,-270],"r":60,"segments":6,"tint":"petal2","scale":[1000,600,1000]},{"kind":"cyl","at":[2580,340,-270],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[2580,470,-270],"r":60,"segments":6,"tint":"petal3","scale":[1000,600,1000]},{"kind":"cyl","at":[820,340,260],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[820,470,260],"r":60,"segments":6,"tint":"petal3","scale":[1000,600,1000]},{"kind":"cyl","at":[1260,340,260],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[1260,470,260],"r":60,"segments":6,"tint":"petal","scale":[1000,600,1000]},{"kind":"cyl","at":[1700,340,260],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[1700,470,260],"r":60,"segments":6,"tint":"petal2","scale":[1000,600,1000]},{"kind":"cyl","at":[2140,340,260],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[2140,470,260],"r":60,"segments":6,"tint":"petal3","scale":[1000,600,1000]},{"kind":"cyl","at":[2580,340,260],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[2580,470,260],"r":60,"segments":6,"tint":"petal","scale":[1000,600,1000]},{"kind":"cyl","at":[820,340,790],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[820,470,790],"r":60,"segments":6,"tint":"petal","scale":[1000,600,1000]},{"kind":"cyl","at":[1260,340,790],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[1260,470,790],"r":60,"segments":6,"tint":"petal2","scale":[1000,600,1000]},{"kind":"cyl","at":[1700,340,790],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[1700,470,790],"r":60,"segments":6,"tint":"petal3","scale":[1000,600,1000]},{"kind":"cyl","at":[2140,340,790],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[2140,470,790],"r":60,"segments":6,"tint":"petal","scale":[1000,600,1000]},{"kind":"cyl","at":[2580,340,790],"r":10,"h":260,"segments":4,"tint":"stalk"},{"kind":"sphere","at":[2580,470,790],"r":60,"segments":6,"tint":"petal2","scale":[1000,600,1000]},{"kind":"box","at":[0,10,0],"size":[1000,20,3000],"round":0,"tint":"gravel"}],"palette":{"edging":"#8a8478","soil":"#4a3a2a","stalk":"#4f7a34","petal":"#d9475b","petal2":"#f0b43c","petal3":"#7d5bbf","gravel":"#c9bea5"},"tags":["plant","garden","flowers","area"]}
+  },
+  "text": {
+    "card": "Formal flower beds in close rows, with a gravel path to wander.",
+    "place": "place",
+    "garden": "garden",
+    "flower_beds": "flower beds",
+    "parterre": "parterre"
+  },
+  "card": {
+    "text": "card",
+    "category": "place",
+    "synonyms": [
+      "garden",
+      "flower_beds",
+      "parterre"
+    ]
+  }
+}
