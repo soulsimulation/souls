@@ -137,7 +137,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { atSocket, readSeat, runtimeOf } from '../home/home.mjs';
 import { QUOTED_NOTE, brief, changedBlock, heldBy } from '../brief/brief.mjs';
-import { changedBetween, decode, posesOf, rememberPublicNames, rowsOf, sequenceOf, rememberPublicWords } from '../brief/copy.mjs';
+import { changedBetween, decode, posesOf, publicNames as toldNames, rememberPublicNames, rememberPublicWords, rowsOf, sequenceOf } from '../brief/copy.mjs';
 import { find } from '../find/find.mjs';
 import { publicNameHydration } from '../find/public-names.mjs';
 import { achievedOf, causeOf, openTrace } from '../stats/trace.mjs';
@@ -147,7 +147,7 @@ import { moveForm, moveVerdict, seatedAfter } from './moves.mjs';
 import { BATCH_MOST, BATCH_READS, catalog, context, query } from './reads.mjs';
 import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check/check.mjs';
 import { risesFromSeat } from '../check/stand.mjs';
-import { kindsIn, stateOf } from '../check/state.mjs';
+import { kindsHeld, kindsIn, stateOf } from '../check/state.mjs';
 import { actWords, nearestIds, nearestOffers, offerNamed, offersOf } from '../check/offers.mjs';
 import { Table } from '../reflex/reflex.mjs';
 import { Wakes } from '../wake/wake.mjs';
@@ -155,6 +155,7 @@ import { history } from '../history/history.mjs';
 import { readLog, soulDirOf } from '../memory/memory.mjs';
 import { clockOf, worldNow } from '../clock/clock.mjs';
 import { worldOps } from '../creator/world.mjs';
+import { exportOf, importOf } from '../creator/genesis.mjs';
 import { TRACE_MOST, openCreatorTrace, rowOf } from '../creator/trace.mjs';
 import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
@@ -796,10 +797,11 @@ async function ageAfter({ now = false } = {}) {
   return !current && !age.gap ? { ...age, stale: true, gap: { ms: 0, why: signedIn ? 'syncing' : 'not-connected' } } : age;
 }
 
-/** The kind entries held in `<home>/kinds/`, the Soul's own body kind given its family's forms (E21, #2791). */
+/** The kind entries held in `<home>/kinds/` and the creator's own from the copy (#3697), the Soul's own body kind given
+ *  its family's forms (E21, #2791). */
 function heldKinds() {
   const me = [...rowsOf(copy).values()].find((r) => r.id === ME || r.soul === ME);
-  return kindsIn(join(home, 'kinds'), me?.kind);
+  return kindsHeld(join(home, 'kinds'), copy, me?.kind);
 }
 
 /** R2's verdict on each candidate, on the copy as it is now (R8). */
@@ -829,10 +831,12 @@ const OPS = new Set([
   'edit',
   'event',
   'events',
+  'export',
   'fields',
   'find',
   'halt',
   'history',
+  'import',
   'inspect',
   'lie',
   'listen',
@@ -1091,7 +1095,7 @@ function actsOf(words) {
       if (arg) {
         kinds ??= heldKinds();
         rows ??= rowsOf(copy);
-        const take = kinds[rows.get(c.this)?.kind]?.forms?.[c.form]?.takes?.[arg[1]];
+        const take = kinds[rows.get(c.this)?.entry ?? rows.get(c.this)?.kind]?.forms?.[c.form]?.takes?.[arg[1]];
         args[arg[1]] = take?.type === 'text' ? { 23: arg[2] } : /^-?\d{1,16}$/.test(arg[2]) && Number.isSafeInteger(Number(arg[2])) ? Number(arg[2]) : arg[2];
         continue;
       }
@@ -1131,6 +1135,14 @@ function sendIntent(ranked, { target, words, args, params, basis, expiry, reflex
   if (signedIn) send(bytes, sequence, ranked.length); else queued.push({ bytes, sequence, ranked: ranked.length });
   return { sequence, sent };
 }
+
+/** How far an import got: its edits, what it placed and set, and what it did not bring over. */
+const summary = (plan, edits, started) => ({
+  edits, placed: plan.counts.placed, set: plan.counts.set, matched: plan.counts.matched, seconds: Math.round((performance.now() - started) / 100) / 10,
+  linked: plan.counts.linked,
+  ...(plan.counts.links ? { links_not_brought: plan.counts.links } : {}),
+  ...(plan.counts.dropped ? { fields_not_brought: Object.fromEntries(plan.counts.droppedFields) } : {}),
+});
 
 // --- #3706 (today's `--key`): a command sent again with the same key is one write --------------------------------
 // A write's key is kept with its first answer and the world's answer to its intent, on disk with the sequence, so a
@@ -1395,7 +1407,7 @@ async function answer(req, conn = null) {
     case 'whatson': case 'calendar': return calendar(req);
     // #3704 (today's `query`, `catalog`, `context` and `batch`): reads from the copy, asking the world nothing.
     case 'query': { const rows = rowsOf(copy), me = [...rows.values()].find((r) => r.id === ME || r.soul === ME)?.id ?? null; const q = query(rows, req.questions, { budget: req.budget, me }); return q.ok ? closing(q, null, { now: true }) : { ...q, ...ageNow() }; }
-    case 'catalog': return closing(catalog(rowsOf(copy), kindsIn(join(home, 'kinds'))), null, { now: true });
+    case 'catalog': return closing(catalog(rowsOf(copy), kindsHeld(join(home, 'kinds'), copy)), null, { now: true });
     case 'context': return closing(context(rowsOf(copy), req.words ?? '', { cursor: req.cursor }), null, { now: true });
     case 'batch': {
       // Several reads in one call, each answered as it would be alone, in order; a write in it is refused, not sent.
@@ -1436,6 +1448,36 @@ async function answer(req, conn = null) {
       kinds: Object.fromEntries(Object.entries(pinned()).map(([n, k]) => [n, { admits: k.admits, ...(Object.keys(k.slots).length ? { slots: k.slots } : {}) }])),
       };
     });
+    case 'export': {
+      // #3728: every node of the copy, brought current first, to the file the creator named (absolute).
+      if (seat.grant.actor !== 'creator') return { ok: false, code: 'edit.not-the-creator', detail: 'this home holds a Soul\'s token, not a creator\'s' };
+      const file = String(req.file ?? '');
+      if (!file.startsWith('/')) return { ok: false, code: 'export.file', detail: 'export <file>: the command passes its absolute path' };
+      const age = await ageAfter();
+      if (!copyVersion) return { ok: false, code: 'edit.no-copy', detail: 'no copy of the world yet' };
+      const out = exportOf(copy, { names: toldNames(copy), world: seat.world, at: sequenceOf(copyVersion) });
+      writeFileSync(file, JSON.stringify(out));
+      return { ok: true, file, nodes: out.nodes.length, bodies: out.bodies, at: out.at, ...age };
+    }
+    case 'import': {
+      // #3728: a file's nodes into this world, one edit at a time (each answered before the next is planned, so a
+      // level's places name the nodes the level above became). The first refusal stops it, and says how far it got.
+      if (seat.grant.actor !== 'creator') return { ok: false, code: 'edit.not-the-creator', detail: 'this home holds a Soul\'s token, not a creator\'s' };
+      let file, plan;
+      try { file = JSON.parse(readFileSync(String(req.file ?? ''), 'utf8')); } catch (e) { return { ok: false, code: 'import.file', detail: String(e.message ?? e).slice(0, 200) }; }
+      await ageAfter();
+      if (!copyVersion) return { ok: false, code: 'edit.no-copy', detail: 'no copy of the world yet' };
+      try { plan = importOf(file, exportOf(copy)); } catch (e) { return { ok: false, code: e.code ?? 'import.format', detail: String(e.message ?? e).slice(0, 200) }; }
+      const started = performance.now();
+      let edits = 0;
+      for (let ops; (ops = plan.next());) {
+        const a = await answer({ op: 'edit', ops });
+        if (!a.ok) return { ok: false, code: a.code, op: a.op, detail: `edit ${edits + 1} was refused (${ops.length} operations, the first ${ops[0].op} ${ops[0].kind ?? ops[0].node}); ${edits} edits were made`, ...summary(plan, edits, started) };
+        plan.took(a.names);
+        edits++;
+      }
+      return { ok: plan.left() === 0, ...(plan.left() ? { code: 'import.unplaced', detail: `${plan.left()} nodes or links name a parent, support, end or door that was not placed` } : {}), ...summary(plan, edits, started) };
+    }
     case 'check': {
       // On the copy as it is: no sync, no frame to the world (A4). A world verb (#3695) is made into its sets first.
       const w = await worldBatch(req);
@@ -1638,7 +1680,7 @@ function inspect(req) {
  * and `add` are the items' own forms (`show_interest`, `drop_interest`, `post`), sent through `act`.
  */
 async function calendar(req) {
-  const kinds = kindsIn(join(home, 'kinds')), clock = clockOf(copy), cal = calendarOf(copy), nowMs = Date.now();
+  const kinds = kindsHeld(join(home, 'kinds'), copy), clock = clockOf(copy), cal = calendarOf(copy), nowMs = Date.now();
   const view = (rows) => ({ rows, me: ME, clock, cal, nowMs });
   if (req.op === 'whatson') {
     const hours = Number(req.hours ?? 3);

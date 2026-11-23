@@ -36,6 +36,8 @@
 //   souls-god.mjs upload <file.glb|png|jpg>     a model or a picture, through the world's check and hold point:
 //                                                {hash, state: allowed|held}; an allowed one is served at `url`
 //   souls-god.mjs check <any of these, or batch> ...   the same, checked on the copy only; nothing is sent
+//   souls-god.mjs export [file]                  every node of the world (not its Souls) to a file, world.souls.json
+//   souls-god.mjs import <file>                  such a file's nodes into this world, as edits, parents first
 //   place <kind> --in <id> --beside <id> [--dir n|ne|e|se|s|sw|w|nw] [--dist mm]   beside another (default e, 1000)
 //   place <kind> --on <id>                       in or on another: its first free slot for a thing, if it has one
 //   place|move ... --facing <id|n|e|s|w>         turned to face another, or a compass point
@@ -131,9 +133,11 @@ export const VERBS = [
   'define-kit',
   'describe',
   'event',
+  'export',
   'find',
   'free',
   'hours',
+  'import',
   'land',
   'layers',
   'listen',
@@ -176,7 +180,7 @@ export const FIX = {
   'edit.kind-unknown': 'use a kind describe lists under kinds (your own kinds too, once defined)',
   'kind.invalid': 'a souls-entry/1 record as content/kinds holds them: whole numbers, sections it can hold (no roles), its kind loads',
   'kind.too-large': 'a record is at most 64 KiB and its bounds_mm at most 1 km: fewer parts, a shorter text or smaller bounds',
-  'kind.effects': 'a form creates only a kind describe lists (its full name) into a slot that admits it, and timers that start each other wait 50 ms or more',
+  'kind.effects': 'a form creates only a kind describe lists (its full name) into a slot that admits it (a kind with solids only into a hand), and timers that start each other wait 50 ms or more',
   'kind.audience': 'define a kind for everyone (no audience)',
   'kind.namespace': 'name it in your own namespace (not souls: or eden:, nor one the world\'s own kinds use)',
   'kind.collision': 'that kind is defined already: place it by the full name describe lists',
@@ -233,6 +237,10 @@ export const FIX = {
   'land.smooth': 'use flatten',
   'land.unavailable': 'use Node 22.18 or later, and the client a world serves (it carries the ground model) or a checkout with packages/ground and zod installed',
   'strike.off-the-ground': 'strike somewhere on the world\'s ground',
+  'import.file': 'import <file>: a file export wrote, readable here',
+  'import.format': 'import a souls-world/1 file, as export writes it',
+  'import.unplaced': 'some nodes name a parent or support that was not placed: export the source again and import that',
+  'export.file': 'export [file]: a file path to write',
   'edit.off-ground': 'put it somewhere on the world\'s ground: describe shows where things stand',
   'not-a-creator': 'pair with --creator <the world\'s creator grant>',
   'edit.claimed': 'that is inside a live claim: send it with --claim <that claim>, or build release <claim>',
@@ -441,6 +449,10 @@ export function requestOf(argv) {
   }
   if (verb === 'visitors') return { directory: '/v1/worlds/visitors', body: {}, creator };
   if (verb === 'status' || verb === 'stop' || verb === 'describe' || verb === 'redo') return { req: { op: verb }, creator };
+  if (verb === 'export' || verb === 'import') {
+    if (rest.length > 1 || (verb === 'import' && !rest[0])) throw usage(`${verb} ${verb === 'import' ? '<file>' : '[file]'}`);
+    return { req: { op: verb, file: absolute(rest[0] ?? 'world.souls.json') }, creator };
+  }
   if (verb === 'upload') {
     if (rest.length !== 1 || !/\.(glb|png|jpe?g)$/i.test(rest[0])) throw usage('upload <file.glb|png|jpg>');
     return { req: { op: 'upload', path: absolute(rest[0]) }, creator };
@@ -884,7 +896,7 @@ if (isMain(import.meta.url)) {
       if (!asked.req) { out(withFix(when)); process.exit(1); }
     }
     const pkg = process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG;
-    const ask = (req, ms = 60_000) => call(home, creator, req, { pkg, ms: req.world?.verb === 'land' ? 130_000 : ms });
+    const ask = (req, ms = 60_000) => call(home, creator, req, { pkg, ms: req.op === 'import' ? 3_600_000 : req.op === 'export' ? 120_000 : req.world?.verb === 'land' ? 130_000 : ms });
     // A relation is resolved on the daemon's copy: describe first, then the batch with its places filled in.
     let req = asked.relation ? resolve(asked.req, asked.relation, await ask({ op: 'describe' }, 15_000)) : asked.req;
     // A helper's home sends every edit under its claim (#3727).
