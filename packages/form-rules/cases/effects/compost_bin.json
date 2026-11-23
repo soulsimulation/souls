@@ -1,0 +1,109 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "eden:compost_bin (0.132 E2). A held bundle of weeds goes into a bin with two portions: the bundle is removed and the bin has three. Then the bin is emptied to none.",
+  "cases": [
+    {
+      "name": "fill_with_weeds_then_empty",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:compost_bin",
+            "fields": {
+              "compost": 2
+            }
+          },
+          "w1": {
+            "kind": "eden:weed_bundle"
+          },
+          "b1": {
+            "hands": {
+              "left": "w1",
+              "right": null
+            }
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "c1",
+            "form": "fill",
+            "args": {
+              "waste": "w1"
+            }
+          },
+          "receipt": "rc1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "remove",
+                "node": "w1"
+              },
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "compost",
+                "n": 28,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:waste_added",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:composted",
+                "node": "c1",
+                "changes": [
+                  1
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "empty"
+          },
+          "receipt": "rc2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "compost",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:emptied",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ]
+    }
+  ]
+}
