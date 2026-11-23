@@ -22,7 +22,7 @@ type SampleRec = [string, string, number | null, number, number, number, number]
 /** A world record (sound/record.ts Happened); only the fields read here (B3-3). */
 type Happened = { at: number; node: string; name?: string };
 type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; said?: Said[]; happened?: Happened[];
-  moves?: { body: string; name: string; start: number; ends: number[] }[]; runEnds?: { body: string; at: number }[] };
+  moves?: { body: string; name: string; start: number; ends: number[]; target?: string | null }[]; runEnds?: { body: string; at: number }[] };
 type Pointer = { newest: number | null; newestTo: number | null; period: number; anchorWorld: number; anchorWallMs: number; quietUntil: number | null };
 type Msg = { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'snapshot'; s: { nodes: NodeRec[]; removed: string[] } } | { t: 'error'; message: string };
 
@@ -162,7 +162,7 @@ export class V2Bridge {
     this.nodesChanged(p.nodes, p.removed, p.from);
     for (const [id, frame, slot, at, x, y, z] of p.samples) this.sample(id, frame, slot, at, [x, y, z]);
     // A gesture move plays on its body (take-gestures.ts); a run that ends early ends its gesture then.
-    for (const m of p.moves ?? []) { const g = gestureFrom(m), t = this.tracks.get(m.body); if (g && t) t.gestures.push(g); }
+    for (const m of p.moves ?? []) { const g = gestureFrom(m, this.toward(m.target)), t = this.tracks.get(m.body); if (g && t) t.gestures.push(g); }
     for (const e of p.runEnds ?? []) { const t = this.tracks.get(e.body); if (t) cutGestures(t.gestures, e.at); }
     for (const h of p.happened ?? []) {
       const word = h.name === undefined ? undefined : WOUND.get(h.name);
@@ -214,6 +214,13 @@ export class V2Bridge {
 
   /** The world frame of a node: its parents' places and turns composed (positions µm, turns `[w, x, y, z]`); null when
    *  its chain of frames is not all public in the copy (as the v2 page: a missing frame is never the world's). */
+  /** An aimed move's target, where it stands now: world x and z, mm (the takes' units); null when it is none or the copy
+   *  cannot place it. */
+  private toward(target: string | null | undefined): [number, number] | null {
+    const w = target ? this.world(target) : null;
+    return w ? [w.p[0] / 1000, w.p[2] / 1000] : null;
+  }
+
   private world(id: string | null, depth = 0): Mat | null {
     if (id === null) return { p: [0, 0, 0], q: [1, 0, 0, 0] };
     const n = this.nodes.get(id);

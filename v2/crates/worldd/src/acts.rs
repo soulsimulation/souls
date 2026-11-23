@@ -2336,9 +2336,22 @@ impl Acts {
         let timers = self.timers.keys().copied().collect::<BTreeSet<Id>>();
         let mut watch = std::mem::take(&mut self.watch);
         let mut blocked = Vec::new();
+        // Intents rule 10 (0.134 I4): a Soul's own walk replaces its open run. In the run's walk its claim on the legs
+        // ends the run (`claim-taken`); a hand move holds no legs, so the run is left, at the move's next phase end
+        // (its contact or its end: never mid-contact).
+        let walking: Vec<Id> = bodies.as_deref().map_or_else(Vec::new, |b| {
+            b.runner
+                .running_bodies()
+                .into_iter()
+                .filter(|body| self.forms.in_hand_move(*body))
+                .collect()
+        });
         let mut stalled = Vec::new();
         let made_way = self.made_way.clone();
         let fired = self.with(tree, bodies.as_deref_mut(), tick, |forms, w| {
+            for body in walking {
+                let _ = forms.leave(w, body, None, now);
+            }
             forms.tick(w, now);
             let asked = std::mem::take(&mut *w.geometry.asked.borrow_mut());
             watch.keep(&asked.keys().copied().collect());

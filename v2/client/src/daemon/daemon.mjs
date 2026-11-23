@@ -147,6 +147,7 @@ import { moveForm, moveVerdict, seatedAfter } from './moves.mjs';
 import { BATCH_MOST, BATCH_READS, catalog, context, query } from './reads.mjs';
 import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check/check.mjs';
 import { risesFromSeat } from '../check/stand.mjs';
+import { ORDER_ENDED, STUCK, stuckOf, whyOf } from './stuck.mjs';
 import { kindsHeld, kindsIn, stateOf } from '../check/state.mjs';
 import { actWords, nearestIds, nearestOffers, offerNamed, offersOf } from '../check/offers.mjs';
 import { Table } from '../reflex/reflex.mjs';
@@ -157,6 +158,7 @@ import { clockOf, worldNow } from '../clock/clock.mjs';
 import { worldOps } from '../creator/world.mjs';
 import { exportOf, importOf } from '../creator/genesis.mjs';
 import { checkedFurnish, furnishOps } from '../creator/furnish.mjs';
+import { cloneFile, moveByOps } from '../creator/things.mjs';
 import { TRACE_MOST, openCreatorTrace, rowOf } from '../creator/trace.mjs';
 import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
@@ -748,6 +750,8 @@ function remember(entries) {
  * to the reflexes and to memory. This Soul's own body's id is its Soul's (`soul`) there, so neither takes its own acts
  * for another's. Utterances arrive addressed, with their words (`onItem`), and are not taken twice.
  */
+/** The world's ladder's ended orders of my body, newest last (stuck.mjs). */
+const stuckSeen = [];
 function onEntry(e) {
   counts.entries++;
   // The version after an entry is its sequence and one (`replica::apply`).
@@ -755,6 +759,11 @@ function onEntry(e) {
   const actor = e.actor === ME ? soul : e.actor;
   const events = e.events.filter((ev) => ev.name !== SAID);
   for (const ev of events) fire({ name: ev.name, fields: ev.fields, actor, toMe: Object.values(ev.fields).includes(ME), sequence: e.sequence });
+  // A walk of mine the world's ladder ended (N1): what it waited for, for that walk's receipt (stuck.mjs).
+  for (const ev of events) {
+    const s = ev.name === ORDER_ENDED ? stuckOf(ev, [ME, [...rowsOf(copy).values()].find((r) => r.soul === ME)?.id].filter(Boolean)) : null;
+    if (s) { stuckSeen.push({ ...s, seenAt: Date.now() }); if (stuckSeen.length > 8) stuckSeen.shift(); }
+  }
   // E26: an invitation to a conversation, or the answer to this Soul's own, wakes a `wait`.
   const offers = events.filter((ev) => OFFER_EVENTS[ev.name]);
   if (offers.length) {
@@ -1195,6 +1204,64 @@ function furnishBatch(w, claim) {
   return checkedFurnish(out, (ops) => JSON.parse(wire.editCheck(copy, batchOf(ops, claim), kindsText())));
 }
 
+/** #3728: an import plan's edits, one at a time, each answered before the next is planned. The first refusal stops
+ *  it, and says how far it got. Each edit goes under the build claim named, if any, as any edit does (#3701). */
+async function runPlan(plan, claim) {
+  const started = performance.now();
+  let edits = 0;
+  for (let ops; (ops = plan.next());) {
+    const a = await answer({ op: 'edit', ops, ...(claim !== undefined ? { claim } : {}) });
+    if (!a.ok) return { ok: false, code: a.code, op: a.op, detail: `edit ${edits + 1} was refused (${ops.length} operations, the first ${ops[0].op} ${ops[0].kind ?? ops[0].node}); ${edits} edits were made`, ...summary(plan, edits, started) };
+    plan.took(a.names);
+    edits++;
+  }
+  return { ok: plan.left() === 0, ...(plan.left() ? { code: 'import.unplaced', detail: `${plan.left()} nodes or links name a parent, support, end or door that was not placed` } : {}), ...summary(plan, edits, started) };
+}
+
+/** #3728: the open ground's id and its height under a point (µm), for a thing moved or copied on it; a refusal when
+ *  the land verbs' model cannot load. */
+async function liftOf() {
+  try {
+    const [{ groundOf }, { heightAt }] = await Promise.all([import('../creator/terrain/land.mjs'), import('../creator/terrain/terrain.mjs')]);
+    const g = groundOf(copy);
+    if (!g) return {};
+    return { ground: g.id, lift: (x, z) => { const h = heightAt(g.tiles, g.tileMm, BigInt(Math.round(x)), BigInt(Math.round(z))); return h === null ? null : Number(h); } };
+  } catch (e) {
+    return { ok: false, code: 'land.unavailable', detail: `moving on the ground needs the land verbs' model: ${String(e.message ?? e).slice(0, 160)}` };
+  }
+}
+
+const metresPair = (v) => (v === undefined ? undefined : String(v).split(',').map(Number));
+
+/** #3728: `move <id>... --by dx,dz [--yaw r]` on the copy (`creator/things.mjs`). */
+async function moveBatch(w) {
+  const by = metresPair(w.by);
+  if (!by || by.length !== 2 || by.some((n) => !Number.isFinite(n))) return { ok: false, code: 'move.by', detail: `--by dx,dz in metres, not ${w.by}` };
+  const yaw = w.yaw === undefined ? undefined : Number(w.yaw);
+  if (yaw !== undefined && !Number.isFinite(yaw)) return { ok: false, code: 'move.by', detail: `--yaw r in radians, not ${w.yaw}` };
+  const lifted = await liftOf();
+  if (lifted.ok === false) return lifted;
+  return moveByOps(exportOf(copy).nodes, w.refs ?? [], by, { yaw, ...lifted });
+}
+
+/** #3728: `clone <id> [--at x,z] [--count n] [--step dx,dz] [--yaw r]` as an import plan of the copies. */
+async function clonePlan(w) {
+  const at = metresPair(w.at), step = metresPair(w.step), count = w.count === undefined ? 1 : Number(w.count);
+  const yaw = w.yaw === undefined ? undefined : Number(w.yaw);
+  for (const [v, f] of [[at, 'at'], [step, 'step']]) if (v && (v.length !== 2 || v.some((n) => !Number.isFinite(n)))) return { ok: false, code: 'clone.flag', detail: `--${f} x,z in metres` };
+  if (yaw !== undefined && !Number.isFinite(yaw)) return { ok: false, code: 'clone.flag', detail: `--yaw r in radians, not ${w.yaw}` };
+  if (!copyVersion) return { ok: false, code: 'edit.no-copy', detail: 'no copy of the world yet' };
+  const target = exportOf(copy), src = target.nodes.find((n) => n.id === String(w.ref ?? ''));
+  const width = src ? kindsIn(join(home, 'kinds'))[String(src.kind).split('@')[0]]?.geometry?.bounds_mm?.[0] : undefined;
+  const lifted = await liftOf();
+  if (lifted.ok === false) return lifted;
+  const made = cloneFile(target.nodes, w.ref, { at, step, count, yaw, width, ...lifted });
+  if (made.ok === false) return made;
+  let plan;
+  try { plan = importOf(made.file, target); } catch (e) { return { ok: false, code: e.code ?? 'import.format', detail: String(e.message ?? e).slice(0, 200) }; }
+  return { plan, says: made.says, copies: made.file.nodes.filter((n) => n.parent === src.parent && n.id.startsWith('clone-')).map((n) => n.id) };
+}
+
 /** The batch an edit or a check carries: its own ops, or a world verb's (#3695) made from the copy now. The land
  *  verbs load today's ground model (`packages/ground`, zod) only when used. */
 async function worldBatch(req) {
@@ -1207,6 +1274,7 @@ async function worldBatch(req) {
     return land.landOps(copy, req.world);
   }
   if (req.world.verb === 'furnish') return furnishBatch(req.world, req.claim);
+  if (req.world.verb === 'move') return moveBatch(req.world);
   return worldOps(copy, req.world, worldNowOrReal());
 }
 
@@ -1478,18 +1546,18 @@ async function answer(req, conn = null) {
       await ageAfter();
       if (!copyVersion) return { ok: false, code: 'edit.no-copy', detail: 'no copy of the world yet' };
       try { plan = importOf(file, exportOf(copy)); } catch (e) { return { ok: false, code: e.code ?? 'import.format', detail: String(e.message ?? e).slice(0, 200) }; }
-      const started = performance.now();
-      let edits = 0;
-      for (let ops; (ops = plan.next());) {
-        const a = await answer({ op: 'edit', ops });
-        if (!a.ok) return { ok: false, code: a.code, op: a.op, detail: `edit ${edits + 1} was refused (${ops.length} operations, the first ${ops[0].op} ${ops[0].kind ?? ops[0].node}); ${edits} edits were made`, ...summary(plan, edits, started) };
-        plan.took(a.names);
-        edits++;
-      }
-      return { ok: plan.left() === 0, ...(plan.left() ? { code: 'import.unplaced', detail: `${plan.left()} nodes or links name a parent, support, end or door that was not placed` } : {}), ...summary(plan, edits, started) };
+      return runPlan(plan);
     }
     case 'check': {
       // On the copy as it is: no sync, no frame to the world (A4). A world verb (#3695) is made into its sets first.
+      // A clone (#3728) is checked by its first edit, the copies' tops.
+      if (req.world?.verb === 'clone') {
+        const c = await clonePlan(req.world);
+        if (c.ok === false) return closing({ ...c, local: true }, null, { now: true });
+        const ops = c.plan.next();
+        const v = JSON.parse(wire.editCheck(copy, batchOf(ops, req.claim), kindsText()));
+        return closing({ ...v, local: true, would: c.says, ops }, null, { now: true });
+      }
       const w = await worldBatch(req);
       if (w.ok === false) return closing({ ...w, local: true }, null, { now: true });
       const v = JSON.parse(wire.editCheck(copy, batchOf(w.ops, req.claim), kindsText()));
@@ -1505,7 +1573,19 @@ async function answer(req, conn = null) {
         return { id: row.id, fields: Object.fromEntries(pairs.map(([k, v]) => [String(k), v])) };
       }, { now: true });
     }
-    case 'edit': case 'redo': return editOnce(req);
+    case 'edit': {
+      if (req.world?.verb === 'clone') {
+        // #3728: copies are placed as an import is, parents first, an edit a level.
+        if (seat.grant.actor !== 'creator') return { ok: false, code: 'edit.not-the-creator', detail: 'this home holds a Soul\'s token, not a creator\'s' };
+        const age = await ageAfter();
+        const c = await clonePlan(req.world);
+        if (c.ok === false) return closing({ ...c, sent: false, local: true }, null, { age });
+        const out = await runPlan(c.plan, req.claim);
+        return out.ok ? { ...out, did: c.says, copies: c.copies.map((id) => c.plan.ids.get(id) ?? null) } : out;
+      }
+      return editOnce(req);
+    }
+    case 'redo': return editOnce(req);
     case 'undo': {
       if (req.build === undefined) return editOnce(req);
       // A whole build, undone step by step (#3694): while the newest of this daemon's edits is that build's. With
@@ -1607,7 +1687,12 @@ async function answer(req, conn = null) {
       // fallback took), read from the copy brought current.
       const done = r.answers.at(-1)?.answer === 'receipt';
       // R1b: an act the world refused names one offer of the same thing that would work, from this client's own offers.
-      const instead = r.answers.at(-1)?.answer === 'refused' ? suggestionFor(r) : null;
+      // A walk that could not get there (`walk.blocked`, N1's `goal-unreachable`) names what it waited for, and no other
+      // offer of its target: each needs the same way there.
+      const stuck = STUCK.has(r.answers.at(-1)?.reason);
+      const why = stuck ? whyOf(r, stuckSeen) : null;
+      if (why) got.receipt.why = why;
+      const instead = r.answers.at(-1)?.answer === 'refused' && !stuck ? suggestionFor(r) : null;
       if (instead) got.receipt.try = instead;
       return closing(got, done ? (rows) => { const h = heldBy(rows, ME, r); return h ? { receipt: { ...got.receipt, held: h } } : {}; } : null, { now: !done });
     }
