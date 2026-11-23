@@ -465,6 +465,14 @@ impl Link {
     fn disconnected(&self) -> Vec<(Vec<u8>, Value)> {
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
         s.out = None;
+        // A world that went to sleep with intents still unanswered here (one arrived as it went): asked awake at
+        // once, as a new intent would ask (O2, 0.133 S3b), so they are not left to their deadlines.
+        if !s.pending.is_empty()
+            && let Some(wake) = s.wake.clone()
+            && !std::mem::replace(&mut s.asked, true)
+        {
+            wake();
+        }
         std::mem::take(&mut s.syncs).into_values().collect()
     }
 }
