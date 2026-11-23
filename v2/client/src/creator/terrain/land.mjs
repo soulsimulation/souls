@@ -225,7 +225,7 @@ export function boundsOf(a, cur) {
   return [cur[0] - (dir[0] < 0 ? d : 0), cur[1] - (dir[1] < 0 ? d : 0), cur[2] + (dir[0] > 0 ? d : 0), cur[3] + (dir[1] > 0 ? d : 0)];
 }
 
-/** The batch that grows the open ground (`expand <m>`, `land extend`): the new tiles with the old, the extent place
+/** The batch that grows the open ground (`expand <m>`, `land extend`): the new tiles as rows, the extent place
  *  made or its outline set, and a move for each thing resting off the old tiles whose ground the new ones raise. */
 export function extentOps(g, a) {
   const side = g.tileMm / 1000;
@@ -234,23 +234,23 @@ export function extentOps(g, a) {
   let b;
   try { b = boundsOf(a, cur); } catch (e) { return no(e.code ?? 'land.flag', e.message); }
   if (b[2] - b[0] > 16000 || b[3] - b[1] > 16000) return no('land.flag', `the world would be ${b[2] - b[0]} by ${b[3] - b[1]} m; each side at most 16000 m`);
-  // Sized before it is made: the tiles go whole in one edit.
-  const r = tileRange(g.tiles, g.tileMm, b), count = g.tiles.length + (r[2] - r[0] + 1) * (r[3] - r[1] + 1) - (() => { const o = tileRange(g.tiles); return (o[2] - o[0] + 1) * (o[3] - o[1] + 1); })();
+  // Sized before it is made: the new tiles go in one edit, as rows (the old ones are not sent again).
+  const r = tileRange(g.tiles, g.tileMm, b), old = tileRange(g.tiles);
+  const count = (r[2] - r[0] + 1) * (r[3] - r[1] + 1) - (old[2] - old[0] + 1) * (old[3] - old[1] + 1);
   const perTile = g.tiles[0].heights.length * 4 + g.tiles[0].classes.length + 16;
   if (count * perTile > EDIT_BYTES) {
-    const most = Math.floor(EDIT_BYTES / perTile), across = Math.floor(Math.sqrt(most)) * side;
-    return no('expand.too-large', `the ground would be ${count} tiles of ${side} m (${Math.round((count * perTile) / 1e5) / 10} MB); one edit carries at most ${most} (about ${across} m square)`);
+    const most = Math.floor(EDIT_BYTES / perTile);
+    return no('expand.too-large', `the world would grow by ${count} tiles of ${side} m (${Math.round((count * perTile) / 1e5) / 10} MB); one edit adds at most ${most}: grow it in steps`);
   }
   const added = grownTiles(g.tiles, g.tileMm, b);
   if (!added.length && b.every((v, k) => v === cur[k])) return no('expand.nothing', `the world already reaches [${cur.join(', ')}] m`);
-  const tiles = [...g.tiles, ...added];
   const outside = (p) => heightAt(g.tiles, g.tileMm, p[0], p[2]) === null;
   const under = g.bodies.filter((x) => outside(x.position) && (heightAt(added, g.tileMm, x.position[0], x.position[2]) ?? 0n) !== 0n);
   if (under.length) return no('edit.terrain-under-soul', under.map((x) => `${x.id} stands at (${Number(x.position[0]) / 1e6}, ${Number(x.position[2]) / 1e6}) m, where the new ground is not at 0`).join('; '));
   const outline = [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]].map(([x, z]) => [Math.round(x * 1000), Math.round(z * 1000)]);
   const hexOf = (u) => ({ hex: Buffer.from(u.buffer, u.byteOffset, u.byteLength).toString('hex') });
   const ops = [
-    { op: 'set', node: g.id, field: F.TILES, value: tiles.map((t) => [t.tx, t.tz, hexOf(t.heights), hexOf(t.classes)]) },
+    { op: 'rows', node: g.id, field: F.TILES, rows: added.map((t) => [t.tx, t.tz, hexOf(t.heights), hexOf(t.classes)]) },
     g.extent
       ? { op: 'set', node: g.extent.id, field: F.OUTLINE, value: outline }
       : { op: 'place', name: 1, kind: g.placeKind, in: g.id, at: [0, 0, 0], fields: { [F.OUTLINE]: outline, [F.PLACE_OF]: EXTENT } },
@@ -261,7 +261,7 @@ export function extentOps(g, a) {
     if (rise !== 0n) ops.push({ op: 'move', node: th.id, atUm: [Number(th.position[0]), Number(th.position[1] + rise), Number(th.position[2])], orientation: th.orientation, support: th.support });
   }
   if (ops.length > OPS_MOST) return no('land.too-many-things', `${ops.length - 2} things rest where the new ground rises; one edit moves at most ${OPS_MOST - 2}`);
-  return { ops, says: `the world reaches [${b.join(', ')}] m: ${added.length} new tile(s) of ${side} m, ${tiles.length} in all` };
+  return { ops, says: `the world reaches [${b.join(', ')}] m: ${added.length} new tile(s) of ${side} m, ${g.tiles.length + added.length} in all` };
 }
 
 /** The batch a land verb makes on `copy` (`a` its flags, `a.land` the verb and `a.ref`), or `expand`'s (`a.verb`,

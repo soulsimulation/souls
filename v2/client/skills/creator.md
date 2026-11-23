@@ -153,8 +153,10 @@ the root, which `describe` shows), and from then on you place it like any other 
 - `node souls-god.mjs expand <m>` grows the world's ground to a square `m` metres a side, centred on the middle.
 - `node souls-god.mjs land extend --toward n|s|e|w|ne|nw|se|sw --metres <m>` grows it one way, or
   `--bounds x0,z0,x1,z1` (metres) to cover a box.
-- The new ground is flat, level with the old ground's edge, and Souls walk on it. The world only grows. The whole
-  ground goes in one edit, so a refusal `expand.too-large` names the largest size one edit carries.
+- The new ground is flat, level with the old ground's edge, and Souls walk on it. The world only grows. Your upload
+  carries only the new tiles, so one grow adds at most about 390 of Eden's 64 m tiles; a larger one is refused
+  `expand.too-large`: grow it in steps. The world still writes the whole ground to its log and to viewers on every
+  land edit, so a ground past about 16 MB is refused `edit.too-large`.
 
 ## Your own models and pictures
 
@@ -182,6 +184,7 @@ texture inside the GLB), textures at most 2,048 px; a picture at most 2 MB. A re
 | `edit.name-unknown` | the batch uses a name no earlier place gave |
 | `edit.stale` | someone changed that thing after your copy saw it: `describe`, then send again |
 | `edit.not-the-creator` | this token is not the creator's |
+| `edit.too-large` | the fields the batch sets come to over 16 MB: split it, or the field has grown as large as it can |
 | `kind.invalid` | the record is not one the world can keep: its `detail` names the part |
 | `kind.too-large` | the record is over 64 KiB, or a `bounds_mm` is over 1 km |
 | `kind.effects` | a form would fail every time it ran: it creates a kind the world has not got (use its full name), into a slot that does not admit it, a kind with solids into a slot rather than a hand, or its timers start each other sooner than 50 ms in a ring |
