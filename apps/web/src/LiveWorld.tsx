@@ -383,6 +383,9 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     const followView=new WorldFollow();
     // #1317: ?camtrace loads the camera trace (its own chunk); without it this is one null check a frame.
     let camTrace:import('./camera-trace.ts').CameraTrace|null=null;
+    // #1963, 0.135 P3: ?track=<same-origin file> gives the camera a planned track (a recorded range, or a live take's); nothing loads without it.
+    let shotTrack:import('./WorldShotTrack.ts').ShotTrack|null=null,shotPoseNow:typeof import('./WorldShotTrack.ts').poseNow|null=null;
+    if(new URLSearchParams(location.search).has('track'))void import('./WorldShotTrack.ts').then(async m=>{const url=m.shotTrackUrl(location.search);if(!url||abort.signal.aborted)return;shotTrack=await m.loadShotTrack(url,abort.signal,{seek:tick=>playbackCommands.current?.seek(tick)??Promise.resolve(),setPlaying:playing=>playbackCommands.current?.setPlaying(playing)??false,tick:()=>past.current?.tick??null});shotPoseNow=m.poseNow;}).catch(()=>{});
     if(new URLSearchParams(location.search).has('camtrace'))void import('./camera-trace.ts').then(m=>{if(abort.signal.aborted)return;const t=m.startCameraTrace(renderer.domElement);camTrace=t.trace;abort.signal.addEventListener('abort',()=>t.stop());});
     let down: { x: number; y: number } | null = null;
     const newControls = (target?: THREE.Vector3) => createWorldOrbitControls(camera,renderer.domElement,target,{
@@ -1137,6 +1140,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
           renderer.domElement.dataset.cameraShot = shot.shot ?? '';
         }
       }
+      if(shotTrack&&shotPoseNow){const pose=shotPoseNow(shotTrack,past.current?.tick??null,now);if(pose){camera.position.fromArray(pose.position);controls.target.fromArray(pose.target);logicalFov=pose.fov;camera.up.set(0,1,0);camera.lookAt(controls.target);renderer.domElement.dataset.cameraShot='track:'+shotTrack.move;}}  // #1963: a planned camera
       refreshCameraGround();
       if(cameraGround.apply(camera,scene)>0&&!(viewing==='manual'&&context.current.manualNavigation==='free'))camera.lookAt(controls.target);  // never underground (Gene)
       if(context.current.cameraMode==='manual'&&expansion?.group.visible)constrainOfficeGuardCamera(camera,controls.target,officeGuardFrom,expansion.officeGuards);

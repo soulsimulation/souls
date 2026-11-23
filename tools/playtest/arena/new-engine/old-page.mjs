@@ -65,9 +65,25 @@ function start(name, cmd, args, ready, { dir, env = {} }) {
 const safeRead = (f) => { try { return readFileSync(f, 'utf8'); } catch { return ''; } };
 const kill = (p) => { try { process.kill(-p.pid, 'SIGTERM'); } catch { /* gone */ } };
 
-/** Brings the old page up on a new-engine world of `template`. → {page, slug, world, stop()} */
-export async function startOldPage({ template = 'worlds/templates/hello-hamlet.json', dir, marsWeb = MARS_WEB, pkg = REPLICA_PKG, log = () => {} } = {}) {
+/** The genesis both sides start from. A committed template (`worlds/templates/<name>.json`) is used as it is; any other
+ *  file, or a template with `add` (god ops, as a template's batches hold them: things placed before the world starts),
+ *  is written into this run's own templates folder, which the launcher is given (`--templates-dir`).
+ *  → {template: the file run.sh's export reads, name, templatesDir: null | the run's folder} */
+export function genesisFor({ template, add = [], dir }) {
+  const file = resolve(REPO_ROOT, template), name = templateName(file);
+  if (!add.length && resolve(file, '..') === join(REPO_ROOT, 'worlds/templates')) return { template: file, name, templatesDir: null };
+  const g = JSON.parse(readFileSync(file, 'utf8'));
+  if (add.length) g.batches = [...(g.batches ?? []), { note: 'a staged scene\'s things (0.135 P3)', ops: add }];
+  const templatesDir = join(dir, 'templates');
+  mkdirSync(templatesDir, { recursive: true });
+  writeFileSync(join(templatesDir, `${name}.json`), JSON.stringify(g));
+  return { template: join(templatesDir, `${name}.json`), name, templatesDir };
+}
+
+/** Brings the old page up on a new-engine world of `template` (with `add`'s things placed). → {page, slug, world, stop()} */
+export async function startOldPage({ template = 'worlds/templates/hello-hamlet.json', add = [], dir, marsWeb = MARS_WEB, pkg = REPLICA_PKG, history = true, log = () => {} } = {}) {
   dir = resolve(dir);
+  const genesis = genesisFor({ template, add, dir });
   for (const [f, what] of [[join(REPO_ROOT, 'apps/web/dist/index.html'), 'apps/web is not built (pnpm --filter web build)'],
     [join(marsWeb, 'modular/humanoid/kit.json'), `${marsWeb} has no people's character set (pnpm build:viewer)`], [join(pkg, 'replica.js'), `no replica package at ${pkg}`]]) {
     if (!existsSync(f)) throw new Error(what);
@@ -79,15 +95,15 @@ export async function startOldPage({ template = 'worlds/templates/hello-hamlet.j
   let world = null;
   const stop = async () => { for (const p of procs.reverse()) kill(p); if (world) await stopWorld(world); };
   try {
-    world = await startWorld({ template, dir: join(dir, 'world') });
+    world = await startWorld({ template: genesis.template, dir: join(dir, 'world'), history });
     log(`new engine: ${world.page} (${(world.bootMs / 1000).toFixed(1)} s)`);
     const port = await freePorts(world.port ?? undefined), launcher = port + 1, frontPort = port;
     const binding = join(dir, 'binding.json');
     procs.push(await start('launcher', process.execPath, [LAUNCHER, '--port', String(launcher), '--data', join(dir, 'launcher'), '--dev-auth',
-      '--range', `${launcher + 100}-${launcher + 120}`, '--mars-web', marsWeb], /\[launcher\] http/, { dir, env: { BRAIN_MODE: 'fake', SOULS_CUTOVER_BINDING: binding } }));
+      '--range', `${launcher + 100}-${launcher + 120}`, '--mars-web', marsWeb, ...(genesis.templatesDir ? ['--templates-dir', genesis.templatesDir] : [])], /\[launcher\] http/, { dir, env: { BRAIN_MODE: 'fake', SOULS_CUTOVER_BINDING: binding } }));
     const made = await fetch(`http://127.0.0.1:${launcher}/__sim/worlds`, { method: 'POST', headers: { authorization: 'Bearer dev:Ada', 'content-type': 'application/json' },
-      body: JSON.stringify({ name: templateName(template), template: templateName(template) }) }).then((r) => r.json());
-    if (!made?.slug) throw new Error(`the launcher made no world from ${templateName(template)}: ${JSON.stringify(made).slice(0, 300)}`);
+      body: JSON.stringify({ name: genesis.name, template: genesis.name }) }).then((r) => r.json());
+    if (!made?.slug) throw new Error(`the launcher made no world from ${genesis.name}: ${JSON.stringify(made).slice(0, 300)}`);
     const slug = made.slug;
     log(`old page's shell: /w/${slug}/`);
 
