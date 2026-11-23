@@ -1,9 +1,9 @@
 // Morning booklet: one self-contained HTML folder over every run in a runs root (index.html + <run>.html).
 // Read-only over run folders; images are referenced in place by paths relative to outDir (nothing is copied).
 // node tools/playtest/review/booklet.mjs [--runs-root dir] [--out dir] [--only name,name]
+import { isMain } from '../../lib/is-main.mjs';
 import { existsSync, mkdirSync, readdirSync, readFileSync, writeFileSync, statSync } from 'node:fs';
 import { basename, isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { readJson, readJsonl } from '../lib/jsonl.mjs';
 import { loadRun, secsBetween } from './run.mjs';
 import { bodySummary } from './journal.mjs';
@@ -318,7 +318,7 @@ export function buildBooklet({ runsRoot = DEFAULT_RUNS_ROOT, outDir = null, runs
   return { index, pages, outDir: out };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const a = process.argv.slice(2); const opt = (k) => { const i = a.indexOf(k); return i >= 0 ? a[i + 1] : null; };
   const r = buildBooklet({ runsRoot: opt('--runs-root') ?? DEFAULT_RUNS_ROOT, outDir: opt('--out'), only: opt('--only')?.split(',').filter(Boolean) ?? null });
   process.stdout.write(JSON.stringify({ ok: true, index: r.index, pages: r.pages.length }) + '\n');

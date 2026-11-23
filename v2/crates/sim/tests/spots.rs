@@ -13,8 +13,9 @@ use replica::ids::Id;
 use replica::pose::Vec3;
 use replica::world_model::show;
 use sim::host::Runner;
+use sim::links::Kind;
 use sim::spots::{CLEAR, Entry, Target, to_segment};
-use sim::walk::town::Town;
+use sim::walk::town::{Town, level_part};
 use std::collections::BTreeMap;
 
 const SPEED: i64 = 1_400_000; // µm a second: today's walking pace
@@ -243,7 +244,8 @@ fn inside(p: Vec3, r: [i64; 4]) -> bool {
 }
 
 /// A3's check on every table a town holds: no place within `CLEAR` of a link's end on its node, nor within half the
-/// link's width and half `CLEAR` of its line.
+/// link's width and half `CLEAR` of its line (#4072: a step's line within half `CLEAR`, its ends holding its width; on
+/// a building's floor, a flight's line where it lies from a step below the place to a body's height above it).
 /// Returns how many places it checked.
 fn no_place_in_a_passage(t: &Town) -> usize {
     let mut n = 0;
@@ -268,16 +270,29 @@ fn no_place_in_a_passage(t: &Town) -> usize {
                                 "A3: a place at a link's end"
                             );
                         }
+                        let reach = if l.kind == Kind::Step {
+                            CLEAR / 2
+                        } else {
+                            l.width / 2 + CLEAR / 2
+                        };
+                        let flight = matches!(l.kind, Kind::Stairs | Kind::Ramp | Kind::Ladder);
                         for s in l.line.windows(2) {
                             let (a, c) = if *node == t.ground {
                                 (b.place.point(s[0]).unwrap(), b.place.point(s[1]).unwrap())
                             } else {
                                 (s[0], s[1])
                             };
-                            assert!(
-                                to_segment(p.at, a, c) >= l.width / 2 + CLEAR / 2,
-                                "A3: a place on a link's line"
-                            );
+                            let part = if flight && *node != t.ground {
+                                level_part(a, c, p.at.y)
+                            } else {
+                                Some((a, c))
+                            };
+                            if let Some((a, c)) = part {
+                                assert!(
+                                    to_segment(p.at, a, c) >= reach,
+                                    "A3: a place on a link's line"
+                                );
+                            }
                         }
                     }
                 }

@@ -46,8 +46,12 @@ removal end to end (W7) and who may act (F6) are not here.
    withheld, a leaf it never reads and asks for again at every sync. The container's record, and each ancestor's up
    to its top, is served to that Soul without the withheld children's hashes, under hashes of its own, so its copy
    neither counts nor can test them. The view tier's hub sends an entry that puts a thing into such a container, or
-   touches one in it, to its actor alone. The page's public stream is not covered yet. Code:
-   `v2/crates/worldd/src/closed.rs`.
+   touches one in it, to its actor alone. The page's public stream (#3948) asks as nobody: what such a container
+   holds is out of its state, baselines included, and out of its entries, by the same rule (`Closed::hides`, and the
+   hub's `Inside` for entries), until it is taken out; a part where only hidden things changed is not written. A
+   stream begun before keeps them until its next generation, which starts without them and, when that differs, with
+   no hand-off (a viewer starts again from its baseline). Code: `v2/crates/worldd/src/closed.rs`,
+   `v2/crates/worldd/src/view_out/mod.rs`.
 4. **How far a voice reaches is not who may read it** (E13). Speech is an event, `souls:said {1: reference, 2: reach
    in mm}`. Ordinary speech has the public audience and a short reach; a whisper has an audience of one, the
    listener. The speaker's own client keeps what it said.

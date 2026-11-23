@@ -1,6 +1,7 @@
 // T2: make a scripted Little Martians history using the pinned production
 // reader, copy SQLite read-only, then assert the edge launcher keeps its exact
 // clock/head/hash. Run only against a local checkout and disposable directories.
+import { isMain } from '../../lib/is-main.mjs';
 import {spawnSync} from 'node:child_process';import {mkdtempSync,readFileSync,mkdirSync,rmSync,writeFileSync} from 'node:fs';import {tmpdir} from 'node:os';import {join,resolve} from 'node:path';import {pathToFileURL} from 'node:url';import assert from 'node:assert/strict';
 import {openWorldServer} from './world-server.mjs';
 import {copySqliteReadOnly} from './copy-sqlite.mjs';
@@ -20,4 +21,4 @@ export async function proveProductionLmReplay({baseline,input,fixtureScript,outp
   if(output){mkdirSync(resolve(output,'..'),{recursive:true});writeFileSync(resolve(output),JSON.stringify(proof,null,2)+'\n');}return proof;
  }finally{rmSync(dir,{recursive:true,force:true});}
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){const [baseline,input,fixtureScript,output]=process.argv.slice(2);console.log(JSON.stringify(await proveProductionLmReplay({baseline,input,fixtureScript,output})));}
+if(isMain(import.meta.url)){const [baseline,input,fixtureScript,output]=process.argv.slice(2);console.log(JSON.stringify(await proveProductionLmReplay({baseline,input,fixtureScript,output})));}

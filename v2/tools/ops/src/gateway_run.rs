@@ -22,6 +22,12 @@
 //!
 //! Build first: `cargo build --release -p ops -p worldd -p gatewayd`; then, with `ulimit -n 8192`,
 //! `target/release/o16-run --dir <empty folder> --schedule <file> [--upgrade-at 20] [--kill-at 40]`.
+//!
+//! **Under systemd** (`--unit <script> --listen <addr:port>`, S1): the gateway is a `souls-gateway@` unit and the run
+//! starts nothing itself. It calls `<script> start` once the world and the tokens are there, `<script> upgrade` at the
+//! upgrade (`gateway-upgrade.sh`: `systemctl restart`), `<script> kill` at the kill (`systemctl kill -s KILL`; the
+//! unit's `Restart=always` brings it back after `RestartSec=1s`) and `<script> stop` at the end; it waits for the port
+//! to accept after each. `o16-run.sh --systemd` writes the unit and the script.
 // A run times itself by the wall clock (the wall-clock rule, K7, is the engine's: v2/clippy.toml).
 #![allow(clippy::disallowed_methods)]
 
@@ -324,8 +330,31 @@ async fn agent(
 }
 
 struct Gw {
-    child: Child,
+    /// None under systemd: the unit's process is systemd's.
+    child: Option<Child>,
     addr: String,
+}
+
+/// Wait until the gateway accepts at `addr` (under systemd, where no line says so), at most 15 s.
+fn wait_listening(addr: &str) {
+    let t = Instant::now();
+    while std::net::TcpStream::connect(addr).is_err() {
+        if t.elapsed() > Duration::from_secs(15) {
+            fail(format!("the gateway did not listen at {addr} within 15 s"));
+        }
+        std::thread::sleep(Duration::from_millis(10));
+    }
+}
+
+/// `<script> <what>` for the gateway's unit; the run fails if it does.
+fn unit(script: &str, what: &str) {
+    let ok = Command::new(script)
+        .arg(what)
+        .status()
+        .is_ok_and(|s| s.success());
+    if !ok {
+        fail(format!("`{script} {what}` failed"));
+    }
 }
 
 fn start_gateway(bin: &Path, listen: &str, out: &Path) -> Gw {
@@ -351,7 +380,10 @@ fn start_gateway(bin: &Path, listen: &str, out: &Path) -> Gw {
         .strip_prefix("listening ")
         .unwrap_or_else(|| fail(format!("gatewayd did not listen: {line:?}")))
         .to_owned();
-    Gw { child, addr }
+    Gw {
+        child: Some(child),
+        addr,
+    }
 }
 
 /// The two events, each once at its time.
@@ -361,6 +393,8 @@ struct Events {
     upgraded: Option<Instant>,
     killed: Option<Instant>,
     listen: String,
+    /// The unit's script, under systemd.
+    unit: Option<String>,
 }
 
 impl Events {
@@ -371,10 +405,22 @@ impl Events {
             // `systemctl restart`: SIGTERM, the old process exits, the new one starts.
             let t = Instant::now();
             self.upgraded = Some(t);
+            if let Some(script) = &self.unit {
+                unit(script, "upgrade");
+                let restarted = t.elapsed();
+                wait_listening(&self.listen);
+                println!(
+                    "upgraded through systemd: gateway-upgrade returned {} ms after it began; the new gateway listened at {} ms",
+                    ms(restarted),
+                    ms(t.elapsed())
+                );
+                return;
+            }
+            let child = gw.child.as_mut().expect("the gateway's process");
             let _ = Command::new("kill")
-                .args(["-TERM", &gw.child.id().to_string()])
+                .args(["-TERM", &child.id().to_string()])
                 .status();
-            let _ = gw.child.wait();
+            let _ = child.wait();
             let stopped = t.elapsed();
             *gw = start_gateway(new, &self.listen, out);
             println!(
@@ -386,8 +432,20 @@ impl Events {
         if self.killed.is_none() && now >= self.kill_at {
             let t = Instant::now();
             self.killed = Some(t);
-            let _ = gw.child.kill();
-            let _ = gw.child.wait();
+            if let Some(script) = &self.unit {
+                unit(script, "kill");
+                // The killed process is gone well before the unit's RestartSec=1s brings the next one.
+                std::thread::sleep(Duration::from_millis(200));
+                wait_listening(&self.listen);
+                println!(
+                    "killed through systemd: the unit listened again {} ms after SIGKILL",
+                    ms(t.elapsed())
+                );
+                return;
+            }
+            let child = gw.child.as_mut().expect("the gateway's process");
+            let _ = child.kill();
+            let _ = child.wait();
             std::thread::sleep(Duration::from_secs(1));
             *gw = start_gateway(new, &self.listen, out);
             println!(
@@ -455,12 +513,16 @@ fn event_row(
 async fn main() {
     let a: Vec<String> = std::env::args().collect();
     let get = |n: &str| a.iter().position(|x| x == n).and_then(|k| a.get(k + 1));
-    let usage = "usage: o16-run --dir <empty folder> --schedule <loads.mjs file> [--upgrade-at 20] [--kill-at 40]";
+    let usage = "usage: o16-run --dir <empty folder> --schedule <loads.mjs file> [--upgrade-at 20] [--kill-at 40] [--agents <n>] [--unit <script> --listen <addr:port>]";
     let dir = PathBuf::from(get("--dir").unwrap_or_else(|| fail(usage)));
     let schedule = std::fs::read_to_string(get("--schedule").unwrap_or_else(|| fail(usage)))
         .unwrap_or_else(|e| fail(format!("the schedule: {e}")));
     let secs = |n: &str, d: u64| get(n).map_or(d, |v| v.parse().unwrap_or_else(|_| fail(usage)));
     let (upgrade_at, kill_at) = (secs("--upgrade-at", 20), secs("--kill-at", 40));
+    let unit_script = get("--unit").cloned();
+    if unit_script.is_some() && get("--listen").is_none() {
+        fail(usage);
+    }
     let here = std::env::current_exe()
         .ok()
         .and_then(|p| p.parent().map(Path::to_path_buf))
@@ -483,7 +545,13 @@ async fn main() {
             _ => fail(format!("the schedule: `{line}`")),
         }
     }
-    let agents = acts.iter().map(|(_, k)| k + 1).max().unwrap_or(0);
+    // `--agents`: the schedule's agents, those with no act among them (they connect, lose their socket and come back).
+    let agents = acts
+        .iter()
+        .map(|(_, k)| k + 1)
+        .max()
+        .unwrap_or(0)
+        .max(get("--agents").map_or(0, |v| v.parse().unwrap_or_else(|_| fail(usage))));
 
     let _ = std::fs::remove_dir_all(&dir);
     std::fs::create_dir_all(&dir).unwrap_or_else(|e| fail(e));
@@ -526,12 +594,23 @@ async fn main() {
         .and_then(|l| l.local_addr())
         .unwrap_or_else(|e| fail(e))
         .port();
-    let listen = format!("127.0.0.1:{port}");
-    let mut gw = start_gateway(
-        Path::new("./gatewayd-old"),
-        &listen,
-        Path::new("gatewayd.out"),
-    );
+    let listen = get("--listen")
+        .cloned()
+        .unwrap_or_else(|| format!("127.0.0.1:{port}"));
+    let mut gw = if let Some(script) = &unit_script {
+        unit(script, "start");
+        wait_listening(&listen);
+        Gw {
+            child: None,
+            addr: listen.clone(),
+        }
+    } else {
+        start_gateway(
+            Path::new("./gatewayd-old"),
+            &listen,
+            Path::new("gatewayd.out"),
+        )
+    };
     let url = format!("ws://{}{}", gw.addr, gatewayd::socket::PATH);
 
     // Every agent signs in before the clock starts.
@@ -564,6 +643,7 @@ async fn main() {
         upgraded: None,
         killed: None,
         listen,
+        unit: unit_script.clone(),
     };
     for (at, k) in &acts {
         let due = start + Duration::from_millis(*at);
@@ -584,10 +664,14 @@ async fn main() {
     for t in tasks {
         seen.push(t.await.unwrap_or_else(|e| fail(e)));
     }
-    let _ = Command::new("kill")
-        .args(["-TERM", &gw.child.id().to_string()])
-        .status();
-    let _ = gw.child.wait();
+    if let Some(script) = &unit_script {
+        unit(script, "stop");
+    } else if let Some(child) = gw.child.as_mut() {
+        let _ = Command::new("kill")
+            .args(["-TERM", &child.id().to_string()])
+            .status();
+        let _ = child.wait();
+    }
     let _ = world.kill();
     let _ = world.wait();
 

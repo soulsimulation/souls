@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // The three production/qualification callers share this fixed released input recipe. No install or provider call.
+import { isMain } from '../../../tools/lib/is-main.mjs';
 import { spawnSync } from 'node:child_process';
 import { lstatSync, mkdirSync, readFileSync, readlinkSync, symlinkSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
@@ -61,4 +62,4 @@ try {
   }
 } catch (error) { console.error(error.message); process.exitCode = 1; }
 }
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) main();
+if (isMain(import.meta.url)) main();

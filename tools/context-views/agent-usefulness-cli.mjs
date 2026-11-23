@@ -1,10 +1,10 @@
 // Copied as eden.mjs into a fresh seat. It forwards byte-pinned served CLI
 // readonly commands, logs harness telemetry, and refuses call13 before spawn.
+import { isMain } from '../lib/is-main.mjs';
 import { readFileSync, appendFileSync, existsSync } from 'node:fs';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
-import { basename, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
+import { basename } from 'node:path';
 export function validateSeatCall(args, arm) {
   const [verb, ...rest] = args;
   if (['help', 'version'].includes(verb)) { if (rest.length) throw Error('unexpected readonly CLI arguments'); return { verb }; }
@@ -51,5 +51,5 @@ function main() {
   if (result.stderr) process.stderr.write(result.stderr);
   process.exitCode = result.status ?? 1;
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href)
+if (isMain(import.meta.url))
   try { main(); } catch (error) { process.stderr.write(String(error.message) + '\n'); process.exitCode = 1; }

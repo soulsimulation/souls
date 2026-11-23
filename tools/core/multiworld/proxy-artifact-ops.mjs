@@ -1,4 +1,5 @@
 // Operator-only proxy process. No writer/tunnel signals, credentials or DB access.
+import { isMain } from '../../lib/is-main.mjs';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {execFileSync,spawnSync} from 'node:child_process';
@@ -97,7 +98,7 @@ export async function runProxyOperation(planPin,goPin){
  }catch(e){await close();record('FIRST-FAILURE.json',{pid:process.pid,error:e.message,ownProxyClosed:!!proxy||e.ownProxyClosed===true});throw e;}
  finally{process.removeListener('SIGTERM',signal);process.removeListener('SIGINT',signal);}
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
  const [planPath,planSHA,goPath,goSHA]=process.argv.slice(2);
  try{await runProxyOperation({path:planPath,sha256:planSHA},{path:goPath,sha256:goSHA});}
  catch(e){console.error('Proxy operation refused:',e.message);process.exitCode=1;}

@@ -3,7 +3,7 @@
 
 use replica::effects::{FIXTURE_HEADER, FIXTURES, Header, Part, Refusal, fixture_bytes};
 use replica::ids::{Hash, Id, Scope, Version};
-use replica::sync::{Copy, Records, Served, Source, Start, start};
+use replica::sync::{BIG_RECORD, Copy, Records, Served, Source, Start, start};
 use replica::tree::Tree;
 
 fn header() -> Header {
@@ -242,4 +242,117 @@ fn a_withheld_record_is_a_leaf_the_copy_never_reads() {
         vec![h],
         "a withheld record is asked for again"
     );
+}
+
+/// The set fixture's first entry again, as the `round`th part: the crate's field set to `to`, at the next sequence.
+/// A node whose record changes at every seal, as a moving body's does.
+fn set_again(round: u64, to: replica::encode::Value) -> Part {
+    use replica::encode::{Value, encode};
+    let Value::Map(mut p) = part("4-set").to_value() else {
+        unreachable!("a part is a map")
+    };
+    let Some(Value::Array(effects)) = p.get_mut(&2) else {
+        unreachable!("a part's entries")
+    };
+    effects.truncate(1);
+    let Some(Value::Map(e)) = effects.first_mut() else {
+        unreachable!("an entry is a map")
+    };
+    e.insert(1, Value::Uint(2 + round));
+    e.insert(2, Value::Uint(3_000_000 + round * 50_000));
+    e.remove(&8);
+    let Some(Value::Array(changes)) = e.get_mut(&7) else {
+        unreachable!("the entry's changes")
+    };
+    let Some(Value::Map(c)) = changes.first_mut() else {
+        unreachable!("a change is a map")
+    };
+    c.insert(4, to);
+    c.remove(&5);
+    Part::read(&encode(&Value::Map(p)).unwrap()).unwrap()
+}
+
+/// The crate the set fixture writes to.
+const CRATE: u64 = 7;
+
+/// `rounds` seals, the crate changed before each (its field `to(round)`): the records held stop growing once the
+/// window has passed, a replaced crate record is served for `window` seals and then refused by name, and a sync from
+/// the top still completes.
+fn bounded_over(rounds: u64, window: u64, to: impl Fn(u64) -> replica::encode::Value) {
+    let h = header();
+    let scope = [world_id(0), world_id(1)];
+    let mut w = World {
+        tree: base(&h),
+        records: Records::default(),
+    };
+    w.seal();
+    let at_start = w.records.bytes();
+    let (mut settled, mut watched) = (None, None);
+    for round in 0..rounds {
+        w.tree.apply(&h, &set_again(round, to(round))).unwrap();
+        w.seal();
+        if round == 2 * window {
+            settled = Some(w.records.bytes());
+            // The crate's record as of this seal, which the next seal replaces.
+            watched = w.hash(world_id(CRATE)).map(Hash::to_bytes);
+        }
+        if let Some(watched) = &watched {
+            let served = w.served().records(std::slice::from_ref(watched));
+            let age = round - 2 * window; // the next seal replaced it: seals since then, and one
+            if age <= window {
+                assert!(
+                    served.is_ok(),
+                    "replaced {} seals ago: still served",
+                    age - 1
+                );
+            } else if age == window + 1 {
+                assert_eq!(
+                    served.unwrap_err().name,
+                    "sync-unknown-hash",
+                    "replaced {window} seals ago: let go"
+                );
+            }
+        }
+    }
+    // Past the window, each seal lets go about what it keeps: the bytes held grow by less than one big record (the
+    // small records of the crate's parents, whose window is longer than a big one's, and a value's longer writing).
+    let bytes = settled.unwrap();
+    assert!(bytes > at_start, "the window holds replaced records");
+    let end = w.records.bytes();
+    assert!(
+        end < bytes + BIG_RECORD,
+        "bytes held after {rounds} seals: {end}, after {}: {bytes}",
+        2 * window
+    );
+    let mut fresh = Copy::default();
+    fresh.sync(&scope, &mut w.served()).unwrap();
+    for id in scope {
+        assert_eq!(
+            fresh.roots().get(&id),
+            w.hash(id).map(Hash::to_bytes).as_ref()
+        );
+    }
+}
+
+/// worldd grew 5 to 9 MB a second while one Soul walked, and never gave it back (#1960): its sync thread kept every
+/// record every seal gave, and a moving body re-seals itself and every ancestor at each seal (Eden's ground's record
+/// holds its terrain and every child's hash). A small record changed at every seal is kept its window and let go.
+#[test]
+fn replaced_small_records_are_let_go_after_their_window() {
+    use replica::sync::SMALL_SEALS;
+    bounded_over(
+        3 * SMALL_SEALS + 10,
+        SMALL_SEALS,
+        replica::encode::Value::Uint,
+    );
+}
+
+/// A big record (the ground's, in Eden) changed at every seal is kept its shorter window, so the records held stay
+/// within a few megabytes of the world's own.
+#[test]
+fn replaced_big_records_are_let_go_after_their_shorter_window() {
+    use replica::sync::BIG_SEALS;
+    bounded_over(3 * BIG_SEALS + 10, BIG_SEALS, |r| {
+        replica::encode::Value::Bytes(vec![(r % 251) as u8; BIG_RECORD])
+    });
 }
