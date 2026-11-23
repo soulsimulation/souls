@@ -147,6 +147,20 @@
       "expect": { "verdict": "no", "reason": "not_holding_kind", "need": 0, "detail": { "kind": "r2:cup" }, "fix": { "step": "take", "kind": "r2:cup" } }
     },
     {
+      "name": "cup_clink_holding_a_thing_that_borrows_the_cup_entry",
+      "act": { "this": "c1", "form": "clink" },
+      "state": { "actor": "b1", "nodes": { "c1": { "kind": "r2:cup" }, "x1": { "kind": "mars:mug", "entry": "r2:cup" }, "b1": { "hands": { "left": "x1", "right": null } } } },
+      "asker": { "sees": [] },
+      "expect": { "verdict": "yes", "read": [["b1/hand/left", "x1"], ["b1/hand/right", null]] }
+    },
+    {
+      "name": "cup_clink_holding_a_thing_that_borrows_another_entry",
+      "act": { "this": "c1", "form": "clink" },
+      "state": { "actor": "b1", "nodes": { "c1": { "kind": "r2:cup" }, "x1": { "kind": "mars:lantern", "entry": "r2:lamp" }, "b1": { "hands": { "left": "x1", "right": null } } } },
+      "asker": { "sees": [] },
+      "expect": { "verdict": "no", "reason": "not_holding_kind", "need": 0, "detail": { "kind": "r2:cup" }, "fix": { "step": "take", "kind": "r2:cup" } }
+    },
+    {
       "name": "cup_drink_from_a_cup_on_the_table",
       "act": { "this": "c1", "form": "drink" },
       "state": { "actor": "b1", "nodes": { "c1": { "kind": "r2:cup", "fields": { "water_g": 200 } }, "b1": { "hands": { "left": null } } } },

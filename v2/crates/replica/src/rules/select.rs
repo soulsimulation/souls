@@ -2,7 +2,7 @@
 //! today's form rules do (`chosenSlots`, `selectThing`): the same set, order and rank, read from the input alone.
 
 use super::json::Value;
-use super::{has, sees_audience, sorted};
+use super::{entry_in, has, is_kind, sees_audience, sorted};
 
 /// How far from the anchor a thing `here` may be, mm (worldd `HERE_REACH_MM`).
 pub const HERE_REACH_MM: i128 = 20_000;
@@ -107,7 +107,7 @@ fn select_thing(select: &Value, this: &str, state: &Value) -> Option<Option<Stri
         .filter_map(|id| {
             let n = has(nodes, &id)?;
             let body = n.get("hands").is_some() || has(n.get("links"), "souls:body-of").is_some();
-            if body || kind.is_some_and(|k| n.get("kind").and_then(Value::str) != Some(k)) {
+            if body || kind.is_some_and(|k| !is_kind(Some(n), k)) {
                 return None;
             }
             let d = from
@@ -137,10 +137,7 @@ fn select_thing(select: &Value, this: &str, state: &Value) -> Option<Option<Stri
 /// `chosenSlots`' thing half: each thing argument the act leaves out that its form describes by a selector.
 pub(super) fn chosen(kinds: &Value, act: &Value, state: &Value, sees: Option<&Value>) -> Choice {
     let this = act.get("this").and_then(Value::str).unwrap_or_default();
-    let Some(entry) = has(has(state.get("nodes"), this), "kind")
-        .and_then(Value::str)
-        .and_then(|k| kinds.get(k))
-    else {
+    let Some(entry) = entry_in(kinds, has(state.get("nodes"), this)) else {
         return Choice::Same;
     };
     let Some(form) = has(
