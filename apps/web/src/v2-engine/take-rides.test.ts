@@ -65,3 +65,19 @@ test('before the course reader is in, the balloon and its rider stand where they
   assert.deepEqual(f.entities['festival-balloon-id'].p, [10, 0, 0]);
   assert.deepEqual(f.entities[E].p.map((x) => +x.toFixed(3)), [10.3, 0.1, 0]);
 });
+
+test('the reader\'s worker posts a course\'s places with each part, and the page reads them without loading the replica', async () => {
+  const { coursePlaces } = await import('./course-samples.ts');
+  const b = new V2Bridge({ rulesVersion: 'test/1' });
+  b.receive({ t: 'snapshot', s: { nodes: [world, balloon, body], removed: [] } });
+  for (let n = 0; n < 12; n++) {
+    const p = part(n).p;
+    b.receive({ t: 'part', p: { ...p, courses: coursePlaces(courseAt, [balloon], p.from, p.to) } });
+  }
+  for (const s of [1, 2.5, 4]) {
+    const tick = T0 / TICK_US + Math.round(s / DT), c = b.view.takes.chunks.find((x) => x.fromTick <= tick && tick < x.toTick)!;
+    const f = sampleTake(c.take as unknown as Take, (tick - c.fromTick) * DT);
+    assert.deepEqual(f.entities['festival-balloon-id'].p.map((x) => +x.toFixed(3)), [10, s, 2 * s], `the balloon at ${s} s`);
+    assert.deepEqual(f.entities[E].p.map((x) => +x.toFixed(3)), [10.3, s + 0.1, 2 * s], `its rider at ${s} s`);
+  }
+});

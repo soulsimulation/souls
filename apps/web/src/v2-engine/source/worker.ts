@@ -6,6 +6,7 @@
 // ...]`, the public audience's, written by V1's writer beside the part), kept by reference across parts. A named
 // place's name (import-eden's field 4, a SHA-256 of its words) is a `[hash, words]` row of the same files (#3574).
 import init, { StreamPlayer, readPointer } from 'replica';
+import * as replica from 'replica';
 import { decode, encode } from 'cborg';
 import { publicSoul, type MoveRec, type RunEndRec, type NodeRec, type PartRec, type Pointer, type SaidRec, type SnapshotRec } from './source.ts';
 import { happenedInPart } from './sound-record.ts';
@@ -13,6 +14,7 @@ import { readChanged } from './changed.ts';
 import { skyFields } from './sky-record.ts';
 import { BEHIND_US, CUT_US } from './clock.ts';
 import { fieldsOf } from './kinds-state.ts';
+import { coursePlaces } from '../course-samples.ts';
 
 /** Parts fetched at once from the one played (#3822): a joiner far behind is not one round trip a part. */
 const AHEAD = 16;
@@ -171,7 +173,9 @@ async function run(stream: URL) {
     const transfer: Transferable[] = [];
     // A retained unresolved record may become drawable later; transfer fresh buffers, retaining its exact bytes.
     for (const n of visible) for (const t of n.tiles ?? []) transfer.push(t[2].buffer as ArrayBuffer, t[3].buffer as ArrayBuffer);
-    if (rest) post({ t: 'part', p: { ...rest, nodes: visible, removed: gone, samples: samples.filter(s => next.has(s[0])) } }, transfer);
+    // K4 (0.135): where each node on a course is over the part, so the page never loads the replica (course-samples.ts)
+    const courses = rest && replica.courseAt ? coursePlaces(replica.courseAt, [...next].map(id => known.get(id)!), rest.from, rest.to) : {};
+    if (rest) post({ t: 'part', p: { ...rest, nodes: visible, removed: gone, samples: samples.filter(s => next.has(s[0])), ...(Object.keys(courses).length ? { courses } : {}) } }, transfer);
     else post({ t: 'snapshot', s: { nodes: visible, removed: gone } }, transfer);
   };
   const install = async (p: StreamPointer) => {

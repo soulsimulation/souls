@@ -4,7 +4,9 @@
 // only turns the records into takes (history.ts). Only the WASM module, the header and the day indexes read are kept
 // between seeks. The node records are read as the stream worker reads them, the fields the bridge reads.
 import init, { historyAt } from 'replica';
+import * as replica from 'replica';
 import { decode, encode } from 'cborg';
+import { coursePlaces, type CoursePlaces } from './course-samples.ts';
 
 /** A node record, the fields the bridge reads (v2/web/src/source/source.ts NodeRec). */
 export type HistoryNode = { id: string; kind: string; parent: string | null; slot: number | null; pos: [number, number, number];
@@ -14,7 +16,9 @@ export type HistoryNode = { id: string; kind: string; parent: string | null; slo
 /** A body's motion sample `[body, frame, slot, at µs, x, y, z µm]` (source.ts SampleRec). */
 export type HistorySample = [string, string, number | null, number, number, number, number];
 /** What one seek gives the page: the moment's state, its bundle's samples, and where the next bundle starts. */
-export type Seeked = { seq: number; at: number; start: number; length: number; next: number | null; nodes: HistoryNode[]; samples: HistorySample[] };
+export type Seeked = { seq: number; at: number; start: number; length: number; next: number | null; nodes: HistoryNode[]; samples: HistorySample[];
+  /** K4 (0.135): where each node on a course is over the bundle, worked out here so the page never loads the replica. */
+  courses?: CoursePlaces };
 export type HistoryMsg = { t: 'seeked'; s: Seeked } | { t: 'error'; seq: number; message: string };
 
 const DAY_US = 86_400_000_000;
@@ -92,7 +96,9 @@ async function seek(base: URL, seq: number, at: number) {
       return [key(s.get(1) as IdValue), key(s.get(2) as IdValue), s.has(3) ? num(s.get(3)) : null, num(s.get(4)), p[0], p[1], p[2]];
     });
     const later = ix[i + 1]?.[0] ?? (await dayIndex(base, day + 1))?.[0]?.[0] ?? null;
-    post({ t: 'seeked', s: { seq, at, start: num(out.get(4)), length: num(out.get(5)), next: later, nodes, samples } });
+    const start = num(out.get(4)), length = num(out.get(5));
+    const courses = replica.courseAt ? coursePlaces(replica.courseAt, nodes, Math.min(start, at), start + length) : {};
+    post({ t: 'seeked', s: { seq, at, start, length, next: later, nodes, samples, ...(Object.keys(courses).length ? { courses } : {}) } });
     return;
   }
   throw new Error(`no history in the year before ${at} µs`);

@@ -6,6 +6,7 @@ import { chunkEnd, chunkOf, positionAt, TICK_US, type Body, type Frame, type Rec
 import { defaultLookOf, entityWithLook, legacyBodyOf, lookBodyOf, propOf, seatOf, type CatalogueBody, type Held, type Seat } from './take-bodies.ts';
 import { earshotOf, hearersOf, isPublic, saidKey, speechOf, talkOf, type Said, type Talk } from './take-speech.ts';
 import { cut as cutGestures, endGesture, gestureFrom, type Gesture } from './take-gestures.ts';
+import { keepPlaces, placeAt, type CourseAt, type CoursePlaces } from './course-samples.ts';
 import { privateTurnOf, tickerOf, turnKey } from './take-talk.ts';
 import type { Heard } from './member-turns.ts';
 
@@ -20,16 +21,14 @@ type NodeRec = { id: string; kind: string; parent: string | null; slot: number |
   look?: string;
   /** A moving node's course (field 80, #3603), its canonical bytes, for the replica's `courseAt`. */
   course?: Uint8Array };
-/** The replica's WASM `courseAt` (v2/web/src/draw/course.ts): `[x, y, z, vx, vy, vz]` µm and µm a second in the node's
- *  parent's frame at world time `t` µs; throws by name. */
-export type CourseAt = (field: Uint8Array, t: bigint) => ArrayLike<bigint>;
-/** The page's one `courseAt`, once loaded (use-v2-souls.ts): every bridge reads it, the live one and a past window's. */
-export const courses: { at: CourseAt | null } = { at: null };
+export type { CourseAt };
 type SampleRec = [string, string, number | null, number, number, number, number];
 /** A world record (sound/record.ts Happened); only the fields read here (B3-3). */
 type Happened = { at: number; node: string; name?: string };
 type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; said?: Said[]; happened?: Happened[];
-  moves?: { body: string; name: string; start: number; ends: number[]; target?: string | null; run?: string; ended?: { at: number; how: string } }[]; runEnds?: { body: string; at: number }[] };
+  moves?: { body: string; name: string; start: number; ends: number[]; target?: string | null; run?: string; ended?: { at: number; how: string } }[]; runEnds?: { body: string; at: number }[];
+  /** K4 (0.135): where each node on a course is over the part, as the reader's worker worked it out (course-samples.ts). */
+  courses?: CoursePlaces };
 type Pointer = { newest: number | null; newestTo: number | null; period: number; anchorWorld: number; anchorWallMs: number; quietUntil: number | null; asleep?: true; stillUntil?: number | null };
 type Msg = { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'snapshot'; s: { nodes: NodeRec[]; removed: string[] } } | { t: 'error'; message: string };
 
@@ -128,8 +127,11 @@ export class V2Bridge {
   private liveFrom: number | null = null;
   /** Wall time, ms (tests set it). */
   wallNow: () => number = () => Date.now();
-  /** K4 (0.135): the replica's `courseAt`, once the page has loaded it (a thing on a course stands where it was placed
-   *  until then); `onCourse` is called once, when the first node with a course arrives, to load it. */
+  /** K4 (0.135): where each node on a course is, as the reader's worker posts it with the parts (course-samples.ts); the
+   *  page never loads the replica itself. A thing on a course stands where it was placed until its places come. */
+  private readonly places = new Map<string, number[]>();
+  /** K4: a `courseAt` to read a course with directly where no places were posted (a test's stand-in); `onCourse` is
+   *  called once, when the first node with a course arrives. */
   courseAt: CourseAt | null = null;
   onCourse: (() => void) | null = null;
   /** K4: the page's entity id for a thing, given its `origin` and where it was placed (world metres): the layer's thing
@@ -189,6 +191,8 @@ export class V2Bridge {
     if (m.t === 'snapshot') { this.nodesChanged(m.s.nodes, m.s.removed, this.view.newestTo ?? 0); this.publish(); return; }
     const p = m.p;
     this.liveFrom ??= p.from;
+    for (const id of p.removed) this.places.delete(id);
+    keepPlaces(this.places, p.courses);
     // K2: a record that changes a body's frame or slot (a sit, a stand, a step inside) lands after the part's own motion
     // samples of that body (its walk there), so the walk's last sample never draws a seated body standing again
     const moved = this.nodesChanged(p.nodes, p.removed, p.from, true);
@@ -281,8 +285,11 @@ export class V2Bridge {
 
   /** Where node `n`'s course has it at world time `t` (µm, its parent's frame); null with no course or no reader yet. */
   private coursePos(n: NodeRec, t: number): [number, number, number] | null {
-    const read = this.courseAt ?? courses.at;
-    if (!n.course || !read) return null;
+    if (!n.course) return null;
+    const posted = placeAt(this.places.get(n.id), t);
+    if (posted) return posted;
+    const read = this.courseAt;
+    if (!read) return null;
     try { const v = read(n.course, BigInt(Math.floor(t))); return [Number(v[0]), Number(v[1]), Number(v[2])]; } catch { return null; }
   }
 
@@ -397,6 +404,7 @@ export class V2Bridge {
     for (const from of [...this.built.keys()]) if (from < first) this.built.delete(from);
     // samples kept a body: a minute of world time before the oldest chunk kept
     const cut = first * TICK_US - KEEP_CHUNKS_US - 60_000_000;
+    keepPlaces(this.places, undefined, cut);
     for (const [id, t] of this.tracks) {
       if (t.gone !== null && t.gone < cut) { this.tracks.delete(id); continue; }
       let k = 0;

@@ -55,14 +55,14 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
     void (async () => {
      try {
       const scene = await fetch(apiPath('/v1/scene')).then((r) => (r.ok ? r.json() : null)).catch(() => null) as { renderSceneRef?: { rulesVersion?: string } } | null;
-      const [{ V2Bridge, courses }, { makeReader, makeHistoryReader, loadCourseAt }] = await Promise.all([import('./bridge.ts'), import('./reader.ts')]);
+      const [{ V2Bridge }, { makeReader, makeHistoryReader }] = await Promise.all([import('./bridge.ts'), import('./reader.ts')]);
       if (stopped) return;
       // `hour=HH:MM`, as on the v2 page: the light of the picture only, the world's clock unchanged
       const hour = /^([01]\d|2[0-3]):[0-5]\d$/.exec(new URLSearchParams(location.search).get('hour') ?? '')?.[0];
       const frame = { rulesVersion: scene?.renderSceneRef?.rulesVersion ?? 'souls-v2/1', ...(scene?.renderSceneRef ? { renderSceneRef: scene.renderSceneRef } : {}) };
       bridge = new V2Bridge(frame, hour);
-      // K4: a thing on a course (a balloon) and its riders move where the replica's courseAt has it, loaded on the first one
-      bridge.onCourse = () => void loadCourseAt(new URL(apiPath('/replica.js'), location.href).href).then((f) => { courses.at = f; }, (e) => console.warn('courses stand still:', e));
+      // K4: a thing on a course (a balloon) and its riders move where its course has them: the reader's worker posts the
+      // places with each part (course-samples.ts), so the page never loads the replica itself
       bridge.thingKey = (origin, at) => {
         const m = (window as unknown as { __soulsEntity?: { layer?: LayerLike } }).__soulsEntity?.layer?.model;
         if (!m) return undefined;

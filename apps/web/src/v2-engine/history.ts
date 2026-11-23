@@ -62,7 +62,7 @@ export class V2History {
       // K3: a window that begins before the world's first moment (a link to its first minute) is read from that moment
       const s = await this.seek(at).catch(async (e) => { const f = first ? await this.first(endUs).catch(() => null) : null; if (f === null || f <= at) throw e; at = f; return this.seek(f); }), until = Math.min(s.next ?? s.start + s.length, endUs + 2 * STEP_US);
       // the bundle's state and its motion, then its time step by step
-      bridge.receive({ t: 'part', p: { number: 0, from: first ? s.at : s.start, to: first ? s.at : s.start, nodes: s.nodes as never, removed: [], samples: s.samples } });
+      bridge.receive({ t: 'part', p: { number: 0, from: first ? s.at : s.start, to: first ? s.at : s.start, nodes: s.nodes as never, removed: [], samples: s.samples, ...(s.courses ? { courses: s.courses } : {}) } });
       first = false;
       for (let t = s.start + STEP_US; t < until + STEP_US && got.size < limit; t += STEP_US) {
         bridge.receive({ t: 'pointer', p: { newest: null, newestTo: null, period: 0, anchorWorld: 0, anchorWallMs: 0, quietUntil: Math.min(t, until) } });
