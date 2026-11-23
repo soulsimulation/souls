@@ -756,3 +756,80 @@ fn trace(out: &str, fixed: &Fixed, path: &[Xz], carry: &Carry, walkers: &[(Xz, X
     }
     file.flush().unwrap();
 }
+
+/// 0.135 C2: a load read from its kind's entry, and its checks before the lift.
+mod from_entry {
+    use replica::rules::json::parse;
+
+    use super::super::{Fixed, GRIP_REACH, Load, REACH};
+
+    const M: i64 = 1_000_000;
+
+    fn entry(path: &str) -> replica::rules::json::Value {
+        let root = std::path::Path::new(env!("CARGO_MANIFEST_DIR"))
+            .join("../../../content/kinds/construction");
+        parse(&std::fs::read_to_string(root.join(path)).expect("the entry")).expect("json")
+    }
+
+    #[test]
+    fn c2_the_beam_and_the_upright_as_their_entries_state() {
+        let beam = Load::of(&entry("rack_beam.json")).expect("the beam");
+        assert_eq!(
+            beam,
+            Load {
+                half_length: 1_371_500,
+                half_width: 51_000,
+                grips: [-1_097_000, 1_097_000],
+                crew: 2,
+            }
+        );
+        let upright = Load::of(&entry("rack_upright.json")).expect("the upright");
+        assert_eq!(
+            upright,
+            Load {
+                half_length: 1_219_000,
+                half_width: 609_500,
+                grips: [-780_000, 780_000],
+                crew: 1,
+            }
+        );
+        assert_eq!(upright.places(), [-780_000 - REACH, 780_000 + REACH]);
+    }
+
+    /// Two walls with a 0.9 m passage between them, across a straight way east: the upright (1.22 m wide) is refused
+    /// `carry-board-clips` before the lift and the beam (0.1 m) is not; a crew of one and a carrier off its grip are
+    /// refused by name.
+    #[test]
+    fn c2_a_passage_a_crew_and_a_grip_refused_before_the_lift() {
+        let wall = |z0: i64, z1: i64| {
+            [
+                [10 * M, z0],
+                [10 * M + 200_000, z0],
+                [10 * M + 200_000, z1],
+                [10 * M, z1],
+            ]
+        };
+        let fixed = Fixed::new(vec![wall(450_000, 3 * M), wall(-3 * M, -450_000)]);
+        for (name, load, ok) in [
+            (
+                "upright",
+                Load::of(&entry("rack_upright.json")).unwrap(),
+                false,
+            ),
+            ("beam", Load::of(&entry("rack_beam.json")).unwrap(), true),
+        ] {
+            let [b, f] = load.places();
+            let r = load.check(2, [f, 0], [b, 0], [0, 0], Some(([20 * M, 0], &fixed)));
+            match ok {
+                true => assert!(r.is_ok(), "{name}: {r:?}"),
+                false => assert_eq!(r.map_err(|e| e.name), Err("carry-board-clips"), "{name}"),
+            }
+        }
+        let beam = Load::of(&entry("rack_beam.json")).unwrap();
+        let [b, f] = beam.places();
+        let crew = beam.check(1, [f, 0], [b, 0], [0, 0], None);
+        assert_eq!(crew.map_err(|e| e.name), Err("carry-crew-too-small"));
+        let off = beam.check(2, [f + GRIP_REACH + 400_000, 0], [b, 0], [0, 0], None);
+        assert_eq!(off.map_err(|e| e.name), Err("carry-grip-out-of-reach"));
+    }
+}
