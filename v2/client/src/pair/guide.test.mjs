@@ -53,7 +53,7 @@ test('A1: pairing writes the guide as a marked block; the text around it is kept
   const start = text.indexOf(START), end = text.indexOf(END) + END.length;
   assert.equal(text.slice(0, start), before, 'before the block: byte for byte');
   assert.equal(text.slice(end), after, 'after the block: byte for byte');
-  assert.match(text.slice(start, end), new RegExp(`- s_${'ab'.repeat(16)}-0 in eden: \`node souls.mjs look\``));
+  assert.match(text.slice(start, end), new RegExp(`- s_${'ab'.repeat(16)}-0 in eden: \`node eden.mjs look\``));
   assert.equal(readFileSync(join(folder, 'CLAUDE.md'), 'utf8'), '@AGENTS.md\n');
 
   assert.deepEqual(writeGuide(home), [], 'a second write writes nothing');
@@ -79,9 +79,10 @@ test('A2: for one Soul the guide is under 1,300 characters and names only comman
   const one = guideText([{ id: `s_${'ab'.repeat(16)}-0`, name: 'Oriel', world: 'eden' }]);
   assert.ok(one.length < 1300, `${one.length} characters`);
   const has = new Set([...OPS, ...LOCAL]);
-  const named = [...one.matchAll(/node souls\.mjs (\w+)/g)].map((m) => m[1]);
-  for (const cmd of ['status', 'look', 'act', 'memory', 'remember']) assert.ok(named.includes(cmd), `names ${cmd}`);
-  for (const cmd of named) assert.ok(has.has(cmd), `${cmd} is a command of souls.mjs`);
-  assert.doesNotMatch(one, /eden\.mjs|listen|pending|here`|serve/, 'no command of the shipping line');
+  const named = [...one.matchAll(/node eden\.mjs (\w+)/g)].map((m) => m[1]);
+  for (const cmd of ['status', 'listen', 'act', 'memory', 'remember']) assert.ok(named.includes(cmd), `names ${cmd}`);
+  for (const cmd of named) assert.ok(has.has(cmd), `${cmd} is a command of the client`);
+  // D4: the served client is eden.mjs (instructions.md), so the guide names it, never souls.mjs, nor a command it lacks.
+  assert.doesNotMatch(one, /souls\.mjs|\bserve\b/, 'no other name for the client, and no serve');
   if (process.env.R19_REPORT === '1') console.log(`guide for one Soul: ${one.length} characters\n${one}`);
 });
