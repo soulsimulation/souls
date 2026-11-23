@@ -594,7 +594,7 @@ impl Skill for Route {
         }
         let step = guard([p.x, p.z], want, self.tick, &near, room);
         // Judged over a window of HOLD ticks: a walker that got under a quarter of its free way, while a lower id
-        // stands near it, yields to that one.
+        // stands near it ahead, yields to that one (one behind does not hold it).
         self.held += 1;
         let start = *self.window.get_or_insert(p);
         if self.held >= HOLD {
@@ -604,7 +604,13 @@ impl Skill for Route {
                 let reach = 2 * room;
                 let by = near
                     .iter()
-                    .filter(|n| n.id < body && dist(n) <= reach)
+                    .filter(|n| {
+                        n.id < body
+                            && dist(n) <= reach
+                            && (n.position.x - p.x) * (aim.x - p.x)
+                                + (n.position.z - p.z) * (aim.z - p.z)
+                                > 0
+                    })
                     .min_by_key(|n| (dist(n), n.id));
                 if let Some(n) = by {
                     self.yielding = Some((n.id, BACK));
