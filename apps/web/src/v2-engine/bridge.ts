@@ -3,7 +3,7 @@
 // public nodes and body samples it hands on, and keeps the page's `takes` and Souls list as the old socket would: the
 // last chunks of every Soul's body (takes.ts) and one PublicSoul a body. Nothing here draws or decides; LiveWorld does.
 import { chunkEnd, chunkOf, TICKS, TICK_US, type Body, type Frame, type RecordedChunk, type WorldSample } from './takes.ts';
-import { defaultLookOf, entityWithLook, legacyBodyOf, propOf, seatOf, type CatalogueBody, type Held, type Seat } from './take-bodies.ts';
+import { defaultLookOf, entityWithLook, legacyBodyOf, lookBodyOf, propOf, seatOf, type CatalogueBody, type Held, type Seat } from './take-bodies.ts';
 import { isPublic, saidKey, speechOf, talkOf, type Said, type Talk } from './take-speech.ts';
 import { cut as cutGestures, gestureFrom, type Gesture } from './take-gestures.ts';
 
@@ -13,7 +13,9 @@ type NodeRec = { id: string; kind: string; parent: string | null; slot: number |
   /** Slots `[n, x, y, z, yaw mdeg, capacity]`, mm in its own frame. */
   slots?: number[][];
   /** Exact recorded body-kind hash (field 32); absent is the stated default. */
-  body?: string };
+  body?: string;
+  /** V3: the Soul's own look's params (field 33, G2's `life:look`), JSON. */
+  look?: string };
 type SampleRec = [string, string, number | null, number, number, number, number];
 /** A world record (sound/record.ts Happened); only the fields read here (B3-3). */
 type Happened = { at: number; node: string; name?: string };
@@ -234,8 +236,10 @@ export class V2Bridge {
       const w = this.nodes.has(id) ? this.world(id) : null;
       // The node's turn about +y as the old take's heading (the old model faces +x: heading = -rotation.y).
       const heading = w ? -2 * Math.atan2(w.q[2], w.q[0]) : 0;
-      // The look the v2 page gives it: its body kind's, else the default person its id picks (on both pages alike).
-      const look = legacyBodyOf(n.body, this.catalogue), entity = n.body ? entityOf(id) : entityWithLook(entityOf(id), defaultLookOf(id));
+      // The look the v2 page gives it: its body kind's, else its own look (field 33, V3) drawn by the old page's look code,
+      // else the default person its id picks (on both pages alike).
+      const own = n.body ? null : lookBodyOf(n.look);
+      const look = legacyBodyOf(n.body, this.catalogue) ?? own, entity = n.body || own ? entityOf(id) : entityWithLook(entityOf(id), defaultLookOf(id));
       out.push({ node: id, entity, soul: soulIdOf(n.soul ?? id), name: nameOf(id, n), description: n.description ?? '', samples: t.samples, heading, held: t.held, said: t.said, gestures: t.gestures,
         ...(look ? { look } : {}), ...(t.gone !== null ? { until: t.gone } : {}) });
     }

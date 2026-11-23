@@ -2,6 +2,7 @@
 //!
 //! ```text
 //! supervisor launch <world>     the unit's ExecStart: record the start, read the pin, run builds/<hash>/worldd serve
+//!                               (with --sleep $WORLDS_ROOT/alarms.sock when SOULS_SLEEP=1: a quiet world sleeps, O2)
 //! supervisor ready <world>      the unit's ExecStartPost (after worldd said READY=1): record that it serves
 //! supervisor exited <world>     the unit's ExecStopPost: record how it ended, from $SERVICE_RESULT and $EXIT_*
 //! supervisor health [<world>]   print the health record (every world's, without a name)
@@ -110,12 +111,15 @@ fn launch(root: &Path, world: &World) -> i32 {
     }
     println!("launch: world {name} build {hex} (pin from the {from:?})");
     let state = root.join("worlds").join(&name);
-    let err = Command::new(&path)
-        .arg("serve")
-        .arg("--dir")
-        .arg(&state)
-        .env("WORLDD_BUILD", &hex)
-        .exec();
+    let mut serve = Command::new(&path);
+    serve.arg("serve").arg("--dir").arg(&state);
+    // O2 (0.133 S3b): with SOULS_SLEEP=1 in the unit's environment, the world sleeps through the machine's alarm
+    // daemon when still and nothing is due. Off unless set: until the old page plays a sleeping world as still (S4p)
+    // and a large world starts fast (S5), a sleeping world would stall its viewers and answer late.
+    if std::env::var("SOULS_SLEEP").is_ok_and(|v| v == "1") {
+        serve.arg("--sleep").arg(root.join("alarms.sock"));
+    }
+    let err = serve.env("WORLDD_BUILD", &hex).exec();
     eprintln!("launch: build.missing: {hex}: {err}");
     EXIT_BUILD_MISSING
 }

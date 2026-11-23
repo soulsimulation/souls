@@ -481,6 +481,7 @@ impl Ladder {
             speed: w.speed,
             to: node,
             arrive: None,
+            hold: false,
         };
         runner.controller.carry(who, track)?;
         if runner.running(who) {
