@@ -74,8 +74,10 @@ export type SaidRec = { speaker: string; at: number; length: number; reach: numb
 export type Private = { conversation: string; members: string[] };
 
 /** A run's move as it started (`souls:form-move`, #3741): the body, B2's record (times world µs) and the thing it acts
- * on; and a run's ending (`souls:form-ended`): the body, when and how. The page draws gestures from these alone. */
-export type MoveRec = { body: string; name: string; start: number; ends: number[]; target: string | null };
+ * on; the run or activity it belongs to (0.134: dancers on one beat share it); when a held move was let go, the same
+ * record again with when and how it ended (0.134 T2). And a run's ending (`souls:form-ended`): the body, when and how.
+ * The page draws gestures from these alone. */
+export type MoveRec = { body: string; name: string; start: number; ends: number[]; target: string | null; run?: string; ended?: { at: number; how: string } };
 export type RunEndRec = { body: string; at: number; how: string };
 
 /** What one part changed, in the order played; `samples` is every motion sample in it, in entry order; `said` every
