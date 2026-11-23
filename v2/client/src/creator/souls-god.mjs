@@ -43,6 +43,10 @@
 //   place|move ... --facing <id|n|e|s|w>         turned to face another, or a compass point
 //   any edit verb --build <name> --step <name>  a build's step (#3694): one batch the world keeps under that name
 //   souls-god.mjs undo [--build <name>] | redo   the newest edit undone (a whole build, step by step), or redone
+//   souls-god.mjs build start <name> --steps a,b,c [--brief '<words>']   a build session (R8e): until `build done`,
+//                                                every edit carries its name and current step (see --build --step)
+//   souls-god.mjs build step <step> [<build>] | build show [<build>] | build done [<build>]   move on a step; its steps
+//                                                with each one's status and edits sent and refused; close it
 //   souls-god.mjs build district [<id>]           the district plans, or one plan with each plot's status and the next
 //                                                chapter to claim (#3701)
 //   souls-god.mjs build district <id> --file plan.json   records a plan once (today's plan file: metres, radians)
@@ -114,6 +118,9 @@ import { parseSpace, runSpace } from './space.mjs';
 import { TRACE_MOST } from './trace.mjs';
 import { mapOf } from './map.mjs';
 import { kindsIn } from '../check/state.mjs';
+import { inSession, recordEdit, sessionAct } from './session.mjs';
+/** R8e: the build acts answered from the home's sessions. */
+const SESSION_ACTS = ['start', 'step', 'show', 'done'];
 
 export const VERBS = [
   'about',
@@ -554,6 +561,15 @@ export function buildOf(words) {
   const flag = (f) => { const k = args.indexOf(f); if (k >= 0) args.splice(k, 1); return k >= 0; };
   const helper = flag('--helper'), dry = flag('--dry');
   const [what, id] = args;
+  // R8e: a build session, kept in the home (session.mjs)
+  const brief = takeOpt(args, '--brief'), steps = takeOpt(args, '--steps');
+  if (what === 'start') {
+    const list = String(steps ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+    if (!id || !list.length || args.length > 2) throw usage("build start <name> --steps a,b,c [--brief '<words>']");
+    return { act: 'start', name: id, steps: list, ...(brief !== undefined ? { brief } : {}) };
+  }
+  if (what === 'step') { if (!id || args.length > 3) throw usage('build step <step> [<build>]'); return { act: 'step', step: id, ...(args[2] ? { name: args[2] } : {}) }; }
+  if (what === 'show' || what === 'done') { if (args.length > 2) throw usage(`build ${what} [<build>]`); return { act: what, ...(id ? { name: id } : {}) }; }
   if (what === 'rewind') {
     if (!id || to === undefined) throw usage('build rewind <build> --to <step> [--dry]');
     return { act: 'rewind', build: id, to, ...(dry ? { dry } : {}) };
@@ -888,8 +904,17 @@ if (isMain(import.meta.url)) {
       if (said.ok === false) process.exitCode = 1;
       process.exit();
     }
+    if (asked.build && SESSION_ACTS.includes(asked.build.act)) {
+      const said = sessionAct(home, asked.build);
+      out(withFix(said));
+      if (said.ok === false) process.exitCode = 1;
+      process.exit();
+    }
+    // R8e: an edit sent while a build session is open carries its name and step, and is recorded under them
+    req = inSession(home, req);
     const answer = asked.build ? await runBuild(asked.build, ask, (minutes, claim) => mintHelper(home, creator, minutes, claim)) : asked.layer ? await runLayer(asked.layer, ask) : await ask(req);
-    out(withFix({ ...answer, ...(asked.say ?? {}) }));
+    recordEdit(home, req, answer);
+    out(withFix({ ...answer, ...(asked.say ?? {}), ...(req?.build !== undefined && answer.build === undefined ? { build: req.build, step: req.step } : {}) }));
     if (answer.ok === false) process.exitCode = 1;
   } catch (e) {
     out(withFix({ ok: false, code: e.code ?? 'failed', detail: String(e.message ?? e).slice(0, 200) }));
