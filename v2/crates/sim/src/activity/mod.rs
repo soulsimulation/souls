@@ -26,6 +26,8 @@
 //!   `crate::orders`), so following is the one existing order and its skill. Either member's leave ends it for both;
 //!   the follower's own walk leaves it ([`Activities::walk_leaves`]); its order ending (displaced by the follower's
 //!   own act, expired, the leader gone) ends it too ([`Activities::following`]).
+//! - **Members take their places (0.135 G3).** A role whose kind says where its members stand has them walk there
+//!   and turn to their facing when the activity starts, before its moves begin ([`places`], [`Activities::pending_places`]).
 //! - **A held move lasts while both stay (0.134 T2).** A role's move whose last phase holds (`hold_hand`) holds until
 //!   a member leaves: then every member's held move is released, so both hands come free, each release goes out
 //!   for viewers as its record again, ended `released`, and the others leave the hold too ([`Activities::leave`]). A walk sent by a member ends it the same
@@ -68,6 +70,7 @@ use crate::timers::{DueList, Timer};
 
 pub mod carry;
 pub mod offer;
+pub mod places;
 pub mod seating;
 
 type R<T> = Result<T, Refusal>;
@@ -212,6 +215,11 @@ pub struct Activities {
     stalled: BTreeSet<(Id, Id)>,
     /// Touches that end when their moves end (0.134 T1: a handshake, a hug, a high-five), by activity.
     ending: BTreeSet<Id>,
+    /// Members still taking their places, by activity (0.135 G3); each activity's frame once set, with the node its
+    /// members stand on (None: they stand where they are); and each member's stand, its index in its role.
+    placing: BTreeMap<Id, BTreeSet<Id>>,
+    frames: BTreeMap<Id, Option<(Id, places::Frame)>>,
+    stands: BTreeMap<Id, BTreeMap<Id, usize>>,
 }
 
 impl Activities {
@@ -232,6 +240,9 @@ impl Activities {
             beats: BTreeMap::new(),
             stalled: BTreeSet::new(),
             ending: BTreeSet::new(),
+            placing: BTreeMap::new(),
+            frames: BTreeMap::new(),
+            stands: BTreeMap::new(),
         }
     }
 
@@ -610,6 +621,7 @@ impl Activities {
             l.drivers = drivers;
         }
         self.begun.push(activity);
+        self.mark_places(activity, None);
         Ok(())
     }
 
@@ -692,12 +704,18 @@ impl Activities {
         at: Micros,
     ) -> Vec<(Id, Refusal)> {
         let mut refused = Vec::new();
+        let mut waiting = Vec::new();
         for activity in std::mem::take(&mut self.begun) {
             let Some(l) = self.live.get(&activity) else {
                 continue;
             };
             let kind = &self.kinds[&l.kind];
             if kind.beat {
+                continue;
+            }
+            // 0.135 G3: the moves begin once every member has taken its place.
+            if self.placing.get(&activity).is_some_and(|p| !p.is_empty()) {
+                waiting.push(activity);
                 continue;
             }
             let audience = l.audience;
@@ -756,7 +774,14 @@ impl Activities {
                 self.ending.insert(activity);
             }
         }
+        self.begun.extend(waiting);
         for activity in self.dancing() {
+            // 0.135 G3: a dance's first beat is set once every member has taken its place; one who joins later
+            // starts on the next beat after it has.
+            let placing = self.placing.get(&activity).cloned().unwrap_or_default();
+            if !placing.is_empty() && !self.beats.contains_key(&activity) {
+                continue;
+            }
             let first = *self
                 .beats
                 .entry(activity)
@@ -772,6 +797,7 @@ impl Activities {
                         .get(&m.body)
                         .is_none_or(|n| moves.record(*n).is_none())
                         && !self.stalled.contains(&(activity, m.body))
+                        && !placing.contains(&m.body)
                 })
                 .filter_map(|m| Some((m.clone(), kind.role(&m.role)?.mv.clone()?)))
                 .collect();
@@ -864,6 +890,125 @@ impl Activities {
     /// Whether a touch that ends with its moves is waiting for them to end.
     pub fn finishing(&self) -> bool {
         !self.ending.is_empty()
+    }
+
+    /// Marks every member of `activity` (or only `only`) whose role says where it stands as still to take its place
+    /// (0.135 G3).
+    pub(crate) fn mark_places(&mut self, activity: Id, only: Option<Id>) {
+        let Some(l) = self.live.get(&activity) else {
+            return;
+        };
+        let kind = &self.kinds[&l.kind];
+        let bodies: BTreeSet<Id> = l
+            .node
+            .members
+            .iter()
+            .filter(|m| only.is_none_or(|b| b == m.body))
+            .filter(|m| kind.role(&m.role).is_some_and(|r| !r.stands.is_empty()))
+            .map(|m| m.body)
+            .collect();
+        if !bodies.is_empty() {
+            self.placing.entry(activity).or_default().extend(bodies);
+        }
+    }
+
+    /// The places still to take (0.135 G3): `(activity, body, Soul, node, point, facing)`, the point in the axes of
+    /// the node its members stand on. `at` is where a body stands: its node and its position there
+    /// (`sim::index::place_of`). An activity's frame is set once, from where its members stand, and only when they
+    /// all stand on one node; otherwise, or when the frame cannot be set, every member keeps where it stands and is
+    /// taken as placed, as is a member on another node than the frame's, farther from its middle than its role's
+    /// `within`, or with no stand left in its role. A member
+    /// keeps the stand it is given; one given a stand later takes the first of its role no other member holds.
+    pub fn pending_places(
+        &mut self,
+        at: impl Fn(Id) -> Option<(Id, Vec3)>,
+    ) -> Vec<(Id, Id, Id, Id, Vec3, Quat)> {
+        let live = &self.live;
+        self.placing.retain(|a, _| live.contains_key(a));
+        let mut out = Vec::new();
+        let mut none = Vec::new();
+        for (activity, bodies) in &self.placing {
+            if bodies.is_empty() {
+                continue;
+            }
+            let Some(l) = self.live.get(activity) else {
+                continue;
+            };
+            let kind = &self.kinds[&l.kind];
+            // Each member's stand: the one it holds, else the first of its role no other member holds.
+            let held = self.stands.entry(*activity).or_default();
+            let mut stands = Vec::new();
+            for m in &l.node.members {
+                let role = kind.role(&m.role).map_or(&[][..], |r| r.stands.as_slice());
+                let k = match held.get(&m.body) {
+                    Some(k) => Some(*k),
+                    None if bodies.contains(&m.body) => {
+                        let taken: BTreeSet<usize> = l
+                            .node
+                            .members
+                            .iter()
+                            .filter(|o| o.role == m.role)
+                            .filter_map(|o| held.get(&o.body).copied())
+                            .collect();
+                        let k = (0..role.len()).find(|k| !taken.contains(k));
+                        if let Some(k) = k {
+                            held.insert(m.body, k);
+                        }
+                        k
+                    }
+                    None => None,
+                };
+                stands.push((m.clone(), k.and_then(|k| role.get(k).copied())));
+            }
+            let frame = *self.frames.entry(*activity).or_insert_with(|| {
+                let pos: Option<Vec<(Id, Vec3)>> =
+                    l.node.members.iter().map(|m| at(m.body)).collect();
+                let pos = pos?;
+                let node = pos.first()?.0;
+                if pos.iter().any(|p| p.0 != node) {
+                    return None;
+                }
+                let first = stands
+                    .iter()
+                    .find_map(|(_, s)| s.map(|s| s.0))
+                    .unwrap_or(Vec3::ZERO);
+                let pts: Vec<Vec3> = pos.iter().map(|p| p.1).collect();
+                places::Frame::of(&pts, first).ok().map(|f| (node, f))
+            });
+            for (m, s) in stands {
+                if !bodies.contains(&m.body) {
+                    continue;
+                }
+                // On the frame's node, and near enough its middle where the role says how near (never walked from
+                // far away).
+                let within = kind.role(&m.role).and_then(|r| r.within);
+                let place = frame.filter(|(node, f)| {
+                    at(m.body).is_some_and(|(n, p)| {
+                        let (dx, dz) = (i128::from(p.x - f.origin.x), i128::from(p.z - f.origin.z));
+                        n == *node
+                            && within.is_none_or(|w| dx * dx + dz * dz <= i128::from(w).pow(2))
+                    })
+                });
+                match place
+                    .zip(s)
+                    .map(|((node, f), (p, yaw))| (node, f.place(p, yaw)))
+                {
+                    Some((node, Ok((p, q)))) => out.push((*activity, m.body, m.soul, node, p, q)),
+                    _ => none.push((*activity, m.body)),
+                }
+            }
+        }
+        for (a, b) in none {
+            self.placed(a, b);
+        }
+        out
+    }
+
+    /// `body` has taken its place in `activity` (0.135 G3).
+    pub fn placed(&mut self, activity: Id, body: Id) {
+        if let Some(p) = self.placing.get_mut(&activity) {
+            p.remove(&body);
+        }
     }
 
     /// `ask.soul` takes `body` out of `activity`. Always accepted: membership ends now, in the log, and the activity
@@ -965,6 +1110,17 @@ impl Activities {
             self.beats.remove(&activity);
         }
         self.stalled.remove(&(activity, body));
+        if let Some(p) = self.placing.get_mut(&activity) {
+            p.remove(&body);
+        }
+        if let Some(s) = self.stands.get_mut(&activity) {
+            s.remove(&body);
+        }
+        if !self.live.contains_key(&activity) {
+            self.placing.remove(&activity);
+            self.frames.remove(&activity);
+            self.stands.remove(&activity);
+        }
         if self.holding.get(&body) == Some(&activity) {
             self.holding.remove(&body);
         }

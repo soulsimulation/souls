@@ -444,7 +444,7 @@ impl Engine {
             }
             Verb::Accept => {
                 let offer = target("accept-needs-an-offer")?;
-                // 0.134 T1: a touch starts only where its moves reach; nothing walks the two to their places yet.
+                // 0.134 T1: a touch starts only where its moves reach; then the two take their places (0.135 G3).
                 // A dance (T3) touches nobody: its moves are at each member's own body.
                 if let Some((kind, asker)) = e.offered(offer).filter(|(k, _)| !k.beat) {
                     let feet = Feet::of(c, [asker, a.body]);
@@ -903,6 +903,33 @@ impl Engine {
             eprintln!("worldd: {}'s walk did not let go: {r}", show(body));
         }
         self.collect(Some((intent, soul)));
+    }
+
+    /// The places still to take (0.135 G3, `sim::activity::places`), each activity's frame set from where its members
+    /// stand in `c`, on their node (`sim::index::place_of`): `(activity, body, Soul, node, point, facing)`.
+    pub fn pending_places(
+        &mut self,
+        c: &Controller,
+    ) -> Vec<(Id, Id, Id, Id, Vec3, replica::pose::Quat)> {
+        self.activities.pending_places(|b| {
+            c.body(b)
+                .map(|m| (sim::index::place_of(m).0, m.pose.position))
+        })
+    }
+
+    /// Members that have taken their places (0.135 G3), by (activity, body): an activity's moves begin once all
+    /// have, at `now` on a copy of `live`. Its entries wait in [`Engine::out`].
+    pub fn placed(&mut self, live: &Tree, c: &mut Controller, done: &[(Id, Id)], now: Micros) {
+        if done.is_empty() {
+            return;
+        }
+        for &(a, b) in done {
+            self.activities.placed(a, b);
+        }
+        let mut tree = live.frozen();
+        self.activities.next = tree.next();
+        self.begin_moves(&mut tree, c, now);
+        self.collect(None);
     }
 
     /// Every follow running (0.135 G2): its activity, the leader's body, and the follower's body and Soul.

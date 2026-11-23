@@ -17,14 +17,14 @@
 /** Each touch's activity kind, as the world pins it from its entry (`serve::activity_kinds`), and the offerer's role. */
 export const KINDS = Object.freeze({
   follow: 'eden:follow_activity@1220390b841bf789d26cfe815f2f44765945b061efce3c95e01c3f86ead53b5ea588',
-  dance: 'eden:dance_together_activity@1220a3ede05c7ef3bdc371c94c11e865fc9da0a19efc4ac736ddeea2dbfd53d3333b',
-  handshake: 'eden:handshake_activity@1220b6204784ae7087cc16cd7d3b0b22bc7f851c2de8c2af7ae6b677d0a59b381682',
-  'high-five': 'eden:high_five_activity@1220fd403508fcecb98fb4aff58e9b5450e67696a75b6fef0c7307b130be85453111',
-  'hold-hands': 'eden:hold_hands_activity@1220117af957e071c2126cdc18220b7ec1220944908b29afadb24f89e9a5ef6531f5',
-  hug: 'eden:hug_activity@1220fe29f4c50afff5fc6ec78e7fd295cf2e4bde5b6a888d7dbfb4252e779446abd1',
+  dance: 'eden:dance_together_activity@1220543a9d3587368b26535d8be47d25e08f30ba23549b9adf3a312b91da91ad3731',
+  handshake: 'eden:handshake_activity@1220028df8f261580f491fe35195ff3f0718206eb6046d7196fdf0047117d6444ef4',
+  'high-five': 'eden:high_five_activity@1220bc341d543434979069ffa7eea975fafe2d625170e1e23c8284d97a154bba69a0',
+  'hold-hands': 'eden:hold_hands_activity@1220925c2d0989adfde15f1b3afd895e9d5fedbf2c6038c7692b5d6c024c5d89369c',
+  hug: 'eden:hug_activity@12203217be3b8fea603bfb607aec34b776f5aee4846e894bee49eda3126e5142b12f',
   // 0.135 E1: a fist bump, and harvesting into one basket (each member then picks with the activity's own form).
-  'fist-bump': 'eden:fist_bump_activity@12205c839cc6ba88bb9358e77b2d81fae60e8a750317deab8f736f6c28fb97b8fdab',
-  harvest: 'eden:harvest_together_activity@122032f46f98ac775f66fcc1ec36723d03fc63a16ba5a0835e99c31b55e2c16b885b',
+  'fist-bump': 'eden:fist_bump_activity@122050a3ab206702afc4995432c38cc93da6396c5688fd52b34938ca5672383b4938',
+  harvest: 'eden:harvest_together_activity@122070d31cf09790b76bf43d135b5f50e99f0ba68a528a22119ef70e5a451a44207f',
 });
 export const OFFERER = 'eden:one';
 

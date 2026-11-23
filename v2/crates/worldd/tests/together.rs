@@ -50,6 +50,44 @@ const BRIEF: &str = "test:brief_handshake";
 /// Holding hands (0.134 T2): each role names content's `hold_hand`, whose last phase holds until released.
 const HOLD: &str = "test:hold_hands";
 /// Following (0.135 G2): no move; the giver's role follows.
+/// Holding hands whose two roles stand shoulder to shoulder, 0.25 m either side, facing one way (0.135 G3).
+fn hold_at() -> ActivityKind {
+    let mut k = touch(HOLD_AT, 60_000_000, "souls:hold_hand");
+    k.roles[0].stands = vec![(Vec3::new(-250_000, 0, 0), 0)];
+    k.roles[1].stands = vec![(Vec3::new(250_000, 0, 0), 0)];
+    k
+}
+
+/// A dance whose members stand in a ring of 1 m, facing its middle (0.135 G3): the first role's one place, then the
+/// other role's seven.
+fn dance_at() -> ActivityKind {
+    let ring = |k: i64| {
+        // At 45° steps from +z toward +x: whole-mm points, as the entry states them.
+        let (s, c) = [
+            (0, 1000),
+            (707, 707),
+            (1000, 0),
+            (707, -707),
+            (0, -1000),
+            (-707, -707),
+            (-1000, 0),
+            (-707, 707),
+        ][k as usize];
+        (
+            Vec3::new(s * 1000, 0, c * 1000),
+            (k * 45_000 + 180_000) % 360_000,
+        )
+    };
+    let mut k = ActivityKind {
+        most: 8,
+        beat: true,
+        ..touch(DANCE_AT, 60_000_000, "souls:dance")
+    };
+    k.roles[0].stands = vec![ring(0)];
+    k.roles[1].stands = (1..8).map(ring).collect();
+    k
+}
+
 fn follow() -> ActivityKind {
     let mut k = touch(FOLLOW, 60_000_000, "souls:none");
     for r in &mut k.roles {
@@ -66,6 +104,9 @@ const HUG: &str = "test:hug";
 const HIGH_FIVE: &str = "test:high_five";
 /// Following (0.135 G2): the asker (the giver's role) follows the other.
 const FOLLOW: &str = "test:follow";
+/// Holding hands and a dance whose roles say where members stand (0.135 G3).
+const HOLD_AT: &str = "test:hold_at";
+const DANCE_AT: &str = "test:dance_at";
 const GIVER: &str = "test:giver";
 const TAKER: &str = "test:taker";
 
@@ -89,6 +130,8 @@ fn kinds() -> Vec<(&'static str, String)> {
         (HUG, pinned(HUG, 7)),
         (HIGH_FIVE, pinned(HIGH_FIVE, 8)),
         (FOLLOW, pinned(FOLLOW, 9)),
+        (HOLD_AT, pinned(HOLD_AT, 10)),
+        (DANCE_AT, pinned(DANCE_AT, 11)),
     ]
 }
 
@@ -109,6 +152,8 @@ fn touch(plain: &str, lasts: Micros, mv: &str) -> ActivityKind {
         place: name("souls:here"),
         claims: vec![Want::One(Class::Manipulator)],
         mv: Some(name(mv)),
+        stands: Vec::new(),
+        within: None,
     };
     ActivityKind {
         name: name(&full(plain)),
@@ -235,7 +280,8 @@ fn tree_rules() -> TreeRules {
                 k(
                     "place",
                     &[
-                        "body", HANDSHAKE, BRIEF, HOLD, DANCE, HUG, HIGH_FIVE, FOLLOW,
+                        "body", HANDSHAKE, BRIEF, HOLD, DANCE, HUG, HIGH_FIVE, FOLLOW, HOLD_AT,
+                        DANCE_AT,
                     ],
                 ),
             ),
@@ -247,6 +293,8 @@ fn tree_rules() -> TreeRules {
             (full(HUG), k("activity", &[])),
             (full(HIGH_FIVE), k("activity", &[])),
             (full(FOLLOW), k("activity", &[])),
+            (full(HOLD_AT), k("activity", &[])),
+            (full(DANCE_AT), k("activity", &[])),
         ]),
         souls: [soul(1), soul(2), soul(3), soul(4)].into(),
         audiences: BTreeMap::new(),
@@ -306,15 +354,29 @@ fn world() -> Replica {
     r
 }
 
-fn bodies() -> Result<Bodies, replica::effects::Refusal> {
+/// The test world's building's ground floor (0.135 G3).
+fn floor() -> Id {
+    let w = testworld::generate(1, 0).expect("the test world");
+    import_eden::load(&w.text)
+        .expect("the test world loads")
+        .nodes["building/floor-0"]
+}
+
+/// Where Souls 1 and 2 stand indoors (0.135 G3): 0.6 m apart in a room of the building's ground floor, in its axes.
+fn indoors(n: u64) -> Vec3 {
+    Vec3::new(if n == 1 { 200_000 } else { 800_000 }, 0, -3_000_000)
+}
+
+/// The bodies; `indoor`, Souls 1 and 2 on the building's ground floor ([`indoors`]).
+fn bodies_on(indoor: bool) -> Result<Bodies, replica::effects::Refusal> {
     let (town, ground) = town();
-    let frame = Frame {
-        node: ground,
-        slot: None,
+    let on = |n: u64| {
+        let node = if indoor && n <= 2 { floor() } else { ground };
+        let p = if indoor && n <= 2 { indoors(n) } else { at(n) };
+        let frame = Frame { node, slot: None };
+        town.surfaces[&node].place(soul(n), frame, p, Quat::IDENTITY)
     };
-    let placed = (1..=4)
-        .map(|n| town.surfaces[&ground].place(soul(n), frame, at(n), Quat::IDENTITY))
-        .collect::<Result<Vec<_>, _>>()?;
+    let placed = (1..=4).map(on).collect::<Result<Vec<_>, _>>()?;
     let mut b = Bodies::new(town, 50_000)?;
     for p in placed {
         b.add_body(humanoid(), p)?;
@@ -418,8 +480,19 @@ fn serve(tag: &str) -> Run {
 
 /// [`serve`] from `store`'s log, if it has one: a restart.
 fn serve_on(tag: &str, store: Mem) -> Run {
+    serve_with(tag, store, false)
+}
+
+/// [`serve`] with Souls 1 and 2 indoors ([`indoors`]).
+fn serve_indoors(tag: &str) -> Run {
+    serve_with(tag, Mem::with(Vec::new()), true)
+}
+
+fn serve_with(tag: &str, store: Mem, indoor: bool) -> Run {
     let mut cfg = Config::new(LINEAGE, 1);
-    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
+    cfg.bodies = Some(Box::new(move |_: &worldd::bodies::Placed| {
+        bodies_on(indoor)
+    }));
     cfg.engine = Some((
         tree_rules(),
         vec![
@@ -430,6 +503,8 @@ fn serve_on(tag: &str, store: Mem) -> Run {
             touch(HUG, 60_000_000, "souls:hug"),
             touch(HIGH_FIVE, 60_000_000, "souls:high_five"),
             follow(),
+            hold_at(),
+            dance_at(),
         ],
     ));
     let rules = Rules {
@@ -478,9 +553,12 @@ impl Run {
             if let Body::Changes(cs) = &e.body {
                 for c in cs {
                     if let Change::Create { node, kind, .. } = &c.change
-                        && [HANDSHAKE, BRIEF, HOLD, DANCE, HUG, HIGH_FIVE, FOLLOW]
-                            .iter()
-                            .any(|k| kind.as_str() == full(k))
+                        && [
+                            HANDSHAKE, BRIEF, HOLD, DANCE, HUG, HIGH_FIVE, FOLLOW, HOLD_AT,
+                            DANCE_AT,
+                        ]
+                        .iter()
+                        .any(|k| kind.as_str() == full(k))
                     {
                         return *node;
                     }
@@ -1104,5 +1182,217 @@ fn g2_a_follow_across_a_restart() {
         orders,
         "the order ended with the follow"
     );
+    run.stop();
+}
+
+impl Run {
+    /// Each body row the log holds, in order, with its whole pose.
+    fn poses(&self) -> Vec<(Id, Pose)> {
+        let log = self.store.0.lock().unwrap().bytes.clone();
+        recover(&log)
+            .unwrap()
+            .records
+            .into_iter()
+            .filter(|r| !sim::recorder::is_input(r))
+            .flat_map(|r| match Part::read(&r).unwrap().rest.get(&BODIES) {
+                Some(Value::Array(rows)) => rows.clone(),
+                _ => Vec::new(),
+            })
+            .filter_map(|v| read_row(&v).map(|(b, p, _)| (b, p)))
+            .collect()
+    }
+
+    /// Each body's last pose in the log (its start if it never moved).
+    fn last(&self, n: u64) -> (Vec3, Quat) {
+        self.poses()
+            .into_iter()
+            .filter(|(b, _)| *b == soul(n))
+            .map(|(_, p)| (p.position, p.orientation))
+            .next_back()
+            .unwrap_or((at(n), Quat::IDENTITY))
+    }
+}
+
+/// Where a facing looks on the plan: +z turned by it, µm per metre.
+fn ahead(q: Quat) -> (i64, i64) {
+    let v = q.rotate(Vec3::new(0, 0, 1_000_000)).unwrap();
+    (v.x, v.z)
+}
+
+/// 0.135 G3: members take their places when a group activity starts. Holding hands: the two end shoulder to
+/// shoulder, 0.5 m apart, facing the same way, across the line between them; the hold's moves begin after. A dance
+/// of four: each walks (never more than 0.2 m a tick) to its place on a 1 m ring round where its first two members
+/// stood when it started, faces its middle, and all four start dancing on the same beat.
+#[test]
+fn g3_members_take_their_places_then_their_moves_begin() {
+    let run = serve("places");
+    let mut c: Vec<Client> = (1..=4).map(|n| run.client(n)).collect();
+    let len = |x: i64, z: i64| ((i128::from(x).pow(2) + i128::from(z).pow(2)).isqrt()) as i64;
+
+    // Holding hands.
+    let hold = run.created(&c[0].offer(HOLD_AT, 2).expect("offered"));
+    c[1].act("activity:accept", Some(hold), &[])
+        .expect("accepted");
+    std::thread::sleep(Duration::from_millis(1_500));
+    let ((p1, q1), (p2, q2)) = (run.last(1), run.last(2));
+    let apart = len(p1.x - p2.x, p1.z - p2.z);
+    let (f1, f2) = (ahead(q1), ahead(q2));
+    println!("g3: hold hands {apart} µm apart, facing {f1:?} and {f2:?}");
+    assert!(
+        (apart - 500_000).abs() <= 100_000,
+        "shoulder to shoulder: {apart} µm"
+    );
+    assert!(
+        (f1.0 - f2.0).abs() < 20_000 && (f1.1 - f2.1).abs() < 20_000,
+        "one way: {f1:?} {f2:?}"
+    );
+    let across = (i128::from(f1.0) * i128::from(p2.x - p1.x)
+        + i128::from(f1.1) * i128::from(p2.z - p1.z))
+    .abs();
+    assert!(
+        across < i128::from(apart) * 100_000,
+        "facing across the line between them"
+    );
+    let holds: Vec<_> = run
+        .touches()
+        .into_iter()
+        .filter(|t| t.1 == "souls:hold_hand")
+        .collect();
+    assert_eq!(
+        holds.len(),
+        2,
+        "the hold's moves begin once both are placed"
+    );
+    c[1].act("activity:leave", Some(hold), &[]).expect("left");
+
+    // A dance of four.
+    let from = run.poses().len();
+    let start: Vec<Vec3> = (1..=4).map(|n| run.last(n).0).collect();
+    // The ring's middle is fixed when the dance starts: at the first accept, between its first two members.
+    let middle = Vec3::new(
+        (start[0].x + start[1].x) / 2,
+        0,
+        (start[0].z + start[1].z) / 2,
+    );
+    let asked = Value::Array((2..=4).map(|n| soul(n).to_value()).collect());
+    let offered = c[0]
+        .act(
+            "activity:offer",
+            Some(ground()),
+            &[
+                (1, Value::Text(name(&full(DANCE_AT)))),
+                (2, Value::Text(name(GIVER))),
+                (3, asked),
+            ],
+        )
+        .expect("offered to three");
+    let dance = run.created(&offered);
+    for cl in c.iter_mut().skip(1) {
+        cl.act("activity:accept", Some(dance), &[])
+            .expect("accepted");
+    }
+    std::thread::sleep(Duration::from_millis(5_000));
+    let mut step = 0;
+    let mut last: BTreeMap<Id, Vec3> = (1..=4).map(|n| (soul(n), start[n as usize - 1])).collect();
+    for (b, p) in run.poses().into_iter().skip(from) {
+        if let Some(l) = last.get_mut(&b) {
+            step = step.max(len(p.position.x - l.x, p.position.z - l.z));
+            *l = p.position;
+        }
+    }
+    assert!(step <= 200_000, "walked, never placed: {step} µm in a tick");
+    for n in 1..=4 {
+        let (p, q) = run.last(n);
+        let r = len(p.x - middle.x, p.z - middle.z);
+        let f = ahead(q);
+        let inward = i128::from(f.0) * i128::from(middle.x - p.x)
+            + i128::from(f.1) * i128::from(middle.z - p.z);
+        println!("g3: dancer {n} {r} µm from the middle, facing {f:?}");
+        assert!(
+            (r - 1_000_000).abs() <= 50_000,
+            "dancer {n} on the ring: {r} µm"
+        );
+        assert!(
+            inward > i128::from(r) * 900_000,
+            "dancer {n} faces the middle: {f:?}"
+        );
+    }
+    let starts = run.starts(dance);
+    let first: BTreeSet<Micros> = starts.iter().take(4).map(|s| s.1).collect();
+    assert_eq!(
+        starts
+            .iter()
+            .take(4)
+            .map(|s| s.0)
+            .collect::<BTreeSet<_>>()
+            .len(),
+        4,
+        "all four dance"
+    );
+    assert_eq!(first.len(), 1, "on one beat: {starts:?}");
+    run.stop();
+}
+
+impl Run {
+    /// Soul `n`'s body's last pose in the log, whole (0.135 G3); none if it never changed.
+    fn last_pose(&self, n: u64) -> Option<Pose> {
+        self.poses()
+            .into_iter()
+            .filter(|(b, _)| *b == soul(n))
+            .map(|(_, p)| p)
+            .next_back()
+    }
+}
+
+/// 0.135 G3, indoors: two Souls in a room of the building's ground floor start a dance; each walks to its place on
+/// the 1 m ring round where they stood, on that floor and in its axes, not to the same numbers on the open ground.
+#[test]
+fn g3_indoors_members_take_their_places_on_their_floor() {
+    let run = serve_indoors("places-indoors");
+    let mut c: Vec<Client> = (1..=2).map(|n| run.client(n)).collect();
+    let dance = run.created(&c[0].offer(DANCE_AT, 2).expect("offered"));
+    c[1].act("activity:accept", Some(dance), &[])
+        .expect("accepted");
+    std::thread::sleep(Duration::from_millis(3_000));
+    let len = |x: i64, z: i64| ((i128::from(x).pow(2) + i128::from(z).pow(2)).isqrt()) as i64;
+    let middle = Vec3::new(500_000, 0, -3_000_000);
+    for n in 1..=2 {
+        let p = run.last_pose(n).expect("it moved");
+        let r = len(p.position.x - middle.x, p.position.z - middle.z);
+        println!(
+            "g3 indoors: dancer {n} at {:?} on {:?}, {r} µm from the middle",
+            p.position, p.frame.node
+        );
+        assert_eq!(p.frame.node, floor(), "dancer {n} stays on its floor");
+        assert!(
+            (r - 1_000_000).abs() <= 50_000,
+            "dancer {n} on the ring round where they stood: {r} µm"
+        );
+    }
+    run.stop();
+}
+
+/// 0.135 G3: a Soul that leaves while it walks to its place stops: the world's walk to a place ends with the
+/// membership it was for.
+#[test]
+fn g3_a_leave_while_taking_places_ends_the_walk() {
+    let run = serve("places-leave");
+    let mut c: Vec<Client> = (1..=2).map(|n| run.client(n)).collect();
+    let dance = run.created(&c[0].offer(DANCE_AT, 2).expect("offered"));
+    c[1].act("activity:accept", Some(dance), &[])
+        .expect("accepted");
+    let mut waited = 0;
+    while run.last(2).0 == at(2) {
+        assert!(waited < 3_000, "Soul 2 walks to its place");
+        std::thread::sleep(Duration::from_millis(20));
+        waited += 20;
+    }
+    c[1].act("activity:leave", Some(dance), &[]).expect("left");
+    std::thread::sleep(Duration::from_millis(300));
+    let stopped = run.last(2).0;
+    std::thread::sleep(Duration::from_millis(1_500));
+    let later = run.last(2).0;
+    println!("g3: left on its way at {stopped:?}; 1.5 s on, at {later:?}");
+    assert_eq!(stopped, later, "the walk to its place ended with the leave");
     run.stop();
 }
