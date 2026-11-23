@@ -782,7 +782,7 @@ impl Sight<'_> {
         if named {
             return None;
         }
-        let (corners, _) = sim::spots::footprint(&entry)?;
+        let (corners, _) = sim::spots::footprint(entry)?;
         let on = self.goals.contains(&body) && sim::spots::walkable(entry);
         let reach = match self.walk_moves.get(&body) {
             Some(&r) => {
