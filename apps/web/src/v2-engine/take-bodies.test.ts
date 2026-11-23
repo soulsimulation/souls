@@ -4,7 +4,6 @@ import assert from 'node:assert/strict';
 import { sampleTake } from '../../../../mars/viewer/engine/take/replay.ts';
 import type { Take } from '../../../../mars/viewer/engine/take/types.ts';
 import { PEOPLE, templateNameFor } from '../../../../mars/viewer/app/engine-view/people-light.ts';
-import { readFileSync } from 'node:fs';
 import { entityOf, V2Bridge } from './bridge.ts';
 import { TICK_US } from './takes.ts';
 import { bodiesUrl, catalogueOf, defaultLookOf, entityWithLook, heldAt, legacyBodyOf, lookBodyOf, LOOKS, postureOf, propOf, seatOf } from './take-bodies.ts';
@@ -86,11 +85,9 @@ test('the pure parts: seats, postures, props and what is held when', () => {
 });
 
 test('a body with no body kind is the same default person on both pages', () => {
-  // the v2 page's BODIES (crowd/bodies.ts, which needs three to import), read as text: its people in its order
-  const src = readFileSync(new URL('../../../../v2/web/src/crowd/bodies.ts', import.meta.url), 'utf8');
-  const v2Bodies = [...src.matchAll(/^  \['([a-z]+)', 'animated-/gm)].map((m) => m[1]);
-  // and its id hash (FNV-1a), which picks a default person by `hash(id) % defaults`
-  assert.ok(src.includes('let h = 2166136261;') && src.includes('h = Math.imul(h ^ s.charCodeAt(i), 16777619);') && src.includes('hash(id) % this.defaults'));
+  // the v2 page's BODIES (crowd/bodies.ts), its people in its order, and its id hash (FNV-1a), which picks a default
+  // person by `hash(id) % defaults`: pinned here (X1), so this needs nothing from v2/web
+  const v2Bodies = ['casual', 'punk', 'woman'];
   const v2Hash = (x: string) => { let h = 2166136261; for (let i = 0; i < x.length; i++) h = Math.imul(h ^ x.charCodeAt(i), 16777619); return h >>> 0; };
   assert.deepEqual([...LOOKS], v2Bodies, 'the v2 page\'s people, in its order');
   assert.deepEqual([...LOOKS], [...PEOPLE], 'the old page\'s people, in the same order');
