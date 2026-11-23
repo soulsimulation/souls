@@ -5,6 +5,7 @@ mod compactor;
 mod fork;
 mod gateway_link;
 mod serve;
+mod stopped;
 mod watchdog;
 
 fn main() {

@@ -1498,6 +1498,9 @@ impl Clock {
     ) {
         let frame = self.frame(answer);
         self.sequences.answered(&key, sequence, frame.clone());
+        if let Some(id) = id {
+            self.receipts.ended(id);
+        }
         let mut row = BTreeMap::from([
             (1, Value::Bytes(key)),
             (2, Value::Uint(sequence)),
@@ -1630,6 +1633,9 @@ impl Clock {
         }
         if intent.verb.as_str() == skills::wear::VERB {
             return self.wear(&intent, key, (reply, stamps), now);
+        }
+        if intent.verb.as_str() == skills::wear::LOOK_VERB {
+            return self.look(&intent, key, (reply, stamps), now);
         }
         let mut value = intent.to_value();
         keep_arg_names(&mut value);
@@ -1784,8 +1790,13 @@ impl Clock {
         {
             let (stopped, body) = (o.sequence, o.body);
             let cut = self.bodies.as_mut().and_then(|b| b.cancel(open));
-            self.forms
-                .leave(self.replica.tree(), self.bodies.as_mut(), body, now);
+            self.forms.leave(
+                self.replica.tree(),
+                self.bodies.as_mut(),
+                body,
+                Some(open),
+                now,
+            );
             if cut == Some(Cut::Stopped) {
                 self.note(open, MOVE_ENDED, Some(STOPPED), now);
             }
@@ -2446,6 +2457,66 @@ impl Clock {
         }
     }
 
+    /// G2 (0.133, from #3998): a Soul's look put on its default body, one write of [`skills::wear::LOOK`] by the
+    /// body, answered with a receipt after its tick's sync, as a describe is. Refused `look.wears-body` while it wears
+    /// a hash, `look.worn` when it already carries these params, `look.malformed` for anything but one JSON object of
+    /// at most 2 KiB.
+    fn look(
+        &mut self,
+        intent: &Intent,
+        key: Vec<u8>,
+        (reply, stamps): (Reply, Stamps),
+        now: Micros,
+    ) {
+        let (actor, sequence) = (intent.actor, intent.sequence);
+        let value = intent.to_value();
+        let written = (|| {
+            let params = skills::wear::look_params(&intent.parameters)?;
+            if expired(intent.expiry, now) {
+                return Err("intent.expired");
+            }
+            let body = self.body_of(intent)?;
+            let tree = self.replica.tree();
+            let node = tree.handle(body).and_then(|h| tree.node(h));
+            match skills::wear::look(node.ok_or("intent.no-body")?.fields(), params) {
+                skills::wear::Look::WearsBody => return Err("look.wears-body"),
+                skills::wear::Look::Worn => return Err("look.worn"),
+                skills::wear::Look::Write => {}
+            }
+            let id = Id::new(self.lineage, self.next_intent).ok_or("intent.ids-exhausted")?;
+            let env = words::envelope(self.replica.version(), now, id, actor, body);
+            let effect = Effect {
+                envelope: Envelope {
+                    audience: Audience::Everyone,
+                    ..env
+                },
+                body: Body::Changes(vec![ChangeRec {
+                    change: skills::wear::look_change(body, params),
+                    rest: Rest::new(),
+                }]),
+                events: None,
+                rest: Rest::new(),
+            };
+            self.write_all(vec![effect]).map_err(|r| r.name)?;
+            Ok(id)
+        })();
+        let a = match written {
+            Ok(id) => {
+                self.next_intent += 1;
+                Answer::Receipt {
+                    actor,
+                    sequence,
+                    intent: id,
+                    entries: self.receipts.entries(id).to_vec(),
+                    names: BTreeMap::new(),
+                }
+            }
+            Err(r) => self.refusal(actor, sequence, r),
+        };
+        let id = written.ok();
+        self.answered(key, sequence, id, Some(value), &a, (vec![reply], stamps));
+    }
+
     /// B15's existing hash-only record, checked off-clock and committed without mutating refused actors.
     fn wear(
         &mut self,
@@ -2992,7 +3063,7 @@ impl Clock {
             held = self.held(body);
             // A form's run on the body is left first, while the body is still the controller's.
             self.forms
-                .leave(self.replica.tree(), self.bodies.as_mut(), body, now);
+                .leave(self.replica.tree(), self.bodies.as_mut(), body, None, now);
         }
         let retired = match (self.life.as_mut(), self.bodies.as_mut()) {
             (Some(l), Some(b)) => b.retire(&mut l.life, soul, now),
@@ -3644,8 +3715,13 @@ impl Clock {
                     continue;
                 };
                 let (id, actor, sequence, body) = (o.0, o.1.actor, o.1.sequence, o.1.body);
-                self.forms
-                    .leave(self.replica.tree(), self.bodies.as_mut(), body, now);
+                self.forms.leave(
+                    self.replica.tree(),
+                    self.bodies.as_mut(),
+                    body,
+                    Some(id),
+                    now,
+                );
                 self.end(id, |c| c.refusal(actor, sequence, r.name));
             }
         }
@@ -3669,6 +3745,10 @@ impl Clock {
         }
         for (id, how, why) in self.forms.ended() {
             self.form_ended(id, how, why, now);
+        }
+        // An act that waited on its body's posture step gets its run's deadline and progress answer as it starts.
+        for (id, run) in self.forms.started_late() {
+            self.form_started(id, run, now);
         }
     }
 
@@ -3849,6 +3929,8 @@ impl Clock {
         // what a script set for this one, is taken now. The words on the disk as the tick starts are what the
         // directory's notices read by (#4134): in lockstep that is every word queued before it.
         let words_durable = self.text.marks().1;
+        // Ended intents' receipt entries go ten minutes after they end (A1-4): nothing reads them once answered.
+        self.receipts.trim(now);
         self.births(now);
         self.notices(now, words_durable);
         self.tell_states();
@@ -3869,9 +3951,15 @@ impl Clock {
             };
             let (actor, sequence, body) = (o.actor, o.sequence, o.body);
             let cut = self.bodies.as_mut().and_then(|b| b.cancel(id));
-            // A form's run whose act timed out is left: it ends at its next stable moment (F3).
-            self.forms
-                .leave(self.replica.tree(), self.bodies.as_mut(), body, now);
+            // A form's run whose act timed out is left: it ends at its next stable moment (F3). An act still waiting
+            // on its body's run (#4187) is left alone, and never starts.
+            self.forms.leave(
+                self.replica.tree(),
+                self.bodies.as_mut(),
+                body,
+                Some(id),
+                now,
+            );
             match cut {
                 Some(Cut::Stopped) => self.note(id, MOVE_ENDED, Some(TIMED_OUT), now),
                 Some(Cut::Finishing) => {
@@ -4549,6 +4637,7 @@ pub fn start<S: Storage + 'static>(
             }
             if let Some(id) = m.get(&3).and_then(|v| replica::effects::read_id(v).ok()) {
                 next_intent = next_intent.max(id.counter() + 1);
+                receipts.ended(id);
             }
         }
     }
@@ -5170,6 +5259,47 @@ pub fn start<S: Storage + 'static>(
     })
 }
 
+/// A creator's definitions' forms (#3697) pass the entry checker content entries pass: the import check, and each form
+/// that takes no arguments binds, its steps and its effects. Refused `kind.invalid`, naming the form.
+fn definitions_form_checked(c: &edit::Checked) -> Result<(), Refused> {
+    use replica::kinds::defined;
+    for (i, op) in c.edit.ops.iter().enumerate() {
+        let edit::Op::Place { kind, fields, .. } = op else {
+            continue;
+        };
+        let Some(replica::encode::Value::Bytes(b)) = fields.get(&defined::ENTRY) else {
+            continue;
+        };
+        if !defined::is_definition(kind.as_str()) {
+            continue;
+        }
+        let no = |detail: String| Refused {
+            op: Some(i),
+            name: "kind.invalid",
+            detail,
+        };
+        let d = defined::read(b, &|_| false).map_err(|(_, why)| no(why))?;
+        skills::form_runner::check(&d.entry)
+            .map_err(|r| no(format!("{}: {}", r.name, r.detail)))?;
+        for (form, f) in d
+            .entry
+            .get("forms")
+            .and_then(replica::rules::json::Value::obj)
+            .unwrap_or(&[])
+        {
+            // A form that takes no arguments binds its steps and its effects now, as its run would (#3697 review);
+            // what `kind.effects` cannot see without the run's arguments is refused for that run alone.
+            if f.get("takes").is_none() {
+                skills::form_runner::bind(&d.entry, form)
+                    .map_err(|r| no(format!("{form}: {}: {}", r.name, r.detail)))?;
+                skills::form_runner::bind_effects(&d.entry, form)
+                    .map_err(|r| no(format!("{form}: {}: {}", r.name, r.detail)))?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The edit checker's thread (G1b): each edit is checked (`replica::edit::check`) and planned (`sim::edit::plan_on`,
 /// G2's safety guard on the town, G2b) on the newest frozen copy that stands at the version it was planned against
 /// (and after the last edit committed), or after a second whatever it stands at, never on the live tree. G2 is given
@@ -5390,6 +5520,7 @@ fn edit_checker(
                         Some(c) => {
                             world.creator = c;
                             edit::check(e, &copy, world)
+                                .and_then(|c| definitions_form_checked(&c).map(|()| c))
                         }
                         None => Err(Refused {
                             op: None,

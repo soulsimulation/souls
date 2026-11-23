@@ -40,7 +40,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
     const startedAt = performance.now();
     // #4176: doors, lamps and the weather as v2 has them, brought to the page's entity layer by its own world diffs
     const world = new WorldState();
-    let seenParts = 0, lastPartAt: number | null = null, errorAtParts: number | null = null;
+    let seenParts = 0, lastPartAt: number | null = null, errorAtParts: number | null = null, seenTo: number | null = null;
     // The scenery the page binds is the world's own (/v1/scene, published with the world); takes carry its rules version.
     void (async () => {
      try {
@@ -50,7 +50,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
       // `hour=HH:MM`, as on the v2 page: the light of the picture only, the world's clock unchanged
       const hour = /^([01]\d|2[0-3]):[0-5]\d$/.exec(new URLSearchParams(location.search).get('hour') ?? '')?.[0];
       bridge = new V2Bridge({ rulesVersion: scene?.renderSceneRef?.rulesVersion ?? 'souls-v2/1', ...(scene?.renderSceneRef ? { renderSceneRef: scene.renderSceneRef } : {}) }, hour);
-      bridge.start(stream, () => world.watch(makeReader()));
+      bridge.start(stream, () => world.watch(makeReader(new URL(apiPath('/replica.js'), location.href).href)));
       // read-only, for checks and proof: what the stream gave (parts played, newest time, the reader's last error)
       (window as unknown as { __soulsV2?: unknown }).__soulsV2 = bridge.view;
       // The world's body catalogue, where its config (or `?bodies=`, as on the v2 page) names the v2 body assets: each
@@ -76,11 +76,15 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
         conn.anchor = { tick: v.takes.serverTick, at: Date.now() - (performance.now() - v.takes.receivedAt) };
         if (v.souls !== lastSouls) {
           lastSouls = v.souls;
-          conn.replica.souls = new Map([...v.souls.values()].map((x) => [x.id, { id: x.id, entityId: x.entityId, name: x.name, description: '', owner: '', intent: null, intentText: '',
-            mood: '', energy: '', doing: '', native: false } satisfies PublicSoul]));
+          // B3-3: the card's name, description and what it is doing now, from the stream; its body is awake unless the world
+          // is winding it down (idle, zombie, asleep)
+          conn.replica.souls = new Map([...v.souls.values()].map((x) => [x.id, { id: x.id, entityId: x.entityId, name: x.name, description: x.description, owner: '', intent: null, intentText: '',
+            mood: '', energy: '', doing: x.doing, native: false, body: { state: x.state, doing: null, since: 0 } } satisfies PublicSoul]));
         }
         if (v.error && v.error !== lastError) { lastError = v.error; errorAtParts = v.parts; console.warn('v2 stream:', v.error); }
         if (v.parts !== seenParts) { seenParts = v.parts; lastPartAt = performance.now(); }
+        // B2-3: a still world's pointer moving its time on is the stream alive, not silent
+        if (v.newestTo !== seenTo) { seenTo = v.newestTo; if (seenParts) lastPartAt = performance.now(); }
         const diff = world.next((window as unknown as { __soulsEntity?: { layer?: LayerLike } }).__soulsEntity?.layer, Date.now());
         if (diff) st.edge = appendEdge(st.edge, diff);
       }

@@ -3,7 +3,7 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { sampleTake } from '../../../../mars/viewer/engine/take/replay.ts';
 import type { Take } from '../../../../mars/viewer/engine/take/types.ts';
-import { V2Bridge } from './bridge.ts';
+import { V2Bridge, doingOf } from './bridge.ts';
 import { TICK_US, TICKS } from './takes.ts';
 import { defaultLookOf, entityWithLook } from './take-bodies.ts';
 
@@ -26,7 +26,8 @@ test('a body in a turned building is drawn in the world frame, with the page\'s 
   b.receive({ t: 'snapshot', s: { nodes: [world, building, floor, body], removed: [] } });
   // walks 2 m along the floor's +x over 2 s, sampled every 0.5 s; the parts run 6 s on so whole chunks are made
   for (let n = 0; n < 12; n++) b.receive(part(n, n <= 4 ? [['b.7', 'w.2', null, T0 + n * 500_000, 1_000_000 + n * 500_000, 0, 0]] : []));
-  assert.deepEqual([...b.view.souls.values()], [{ id: 's_abc-7', entityId: E, name: 'Ada' }]);
+  assert.deepEqual([...b.view.souls.values()], [{ id: 's_abc-7', entityId: E, name: 'Ada', description: '', doing: 'standing', state: 'awake' }],
+    'shown 2 s behind the newest part, its last step 2 s before that: standing');
   const take = b.view.takes.chunks.find((c) => c.fromTick === T0 / TICK_US)!.take as unknown as Take;
   const at = (s: number) => sampleTake(take, s).entities[E];
   // a quarter turn about +y takes the floor's +x to the world's -z: (100 + 0, 3, -1) m at the start
@@ -52,4 +53,26 @@ test('no chunk until the world is past it by the v2 page\'s lag; a body the copy
   assert.ok(hidden.length && hidden.every((c) => !(E in (c.take as { tracks: object }).tracks)), 'not drawn after');
   assert.equal(b.view.takes.serverTick, chunks.at(-1)!.toTick);
   assert.equal((chunks.at(-1)!.toTick - chunks[0].fromTick) % TICKS, 0);
+});
+
+test('B3-3: a Soul\'s card fields from the stream: its description, and what it is doing now as the v2 page says it', () => {
+  const b = new V2Bridge({ rulesVersion: 'test/1' });
+  b.receive({ t: 'snapshot', s: { nodes: [world, building, floor, { ...body, description: 'Keeps the bees.' }], removed: [] } });
+  const soul = () => b.view.souls.get('s_abc-7')!;
+  // walking: a step every half second up to the time shown (2 s behind the newest part)
+  for (let n = 0; n < 8; n++) b.receive(part(n, [['b.7', 'w.2', null, T0 + n * 500_000, 1_000_000 + n * 100_000, 0, 0]]));
+  assert.equal(soul().description, 'Keeps the bees.');
+  assert.equal(soul().doing, 'walking');
+  // speaking while its sentence is on at the time shown
+  b.receive(part(8, [], { said: [{ speaker: 'b.7', at: T0 + 2_000_000, length: 3_000_000, words: 'Morning!' }] }));
+  assert.equal(soul().doing, 'speaking');
+  // the world winds it down (B16): zombie, until it is awake again; then standing (no step for a while)
+  for (let n = 9; n < 16; n++) b.receive(part(n, [], n === 9 ? { happened: [{ at: T0 + 2_500_000, node: 'b.7', name: 'souls:zombie' }] } : {}));
+  assert.deepEqual([soul().doing, soul().state], ['zombie', 'zombie']);
+  b.receive(part(16, [], { happened: [{ at: T0 + 8_000_000, node: 'b.7', name: 'souls:awake' }] }));
+  for (let n = 17; n < 20; n++) b.receive(part(n, []));
+  assert.deepEqual([soul().doing, soul().state], ['standing', 'awake']);
+  // seated while it is in a slot
+  assert.equal(doingOf({ ...body, slot: 2 }, [], T0, false, undefined), 'seated');
+  assert.equal(doingOf(body, [{ at: T0 }], T0, false, undefined), 'standing', 'one placement is not a walk');
 });

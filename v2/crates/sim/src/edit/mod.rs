@@ -612,6 +612,9 @@ fn int(n: i64) -> Value {
 }
 
 #[cfg(test)]
+mod defined_tests;
+
+#[cfg(test)]
 mod doorway_lowering_tests {
     use super::*;
     use crate::ground::scene::{F_DOORWAYS, F_OPEN_DOOR_LINK, F_SOLIDS};

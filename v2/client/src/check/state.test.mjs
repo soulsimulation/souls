@@ -56,3 +56,32 @@ test('a body with its own entry, or two families, is left alone', () => {
   dir = folder({ 'q.json': { format: 'souls-entry/1', kind: 'eden:quadruped', owner: 'family', forms: {} } });
   try { assert.equal(kindsIn(dir, 'souls:body')['souls:body'], undefined); } finally { rmSync(dir, { recursive: true }); }
 });
+
+test('D8, D10: a body a seat or a bed holds has that slot\'s posture, over a written stand; one standing, or with another written posture, keeps its own', () => {
+  const body = { format: 'souls-entry/1', kind: 'test:body', owner: 'thing', state: { posture: { n: 28, type: 'enum', values: ['stand', 'sit', 'lie', 'kneel'], default: 'stand' } } };
+  const kinds = {
+    'test:body': body,
+    'test:chair': { slots: { seat: { admits: 'body', posture: 'sit', most: 1 } } },
+    'test:bed': { slots: { left: { admits: 'body', posture: 'lie' }, right: { admits: 'body', posture: 'lie' } } },
+    'test:room': {},
+  };
+  const node = (k, kind, parent, fields, children) => encode(new Map([[1, [scope, k]], [2, kind], ...(parent ? [[3, [scope, parent]]] : []), [6, new Map(fields ?? [])], ...(children ? [[10, children]] : [])]));
+  const records = {
+    a1: node(2, 'test:chair@1220aa', 1, [], [Buffer.from('b2', 'hex')]),
+    b2: node(3, 'test:body@1220bb', 2),
+    c3: node(4, 'test:bed@1220cc', 1, [], [Buffer.from('d4', 'hex')]),
+    d4: node(5, 'test:body@1220bb', 4),
+    e5: node(6, 'test:body@1220bb', 1),
+    f6: node(7, 'test:body@1220bb', 2, [[28, 'souls:stand']]),
+    aa: node(8, 'test:body@1220bb', 4, [[28, 'souls:kneel']]),
+  };
+  records.root = node(1, 'test:room@1220dd', null, [], ['a1', 'c3', 'e5', 'f6', 'aa'].map((h) => Buffer.from(h, 'hex')));
+  const copy = { roots: () => JSON.stringify({ x: 'root' }), record: (h) => records[h] ?? null };
+  const nodes = stateOf(copy, kinds, 'me').nodes, at = (k) => nodes[`${'ab'.repeat(16)}-${k}`];
+  assert.equal(at(3).fields?.posture, 'sit', 'seated in the chair');
+  assert.equal(at(5).fields?.posture, 'lie', 'lying in the bed');
+  assert.equal(at(6).fields?.posture, undefined, 'standing in the room: the entry\'s default');
+  // D10: a rise wrote `stand`; the seat's own sit after it wrote no posture: seated in the chair, it is the seat's.
+  assert.equal(at(7).fields?.posture, 'sit', 'a written stand under a seat is the seat\'s posture');
+  assert.equal(at(8).fields?.posture, 'kneel', 'any other posture the world wrote is kept');
+});

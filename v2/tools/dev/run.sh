@@ -82,7 +82,7 @@ if [ ! -f world/world.json ]; then
   od -An -tx1 -N32 /dev/urandom | tr -d ' \n' > view.key
 fi
 
-PIDS=()
+PIDS=() NAMES=()
 stop() {
   trap - EXIT INT TERM
   [ ${#PIDS[@]} -eq 0 ] || kill "${PIDS[@]}" 2> /dev/null || true
@@ -95,7 +95,7 @@ start() {
   local name=$1
   shift
   "$@" > "logs/$name.log" 2>&1 &
-  PIDS+=($!)
+  PIDS+=($!) NAMES+=("$name")
 }
 # until_ready <name> <test command...>: waits up to 60 s; a program that ended is reported with its last lines.
 until_ready() {
@@ -115,10 +115,12 @@ start directoryd "$BIN/directoryd" --listen "$DIRECTORY" --public-url "$BASE" --
   --test-sign-in --test-own "Ada=creator-$CREATOR"
 until_ready directoryd grep -q '^listening' logs/directoryd.log
 
+# The world's folder and socket by their full paths: a `pkill -f` aimed at another run's world then cannot match this
+# one (the same relative words in every run's command line let one run's cleanup stop every local world).
 rm -f w.sock
-start worldd "$BIN/worldd" serve --dir world --socket w.sock
+start worldd "$BIN/worldd" serve --dir "$DIR/world" --socket "$DIR/w.sock"
 until_ready worldd test -S w.sock -a -f world/views/world.json
-start gatewayd "$BIN/gatewayd" --listen "$GATEWAY" --world w.sock --tokens world/tokens --build "1220$(printf '%064d' 0)" \
+start gatewayd "$BIN/gatewayd" --listen "$GATEWAY" --world "$DIR/w.sock" --tokens world/tokens --build "1220$(printf '%064d' 0)" \
   --entries world/entries --view-key view.key --creator "$CREATOR" --directory "$DIRECTORY"
 until_ready gatewayd grep -q '^listening' logs/gatewayd.log
 
@@ -151,8 +153,14 @@ until_ready caddy node -e 'fetch(process.argv[1]).then(async (r) => process.exit
 
 echo "ready $BASE"
 echo "world $BASE/w/dev/   signed in as Ada: $BASE/w/dev/?as=Ada   logs: $DIR/logs"
+# A program that ends is named with its exit status, here and at the end of its own log (128+n: signal n; 143 is a
+# SIGTERM from outside this run, which a world server answers with no line of its own).
 while sleep 1; do
-  for pid in "${PIDS[@]}"; do
-    kill -0 "$pid" 2> /dev/null || die "a program ended; see $DIR/logs"
+  for k in "${!PIDS[@]}"; do
+    kill -0 "${PIDS[$k]}" 2> /dev/null && continue
+    status=0
+    wait "${PIDS[$k]}" || status=$?
+    echo "run.sh: ${NAMES[$k]} ended with exit status $status at $(date -u +%FT%TZ)" >> "logs/${NAMES[$k]}.log"
+    die "${NAMES[$k]} ended with exit status $status (128+n: signal n); see $DIR/logs"
   done
 done
