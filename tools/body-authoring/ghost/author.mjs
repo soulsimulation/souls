@@ -2,9 +2,9 @@
 // Agent-local example: an original asymmetric rigid ghost. Dependency-free; the GLB is generated, never checked in.
 // It is a ceramic body: ground navigation on the admitted disc with a visual hover, bounded body-motion/1 adapters
 // and no hands. The hover is appearance only; it does not grant flight, wall traversal or phasing.
+import { isMain } from '../../lib/is-main.mjs';
 import {writeFileSync,mkdirSync} from 'node:fs';
 import {join,resolve} from 'node:path';
-import {pathToFileURL} from 'node:url';
 
 export const GHOST_MANIFEST={type:'ceramic',license:'owned',rightsConfirmed:true,name:'Wisp the ghost',
  description:'A lopsided sheet ghost with a curled hem and one waving flap. Glides on the ground; cannot hold things.',
@@ -49,4 +49,4 @@ export function authorGhost({out}={}){
  if(out){out=resolve(out);mkdirSync(out,{recursive:true});writeFileSync(join(out,'body.glb'),bytes);writeFileSync(join(out,'manifest.json'),JSON.stringify(manifest,null,1)+'\n');}
  return {bytes,manifest,stats:{body:'Wisp',bytes:bytes.length,triangles:count/3,drawCalls:1,images:0,clips:[]}};
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href)console.log(JSON.stringify(authorGhost({out:process.argv[2]}).stats));
+if(isMain(import.meta.url))console.log(JSON.stringify(authorGhost({out:process.argv[2]}).stats));

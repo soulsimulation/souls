@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 // Photograph a mars-two world from the named views (real GPU Chrome under the shared lease).
 //   node tools/god-skill/scripts/mars-two/shots.mjs <world-url> <out-dir> [view…] [--dpr 2]
+import { isMain } from '../../../lib/is-main.mjs';
 import { mkdirSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { join } from 'node:path';
@@ -20,7 +21,7 @@ export const VIEWS = {
   showers: { eye: [56, 6, -2], at: [50, 0.5, -8] },
   chiba: { eye: [70, 16, 30], at: [50, 2, 10] },
 };
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const args = process.argv.slice(2), flag = (k, d) => { const i = args.indexOf(`--${k}`); return i >= 0 ? args.splice(i, 2)[1] : d; };
   const dpr = Number(flag('dpr', 1)); const [url, out, ...names] = args; mkdirSync(out, { recursive: true });
   const release = await chromeLease('mars-two shots');

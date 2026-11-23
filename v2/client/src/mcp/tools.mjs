@@ -6,6 +6,7 @@
 //
 //   node v2/client/src/mcp/tools.mjs --write     rewrites v2/docs/site/mcp.md from the table
 
+import { isMain } from '../../../../tools/lib/is-main.mjs';
 import { writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -173,7 +174,7 @@ ${tools}
 
 export const PAGE = resolve(dirname(fileURLToPath(import.meta.url)), '../../../docs/site/mcp.md');
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   if (process.argv[2] !== '--write') { process.stderr.write('usage: tools.mjs --write\n'); process.exit(2); }
   writeFileSync(PAGE, pageOf());
   process.stdout.write(`wrote ${TOOLS.length} tools to v2/docs/site/mcp.md\n`);

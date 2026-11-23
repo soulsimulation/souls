@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Read retained local evidence only. This tool never launches or qualifies a run.
+import { isMain } from '../lib/is-main.mjs';
 import { createHash } from 'node:crypto';
 import { existsSync, lstatSync, mkdirSync, readdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 const digest = bytes => createHash('sha256').update(bytes).digest('hex');
 const strip = text => text.replace(/\u001b\[[0-9;]*m/g, '');
@@ -255,6 +255,6 @@ export function main(args = process.argv.slice(2)) {
   else process.stdout.write(formatMarkdown(report));
   return 0; // Diagnostic generation success; never a release qualification exit code.
 }
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   try { process.exitCode = main(); } catch (e) { console.error(e.message); process.exitCode = 2; }
 }
