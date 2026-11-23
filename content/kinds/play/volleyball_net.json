@@ -1,0 +1,36 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:volleyball_net",
+  "owner": "thing",
+  "geometry": {
+    "bounds_mm": [
+      9200,
+      2500,
+      8000
+    ]
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:volleyball_net",
+    "shape": {"round":4,"shapes":[{"kind":"box","at":[0,10,0],"size":[9000,20,8000],"tint":"sand"},{"kind":"cyl","at":[-4600,1250,0],"r":50,"h":2500,"tint":"post"},{"kind":"cyl","at":[4600,1250,0],"r":50,"h":2500,"tint":"post"},{"kind":"box","at":[0,2000,0],"size":[9200,900,20],"tint":"net"}],"palette":{"sand":"#e3d3a4","post":"#dddddd","net":"#f4f4f4"},"tags":["sport","volleyball","net","sand"]}
+  },
+  "text": {
+    "card": "A beach volleyball net on two posts across a sand court.",
+    "sport": "sport",
+    "volleyball": "volleyball",
+    "court": "court"
+  },
+  "card": {
+    "text": "card",
+    "category": "sport",
+    "synonyms": [
+      "volleyball",
+      "court"
+    ]
+  }
+}
