@@ -2792,6 +2792,26 @@ fn whys(w: &Seeded, entries: &[u64], event: &str) -> Vec<(Id, String)> {
         .collect()
 }
 
+/// The crews on part `id` (its children of the crew's kind) and how many of them are kept holds (B18's `F_KEPT`).
+fn crews_on(w: &Seeded, id: Id) -> (usize, usize) {
+    let (copy, _) = served_copy(w);
+    let t = copy.tree();
+    let crews: Vec<_> = t
+        .children(t.handle(id).unwrap())
+        .unwrap_or(&[])
+        .iter()
+        .filter_map(|h| t.node(*h))
+        .filter(|n| n.kind().as_str().starts_with("mars:carry_activity@"))
+        .collect();
+    let kept = crews
+        .iter()
+        .filter(
+            |n| matches!(n.fields().get(&sim::structure::F_KEPT), Some(Value::Uint(k)) if *k > 0),
+        )
+        .count();
+    (crews.len(), kept)
+}
+
 /// The links of B18's joint type at `id`, as the served world holds them.
 fn joints_at(w: &Seeded, id: Id) -> usize {
     let (copy, _) = served_copy(w);
@@ -2841,7 +2861,7 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     const H: i64 = 1_200_000;
     let d = scratch("a2seat");
     let (facts, slots) = yard_world(&d);
-    let w = seed_entries(&d, &facts, 5, (36, -20), Some(&d.join("entries")));
+    let w = seed_entries(&d, &facts, 7, (36, -20), Some(&d.join("entries")));
     let (creator_id, creator_actor) = creator(0xa2);
     static_creator(&w, creator_id);
     let socket = d.join("s");
@@ -3398,29 +3418,119 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
         (Some(bay), Some(bay)),
         "nothing moved"
     );
+    // A kept hold ends when another crew holds the frame: crew E (Souls 2 and 5) holds it, and frame B has one crew.
+    let (p, q) = across(ub, 800_000);
+    both(&mut hands, (1, 4), p, q, "Souls 2 and 5 to frame B");
+    let crew_e = crew(&mut hands, (1, 4), fb);
+    assert_eq!(
+        crews_on(&w, fb),
+        (1, 0),
+        "crew E holds frame B; the kept hold is gone"
+    );
+    assert_eq!(
+        leave(&mut hands, 4, crew_e).kind,
+        1,
+        "Soul 5 lets go; Soul 2 holds frame B"
+    );
+    // A second retire with the hold kept; a new crew (Souls 5 and 6) may still hold frame B (no `crew.over-most`).
+    let retire_kept = |hands: &mut [Hand], k: usize, what: &str| {
+        hands[k].send_to(answers::LEAVE, None, BTreeMap::new());
+        let got = socket_end(&mut hands[k].s);
+        println!("{what}: {got:?}");
+        assert_eq!(got.kind, 1, "{what}");
+        assert_eq!(
+            whys(&w, &got.entries, "souls:hold-kept"),
+            vec![(fb, "souls:holder-left-structure-kept".to_owned())],
+            "{what}: kept"
+        );
+    };
+    retire_kept(
+        &mut hands,
+        1,
+        "Soul 2, frame B's last holder, leaves with beam 1 boxed in",
+    );
+    let (p, q) = across(ub, 800_000);
+    both(&mut hands, (4, 5), p, q, "Souls 5 and 6 to frame B");
+    let crew_f = crew(&mut hands, (4, 5), fb);
+    assert_eq!(
+        crews_on(&w, fb),
+        (1, 0),
+        "crew F holds frame B, after two kept holds"
+    );
+    assert_eq!(leave(&mut hands, 5, crew_f).kind, 1, "Soul 6 lets go");
+    retire_kept(
+        &mut hands,
+        4,
+        "Soul 5, frame B's last holder, leaves with beam 1 boxed in",
+    );
     for wall_id in walls {
         let got = creator_edit(Op::Remove {
             node: Ref::Node(wall_id),
         });
         assert_eq!(got.kind, 1, "a wall taken away: {got:?}");
     }
-    let (p, q) = across(ub, 800_000);
-    both(&mut hands, (1, 4), p, q, "Souls 2 and 5 to frame B");
-    let crew_e = crew(&mut hands, (1, 4), fb);
-    println!("crew E holds frame B");
+    // The kept hold counts for B18: crew H (Souls 1 and 6) takes beam 1 out and sets it down.
     assert_eq!(
-        leave(&mut hands, 4, crew_e).kind,
+        leave(&mut hands, 0, crew_d).kind,
         1,
-        "Soul 5 lets go; Soul 2 holds frame B"
+        "Soul 1 lets go of frame A; Soul 3 holds it"
     );
+    let (p, q) = along(bl);
+    both(&mut hands, (0, 5), p, q, "Souls 1 and 6 to beam 1");
+    let crew_h = crew(&mut hands, (0, 5), g);
+    let got = hands[0].act("part:unseat", crew_h, part(b1));
+    println!("crew H takes beam 1 out from frame B's kept hold: {got:?}");
+    assert_eq!(got.kind, 1, "beam 1 out");
+    assert_eq!(
+        leave(&mut hands, 0, crew_h).kind,
+        1,
+        "Soul 1 lets go: beam 1 set down"
+    );
+    assert_eq!(leave(&mut hands, 5, crew_h).kind, 1, "Soul 6 leaves crew H");
+    assert_eq!(where_is(&w, b1).0, Some(g), "beam 1 on the ground");
+    // A new crew takes the kept frame out: the kept hold ends with it, so no phantom holder rides along, and once frame
+    // B is back in its slot, its last holder may not let go (`support.none`).
+    let (p, q) = ends(ub, 0);
+    both(&mut hands, (0, 5), p, q, "Souls 1 and 6 to frame B");
+    let crew_i = crew(&mut hands, (0, 5), g);
+    let got = hands[0].act("part:unseat", crew_i, part(fb));
+    println!("crew I takes the kept frame B out (an unseat): {got:?}");
+    assert_eq!(got.kind, 1, "frame B taken");
+    assert_eq!(where_is(&w, fb).0, Some(crew_i), "frame B rides crew I");
+    assert_eq!(crews_on(&w, fb), (0, 0), "no kept hold rides along");
+    let got = hands[0].act("part:put", crew_i, into("upright_b"));
+    assert_eq!(got.kind, 1, "frame B back in: {got:?}");
+    assert_eq!(leave(&mut hands, 0, crew_i).kind, 1, "Soul 1 lets go");
+    let got = leave(&mut hands, 5, crew_i);
+    refused(
+        &got,
+        "support.none",
+        "Soul 6, frame B's last holder, lets go of it unbraced",
+    );
+    // Crew J (Souls 1 and 7) puts beam 1 back, joined to both frames.
+    let (p, q) = along(where_is(&w, b1).2);
+    both(&mut hands, (0, 6), p, q, "Souls 1 and 7 to beam 1");
+    let crew_j = crew(&mut hands, (0, 6), g);
+    assert_eq!(
+        hands[0].act("part:take", crew_j, part(b1)).kind,
+        1,
+        "beam 1 taken"
+    );
+    let (p, q) = along(bl);
+    both(&mut hands, (0, 6), p, q, "beam 1 to the bay");
+    let got = hands[0].act("part:put", crew_j, into("beam_low_l"));
+    assert_eq!(got.kind, 1, "beam 1 back in: {got:?}");
+    assert!(joints_at(&w, b1) > 0, "beam 1 joined again");
+    assert_eq!(leave(&mut hands, 0, crew_j).kind, 1);
+    assert_eq!(leave(&mut hands, 6, crew_j).kind, 1);
 
-    // Soul 2, frame B's last holder now, leaves the world, the walls gone: beam 1 would hang by frame B's one end, so
-    // it is laid down first, then frame B, and B18 judges both together. Frame A stays, held by crew D; no part is
-    // left hanging.
-    hands[1].send_to(answers::LEAVE, None, BTreeMap::new());
-    let got = socket_end(&mut hands[1].s);
-    println!("Soul 2, frame B's last holder, leaves with beam 1 joined to frame B: {got:?}");
-    assert_eq!(got.kind, 1, "Soul 2 leaves the world");
+    // Soul 6, frame B's last holder, leaves the world, no walls now: beam 1 would hang by frame B's one end, so it is
+    // laid down first, then frame B, and B18 judges both together. Frame A stays, held by Soul 3; no part is left
+    // hanging.
+    hands[5].send_to(answers::LEAVE, None, BTreeMap::new());
+    let got = socket_end(&mut hands[5].s);
+    println!("Soul 6, frame B's last holder, leaves with beam 1 joined to frame B: {got:?}");
+    assert_eq!(got.kind, 1, "Soul 6 leaves the world");
     let set_down = whys(&w, &got.entries, "souls:carry-set-down");
     println!("its set-downs: {set_down:?}");
     assert!(
@@ -3443,7 +3553,7 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     assert_eq!(
         where_is(&w, fa).0,
         Some(bay),
-        "frame A stays, held by crew D"
+        "frame A stays, held by Soul 3"
     );
     let (beam_y, _, _) = rest_of(&w, b1, 0);
     assert!(

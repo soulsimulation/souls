@@ -658,6 +658,34 @@ impl Activities {
         self.load_word(tree, activity, load, "souls:hold-kept", why, by)
     }
 
+    /// Ends kept hold `activity` (0.135 A2: its last holder left the world and its part was kept as it stood), as
+    /// another crew holds, takes or unseats its part: its node is removed, caused and acted as `ask` says
+    /// (`souls:hold-ended`), and it is forgotten here. Nothing else is held by it: its members' bodies are gone.
+    pub fn forget(&mut self, tree: &mut Tree, activity: Id, ask: Ask) -> R<()> {
+        let audience = self
+            .live
+            .get(&activity)
+            .map_or(Audience::Everyone, |l| l.audience);
+        self.write(
+            tree,
+            activity,
+            audience,
+            ask,
+            "souls:hold-ended",
+            vec![Change::Remove { node: activity }],
+        )?;
+        self.live.remove(&activity);
+        self.beats.remove(&activity);
+        self.ending.remove(&activity);
+        self.begun.retain(|a| *a != activity);
+        self.holding.retain(|_, a| *a != activity);
+        self.stalled.retain(|(a, _)| *a != activity);
+        self.placing.remove(&activity);
+        self.frames.remove(&activity);
+        self.stands.remove(&activity);
+        Ok(())
+    }
+
     fn load_word(
         &mut self,
         tree: &mut Tree,

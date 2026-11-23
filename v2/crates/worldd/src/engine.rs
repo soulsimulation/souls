@@ -833,10 +833,16 @@ impl Engine {
                 }
             }
         }
+        // A crew started on a part ends the kept holds on it (0.135 A2).
         if a.verb == Verb::Accept
             && let Some(t) = a.target
+            && self.activities.started(t)
+            && let Some(part) = tree
+                .handle(t)
+                .and_then(|h| tree.node(h))
+                .and_then(|n| n.parent())
         {
-            self.unkeep(&mut tree, now, t)?;
+            self.unkeep(&mut tree, part, t, ask)?;
         }
         self.begin_moves(&mut tree, c, now);
         self.collect(Some((a.id, a.soul)));
@@ -1406,20 +1412,10 @@ impl Engine {
         Ok(())
     }
 
-    /// Crew `activity` has started holding a part (0.135 A2): every kept hold on that part (its last holder gone,
-    /// [`Engine::holder_left`]) stops counting, as the new crew holds it now.
-    fn unkeep(&mut self, tree: &mut Tree, now: Micros, activity: Id) -> R<()> {
-        if !self.activities.started(activity) {
-            return Ok(());
-        }
-        let Some(part) = tree
-            .handle(activity)
-            .and_then(|h| tree.node(h))
-            .and_then(|n| n.parent())
-        else {
-            return Ok(());
-        };
-        let kept: Vec<(Id, replica::world_model::Audience)> = tree
+    /// Another crew, `activity`, holds `part` now, or has taken or unseated it (0.135 A2): every kept hold on it (its
+    /// last holder gone, [`Engine::holder_left`]) ends, its node removed and forgotten, for `ask`.
+    fn unkeep(&mut self, tree: &mut Tree, part: Id, activity: Id, ask: Ask) -> R<()> {
+        let kept: Vec<Id> = tree
             .handle(part)
             .and_then(|h| tree.children(h))
             .unwrap_or(&[])
@@ -1429,10 +1425,14 @@ impl Engine {
             .filter(|n| {
                 matches!(n.fields().get(&sim::structure::F_KEPT), Some(Value::Uint(k)) if *k > 0)
             })
-            .map(|n| (n.id(), n.audience()))
+            .map(|n| n.id())
             .collect();
-        for (k, audience) in kept {
-            self.mark(tree, now, k, audience, 0)?;
+        for k in kept {
+            self.activities.next = tree.next();
+            self.activities.forget(tree, k, ask)?;
+            if let Some(s) = self.asm.as_mut() {
+                s.ended(k);
+            }
         }
         Ok(())
     }
@@ -1974,14 +1974,33 @@ impl Engine {
             self.stop_refused(&mut tree, now);
             return;
         }
-        let (Some(asm), Some((ground, at, turn, span))) = (self.asm.as_mut(), taking) else {
+        let Some((ground, at, turn, span)) = taking else {
             return;
         };
-        let part = asm.held.get(&r.activity).copied();
+        let part = self
+            .asm
+            .as_ref()
+            .and_then(|a| a.held.get(&r.activity).copied());
         let audience = live
             .handle(r.activity)
             .and_then(|h| live.node(h))
             .map(|n| n.audience());
+        // A take or an unseat committed ends the kept holds on the part (0.135 A2): they rode out with it.
+        if written && let Some(p) = part {
+            let mut tree = live.frozen();
+            let ask = Ask {
+                soul: r.soul,
+                intent: r.intent,
+                at: now,
+            };
+            match self.unkeep(&mut tree, p, r.activity, ask) {
+                Ok(()) => self.collect(Some((r.intent, r.soul))),
+                Err(e) => eprintln!("worldd: a kept hold did not end at a take: {e}"),
+            }
+        }
+        let Some(asm) = self.asm.as_mut() else {
+            return;
+        };
         match (written, part, audience) {
             (true, Some(part), Some(audience)) => {
                 let mut carry = Carry::new(
