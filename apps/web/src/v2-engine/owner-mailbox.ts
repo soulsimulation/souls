@@ -1,13 +1,14 @@
 // Stage 4 (#4178): the old owner box on a world the new engine runs. The old box reads and writes
 // `/v1/edge/owner/:id/inbox`, which no v2 service serves; on a v2 world its words travel the gateway mailbox instead
-// (R13/W10: the directory's `/v1/mailbox/*`, reached from a page only through the gateway's view socket). The v2 page's
-// `OwnerBox` (its text frames) is reused as it is; the view-token exchange and the box-only socket follow its
-// `exchange` and `MailSocket`. This file turns the box's messages into the old box's `AgentInbox`, so the old card
-// draws them unchanged. Nothing here makes a Soul act, and the token stays in memory only.
+// (R13/W10: the directory's `/v1/mailbox/*`, reached from a page only through the gateway's view socket). Nothing
+// outside v2/ imports from it (K14), so the box's text frames, the view-token exchange and the box-only socket are read
+// here as the v2 page reads them (v2/web/src/owner/box.ts `OwnerBox`, source/socket.ts `exchange`, owner/mail-socket.ts
+// `MailSocket`). This file turns the box's messages into the old box's `AgentInbox`, so the old card draws them
+// unchanged. Nothing here makes a Soul act, and the token stays in memory only.
 import type { AgentInbox } from '../AgentMessageBox.tsx';
 import { v2Stream } from './use-v2-souls.ts';
 
-/** The v2 page's box message (v2/web/src/owner/box.ts `Message`; only the fields read here). */
+/** One message, as the v2 page's box keeps it (v2/web/src/owner/box.ts `Message`). */
 export type BoxMessage = {
   words: string;
   id: string | null;
@@ -71,7 +72,72 @@ export function inboxOf(messages: readonly BoxMessage[], sentAt: ReadonlyMap<Box
   };
 }
 
-type Box = { messages: BoxMessage[]; onChange: () => void; put(grant: string, words: string): string | null; text(frame: string): boolean };
+/** The longest message (the mailbox's, bytes), the longest reply drawn and the notes kept, as the v2 page's box. */
+const WORDS_MOST = 2000, REPLY_MOST = 1000, NOTES_KEPT = 5;
+const clip = (s: string) => [...s].slice(0, REPLY_MOST).join('');
+
+/**
+ * The box's state, fed the gateway's text frames (gatewayd's mailbox.rs; as v2/web/src/owner/box.ts reads them):
+ * page → gateway `put <grant>\n<words>`; gateway → page `{"sent": {"id"} | {"refused"}}`, `{"mail": {"id", "state":
+ * "picked"}}`, `{"doing": {"seq", "verb", "phase", "outcome"}}`, `{"note": {"id", "reply"}}`, `{"close": {"id", "state",
+ * "outcome", "reply"?}}`.
+ */
+export class MailBox {
+  readonly messages: BoxMessage[] = [];
+  private readonly picked = new Set<string>();
+  onChange: () => void = () => {};
+
+  /** The frame that puts `words` for `grant`; null for empty or long words. */
+  put(grant: string, words: string): string | null {
+    const w = words.trim();
+    if (!w || new TextEncoder().encode(w).length > WORDS_MOST) return null;
+    this.messages.push({ words: w, id: null, state: 'sending', act: null, outcome: null });
+    this.onChange();
+    return `put ${grant}\n${w}`;
+  }
+
+  /** One text frame from the gateway; false if it is not the box's. */
+  text(frame: string): boolean {
+    let f: Record<string, Record<string, unknown> | undefined>;
+    try { f = JSON.parse(frame); } catch { return false; }
+    if (!f || typeof f !== 'object') return false;
+    const str = (v: unknown) => (typeof v === 'string' ? v : null);
+    const byId = (id: unknown) => this.messages.find((m) => m.id !== null && m.id === id);
+    if (f.sent) {
+      const m = this.messages.find((x) => x.state === 'sending');
+      if (!m) return true;
+      const id = str(f.sent.id);
+      if (id) { m.id = id; m.state = this.picked.delete(id) ? 'thinking' : 'waiting'; }
+      else { m.state = 'refused'; m.outcome = str(f.sent.refused) ?? 'refused'; }
+    } else if (f.mail) {
+      if (f.mail.state !== 'picked') return true;
+      const m = byId(f.mail.id);
+      if (!m) this.picked.add(String(f.mail.id)); // picked up before the put's answer came
+      else if (m.state === 'waiting') m.state = 'thinking';
+    } else if (f.doing) {
+      // an act the agent began after it picked up a message: the newest open message's
+      const m = [...this.messages].reverse().find((x) => OPEN.has(x.state));
+      if (!m) return true;
+      m.state = 'doing';
+      m.act = { verb: str(f.doing.verb) ?? '?', phase: str(f.doing.phase) ?? '?', outcome: str(f.doing.outcome) };
+    } else if (f.note) {
+      const m = byId(f.note.id), note = str(f.note.reply)?.trim();
+      if (!m || !note || !OPEN.has(m.state)) return true;
+      m.notes = [...(m.notes ?? []), clip(note)].slice(-NOTES_KEPT);
+    } else if (f.close) {
+      const m = byId(f.close.id);
+      if (!m) return true;
+      m.state = f.close.state === 'done' ? 'done' : 'failed';
+      m.outcome = str(f.close.outcome);
+      const reply = str(f.close.reply)?.trim();
+      if (reply) m.reply = clip(reply);
+    } else return false;
+    this.onChange();
+    return true;
+  }
+}
+
+type Box = Pick<MailBox, 'messages' | 'onChange' | 'put' | 'text'>;
 type Sock = { onText: ((t: string) => void) | null; sendText(t: string): boolean; start(): void; stop(): void };
 
 /** One Soul's box on the gateway mailbox. */
@@ -199,13 +265,13 @@ export function v2OwnerMailbox(soulId: string): V2OwnerMailbox | null {
   const place = mailboxPlace(location.href, (window as unknown as { __simConfig?: Record<string, unknown> }).__simConfig, stream);
   const mb = new V2OwnerMailbox(async (self) => {
     if (!place) throw new Error('This world\'s mailbox is not reachable from this page.');
-    // the v2 page's own box (its text frames), and the page's Soul ids for v2 grants, loaded only on a v2 world
-    const [{ OwnerBox }, { soulIdOf }] = await Promise.all([import('../../../../v2/web/src/owner/box.ts'), import('./bridge.ts')]);
+    // the page's Soul ids for v2 grants, loaded only on a v2 world
+    const { soulIdOf } = await import('./bridge.ts');
     const renew = () => viewToken(place);
     const g = await renew();
     const own = g.owned.find((o) => soulIdOf(o.grant) === soulId);
     if (!own) throw new Error('This Soul is not yours on this world.');
-    self.attach(new OwnerBox(), new BoxSocket(place.gateway, g, renew), own.grant);
+    self.attach(new MailBox(), new BoxSocket(place.gateway, g, renew), own.grant);
   });
   boxes.set(soulId, mb);
   return mb;

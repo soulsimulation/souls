@@ -1,13 +1,12 @@
-// #4178: the old owner box on the v2 gateway mailbox. The v2 page's own OwnerBox is fed the gateway's text frames (as
-// gatewayd's mailbox.rs sends them) and the old card's inbox fields are read from what this adapter makes of them
+// #4178: the old owner box on the v2 gateway mailbox. The box (reading frames as the v2 page's OwnerBox does) is fed
+// the gateway's text frames (as gatewayd's mailbox.rs sends them) and the old card's inbox fields are read from what this adapter makes of them
 // (AgentMessageBox.tsx's receiptState: sent → "Sent", delivered → "Picked up", acknowledged with a result → "Done",
 // with outcome failed → "Could not do it").
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { OwnerBox } from '../../../../v2/web/src/owner/box.ts';
 // the page modules it loads read `location` when loaded
 Object.assign(globalThis, { location: { origin: 'http://localhost:5960', pathname: '/w/eden/', search: '', hash: '', href: 'http://localhost:5960/w/eden/' } });
-const { V2OwnerMailbox, inboxOf, mailboxPlace } = await import('./owner-mailbox.ts');
+const { MailBox: OwnerBox, V2OwnerMailbox, inboxOf, mailboxPlace } = await import('./owner-mailbox.ts');
 
 const GRANT = `soul-${'2b'.repeat(16)}-2`;
 
