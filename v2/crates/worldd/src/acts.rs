@@ -494,8 +494,7 @@ impl Sight<'_> {
         if n.parent() != Some(node) {
             return None;
         }
-        self.kinds
-            .get(entry_of(&n))?
+        entry_in(self.kinds, self.tree, &n)?
             .get("areas")?
             .get(point.as_str())?;
         let place = n.place()?;
@@ -1209,7 +1208,7 @@ impl Sight<'_> {
         let radius = build.size.radius_mm() * 1000;
         self.with_view(body, |view| {
             let n = self.tree.node(self.tree.handle(target)?)?;
-            let entry = self.kinds.get(entry_of(&n))?;
+            let entry = entry_in(self.kinds, self.tree, &n)?;
             // A body on one of the thing's own floors (inside a greenhouse, C34 #3599) is in the thing's frame: a floor
             // is placed at its building's origin. Carried up the tree, the point would land on the ground cut out under it.
             let own_floor = self
@@ -1259,7 +1258,7 @@ impl Sight<'_> {
                 .and_then(|p| p.get("at_mm")))
             .and_then(on)
             .map(|p| gap(flat(q, [p.x, p.z]), p.y, p.y));
-            let surface = sim::spots::footprint(entry).and_then(|(corners, height)| {
+            let surface = sim::spots::footprint(&entry).and_then(|(corners, height)| {
                 let [a, b, c, d] = corners;
                 let corners = [on(a)?, on(b)?, on(c)?, on(d)?];
                 let ring = corners.map(|p| [p.x, p.z]);
@@ -1724,6 +1723,22 @@ fn entry_of<'a>(n: &'a replica::tree::NodeRef<'_>) -> &'a str {
     import_eden::entry_name(n.kind().as_str(), n.fields())
 }
 
+/// A node's entry: the world's entry for its kind (or the entry it names), else the record of a creator's kind the
+/// world defines, read by the one loader (`replica::kinds::defined`, #3697), so a creator's forms run as content's do.
+fn entry_in<'a>(
+    kinds: &'a Json,
+    tree: &Tree,
+    n: &replica::tree::NodeRef<'_>,
+) -> Option<std::borrow::Cow<'a, Json>> {
+    kinds
+        .get(entry_of(n))
+        .map(std::borrow::Cow::Borrowed)
+        .or_else(|| {
+            replica::kinds::defined::entry_named(tree, n.kind().as_str())
+                .map(std::borrow::Cow::Owned)
+        })
+}
+
 /// The plain name (`namespace:name`) of a node's kind.
 fn plain(kind: &Name) -> &str {
     let k = kind.as_str();
@@ -1776,8 +1791,8 @@ impl Acts {
         // By the entry the node goes by (#3980): a thing that borrows `eden:chair` (field 27) sits as a chair does.
         tree.handle(*node)
             .and_then(|h| tree.node(h))
-            .and_then(|n| self.kinds.get(entry_of(&n)))
-            .is_some_and(|entry| fixture_seat(entry, "sit").is_some())
+            .and_then(|n| entry_in(&self.kinds, tree, &n))
+            .is_some_and(|entry| fixture_seat(&entry, "sit").is_some())
     }
 }
 
@@ -1994,7 +2009,7 @@ impl Acts {
         let Some(entry) = tree
             .handle(node)
             .and_then(|h| tree.node(h))
-            .and_then(|n| self.kinds.get(plain(n.kind())))
+            .and_then(|n| entry_in(&self.kinds, tree, &n))
         else {
             return false;
         };
@@ -2048,19 +2063,20 @@ impl Acts {
         let mut bodies = bodies;
         let mut first = None;
         for (node, form) in candidates {
-            let kind = tree
+            let found = tree
                 .handle(*node)
                 .and_then(|h| tree.node(h))
-                .map(|n| entry_of(&n).to_owned());
+                .map(|n| (entry_of(&n).to_owned(), entry_in(&self.kinds, tree, &n)));
             // A thing already gone is refused by name here, never handed to the runner (F4's known gap).
-            let Some(kind) = kind else {
+            let Some((kind, entry)) = found else {
                 first.get_or_insert(refusal("thing-missing", replica::world_model::show(*node)));
                 continue;
             };
-            let Some(entry) = self.kinds.get(&kind) else {
+            let Some(entry) = entry else {
                 first.get_or_insert(refusal("no_such_kind", kind));
                 continue;
             };
+            let entry: &Json = &entry;
             if let Some(key) = args.things.keys().find(|k| args.slots.contains_key(*k)) {
                 first.get_or_insert(refusal("arg-ambiguous", key));
                 continue;
@@ -2408,7 +2424,7 @@ impl Acts {
         let entry = tree
             .handle(node)
             .and_then(|h| tree.node(h))
-            .and_then(|n| self.kinds.get(entry_of(&n)).cloned());
+            .and_then(|n| entry_in(&self.kinds, tree, &n).map(std::borrow::Cow::into_owned));
         let asked = match entry {
             None => Err(refusal("thing-missing", replica::world_model::show(node))),
             Some(entry) => {
