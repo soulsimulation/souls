@@ -45,7 +45,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
     const world = new WorldState(), edges = new EdgeLog();
     let said: readonly unknown[] = [], seenSpeech: unknown = null, seenTurns: unknown = null;
     // 0.133 V1: a creator's kinds that exist only in the new format, drawn by the entity layer from their records
-    const kinds = new CreatorKinds(undefined, setAssetSource);
+    const kinds = new CreatorKinds((h) => apiPath(`/v2/uploads/${h}`), setAssetSource); // K3: the world's own uploads, through the front door
     let seenParts = 0, lastPartAt: number | null = null, errorAtParts: number | null = null, seenTo: number | null = null;
     // The scenery the page binds is the world's own (/v1/scene, published with the world); takes carry its rules version.
     void (async () => {

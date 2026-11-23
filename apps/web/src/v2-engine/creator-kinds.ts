@@ -5,6 +5,11 @@
 // thing of such a kind into an old entity at its world pose, and sends both to the entity layer as one `world-diff`, as
 // world-state.ts sends doors and lamps. Nothing here draws: the layer draws the def as it draws any other.
 //
+// 0.133 V2: what a creator adds and removes. A thing of a kind the world already has (a bench beside the world's own
+// benches) is drawn with the old def the world's own things of that kind have (learned from them: a node's `origin` is
+// its old entity), and a thing of the world's own scene a creator removes leaves the layer. A thing moved (the world's
+// own, B2-2's path in world-state.ts, or a creator's, here) moves as the layer eases any moved thing.
+//
 // The record's look, read as #3945 reads it for the v2 page (v2/web/src/kinds/catalogue.ts `recordEntry`, copied, not
 // imported): `geometry.parts` (kit shapes in mm, millidegrees and permille, as `souls-god define-kit` writes them) and
 // `geometry.palette`. A model (K3, #3725's design: an allowed upload named by its hash, `1220` and the SHA-256 in hex)
@@ -15,7 +20,7 @@ import { placedOf, type LayerLike, type WorldDiff } from './world-state.ts';
 
 /** The reader's node record, the fields read here (v2/web/src/source/source.ts NodeRec). */
 type NodeLike = { id: string; kind: string; parent: string | null; pos?: [number, number, number]; rot?: [number, number, number, number];
-  slot?: number | null; slots?: number[][]; soul?: string | null; defines?: string; entry?: Uint8Array };
+  slot?: number | null; slots?: number[][]; soul?: string | null; origin?: string; defines?: string; entry?: Uint8Array };
 type Msg = { t: 'part'; p: { nodes: NodeLike[]; removed: string[] } } | { t: 'snapshot'; s: { nodes: NodeLike[]; removed: string[] } } | { t: string };
 type Json = Record<string, unknown>;
 
@@ -24,6 +29,8 @@ export const DEFINITION = 'souls:kind';
 const obj = (v: unknown): Json | null => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Json) : null);
 const point = (v: unknown): v is [number, number, number] => Array.isArray(v) && v.length === 3 && v.every((x) => typeof x === 'number' && Number.isFinite(x));
 const UPLOAD = /^upload:(1220([0-9a-f]{64}))$/;
+/** A kind's plain name: `ns:name`, without its revision. */
+const plain = (k: string) => k.split('@')[0];
 
 /** Entry shape lengths in mm (kit/2: metres); angles in millidegrees (kit/2: radians); `scale` and `glow` in permille. */
 const LENGTH = new Set(['r', 'r2', 'h', 'round', 'width', 'depth', 'thickness', 'tube']);
@@ -101,6 +108,10 @@ export class CreatorKinds {
   private definers = new Map<string, string>();
   /** What the layer was last sent: each thing's def and place. */
   private sent = new Map<string, string>();
+  /** V2: the old def each kind's own things have in the layer (its plain name → the def's ref), and the old entities
+   *  whose nodes a creator removed. */
+  private oldDefs = new Map<string, string>();
+  private gone = new Set<string>();
   /** Where a model's bytes are, by its upload hash (gatewayd's `/v2/uploads/<hash>`, same origin). */
   private readonly uploadUrl: (hash: string) => string;
   private readonly onModel: (sha: string, url: string) => void;
@@ -111,6 +122,8 @@ export class CreatorKinds {
 
   apply(nodes: NodeLike[], removed: string[]): void {
     for (const id of removed) {
+      const o = this.nodes.get(id)?.origin;
+      if (o && !o.includes('/')) this.gone.add(o);
       this.nodes.delete(id);
       const full = this.definers.get(id);
       if (full === undefined) continue;
@@ -149,18 +162,27 @@ export class CreatorKinds {
     const defs: StoredDef[] = [], upserts: unknown[] = [], removes: string[] = [];
     // a def goes with each diff while the layer does not hold it (a resync takes the world's own defs again)
     const held = (m as { defs?: { has(k: string): boolean } }).defs, need = (d: StoredDef) => !held?.has(d.ref) && !defs.includes(d);
+    // V2: the old def of each kind the world's own things show (a node's origin is its entity in the layer)
+    for (const n of this.nodes.values()) {
+      const e = n.origin && !n.origin.includes('/') ? (m.entities.get(n.origin) as { def?: string } | undefined) : undefined;
+      if (e?.def && !this.oldDefs.has(plain(n.kind))) this.oldDefs.set(plain(n.kind), e.def);
+    }
+    const live = new Set<string>();
     for (const [id, n] of this.nodes) {
-      const d = this.defs.get(n.kind);
-      if (!d) continue;
+      if (n.origin) continue; // the world's own scene: the layer has it, and world-state.ts moves it
+      const d = this.defs.get(n.kind), old = d ? undefined : this.oldDefs.get(plain(n.kind));
+      if (!d && !old) continue;
       const to = placedOf(this.nodes, id);
       if (!to) continue;
-      const eid = entityId(id), key = JSON.stringify([d.def.ref, to.p.map((v) => Math.round(v * 1000)), Math.round(to.yaw * 1000)]);
-      if (this.sent.get(eid) === key && m.entities.has(eid) && !need(d.def)) continue;
-      if (need(d.def)) defs.push(d.def);
-      upserts.push({ id: eid, def: d.def.ref, in: { parent: 'world' }, p: [...to.p], r: to.yaw });
+      const ref = d ? d.def.ref : old!, eid = entityId(id), key = JSON.stringify([ref, to.p.map((v) => Math.round(v * 1000)), Math.round(to.yaw * 1000)]);
+      live.add(eid);
+      if (this.sent.get(eid) === key && m.entities.has(eid) && !(d && need(d.def))) continue;
+      if (d && need(d.def)) defs.push(d.def);
+      upserts.push({ id: eid, def: ref, in: { parent: 'world' }, p: [...to.p], r: to.yaw });
       this.sent.set(eid, key);
     }
-    const live = new Set([...this.nodes].filter(([, n]) => this.defs.has(n.kind)).map(([id]) => entityId(id)));
+    // sent again with each diff until the layer has dropped it (a diff it did not apply loses nothing)
+    for (const o of this.gone) { if (m.entities.has(o)) removes.push(o); else this.gone.delete(o); }
     for (const eid of [...this.sent.keys()]) {
       if (live.has(eid)) continue;
       this.sent.delete(eid);
