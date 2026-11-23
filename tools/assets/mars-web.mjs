@@ -11,6 +11,7 @@
 // and dependencies, plus pnpm-lock.yaml), kept in dist/client/.sim-build.json. When the stamp matches and the
 // character set is complete the run is one directory walk (a few thousand stats, well under a second), no build.
 // When the media is not pulled yet it warns and builds nothing (`pnpm dev` keeps starting, as with the media check).
+import { isMain } from '../lib/is-main.mjs';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { existsSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
@@ -97,6 +98,6 @@ export function main(argv = process.argv.slice(2), log = console.log, { viewer =
   return 0;
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (isMain(import.meta.url)) {
   try { process.exitCode = main(); } catch (e) { console.error(e.message); process.exitCode = 1; }
 }

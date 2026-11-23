@@ -10,10 +10,10 @@
 // They combine only when both judged the SAME candidate commit: the V7 source sha must equal the gate's candidate sha,
 // the V7 checkout must have been clean, the V7 walk must pass and the gate must not be blocked. Anything else is blocked.
 // Status = the gate's status (pass | quarantined) when they combine; remaining exclusions are the gate's minus V7 (V8).
+import { isMain } from '../lib/is-main.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { assertPublishable } from '../proof/publication.mjs';
 
 export function combineReceipts(gate, v7) {
@@ -84,4 +84,4 @@ export function main(args = process.argv.slice(2)) {
   return receipt.status === 'blocked' ? 1 : 0;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = main();
+if (isMain(import.meta.url)) process.exitCode = main();

@@ -288,6 +288,12 @@ export default defineConfig({
     // CDN4: god uploads via the pull-through Worker on assets.eden.art/w/* (default on; needs the CDN switch above)
     __SIM_GOD_UPLOADS_CDN__: process.env.SIM_GOD_UPLOADS_CDN!=='0',
     __SIM_ASSETS_CDN_ORIGIN__: JSON.stringify(process.env.SIM_ASSETS_CDN_ORIGIN ?? 'https://assets.eden.art') },
+  // #4153: the v2 stream reader's worker (v2/web/src/source, reused as it is) imports `replica` (the new engine's WASM,
+  // the package V2_REPLICA_PKG names; a stand-in that refuses when unset, as the default build is) and `cborg` (ours).
+  resolve: { alias: [
+    { find: /^replica$/, replacement: process.env.V2_REPLICA_PKG ? resolvePath(process.env.V2_REPLICA_PKG, 'replica.js') : fileURLToPath(new URL('./src/v2-engine/replica-missing.ts', import.meta.url)) },
+    { find: /^cborg$/, replacement: fileURLToPath(new URL('./node_modules/cborg/cborg.js', import.meta.url)) },
+  ] },
   server: { port: Number(process.env.WEB_PORT ?? 5173), proxy: devProxy() },
   preview: { port: Number(process.env.WEB_PORT ?? 5173), proxy: devProxy() },   // PERF-EDEN: `vite preview` serves a production build through the same proxy (SIM_DEV_API: a live world)
   // W1: standalone world-free studio, served by /god/workbench.

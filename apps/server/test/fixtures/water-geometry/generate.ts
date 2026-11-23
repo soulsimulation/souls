@@ -1,7 +1,7 @@
 // Detached public proposal producer. No DB, engine installation, model or route.
+import { isMain } from '../../../../../tools/lib/is-main.mjs';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
 import { createWaterGeometryProbe } from '@souls/engine-mars';
 const sourcePath='apps/server/test/fixtures/scene-placement/shore-world.v1.json';
 const sourceCommit='27879c144ef7716cd0238b5734a93d785e922950';
@@ -22,4 +22,4 @@ export function generateShoreWaterGeometry() {
     columns:columnRequests.map(q=>probe.column(q)),hullClearances:clearanceRequests.map(q=>probe.clearance(q)),
     suppliedUnderKeelMarginMetres:underKeelMarginMetres};
 }
-if(process.argv[1]===fileURLToPath(import.meta.url))process.stdout.write(JSON.stringify(generateShoreWaterGeometry(),null,2)+'\n');
+if(isMain(import.meta.url))process.stdout.write(JSON.stringify(generateShoreWaterGeometry(),null,2)+'\n');

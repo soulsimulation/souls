@@ -12,6 +12,7 @@
 // (<cache>/<sha[:2]>/<sha>, one copy for every checkout on the machine); else --from <tree> (another checkout that has
 // the file); else GET <url> (stalls time out, transient failures are retried). Every byte that lands is checked against
 // sha256 + size of the decoded file. Exit 1 lists every path that is missing or wrong, with the reason.
+import { isMain } from '../lib/is-main.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { constants, createReadStream, createWriteStream } from 'node:fs';
 import { copyFile, lstat, mkdir, readFile, readlink, rename, rm, stat, symlink, writeFile } from 'node:fs/promises';
@@ -19,7 +20,7 @@ import { homedir } from 'node:os';
 import { dirname, extname, join, relative, resolve } from 'node:path';
 import { Readable } from 'node:stream';
 import { pipeline } from 'node:stream/promises';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 
 export const ROOT = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 export const MANIFEST = join(ROOT, 'tools/assets/manifest.json');
@@ -269,4 +270,4 @@ const readHelp = () => {
   return `see the header of ${relative(process.cwd(), src)} and tools/assets/README.md`;
 };
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) main().catch(e => { console.error(`assets: ${e.message}`); process.exitCode = 2; });
+if (isMain(import.meta.url)) main().catch(e => { console.error(`assets: ${e.message}`); process.exitCode = 2; });

@@ -18,6 +18,7 @@
 // template). Units are packed whole into batches of <= 256 ops and < 56 KB under one group; each batch is preview -> act
 // with the plan-time revisions as `expect` (stale = refused). Rollback undoes the group (journal inverses) after a guard.
 // The credential is read by path at runtime and never written anywhere; the receipt and the pre-apply snapshot are 0600.
+import { isMain } from '../lib/is-main.mjs';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
@@ -396,4 +397,4 @@ function recordApplied(receipt, after) {
   receipt.applied = { versions, placed, roots: [...roots] };
 }
 
-if (import.meta.url === 'file://' + process.argv[1]) main(process.argv.slice(2)).catch((e) => { console.error(e.message); process.exit(1); });
+if (isMain(import.meta.url)) main(process.argv.slice(2)).catch((e) => { console.error(e.message); process.exit(1); });

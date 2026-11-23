@@ -10,8 +10,12 @@ import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { decode, entryKind, idText, plainKind } from '../brief/copy.mjs';
 
-/** The `souls-entry/1` entries in `dir`, by kind name; none if the folder is missing. Unreadable files are skipped. */
-export function kindsIn(dir) {
+/**
+ * The `souls-entry/1` entries in `dir`, by kind name; none if the folder is missing. Unreadable files are skipped.
+ * `body`, a body kind with no entry of its own (a served Soul's `souls:body`), gets the family entry (owner `family`)
+ * when the folder holds exactly one: its forms are the body's (E21, #2791; replica's `kinds::entry::family_forms`).
+ */
+export function kindsIn(dir, body) {
   const kinds = {};
   let names = [];
   try { names = readdirSync(dir).filter((f) => f.endsWith('.json')); } catch { return kinds; }
@@ -21,6 +25,8 @@ export function kindsIn(dir) {
       if (e?.format === 'souls-entry/1' && typeof e.kind === 'string') kinds[e.kind] = e;
     } catch { /* not an entry */ }
   }
+  const families = Object.values(kinds).filter((e) => e.owner === 'family');
+  if (body && !kinds[body] && families.length === 1) kinds[body] = { ...families[0], kind: body };
   return kinds;
 }
 
@@ -57,8 +63,8 @@ export function definedIn(copy) {
 }
 
 /** Every kind entry this Soul holds: the world's, from `dir`, and the creator's own from the copy (`definedIn`). */
-export function kindsHeld(dir, copy) {
-  return { ...definedIn(copy), ...kindsIn(dir) };
+export function kindsHeld(dir, copy, body) {
+  return { ...definedIn(copy), ...kindsIn(dir, body) };
 }
 
 const plain = (v) => (typeof v === 'bigint' ? Number(v) : v instanceof Uint8Array ? Buffer.from(v).toString('hex') : v);
@@ -78,7 +84,9 @@ export function stateOf(copy, kinds, me) {
     const state = (kinds[String(m.get(2))] ?? kinds[kind])?.state ?? {};
     const byN = Object.fromEntries(Object.entries(state).map(([name, def]) => [def.n, name]));
     const fields = {};
-    if (m.get(6) instanceof Map) for (const [n, v] of m.get(6)) if (byN[n]) fields[byN[n]] = state[byN[n]].type === 'text' ? textValue(v) : plain(v);
+    // An enum's value is held as a name (`souls:stand`); the entry lists its values by their local part (`stand`).
+    const valueOf = (def, v) => (def?.type === 'enum' && typeof v === 'string' && def.values?.includes(v.replace(/^[^:]*:/, '')) ? v.replace(/^[^:]*:/, '') : v);
+    if (m.get(6) instanceof Map) for (const [n, v] of m.get(6)) if (byN[n]) fields[byN[n]] = state[byN[n]].type === 'text' ? textValue(v) : valueOf(state[byN[n]], plain(v));
     nodes[id] = { ...nodes[id], kind, ...(Object.keys(fields).length ? { fields } : {}) };
     for (const c of m.get(10) ?? []) todo.push(Buffer.from(c).toString('hex'));
   }
