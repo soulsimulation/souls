@@ -83,8 +83,6 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
     document.addEventListener('pointerdown', away); document.addEventListener('keydown', esc);
     return () => { document.removeEventListener('pointerdown', away); document.removeEventListener('keydown', esc); };
   }, [hourOpen]);
-  // DLG3 (Gene): the history scrub ("Back 1 min") is hidden for now; `?rewind` keeps it reachable for tests.
-  const [rewind] = useState(() => { try { return new URLSearchParams(location.search).has('rewind'); } catch { return false; } });
   // X3: a moved world's link to a moment. Opened, the page seeks that moment once and plays from there.
   const [copied, setCopied] = useState<string | null>(null), opened = useRef(false);
   useEffect(() => {
@@ -131,7 +129,7 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   const preparing = initialPending(initial);
   // lane PERF: a new world's card also waits for the GLBs nearest the arrival (gen-mesh/lazy-assets.ts, ≤ 30 s), so the
   // first view is the world, not bare ground filling in; old worlds never plan an eager set, so this is false there
-  const assetsNear = useSyncExternalStore(arrivalGate.subscribe, arrivalGate.pending);
+  const assetsNear = useSyncExternalStore(arrivalGate.subscribe, arrivalGate.pending, arrivalGate.pending);
   // P7 lever D: a phone's new world drawn before the live data came: only the nearest assets still hold the card
   const early = useSyncExternalStore(earlyArrival.subscribe, earlyArrival.shown, earlyArrival.shown);
   if (early) drawnOnce.current = true;
@@ -145,7 +143,7 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   const arrivalGone = useCallback(() => { lightGone.current = true; setArrivalShown(false); }, []);
   // The bar counts bytes (asset-bytes.ts: every asset fetch, total known up front), never files; it only moves forward
   // and is full once the world is ready. Without a byte total yet, the older measures stand in.
-  const bytes = useSyncExternalStore(assetBytes.subscribe.bind(assetBytes), () => assetBytes.snapshot());
+  const bytes = useSyncExternalStore(assetBytes.subscribe.bind(assetBytes), () => assetBytes.snapshot(), () => assetBytes.snapshot());
   // new worlds learn their total from the snapshot a moment after the first downloads start: no bar until then
   // #1266: one progress for the bar and the light: bytes, then preparation, and 100% only once the world is drawn
   const measured = !card ? (arrivalShown ? 1 : null) : arrivalFraction({ card, bytes, initial, downloads: state?.assetDownloads, arriving });
@@ -214,7 +212,8 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
         </div>, document.body)}
         {!arriving&&!!state?.assetDownloads?.pending&&<span className="asset-download-note" role="status" title="Actual asset downloads; the world stays usable while art arrives.">Art loading · {state.assetDownloads.loaded}/{state.assetDownloads.total}</span>}
         {settledReason && !lost && <span role="status" className="warn viewer-reason" title={settledReason}>{settledReason}</span>}
-        {rewind && <button disabled={!handle || state?.shownTick == null || state.loading} onClick={() => { if (state?.shownTick != null) void handle?.seek(Math.max(0, state.shownTick - 60 / dt)); }}>Back 1 min</button>}
+        {/* Gene: "Show it to everyone": the history scrub ("Back 1 min") shows to every viewer, no `?rewind` flag */}
+        <button disabled={!handle || state?.shownTick == null || state.loading} onClick={() => { if (state?.shownTick != null) void handle?.seek(Math.max(0, state.shownTick - 60 / dt)); }}>Back 1 min</button>
         {v2History() && state?.shownTick != null && !state.loading && <button type="button" data-moment-link={copied ?? ''} title="Copy a link that opens the world at this moment" onClick={() => copyMoment(state.shownTick!)}>{copied ? 'Link copied' : 'Link to this moment'}</button>}
         {state?.presentation === 'history' && <>
           <button onClick={() => handle?.setPlaying(state.playback !== 'playing')}>{state.playback === 'playing' ? 'Pause recording' : 'Play recording'}</button>

@@ -53,6 +53,8 @@ pub struct Role {
     pub name: Name,
     pub place: Name,
     pub claims: Vec<Want>,
+    /// The move this role makes at the other member when the activity starts (0.134 T1: a handshake's), if any.
+    pub mv: Option<Name>,
 }
 
 /// An activity's kind, as data.
@@ -120,11 +122,11 @@ impl ActivityKind {
             let Value::Map(r) = r else {
                 return refuse(
                     "not-an-activity",
-                    "a role is {1: name, 2: place, 3: [want, ...]}",
+                    "a role is {1: name, 2: place, 3: [want, ...], 4?: move}",
                 );
             };
-            if r.keys().any(|k| *k == 0 || *k > 3) {
-                return refuse("not-an-activity", "a role has fields 1 to 3");
+            if r.keys().any(|k| *k == 0 || *k > 4) {
+                return refuse("not-an-activity", "a role has fields 1 to 4");
             }
             let rname = text(r.get(&1), "a role's name")?;
             let place = text(r.get(&2), "a role's place")?;
@@ -138,10 +140,15 @@ impl ActivityKind {
             if roles.iter().any(|x| x.name == rname) {
                 return refuse("role-duplicate", rname.as_str());
             }
+            let mv = match r.get(&4) {
+                None => None,
+                v => Some(text(v, "a role's move")?),
+            };
             roles.push(Role {
                 name: rname,
                 place,
                 claims,
+                mv,
             });
         }
         if roles.len() < 2 {
