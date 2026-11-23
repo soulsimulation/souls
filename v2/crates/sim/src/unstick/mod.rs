@@ -711,6 +711,7 @@ impl Ladder {
                                 speed,
                                 to: sn,
                                 arrive: None,
+                                hold: false,
                             };
                             if runner.controller.carry(s, track).is_ok() {
                                 self.aside.push((sn, to));
