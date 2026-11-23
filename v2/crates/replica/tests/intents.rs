@@ -265,6 +265,8 @@ fn g1b_an_edit_reads_to_its_batch_and_other_answers_keep_their_bytes() {
             Op::Set { .. } => "set",
             Op::Remove { .. } => "remove",
             Op::Doorway { .. } => "doorway",
+            Op::Link { .. } => "link",
+            Op::Rows { .. } => "rows",
         })
         .collect();
     println!(
@@ -340,6 +342,82 @@ fn g1f_doorway_wire_roundtrip_keeps_owned_geometry_under_strict_i2() {
     };
     op.insert(11, Value::Uint(0));
     assert!(replica::intent_decode::decode(&encode(&i.to_value()).unwrap()).is_err());
+}
+
+#[test]
+fn link_wire_roundtrip_keeps_its_row_owner_and_door_under_strict_i2() {
+    use replica::edit::wire::{parameters, read};
+    use replica::edit::{Op, Ref};
+    use replica::ids::{Id, Scope};
+    use replica::world_model::End;
+    let node = |n| Ref::Node(Id::new(Scope([0xdd; 16]), n).unwrap());
+    // A stair's row: its kind, then numbers, then its line's points (3 deep inside the operation).
+    let row = vec![
+        Value::Text(replica::encode::Name::new("eden:stairs").unwrap()),
+        Value::Uint(1),
+        Value::Array(vec![Value::Array(vec![Value::Uint(5), Value::Nint(4)])]),
+    ];
+    for (owner, door) in [(End::First, Some(Ref::New(3))), (End::Second, None)] {
+        let ops = vec![Op::Link {
+            name: 7,
+            ty: replica::encode::Name::new("eden:stairs").unwrap(),
+            ends: [node(1), node(2)],
+            owner,
+            field: 21,
+            row: row.clone(),
+            door,
+        }];
+        let (_, mut i) = intent("edit");
+        i.parameters = parameters(&ops);
+        let decoded = replica::intent_decode::decode(&encode(&i.to_value()).unwrap()).unwrap();
+        assert_eq!(read(&decoded.parameters).unwrap(), ops);
+    }
+}
+
+/// #3728: a rows operation (a land edit's changed tiles) keeps its node, field and rows on the wire, and merges each
+/// row over the one with its first two values, adding the rest after.
+#[test]
+fn rows_wire_roundtrip_and_merge_by_first_two_values() {
+    use replica::edit::wire::{parameters, read};
+    use replica::edit::{Op, Ref, merged_rows};
+    use replica::ids::{Id, Scope};
+    let tile = |x: u64, z: u64, h: u8| {
+        Value::Array(vec![
+            Value::Uint(x),
+            Value::Uint(z),
+            Value::Bytes(vec![h; 4]),
+            Value::Bytes(vec![0]),
+        ])
+    };
+    let ops = vec![Op::Rows {
+        node: Ref::Node(Id::new(Scope([0xdd; 16]), 1).unwrap()),
+        field: 25,
+        rows: vec![tile(1, 0, 9), tile(2, 0, 9)],
+    }];
+    let (_, mut i) = intent("edit");
+    i.parameters = parameters(&ops);
+    let decoded = replica::intent_decode::decode(&encode(&i.to_value()).unwrap()).unwrap();
+    assert_eq!(read(&decoded.parameters).unwrap(), ops);
+    let now = Value::Array(vec![tile(0, 0, 1), tile(1, 0, 1)]);
+    assert_eq!(
+        merged_rows(Some(&now), &[tile(1, 0, 9), tile(2, 0, 9)]),
+        Some(Value::Array(vec![
+            tile(0, 0, 1),
+            tile(1, 0, 9),
+            tile(2, 0, 9)
+        ]))
+    );
+    assert_eq!(
+        merged_rows(Some(&Value::Uint(3)), &[tile(1, 0, 9)]),
+        None,
+        "not a field of rows"
+    );
+    assert_eq!(
+        merged_rows(Some(&now), &[Value::Array(vec![Value::Uint(1)])]),
+        None,
+        "a row of one value"
+    );
+    assert_eq!(merged_rows(None, &[tile(1, 0, 9)]), None, "no field");
 }
 
 /// The checker artifact itself (rule 13): when CI has built it (`CHECKER_WASM`, the `checker-artifact` step of

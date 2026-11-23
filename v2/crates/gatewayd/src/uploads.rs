@@ -14,6 +14,9 @@
 //!   (the bytes are their hash's); held, removed or unknown is 404. No sign-in: a page draws what a world shows.
 //! - **One at a time:** checks run on a blocking thread, one upload at a time per gateway, each logged with its size,
 //!   time and outcome, never its bytes.
+//! - **A kind's model (I2, 0.134):** a creator's edit whose kind definition names an uploaded model (`looks.model:
+//!   "upload:<hash>"`) is refused `kind.model-unknown` before the world sees it, unless the hash is an allowed upload
+//!   here ([`edit_refusal`]); held, unknown or misspelt names are the same refusal.
 
 use std::path::{Path, PathBuf};
 use std::sync::{Arc, Mutex};
@@ -24,9 +27,14 @@ use axum::body::Bytes;
 use axum::extract::{DefaultBodyLimit, Path as UrlPath, State};
 use axum::http::{HeaderMap, StatusCode, header};
 use axum::response::{IntoResponse, Response};
+use replica::edit::Op;
+use replica::edit::wire::{VERB, read as read_edit};
 use replica::effects::Actor;
-use replica::encode::to_hex;
+use replica::encode::{Value, to_hex};
 use replica::ids::{Minter, Scope};
+use replica::intents::Intent;
+use replica::kinds::defined;
+use replica::rules::json;
 
 use crate::Gateway;
 use crate::token::{Grant, Token};
@@ -270,4 +278,57 @@ pub async fn serve(State(gw): State<Arc<Gateway>>, UrlPath(hash): UrlPath<String
             .into_response(),
         _ => StatusCode::NOT_FOUND.into_response(),
     }
+}
+
+/// The refusal a creator's edit gets when a kind it defines names an uploaded model this gateway does not hold.
+pub const MODEL_UNKNOWN: &str = "kind.model-unknown";
+
+/// I2: [`MODEL_UNKNOWN`] when `intent` is an edit placing a kind definition whose `looks.model` is `upload:<hash>` and
+/// the hash is not an allowed upload of this gateway's world (held, unknown, written wrong, or no uploads here). Any
+/// other intent passes: an edit the gateway cannot read is the world's to refuse by its own name.
+pub fn edit_refusal(gw: &Gateway, intent: &Intent) -> Option<&'static str> {
+    if intent.verb.as_str() != VERB {
+        return None;
+    }
+    let ops = read_edit(&intent.parameters).ok()?;
+    let definition = defined::kind().0.as_str();
+    let named = ops.iter().filter_map(|op| match op {
+        Op::Place { kind, fields, .. } if kind.as_str() == definition => {
+            match fields.get(&defined::ENTRY) {
+                Some(Value::Bytes(b)) => uploaded_model(b),
+                _ => None,
+            }
+        }
+        _ => None,
+    });
+    for model in named {
+        if !model
+            .strip_prefix("upload:")
+            .is_some_and(|h| allowed(gw, h))
+        {
+            return Some(MODEL_UNKNOWN);
+        }
+    }
+    None
+}
+
+/// The entry's `looks.model` when it names an upload (`upload:` and anything after it).
+fn uploaded_model(entry: &[u8]) -> Option<String> {
+    let v = json::parse(std::str::from_utf8(entry).ok()?).ok()?;
+    let m = v.get("looks")?.get("model")?.str()?;
+    m.starts_with("upload:").then(|| m.to_owned())
+}
+
+/// Whether `hash` (`1220` and 64 lowercase hex digits) is an allowed upload kept here, as `GET /v2/uploads/<hash>` serves.
+fn allowed(gw: &Gateway, hash: &str) -> bool {
+    let named = hash.len() == 68
+        && hash.starts_with("1220")
+        && hash
+            .bytes()
+            .all(|b| b.is_ascii_digit() || (b'a'..=b'f').contains(&b));
+    named
+        && gw
+            .uploads
+            .get()
+            .is_some_and(|up| up.dir.join(hash).is_file())
 }

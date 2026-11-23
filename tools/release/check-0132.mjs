@@ -10,6 +10,7 @@
 //   --pkg    replica's wasm-bindgen package of the same head (target/wasm-load/pkg): the page's and the client's
 //   --card   the new page's build (v2/web/dist): the front door serves the pairing card (/pair) from it
 //   --facts  Eden's facts (v2/tools/import-eden/export/export.ts; exported here when not given)
+//   --gl soft  SwiftShader even where there is a GPU (line 2 is then not reported)
 //   --mars-web  the people's character set the old page draws (default mars/viewer/dist/client, `pnpm build:viewer`)
 //   The old page is this checkout's apps/web/dist (`pnpm --filter web build`); caddy and node on PATH.
 //
@@ -26,7 +27,7 @@ import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, 
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const argv = process.argv.slice(2), opt = (k, d) => { const i = argv.indexOf(`--${k}`); return i >= 0 ? argv[i + 1] : d; };
@@ -131,12 +132,24 @@ const sw = JSON.parse(execFileSync(process.execPath, [join(repo, 'tools/world-la
 need(sw.page?.v2Stream, `the switch did not take: ${JSON.stringify(sw)}`);
 log(`switched: ${BASE}/w/${SLUG}/ reads ${sw.page.v2Stream}`);
 
-// The machine's GPU where there is one (B3-5): with software GL the page's place previews read pixels back for about
-// 20 s after it opens (WorldPlacePreviews.ts readRenderTargetPixels), holding its main thread and every stream message
-// behind them, which no viewer with a GPU sees. `--gl soft` keeps SwiftShader.
-const GL = opt('gl', process.platform === 'darwin' ? 'metal' : 'soft');
-const browser = await chromium.launch({ args: [...(GL === 'metal' ? ['--use-angle=metal', '--enable-gpu'] : ['--use-gl=angle', '--use-angle=swiftshader']), '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
-const report = { base: '<local front door>', world: SLUG, agents: AGENTS, seconds: SECONDS, lines: {} };
+// The machine's GPU (B3-5, F5-run): with software GL the page's main thread blocks for about 20 s on shader compiles after
+// it opens, holding every stream message behind them, which no viewer with a GPU sees. The proof recorder's flag sets are
+// tried in order (ANGLE Metal on macOS; ANGLE Vulkan, ANGLE GL-EGL, EGL on Linux) and the first whose
+// WEBGL_debug_renderer_info names a hardware renderer is used. With none (or `--gl soft`) lines 3 and 4 still run on
+// SwiftShader, but line 2 is not reported: its 2 s would measure the software renderer, not the page.
+const { GPU_CANDIDATES, softwareGl } = await import(pathToFileURL(join(repo, '.claude/skills/proof/record.mjs')).href);
+const glBase = ['--no-sandbox', '--disable-dev-shm-usage', '--ignore-gpu-blocklist', '--enable-gpu', '--autoplay-policy=no-user-gesture-required'];
+const readGl = async (b) => { const p = await b.newPage(); try { return await p.evaluate(() => { const gl = document.createElement('canvas').getContext('webgl2'); const x = gl?.getExtension('WEBGL_debug_renderer_info'); return gl ? { vendor: gl.getParameter(x ? x.UNMASKED_VENDOR_WEBGL : gl.VENDOR), renderer: gl.getParameter(x ? x.UNMASKED_RENDERER_WEBGL : gl.RENDERER) } : {}; }); } finally { await p.close(); } };
+let browser, gl;
+for (const c of opt('gl') === 'soft' ? [] : GPU_CANDIDATES) {
+  let b; try { b = await chromium.launch({ args: [...glBase, ...c.args], ...(c.channel ? { channel: c.channel } : {}) }); } catch (e) { log(`gl ${c.label}: ${String(e?.message ?? e).split('\n')[0].slice(0, 120)}`); continue; }
+  const g = await readGl(b).catch(() => ({})); log(`gl ${c.label}: ${g.renderer ?? 'no WebGL'}`);
+  if (!softwareGl(g.renderer)) { browser = b; gl = { ...g, flags: c.label, software: false }; break; }
+  await b.close();
+}
+if (!browser) { browser = await chromium.launch({ args: [...glBase, '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] }); gl = { ...(await readGl(browser).catch(() => ({}))), flags: 'swiftshader', software: true }; }
+log(`renderer: ${gl.renderer ?? 'none'} (${gl.software ? 'software' : 'hardware'})`);
+const report = { base: '<local front door>', world: SLUG, agents: AGENTS, seconds: SECONDS, gl: { vendor: gl.vendor ?? null, renderer: gl.renderer ?? null, flags: gl.flags, software: gl.software }, lines: {} };
 const rows = [];
 const row = (line, what, pass, detail) => { rows.push({ line, what, pass, detail }); log(`${pass ? 'PASS' : 'FAIL'} ${line} ${what}: ${detail}`); };
 
@@ -183,7 +196,8 @@ const probe = (page, soul) => page.evaluate((soul) => {
 }, soul);
 
 // ---- 2: a freshly paired agent ----
-if (ONLY.has('2')) {
+if (ONLY.has('2') && gl.software) row(2, 'line 2 needs a hardware GL renderer', false, `not reported: the browser's renderer is ${gl.renderer ?? 'none'} (software); run where WEBGL_debug_renderer_info names a GPU`);
+else if (ONLY.has('2')) {
   // The agent's own home, named with SOULS_HOME: an empty .souls is not a home, and the client would walk up from here
   // to the nearest real one (a person's own Souls, when the checkout sits in their folder).
   const cliIn = (home) => (...a) => { try { return JSON.parse(execFileSync(process.execPath, [join(repo, 'v2/client/src/cli/souls.mjs'), ...a], { cwd: home, encoding: 'utf8', env: { ...process.env, SOULS_HOME: join(home, '.souls'), SOULS_REPLICA_PKG: PKG }, timeout: 30_000 }).trim().split('\n').at(-1)); } catch (e) { const out = String(e.stdout ?? '').trim().split('\n').at(-1); try { return JSON.parse(out); } catch { return { ok: false, detail: String(out || e.message).slice(0, 300) }; } } };
@@ -239,6 +253,10 @@ if (ONLY.has('2')) {
   };
   /** Waits for act `seq` to end (its receipt, or a refusal), at most `ms`. */
   const ended = async (seq, ms = 120_000) => { for (const t0 = Date.now(); Date.now() - t0 < ms; await sleep(1000)) { const r = cli('receipt', String(seq)).receipt; if (r && r.going === false) return r; } return null; };
+  /** Waits for walk `seq` to end. The world ends a walk: done when it arrives, `walk.blocked` when it stalls (C21), so a
+   *  long walk that keeps closing on its goal is waited for (D11: a 233 s walk to a bed was cut at 120 s here, by the
+   *  next act sent while it still walked). The bound only keeps a check from hanging on a world that never answers. */
+  const walked = (seq) => ended(seq, 20 * 60_000);
   /** One timed step: the act sent, then the page polled until `shown` holds (at most 6 s); passes within 2 s. */
   let soul = null, arrivalT0 = null;
   const step = async (name, send, shown) => {
@@ -281,21 +299,21 @@ if (ONLY.has('2')) {
     const took = report.lines[2].steps[0]?.timed?.[0]?.ms ?? null, came = report.lines[2].appearedMs ?? null;
     report.lines[2].arrivals.push({ acceptedMs: took, shownMs: came, afterMs: took !== null && came !== null ? came - took : null });
     row(2, `arrival ${ARRIVALS} of ${ARRIVALS}`, took !== null && came !== null && came - took <= 2000, `first act taken at ${took ?? '?'} ms; its body on the page ${came === null ? 'not within 30 s' : `at ${came} ms, ${came - took} ms after`}`);
-    if (r?.sequence) await ended(r.sequence);
-    r = await step('sit', () => bench ? cli('act', `sit:${bench}`) : { ok: false, detail: 'no seat found' }, (s) => s.activity === 'sit');
+    if (r?.sequence) await walked(r.sequence);
+    r = await step('sit', () => bench ? cli('act', `sit:${bench}`) : { ok: false, detail: 'no seat found' }, (s) => s.activity === 'sit' || s.acts.includes('sit') || s.doing === 'seated');
     if (r?.sequence) await ended(r.sequence, 15_000);
     // seated, a Soul stands up before it goes anywhere (the skill: `act <ns>:rise`), in the world's namespace or the seat's
     const rise = () => { const ns = [...new Set([bench, bed].filter(Boolean).map((id) => JSON.stringify(cli('inspect', id)).match(/"([a-z0-9_-]+):rise:/)?.[1]).filter(Boolean))]; const w = cli('act', ...(ns.length ? ns : ['eden', SLUG]).map((n) => `${n}:rise`)); return w.sequence ? ended(w.sequence, 15_000) : null; };
     await rise();
-    if (bed) { const w = cli('act', bed); if (w.sequence) await ended(w.sequence); }
-    r = await step('lie', () => bed ? cli('act', `lie:${bed}`) : { ok: false, detail: 'no bed found' }, (s) => s.activity === 'lie');
+    if (bed) { const w = cli('act', bed); if (w.sequence) await walked(w.sequence); }
+    r = await step('lie', () => bed ? cli('act', `lie:${bed}`) : { ok: false, detail: 'no bed found' }, (s) => s.activity === 'lie' || s.acts.includes('lie'));
     if (r?.sequence) await ended(r.sequence, 15_000);
     await rise();
-    if (cup) { const w = cli('act', cup); if (w.sequence) await ended(w.sequence); }
+    if (cup) { const w = cli('act', cup); if (w.sequence) await walked(w.sequence); }
     r = await step('take', () => cup ? cli('act', `take:${cup}`) : { ok: false, detail: 'no thing to take found' }, (s) => !!s.prop);
     if (r?.sequence) await ended(r.sequence, 15_000);
     r = await step('carry', () => bench ? cli('act', bench) : { ok: false, detail: 'no place to carry it to' }, (s) => !!s.prop && walking(s));
-    if (r?.sequence) await ended(r.sequence);
+    if (r?.sequence) await walked(r.sequence);
     // the client's set-down names the held thing itself (a take from a bookcase holds a new book, not the bookcase): the
     // thing `find` places in the Soul's own body, by the body's name
     const me = cli('status').body, myName = me ? cli('inspect', me).name : null, held = (await probe(page, soul))?.prop;
@@ -311,7 +329,7 @@ if (ONLY.has('2')) {
   }
   cli('quit'); // the agent's daemon is this run's: stopped by its own command
   await ctx.close(); // the clip is written on close
-  report.clip = join(OUT, 'clip');
+  report.clip = 'clip/';
 }
 // ---- 4: a browser smoke of home, sign-in, sound, music, the camera ----
 if (ONLY.has('4')) {
@@ -402,8 +420,10 @@ if (ONLY.has('3')) {
 await browser.close();
 report.rows = rows;
 writeFileSync(join(OUT, 'report.json'), JSON.stringify(report, null, 2));
-console.log('\n| line | check | result | detail |\n|---|---|---|---|');
-for (const r of rows) console.log(`| ${r.line} | ${r.what} | ${r.pass ? 'pass' : 'FAIL'} | ${r.detail.replaceAll('|', '/')} |`);
-console.log(`\nreport: ${join(OUT, 'report.json')}${report.clip ? `; clip: ${report.clip}` : ''}`);
+const table = [`Renderer: ${gl.renderer ?? 'none'} (${gl.software ? 'software' : 'hardware'}, ${gl.flags})`, '', '| line | check | result | detail |', '|---|---|---|---|',
+  ...rows.map((r) => `| ${r.line} | ${r.what} | ${r.pass ? 'pass' : 'FAIL'} | ${r.detail.replaceAll('|', '/')} |`)].join('\n');
+writeFileSync(join(OUT, 'table.md'), table + '\n');
+console.log(`\n${table}`);
+console.log(`\nreport: ${join(OUT, 'report.json')}${report.clip ? `; clip: ${join(OUT, 'clip')}` : ''}`);
 if (KEEP) { log('kept running (--keep); Ctrl-C stops everything'); await new Promise(() => {}); }
 process.exit(rows.every((r) => r.pass) ? 0 : 1);

@@ -26,6 +26,7 @@ mod syncs;
 pub use syncs::SEAL_EVERY;
 pub mod testbodies;
 pub mod undo;
+pub mod unstick;
 pub mod view_out;
 pub mod views;
 pub mod words;

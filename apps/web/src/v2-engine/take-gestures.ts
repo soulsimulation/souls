@@ -12,8 +12,9 @@ const GESTURES: Readonly<Record<string, string>> = {
   tell_story: 'tell-story', stargaze: 'stargaze',
 };
 
-/** A gesture as the take draws it: world time µs, its end (planned or cut), the old activity id. */
-export type Gesture = { start: number; end: number; activity: string };
+/** A gesture as the take draws it: world time µs, its end (planned or cut), the old activity id, and (0.134 B1's aimed
+ *  moves: point, wave, nod, bow, look) where its target stood when it began, world x and z in mm. */
+export type Gesture = { start: number; end: number; activity: string; toward?: [number, number] };
 
 /** The old activity a move plays, or null: `souls:wave`, `wave@2` and `wave` alike. */
 export function gestureOf(move: string): string | null {
@@ -22,14 +23,21 @@ export function gestureOf(move: string): string | null {
 }
 
 /** A move record (start and phase ends, µs) as a gesture, or null when its move is not one. */
-export function gestureFrom(move: { name: string; start: number; ends: readonly number[] }): Gesture | null {
+export function gestureFrom(move: { name: string; start: number; ends: readonly number[] }, toward?: [number, number] | null): Gesture | null {
   const activity = gestureOf(move.name), end = move.ends[move.ends.length - 1];
-  return activity && end > move.start ? { start: move.start, end, activity } : null;
+  return activity && end > move.start ? { start: move.start, end, activity, ...(toward ? { toward } : {}) } : null;
 }
 
 /** Ends a body's gesture running at `at` (its run ended early); one that has not begun or is over stays as it is. */
 export function cut(gestures: Gesture[], at: number): void {
   for (const g of gestures) if (g.start <= at && at < g.end) g.end = at;
+}
+
+/** Where the gesture playing at world time t is aimed (its target's world x and z, mm), or null. */
+export function towardAt(gestures: readonly Gesture[] | undefined, t: number): [number, number] | null {
+  let out: [number, number] | null = null;
+  for (const g of gestures ?? []) if (g.start <= t && t < g.end) out = g.toward ?? null;
+  return out;
 }
 
 /** The activity of the gesture playing at world time t (the newest begun), or null. */

@@ -34,7 +34,7 @@ async function get(url: URL): Promise<Uint8Array | null> {
 
 function readPtr(bytes: Uint8Array): StreamPointer {
   const p = JSON.parse(readPointer(bytes));
-  return { newest: p.newest, newestTo: p.newestTo ?? null, period: p.period, anchorWorld: p.anchorWorld, anchorWallMs: p.anchorWallMs, quietUntil: p.quietUntil ?? null, header: p.header, ...(p.baseline ? { baseline: p.baseline, generation: p.generation } : {}), ...(p.legacyHash ? { legacyVersion: p.legacyVersion, legacyNext: p.legacyNext, legacyHash: p.legacyHash } : {}), ...(p.handoffFrom ? { handoffFrom: p.handoffFrom } : {}) };
+  return { newest: p.newest, newestTo: p.newestTo ?? null, period: p.period, anchorWorld: p.anchorWorld, anchorWallMs: p.anchorWallMs, quietUntil: p.quietUntil ?? null, header: p.header, ...(p.baseline ? { baseline: p.baseline, generation: p.generation } : {}), ...(p.legacyHash ? { legacyVersion: p.legacyVersion, legacyNext: p.legacyNext, legacyHash: p.legacyHash } : {}), ...(p.handoffFrom ? { handoffFrom: p.handoffFrom } : {}), ...(p.asleep ? { asleep: true, stillUntil: p.stillUntil ?? null } : {}) };
 }
 
 /** The reference in a `{21: id}` value, as the page keys it, or null. */
@@ -70,6 +70,7 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   // only in the shape the importer writes it.
   const o = f.get(1);
   if (o instanceof Uint8Array) rec.origin = new TextDecoder().decode(o);
+  else if (typeof o === 'string' && f.get(2) instanceof Uint8Array) (rec.defines = o), (rec.entry = f.get(2) as Uint8Array); // #3697: a creator's kind
   if (Array.isArray(f.get(11))) rec.outline = rows(f.get(11));
   if (Array.isArray(f.get(12))) rec.solids = rows(f.get(12));
   if (Array.isArray(f.get(13))) rec.slots = rows(f.get(13));

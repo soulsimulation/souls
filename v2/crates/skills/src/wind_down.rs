@@ -335,6 +335,42 @@ impl WindDown {
         self.souls.values().filter_map(|(_, d)| *d).min()
     }
 
+    /// A body born at `at`, as a record of the rule: Owned from then (S6: what a start's checkpoint carries for a body
+    /// born after the world's first start that no other record names yet).
+    pub fn born(body: Id, at: Micros) -> Effect {
+        let o = Order {
+            body,
+            phase: Phase::Woken,
+            what: Vec::new(),
+        };
+        record(&o, &State::owned(at), at, 0)
+    }
+
+    /// Each body's state as a record of the rule (S6, 0.133): what a checkpoint carries, so a restart from it starts
+    /// [`WindDown::resume`] from these and the log's records after it, and every body's clock goes on where it was.
+    pub fn carried(&self) -> Vec<Effect> {
+        self.souls
+            .iter()
+            .map(|(&body, (s, _))| {
+                let phase = if s.slept {
+                    Phase::Asleep
+                } else if s.zombie.is_some() {
+                    Phase::Zombie
+                } else if s.wander.is_some() {
+                    Phase::Wander
+                } else {
+                    Phase::Woken
+                };
+                let o = Order {
+                    body,
+                    phase,
+                    what: Vec::new(),
+                };
+                record(&o, s, s.last, 0)
+            })
+            .collect()
+    }
+
     /// Rebuilds the rule from a log: each body's state from its last record or its agent's last act, whichever is
     /// later (`body_of` names a Soul's body). Bodies the log does not name are added at `now`.
     pub fn resume<'a>(
@@ -343,6 +379,20 @@ impl WindDown {
         body_of: impl Fn(Id) -> Option<Id>,
         bodies: impl IntoIterator<Item = Id>,
         now: Micros,
+    ) {
+        self.resume_since(effects, body_of, bodies, now, now, &BTreeMap::new());
+    }
+
+    /// As [`WindDown::resume`], with the bodies the log does not name counted from `since` (S6: when the world first
+    /// counted them, which the start's checkpoint carries), or from their birth in `born` when that came later.
+    pub fn resume_since<'a>(
+        &mut self,
+        effects: impl IntoIterator<Item = &'a Effect>,
+        body_of: impl Fn(Id) -> Option<Id>,
+        bodies: impl IntoIterator<Item = Id>,
+        now: Micros,
+        since: Micros,
+        born: &BTreeMap<Id, Micros>,
     ) {
         let mut found: BTreeMap<Id, State> = BTreeMap::new();
         for e in effects {
@@ -358,7 +408,9 @@ impl WindDown {
             }
         }
         for body in bodies {
-            let mut s = found.remove(&body).unwrap_or_else(|| State::owned(now));
+            let mut s = found
+                .remove(&body)
+                .unwrap_or_else(|| State::owned(born.get(&body).map_or(since, |b| since.max(*b))));
             // A body whose hour passed while the world was down enters Wander at the hour, as today.
             if s.wander.is_none() && now > s.last + self.knobs.wander {
                 s.wander = Some(s.last + self.knobs.wander);
