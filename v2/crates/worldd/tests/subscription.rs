@@ -626,3 +626,57 @@ fn a_hide_into_a_closed_container_reaches_its_actor_alone() {
     assert_eq!(entries(&mut hub, sa), 1, "the hider is sent its own entry");
     assert_eq!(entries(&mut hub, sb), 0, "the Soul standing by is not");
 }
+
+/// 0.134 I3: a move's end, as the world writes it (on the zone, no changes, its event's field 1 the body that moved), is
+/// that body's entry: a Soul following its own body near it is sent it at `sampled`, so it hears another Soul arrive.
+#[test]
+fn i3_another_bodys_move_end_reaches_a_soul_near_it() {
+    let (hall, zone, me, other) = (id(1), id(2), id(10), id(11));
+    let mut w = w();
+    let mut hub = Hub::new();
+    let e = vec![w.body(me, hall, 0), w.body(other, hall, 2_000_000)];
+    hub.tick(&w.part(e)).expect("a tick");
+    let s = hub
+        .subscribe(Request {
+            scopes: vec![Scope::Follow(me)],
+            level: Level::Sampled,
+            budget: 8_000,
+        })
+        .expect("subscribed");
+    let e = vec![w.walk(other, hall, 1_000_000)];
+    hub.tick(&w.part(e)).expect("a tick");
+    hub.drain(s);
+    assert!(
+        hub.interest(s).expect("a set").contains(&other),
+        "the other body is near"
+    );
+    // The clock moves by entries: a still body's sample each tick (a part with none is no tick to the hub).
+    for _ in 0..25 {
+        let e = vec![w.walk(me, hall, 0)];
+        hub.tick(&w.part(e)).expect("a tick");
+    }
+    let mut ended = w.entry(zone, Change::Unlink { link: id(999) });
+    ended.body = Body::Changes(Vec::new());
+    ended.events = Some(vec![replica::effects::Event {
+        name: Name::new("souls:move-ended").expect("a name"),
+        fields: BTreeMap::from([(1, other.to_value()), (2, Value::Bytes(b"done".to_vec()))]),
+        changes: Vec::new(),
+        rest: Rest::new(),
+    }]);
+    let mut got = Vec::new();
+    hub.tick(&w.part(vec![ended])).expect("a tick");
+    for _ in 0..25 {
+        let e = vec![w.walk(me, hall, 0)];
+        hub.tick(&w.part(e)).expect("a tick");
+        got.extend(hub.drain(s));
+    }
+    let named = b"souls:move-ended";
+    let sent = got
+        .iter()
+        .any(|o| o.kind == Kind::Entry && o.bytes.windows(named.len()).any(|x| x == named));
+    println!("I3: another body's move end sent to the Soul near it: {sent}");
+    assert!(
+        sent,
+        "the move's end reaches the Soul following its own body near it"
+    );
+}

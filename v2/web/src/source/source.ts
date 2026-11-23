@@ -53,6 +53,10 @@ export type NodeRec = {
   /** Its plain fields by number (record key 6: whole numbers, texts, timed values), which hold its kind's state by each
    *  state field's `n` (#3871, `kinds/state.ts`); absent when it has none. */
   fields?: Fields;
+  /** A creator's kind (`souls:kind`, #3697): the full name it defines (field 1) and its canonical `souls-entry/1`
+   *  record (field 2), for the page's kind catalogue (`kinds/catalogue.ts`). */
+  defines?: string;
+  entry?: Uint8Array;
 };
 
 /** Where the world is: its newest part's end, world time against wall time, and the world time up to which a still

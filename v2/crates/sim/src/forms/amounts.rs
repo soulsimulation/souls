@@ -105,7 +105,7 @@ pub fn limits(kinds: &Kinds) -> Limits {
 }
 
 /// The tree as of the tick's start, and the entries written since, latest last.
-pub(super) struct View<'a> {
+pub(crate) struct View<'a> {
     pub tree: &'a Tree,
     pub out: &'a [Effect],
 }
@@ -291,7 +291,7 @@ impl View<'_> {
 
 /// What an effect works on: the view, the amount fields, the zone's header (for B4's transfer), the body, its hands'
 /// slots, and the node the form is done at.
-pub(super) struct Cx<'a> {
+pub(crate) struct Cx<'a> {
     pub view: View<'a>,
     pub limits: &'a Limits,
     pub header: Option<&'a Header>,
@@ -520,7 +520,7 @@ impl Cx<'_> {
                                 support: Support::Slot,
                             },
                             audience: Audience::Everyone,
-                            fields: BTreeMap::new(),
+                            fields: made_fields(self.view.tree, kind),
                         },
                         rest: Rest::new(),
                     }]),
@@ -584,6 +584,7 @@ impl Cx<'_> {
                     );
                 }
                 self.not_in_use(thing)?;
+                self.not_fixed_unjudged(thing, *slot)?;
                 let to = self.free_slot(*slot)?;
                 self.transfer(m, thing, to)
             }
@@ -672,4 +673,54 @@ impl Cx<'_> {
             None => Ok(()),
         }
     }
+}
+
+impl Cx<'_> {
+    /// A thing of a creator's kind with solids goes where it is fixed geometry (a slot its holder gives a point,
+    /// N19) only by an edit or a set-down, which judge what it would bury or cut off (BUILDSAFE). A form's put or
+    /// reparent judges nothing, so it is refused `solid-into-slot` (#3697 re-review); a boot thing keeps today's
+    /// behaviour (C12).
+    fn not_fixed_unjudged(&self, thing: Id, slot: u64) -> R<()> {
+        let tree = self.view.tree;
+        let Some(kind) = self.view.kind(thing) else {
+            return Ok(());
+        };
+        if replica::kinds::defined::defined_named(tree, kind.as_str()).is_none() {
+            return Ok(());
+        }
+        let solid = self
+            .view
+            .field(thing, crate::ground::scene::F_SOLIDS)
+            .is_some()
+            || !made_fields(tree, &kind).is_empty();
+        let pointed = matches!(
+            self.view.field(self.node, crate::ground::scene::F_SLOTS),
+            Some(Value::Array(rows)) if rows.iter().any(|r| matches!(
+                r,
+                Value::Array(c) if c.first().and_then(int) == i64::try_from(slot).ok()
+            ))
+        );
+        if solid && pointed {
+            return refuse(
+                "solid-into-slot",
+                format!(
+                    "{} has solids and slot {slot} of {} is fixed ground: set it down instead, where it is judged",
+                    show(thing),
+                    show(self.node)
+                ),
+            );
+        }
+        Ok(())
+    }
+}
+
+/// The fields a made thing starts with: a creator's kind's solids (N1's field 12, from its record's bounds), as the
+/// creator's own place gives it (#3697 review). Such a thing is made only into a hand (into a slot is `kind.effects`
+/// at define, since a made thing is not judged for what it would bury), so the set-down that puts it in the world
+/// judges it and walkers then go round it; none for a boot kind, whose solids come from its geometry as today.
+pub(crate) fn made_fields(tree: &Tree, kind: &Name) -> BTreeMap<u64, Value> {
+    replica::kinds::defined::defined_named(tree, kind.as_str())
+        .and_then(|d| replica::kinds::defined::solids_of(&d.entry))
+        .map(|s| BTreeMap::from([(crate::ground::scene::F_SOLIDS, s)]))
+        .unwrap_or_default()
 }

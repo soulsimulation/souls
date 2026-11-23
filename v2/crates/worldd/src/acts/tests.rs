@@ -909,3 +909,71 @@ fn a_thing_directly_above_or_below_is_out_of_reach() {
     assert!(high > reach, "4 m straight overhead: {high}");
     assert_eq!(low, 0, "1 m up, straight overhead");
 }
+
+/// #4330, #4339: a move at a thing argument names that thing for viewers, unless it is in a closed container: the
+/// record is seen by everyone, so a hidden thing's id stays out of it (the record keeps the form's own node).
+#[test]
+fn an_aimed_move_names_a_visible_thing_and_never_a_hidden_one() {
+    let generated = testworld::generate(1, 0).expect("the synthetic world");
+    let imported = import_eden::load(&generated.text).expect("the imported world");
+    let (building, room) = (imported.nodes["building"], imported.nodes["building/r1a"]);
+    let tree = &imported.tree;
+    let b = tree.node(tree.handle(building).unwrap()).unwrap();
+    let closed = Json::Obj(vec![(
+        "closed".into(),
+        Json::Obj(vec![(
+            "audience".into(),
+            Json::Obj(vec![("rule".into(), Json::Str("owner".into()))]),
+        )]),
+    )]);
+    let open = Json::Obj(Vec::new());
+    let (me, you) = (
+        Id::new(Scope([0xca; 16]), 1).unwrap(),
+        Id::new(Scope([0xca; 16]), 2).unwrap(),
+    );
+    let toward = BTreeMap::from([(me, room), (you, building)]);
+    let planning = RefCell::new(Planning::default());
+    let aimed = |entry: &Json, body: Id, point: &str| {
+        let kinds = Json::Obj(vec![(plain(b.kind()).to_owned(), entry.clone())]);
+        Sight {
+            bodies: BTreeMap::new(),
+            carrying: BTreeSet::new(),
+            tree,
+            split: None,
+            builds: BTreeMap::new(),
+            kind: Name::new("souls:body").unwrap(),
+            kinds: &kinds,
+            toward: &toward,
+            asked: RefCell::new(BTreeMap::new()),
+            context: BTreeMap::new(),
+            walks: BTreeMap::new(),
+            approaches: Default::default(),
+            sit_walks: BTreeMap::new(),
+            goals: BTreeSet::new(),
+            walk_moves: BTreeMap::new(),
+            planning: &planning,
+            map: Arc::new(Versions::default()),
+        }
+        .aimed(body, &Name::new(point).unwrap())
+    };
+    assert_eq!(
+        aimed(&open, me, AT_ARG),
+        Some(room),
+        "a visible thing is named"
+    );
+    assert_eq!(
+        aimed(&closed, you, AT_ARG),
+        Some(building),
+        "the closed container itself is seen"
+    );
+    assert_eq!(
+        aimed(&closed, me, AT_ARG),
+        None,
+        "a thing in a closed container is not named"
+    );
+    assert_eq!(
+        aimed(&open, me, AT_SELF),
+        None,
+        "a move at the body itself names nothing else"
+    );
+}
