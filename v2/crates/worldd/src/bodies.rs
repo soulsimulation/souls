@@ -216,6 +216,8 @@ pub struct Bodies {
     /// Batches sent to the planner and taken back so far (S8): a request still out is not asked again.
     sent: u64,
     taken: u64,
+    /// Form questions out at the planner (S8): each cursor's generation and the batch it went in.
+    forms_out: BTreeMap<FormKey, (u64, u64)>,
     pub(crate) form_map: Arc<Versions>,
     pub(crate) form_answers: BTreeMap<FormKey, FormAnswer>,
     pub(crate) form_questions: BTreeMap<FormKey, FormQuestion>,
@@ -375,6 +377,7 @@ impl Bodies {
             planned: Planned::default(),
             sent: 0,
             taken: 0,
+            forms_out: BTreeMap::new(),
             reached: BTreeMap::new(),
             waiting: Vec::new(),
             runner: Runner::new(tick),
@@ -1259,9 +1262,12 @@ impl Bodies {
                 self.form_answers.clear();
             }
             wants.form_map = Some(Arc::clone(&self.form_map));
-            wants.forms = std::mem::take(&mut self.form_questions)
-                .into_values()
-                .collect();
+            wants.forms = fresh_forms(
+                &mut self.forms_out,
+                std::mem::take(&mut self.form_questions),
+                self.taken,
+                self.sent,
+            );
             debug_assert_eq!(planned.batches.map(|b| b.next), Some(self.sent));
             self.send(wants);
             // Who hears each utterance the step started, as the bodies stand after it (B11, #3369): every body in the
@@ -1715,6 +1721,27 @@ fn refusal(name: &'static str, node: Id) -> Refusal {
         name,
         detail: replica::world_model::show(node),
     }
+}
+
+/// The form questions to send in batch `next` (S8): a cursor's question of a generation still out at the planner (sent
+/// in a batch at or after `taken`) is not sent again; once that batch has been taken without its answer, it is.
+pub(crate) fn fresh_forms(
+    out: &mut BTreeMap<FormKey, (u64, u64)>,
+    questions: BTreeMap<FormKey, FormQuestion>,
+    taken: u64,
+    next: u64,
+) -> Vec<FormQuestion> {
+    out.retain(|_, (_, sent)| *sent >= taken);
+    questions
+        .into_values()
+        .filter(|q| {
+            if out.get(&q.key).is_some_and(|(g, _)| *g == q.generation) {
+                return false;
+            }
+            out.insert(q.key, (q.generation, next));
+            true
+        })
+        .collect()
 }
 
 #[cfg(test)]

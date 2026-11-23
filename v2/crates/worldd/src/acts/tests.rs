@@ -317,6 +317,67 @@ fn form_answers_reject_old_generation_map_and_cancelled_order() {
     );
 }
 
+/// S8: a form's walk question ("where to stand near this thing", C7's 95 % of the planner at 750 agents) is queued
+/// by its form every tick until answered, and sent to the planner once while that request is out: counted over ten
+/// ticks with the batches not taken, once more after its batch was taken without the answer, and at once for a new
+/// generation.
+#[test]
+fn s8_a_form_walk_question_is_sent_once_while_it_is_out() {
+    let generated = testworld::generate(1, 0).unwrap();
+    let imported = import_eden::load(&generated.text).unwrap();
+    let ground = imported.nodes["ground"];
+    let header = import_eden::header(imported.nodes["world"], &imported.rules).unwrap();
+    let town = Town::new(imported.tree, ground, Doors::new(header, imported.rules, 0)).unwrap();
+    let id = Id::new(Scope([0xc9; 16]), 1).unwrap();
+    let body = town.surfaces[&ground]
+        .place(
+            id,
+            Frame {
+                node: ground,
+                slot: None,
+            },
+            Vec3::new(0, 0, 40_000_000),
+            Quat::IDENTITY,
+        )
+        .unwrap();
+    let key = FormKey {
+        body: id,
+        intent: Id::new(Scope([0xc9; 16]), 2).unwrap(),
+        stage: 1,
+        step: 2,
+        kind: FormKind::Walk,
+    };
+    let map = Arc::new(town.versions.clone());
+    let walk = |x| FormQuery::Walk {
+        node: ground,
+        at: Vec3::new(x, 0, 0),
+        reach: 0,
+        door: None,
+        ring: None,
+    };
+    let mut planning = Planning::default();
+    let mut out = BTreeMap::new();
+    // One tick: the form asks (its question queued until answered), the queue goes in batch `next`.
+    let mut tick = |planning: &mut Planning, x: i64, taken: u64, next: u64| {
+        planning.ask(key, body, walk(x), &map);
+        crate::bodies::fresh_forms(&mut out, std::mem::take(&mut planning.queued), taken, next)
+            .len()
+    };
+    let sent: usize = (0..10).map(|k| tick(&mut planning, 0, 0, k)).sum();
+    assert_eq!(sent, 1, "sent once in ten ticks while out, not once a tick");
+    assert_eq!(
+        tick(&mut planning, 0, 1, 10),
+        1,
+        "its batch taken without the answer: sent again"
+    );
+    assert_eq!(tick(&mut planning, 0, 1, 11), 0);
+    assert_eq!(
+        tick(&mut planning, 5, 1, 12),
+        1,
+        "a new question (a new generation) is sent at once"
+    );
+}
+
 /// C34 (#3599) A1: a walk to a building's named area is planned on the building's own room and floor: the area
 /// named as an upstairs room (`r1a`) resolves onto that room's floor at the room's height, whatever height the point
 /// gives; an area that names no room of a building with more than one floor has no way there; a point its entry does
