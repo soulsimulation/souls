@@ -96,7 +96,7 @@ fn a_joining_kind_takes_its_slots_from_its_entry() {
     let (upright, got) = kind(&joined, "mars:rack_upright");
     assert_ne!(kind(&bare, "mars:rack_upright").0, upright);
     assert!(
-        got.children.contains("mars:rack_upright_activity") && got.children.contains("thing"),
+        got.children.contains("mars:carry_activity") && got.children.contains("thing"),
         "{:?}",
         got.children
     );

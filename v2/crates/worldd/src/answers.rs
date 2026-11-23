@@ -1277,7 +1277,14 @@ enum Taken {
 /// go round (the same handoff an edit's commit takes: `buildsafe::PreparedMaps`, `Bodies::commit_map`).
 type SetDownChecked = (crate::setdown::Checked, Option<buildsafe::PreparedMaps>);
 /// A crew's take or seating (0.135 A2) and the walkers' maps prepared from its part (none without walkers), or why not.
-type PartChecked = (crate::assembly::Ready, R<Option<buildsafe::PreparedMaps>>);
+type PartChecked = (crate::assembly::Ready, R<Option<PartMaps>>);
+/// A crew's seating made ready off the clock (0.135 A2): the walkers' maps prepared from it, and G2's guard on it with
+/// the Souls' bodies of the copy it was judged on (BUILDSAFE: no Soul buried, cut off or in a part's way).
+pub struct PartMaps {
+    maps: buildsafe::PreparedMaps,
+    guard: sim::edit::safety::Guard,
+    souls: Vec<sim::edit::safety::Who>,
+}
 
 /// A form's arguments from an intent's parameter 1: `[[name as bytes, id or slot number], ...]`, a thing by its id
 /// (F4) and a slot of the node by its number, 1, 2, ... in its entry's order (C12).
@@ -2357,22 +2364,31 @@ impl Clock {
         let mut kept = Vec::new();
         for (r, checked) in std::mem::take(&mut self.seated) {
             let mut checked = checked;
-            if let (Ok(Some(maps)), Some(b)) = (&mut checked, &self.bodies)
-                && let Err(e) = b.check_map(maps)
+            if let (Ok(Some(pm)), Some(b)) = (&mut checked, &self.bodies)
+                && let Err(e) = b.check_map(&pm.maps)
             {
-                kept.push(std::mem::take(&mut maps.surfaces));
+                kept.push(std::mem::take(&mut pm.maps.surfaces));
                 checked = Err(Refusal {
                     name: e.name,
                     detail: e.detail,
                 });
+            }
+            // G2's guard, judged again against the bodies as they stand now (lookups only), as a set-down's is.
+            if let (Ok(Some(pm)), Some(b)) = (&mut checked, &self.bodies) {
+                let bodies = buildsafe::judged(pm.souls.clone(), &buildsafe::moving(b));
+                if let Err(e) = crate::setdown::verdict(&pm.guard.judge(&bodies)) {
+                    kept.push(std::mem::take(&mut pm.maps.surfaces));
+                    checked = Err(e);
+                }
             }
             // The walkers' map takes the seating as they see it (`town_part`), the replica the whole part.
             let town = checked
                 .as_ref()
                 .ok()
                 .and_then(|m| m.as_ref())
-                .map(|m| Arc::clone(&m.part));
-            let done = checked.and_then(|maps| {
+                .map(|m| Arc::clone(&m.maps.part));
+            let done = checked.and_then(|pm| {
+                let maps = pm.map(|pm| pm.maps);
                 let (replica, structure) = (&mut self.replica, &self.structure);
                 let mut effects = r.effects.clone();
                 for (k, e) in effects.iter_mut().enumerate() {
@@ -5876,18 +5892,39 @@ fn edit_checker(
                                 for (k, e) in effects.iter_mut().enumerate() {
                                     e.envelope.sequence = copy.version() + k as u64;
                                 }
+                                // G2's rule on the seating as walkers see it, its guard kept for the commit.
+                                let souls = buildsafe::souls(&copy, &kinds);
+                                let bodies = buildsafe::judged(souls.clone(), &snapshot.bodies);
                                 part_of(copy.header(), &effects).and_then(|p| {
-                                    buildsafe::PreparedMaps::prepare_part(
+                                    let ground = buildsafe::open_ground(&copy);
+                                    let t = town.on(&copy, ground, false).ok_or(Refusal {
+                                        name: "part.no-ground",
+                                        detail: "the zone has no open ground".into(),
+                                    })?;
+                                    let known = sim::edit::safety::Known::of(t);
+                                    let (guard, v) = sim::edit::safety::check_on(
+                                        copy.tree(),
+                                        copy.header(),
+                                        &p,
+                                        &bodies,
+                                        &known,
+                                    )
+                                    .map_err(|e| Refusal {
+                                        name: "part.unsafe-check",
+                                        detail: e,
+                                    })?;
+                                    crate::setdown::verdict(&v)?;
+                                    let maps = buildsafe::PreparedMaps::prepare_part(
                                         &copy,
                                         Arc::new(p),
                                         source,
                                         &snapshot.movers,
                                     )
-                                    .map(Some)
                                     .map_err(|e| Refusal {
                                         name: e.name,
                                         detail: e.detail,
-                                    })
+                                    })?;
+                                    Ok(Some(PartMaps { maps, guard, souls }))
                                 })
                             }
                             None => Ok(None),

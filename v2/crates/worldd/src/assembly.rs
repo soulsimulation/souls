@@ -9,7 +9,7 @@
 //! - **Take** ([`Assembly::take`]): the part, within [`GRASP`] of the middle of its two carriers, goes into the crew's
 //!   slot in one commit (B19's take: its joints undone, a holding crew's node moved off it), keeping the turn it had.
 //!   `part:unseat` is the same take for a part in a bay. The crew's carry (B9's samples) starts once it is committed.
-//! - **Seat** ([`Assembly::seat`]): refused before anyone moves by B19's check (`crew.size`, `slot.occupied`,
+//! - **Put** ([`Assembly::put`]): refused before anyone moves by B19's check (`crew.size`, `slot.occupied`,
 //!   `reach.too-high`, B18's `support.none`), by `connectors-do-not-mate` for a join the kinds' connectors do not
 //!   allow, and by the world's rules for the seating as it would be committed (a slot that does not admit the part,
 //!   `child-not-admitted`). Then the crew's node goes on B19's straight set-in track to the slot, and when the track
@@ -20,15 +20,23 @@
 //!   prepared maps (`crate::answers`, as a set-down's), so the ground is rebuilt with the commit. The set-in track,
 //!   which moves only the crew's node, is written as any engine act's entries are.
 //!
-//! Not here: the gathering walk (each Soul walks to its end), a procedure or blueprint, more than one bay, a part
-//! seated while the seating's commit is refused (the part stays in the crew's slot and the intent is refused).
+//! - **Only a crew takes, only a part, only one nobody else has** ([`Assembly::take`]): the activity must be a kind
+//!   a standing part admits as its holders (`part.not-a-crew`), the thing a part B18 reads (`part.not-a-part`), not in
+//!   a body's hand (`part.in-a-hand`), not riding or held by another activity (`part.held-by-another`), and within
+//!   its carriers' standing reach (`reach.too-high`).
+//! - **A seating refused at its track's end or at its commit** stops where it is: the crew's node is handed from its
+//!   track back to its mover there ([`Assembly::stop`]), the crew's carry starts again, and it may put again. The
+//!   part never leaves its crew's slot, and a crew holding a part in its slot cannot be left (`crew.holds-a-part`,
+//!   `crate::engine`), so no part goes with an activity that ends.
+//!
+//! Not here: the gathering walk (each Soul walks to its end), a procedure or blueprint, more than one bay.
 
 use std::collections::BTreeMap;
 
 use replica::effects::{Actor, Cause, Effect, Header, Refusal};
 use replica::encode::Name;
 use replica::ids::{Id, Minter};
-use replica::pose::{Frame, Quat, Vec3};
+use replica::pose::{Frame, HandOff, Owner, Pose, Quat, Support, Track, Vec3};
 use replica::time::Micros;
 use replica::tree::{Rules, Tree};
 use replica::world_model::{Audience, show};
@@ -105,13 +113,20 @@ impl Ready {
     }
 }
 
-/// A crew setting its part in: where it goes, when the track ends, and whose intent asked.
-struct Setting {
-    part: Id,
+/// A crew setting its part in: where it goes, when the track ends, whose intent asked, its crew's reach, and the
+/// track its node is on and where that ends, to stop it there if the seating is refused.
+#[derive(Clone, Debug)]
+pub struct Setting {
+    pub part: Id,
     target: Target,
     due: Micros,
-    by: (Id, Id),
-    ground: Id,
+    pub by: (Id, Id),
+    pub ground: Id,
+    reach: i64,
+    track: Owner,
+    pub end: (Vec3, Quat),
+    /// Between its carriers along the ground when the put was asked, µm: the carry's span when it starts again.
+    pub span: i64,
 }
 
 /// The crews' seating in a running world.
@@ -120,10 +135,14 @@ pub struct Assembly {
     /// The part each crew holds in its slot, taken and committed (or waiting to be).
     pub held: BTreeMap<Id, Id>,
     setting: BTreeMap<Id, Setting>,
+    /// Seatings written at their track's end and waiting for their commit.
+    committing: BTreeMap<Id, Setting>,
     /// Takes and seatings waiting for their commit, in order.
     pub ready: Vec<Ready>,
     /// Seatings refused when their track ended: the intent, its Soul and why.
     pub refused: Vec<(Id, Id, Refusal)>,
+    /// Seatings refused at their track's end or at their commit, by crew: to be stopped ([`Assembly::stop`]).
+    pub stopped: Vec<(Id, Setting)>,
 }
 
 fn kind_of(tree: &Tree, id: Id) -> R<Name> {
@@ -152,8 +171,10 @@ impl Assembly {
             ),
             held: BTreeMap::new(),
             setting: BTreeMap::new(),
+            committing: BTreeMap::new(),
             ready: Vec::new(),
             refused: Vec::new(),
+            stopped: Vec::new(),
         }
     }
 
@@ -209,13 +230,49 @@ impl Assembly {
         (front, back): (Vec3, Vec3),
         ground: Id,
         unseat: bool,
+        reach: i64,
     ) -> R<(Vec3, Quat)> {
         if self.held.contains_key(&activity) {
             return Err(refusal("part.held", show(activity)));
         }
+        let s = &self.seating.structure;
+        if !s.is_crew(kind_of(tree, activity)?.as_str()) {
+            return Err(refusal("part.not-a-crew", show(activity)));
+        }
+        if !s.is_part(kind_of(tree, part)?.as_str()) {
+            return Err(refusal("part.not-a-part", show(part)));
+        }
         let ph = tree
             .handle(part)
             .ok_or_else(|| refusal("part-missing", show(part)))?;
+        let owner = |id: Id| {
+            kind_of(tree, id).ok().and_then(|k| {
+                self.seating
+                    .rules
+                    .kinds
+                    .get(k.as_str())
+                    .map(|d| d.owner.clone())
+            })
+        };
+        if let Some(p) = tree.node(ph).and_then(|n| n.parent()) {
+            match owner(p).as_deref() {
+                Some("family") => return Err(refusal("part.in-a-hand", show(p))),
+                Some("activity") if p != activity => {
+                    return Err(refusal("part.held-by-another", show(p)));
+                }
+                _ => {}
+            }
+        }
+        if let Some(other) = tree
+            .children(ph)
+            .unwrap_or(&[])
+            .iter()
+            .filter_map(|h| tree.node(*h))
+            .map(|n| n.id())
+            .find(|c| *c != activity && owner(*c).as_deref() == Some("activity"))
+        {
+            return Err(refusal("part.held-by-another", show(other)));
+        }
         let gh = tree
             .handle(ground)
             .ok_or_else(|| refusal("part-missing", show(ground)))?;
@@ -236,6 +293,15 @@ impl Assembly {
             (front.y + back.y) / 2,
             (front.z + back.z) / 2,
         );
+        if at.pos.y - middle.y > reach {
+            return Err(refusal(
+                "reach.too-high",
+                format!(
+                    "{} µm above its carriers' feet, standing reach {reach} µm",
+                    at.pos.y - middle.y
+                ),
+            ));
+        }
         let (dx, dz) = (
             i128::from(at.pos.x - middle.x),
             i128::from(at.pos.z - middle.z),
@@ -281,6 +347,7 @@ impl Assembly {
         reach: i64,
         from: (Vec3, Quat),
         ground: Id,
+        apart: i64,
     ) -> R<Vec<Effect>> {
         let part = *self
             .held
@@ -375,6 +442,9 @@ impl Assembly {
         self.seating
             .set_in(tree, acts, activity, now, from.0, from.1, at, now + span)?;
         let effects = self.seating.parts.drain(..).flatten().collect();
+        // The track as `Seating::set_in` writes it, to hand the node back from it if the seating is refused.
+        let v = |a: i64, b: i64| (i128::from(b - a) * 1_000_000 / i128::from(span)) as i64;
+        let velocity = Vec3::new(v(from.0.x, at.x), v(from.0.y, at.y), v(from.0.z, at.z));
         self.setting.insert(
             activity,
             Setting {
@@ -383,6 +453,10 @@ impl Assembly {
                 due: now + span,
                 by,
                 ground,
+                reach,
+                track: Owner::Track(Track::Straight { t0: now, velocity }),
+                end: (at, from.1),
+                span: apart,
             },
         );
         Ok(effects)
@@ -406,33 +480,100 @@ impl Assembly {
             let Some(s) = self.setting.remove(&activity) else {
                 continue;
             };
+            // Checked again as the world is now: another crew may have filled the slot, or a Soul stepped in.
             let done = self.aim(tree, activity, s.ground).and_then(|()| {
+                self.seating.check(
+                    tree,
+                    acts,
+                    &mut mint.clone(),
+                    activity,
+                    s.part,
+                    &s.target,
+                    s.reach,
+                )?;
                 self.seating
                     .put(tree, acts, mint, s.due, activity, s.part, &s.target)
             });
             match done {
                 Ok(()) => {
                     self.drain(s.by, activity, Step::Seated);
-                    self.held.remove(&activity);
+                    self.committing.insert(activity, s);
                 }
                 Err(r) => {
                     self.seating.parts.clear();
                     self.refused.push((s.by.0, s.by.1, r));
+                    self.stopped.push((activity, s));
                 }
             }
         }
     }
 
-    /// A take or a seating's commit was refused: a take's crew holds nothing.
-    pub fn unwritten(&mut self, activity: Id, step: Step) {
-        if step == Step::Taken {
-            self.held.remove(&activity);
+    /// A take's or a seating's commit was written (`written`) or refused: a refused take's crew holds nothing; a
+    /// seated part leaves its crew; a refused seating is stopped ([`Assembly::stop`]).
+    pub fn written(&mut self, activity: Id, step: Step, written: bool) {
+        match (step, written) {
+            (Step::Taken, false) => {
+                self.held.remove(&activity);
+            }
+            (Step::Seated, true) => {
+                self.committing.remove(&activity);
+                self.held.remove(&activity);
+            }
+            (Step::Seated, false) => {
+                if let Some(s) = self.committing.remove(&activity) {
+                    self.stopped.push((activity, s));
+                }
+            }
+            (Step::Taken, true) => {}
         }
+    }
+
+    /// Stops crew `activity`'s refused seating `s` at `now`, writing on `tree`: its node handed from the set-in track
+    /// back to its mover where the track ended, the part still in its slot. The engine then starts the crew's carry
+    /// again from there, so it may put again or carry the part away.
+    pub fn stop(
+        &mut self,
+        tree: &mut Tree,
+        now: Micros,
+        activity: Id,
+        s: &Setting,
+    ) -> R<Vec<Effect>> {
+        self.aim(tree, activity, s.ground)?;
+        let pose = Pose {
+            frame: Frame {
+                node: s.ground,
+                slot: None,
+            },
+            position: s.end.0,
+            orientation: s.end.1,
+            support: Support::Surface {
+                surface: s.ground,
+                height: 0,
+            },
+        };
+        let change = replica::effects::Change::Motion(HandOff {
+            node: activity,
+            at: now,
+            from: s.track,
+            to: Owner::Mover,
+            pose,
+            linear: Vec3::ZERO,
+            angular: Vec3::ZERO,
+        });
+        let body = replica::effects::Body::Changes(vec![replica::effects::ChangeRec {
+            change,
+            rest: replica::effects::Rest::new(),
+        }]);
+        let audience = self.seating.audience;
+        self.seating
+            .write(tree, now, vec![(activity, audience, body)])?;
+        Ok(self.seating.parts.drain(..).flatten().collect())
     }
 
     /// The crew's activity ended: whatever it held stays where it is.
     pub fn ended(&mut self, activity: Id) {
         self.held.remove(&activity);
         self.setting.remove(&activity);
+        self.committing.remove(&activity);
     }
 }

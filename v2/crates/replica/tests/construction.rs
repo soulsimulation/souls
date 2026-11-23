@@ -40,7 +40,8 @@ fn loaded() -> Kinds {
         .collect();
     let names = kinds.load(&sources);
     assert!(kinds.refused().is_empty(), "refused: {:?}", kinds.refused());
-    assert_eq!(names.len(), 4);
+    // The rack's four kinds and the carry its crews are (0.135 C4).
+    assert_eq!(names.len(), 5);
     kinds
 }
 
@@ -266,13 +267,8 @@ fn b19_a_frame_bounds_its_crews_and_the_bound_is_in_its_hash() {
         "rack_upright children: {:?}, most {:?}",
         upright.admits.children, upright.most
     );
-    assert!(
-        upright
-            .admits
-            .children
-            .contains("mars:rack_upright_activity")
-    );
-    assert_eq!(upright.most.get("mars:rack_upright_activity"), Some(&2));
+    assert!(upright.admits.children.contains("mars:carry_activity"));
+    assert_eq!(upright.most.get("mars:carry_activity"), Some(&2));
 
     // The bound is part of the meaning: another bound names another kind; none at all is refused by name.
     let json = std::fs::read_to_string(folder().join("rack_upright.json")).unwrap();

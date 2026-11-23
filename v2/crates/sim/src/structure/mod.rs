@@ -77,6 +77,8 @@ pub struct Structure {
     joints: BTreeSet<String>,
     /// Each joining kind's connectors: (its connector's kind, the kind it mates), by plain kind name.
     connectors: BTreeMap<String, BTreeSet<(String, String)>>,
+    /// The kinds a standing part admits among its children, by plain name: its crews (B19's holders, 0.135 A2).
+    crews: BTreeSet<String>,
     checks: AtomicU64,
 }
 
@@ -227,6 +229,21 @@ impl Structure {
                         },
                     );
                 }
+            }
+        }
+        // A standing part's crew: a kind its entry names among its children (a frame admits the crew that holds it).
+        for k in &defs {
+            if matches!(
+                s.roles.get(plain(k.name.as_str())),
+                Some(Role::Standing { .. })
+            ) {
+                s.crews.extend(
+                    k.admits
+                        .children
+                        .iter()
+                        .filter(|c| c.contains(':'))
+                        .cloned(),
+                );
             }
         }
         // A bay: a kind whose slots admit a standing kind and a bearing one (a stand that holds frames is not a bay).
@@ -422,6 +439,16 @@ impl Structure {
     /// Whether `kind` (a plain or full name) stands: others join to it, and it is held until it is braced.
     pub fn stands(&self, kind: &str) -> bool {
         matches!(self.roles.get(plain(kind)), Some(Role::Standing { .. }))
+    }
+
+    /// Whether `kind` (a plain or full name) is a part the rule reads: one that stands or one that bears.
+    pub fn is_part(&self, kind: &str) -> bool {
+        self.roles.contains_key(plain(kind))
+    }
+
+    /// Whether `kind` (a plain or full name) is a crew: a kind a standing part admits as its holders.
+    pub fn is_crew(&self, kind: &str) -> bool {
+        self.crews.contains(plain(kind))
     }
 
     /// Whether `kind` (a plain or full name) is a bay: its slots take standing and bearing parts.

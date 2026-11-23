@@ -1,0 +1,119 @@
+{
+ "format": "souls-effect-cases/1",
+ "about": "eden:harvest_together (0.135 E1): both members pick into the one basket.",
+ "cases": [
+  {
+   "name": "both_pick_into_one_basket",
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "room": {
+      "loose": [
+       "b1",
+       "b2",
+       "h1"
+      ]
+     },
+     "h1": {
+      "kind": "eden:harvest_together",
+      "links": {
+       "one": [
+        "b1"
+       ],
+       "other": [
+        "b2"
+       ]
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     },
+     "b2": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "do": [
+    {
+     "act": {
+      "this": "h1",
+      "form": "pick"
+     },
+     "receipt": "rh1",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "h1",
+        "field": "picked",
+        "n": 28,
+        "to": 1
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:picked_into_basket",
+        "node": "h1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    },
+    {
+     "actor": "b2",
+     "act": {
+      "this": "h1",
+      "form": "pick_too"
+     },
+     "receipt": "rh2",
+     "expect": {
+      "verdict": "yes",
+      "changes": [
+       {
+        "change": "set",
+        "node": "h1",
+        "field": "picked",
+        "n": 28,
+        "to": 2
+       }
+      ],
+      "events": [
+       {
+        "event": "eden:picked_into_basket",
+        "node": "h1",
+        "changes": [
+         0
+        ]
+       }
+      ]
+     }
+    }
+   ],
+   "after": {
+    "h1": {
+     "kind": "eden:harvest_together",
+     "links": {
+      "one": [
+       "b1"
+      ],
+      "other": [
+       "b2"
+      ]
+     },
+     "fields": {
+      "picked": 2
+     }
+    }
+   }
+  }
+ ]
+}

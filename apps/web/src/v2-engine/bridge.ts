@@ -2,9 +2,9 @@
 // (v2/web/src/source/worker.ts: the stream's pointer and parts, played on the replica's WASM in a worker), keeps the
 // public nodes and body samples it hands on, and keeps the page's `takes` and Souls list as the old socket would: the
 // last chunks of every Soul's body (takes.ts) and one PublicSoul a body. Nothing here draws or decides; LiveWorld does.
-import { chunkEnd, chunkOf, TICK_US, type Body, type Frame, type RecordedChunk, type WorldSample } from './takes.ts';
+import { chunkEnd, chunkOf, positionAt, TICK_US, type Body, type Frame, type RecordedChunk, type WorldSample } from './takes.ts';
 import { defaultLookOf, entityWithLook, legacyBodyOf, lookBodyOf, propOf, seatOf, type CatalogueBody, type Held, type Seat } from './take-bodies.ts';
-import { isPublic, saidKey, speechOf, talkOf, type Said, type Talk } from './take-speech.ts';
+import { earshotOf, hearersOf, isPublic, saidKey, speechOf, talkOf, type Said, type Talk } from './take-speech.ts';
 import { cut as cutGestures, endGesture, gestureFrom, type Gesture } from './take-gestures.ts';
 import { privateTurnOf, tickerOf, turnKey } from './take-talk.ts';
 import type { Heard } from './member-turns.ts';
@@ -408,7 +408,10 @@ export class V2Bridge {
       if (!t || !n) continue;
       const tick = Math.floor(s.at / TICK_US), line = talkOf(s, this.talkId++, soulIdOf(n.soul ?? s.speaker), nameOf(s.speaker, n), TICK_US, now + (tick - end) * TICK_US / 1000);
       t.said.push(line);
-      this.view.speech = [...this.view.speech, speechOf(line, s.reach ?? 0)].slice(-300);
+      const others = [...this.tracks].filter(([id, o]) => id !== s.speaker && (o.gone === null || o.gone > s.at))
+        .flatMap(([id, o]) => { const m = this.nodes.get(id) ?? o.node; return m && isBody(m) ? [{ soul: soulIdOf(m.soul ?? id), p: positionAt(o.samples, s.at) }] : []; });
+      const heardBy = hearersOf(positionAt(t.samples, s.at), earshotOf(s.reach ?? 0) * 1000, others).filter((h) => h !== line.from);
+      this.view.speech = [...this.view.speech, speechOf(line, s.reach ?? 0, heardBy)].slice(-300);
     }
   }
 
