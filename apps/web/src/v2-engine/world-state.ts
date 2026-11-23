@@ -243,3 +243,17 @@ export class WorldState {
 /** The page's edge log with one message appended, kept as the old socket keeps it (useSouls.ts: the last 300). */
 export function appendEdge<T>(log: readonly T[], m: T): T[] { return [...log, m].slice(-300);
 }
+
+/** B2-4: the page's one edge log on a v2 world: what the Souls said aloud (the bridge's speech, replaced whole as it
+ *  grows) and the world diffs (appended), together. A diff stays in it until it falls out of the last 300, however
+ *  often the speech changes: the layer may hold one until the picture reaches its tick (applyEdge), and it is sent once. */
+export class EdgeLog<T = unknown> {
+  private world: T[] = [];
+  private speech: readonly T[] | null = null;
+  edge: readonly T[] = [];
+  step(speech: readonly T[], diff: T | null): readonly T[] {
+    if (diff) this.world = appendEdge(this.world, diff);
+    if (diff || speech !== this.speech) { this.speech = speech; this.edge = [...speech, ...this.world]; }
+    return this.edge;
+  }
+}

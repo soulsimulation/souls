@@ -31,6 +31,10 @@ export function privateTurnOf(s: Said, tick: number, at: number, who: (node: str
   ];
 }
 
+/** R3b: the key a private turn is known by, from its words (member-turns.ts) or its public record: its conversation,
+ *  the body that spoke and when (µs); the two entries share all three. */
+export const turnKey = (conversation: string, speaker: string, at: number) => `${conversation}|${speaker}|${at}`;
+
 /** Words for what a body did, by move or event name (its local part): what the ticker says after the Soul's name. */
 const DID: Readonly<Record<string, string>> = {
   sit: 'sat down', sit_down: 'sat down', sat_down: 'sat down', lie: 'lay down', lie_down: 'lay down', rise: 'stood up', stand: 'stood up',

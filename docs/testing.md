@@ -160,9 +160,13 @@ Since 0.132 (task F1), **every push to a ready (non-draft) pull request runs `ci
   separate `security` (gitleaks, path-guard, scrub-guard), `proof` and `changelog` workflows. Labels start no run.
 - **A draft** runs `scope` and `repo` only. When its paths select heavier jobs, `ci-ok` fails as "Full CI deferred"
   until it is marked ready for review, which starts a full run. Docs or tools-only drafts are never deferred.
-- **The merge queue runs nothing again.** A PR enters only with its required checks green at its head, so a
-  `merge_group` run of `ci` skips `scope`, `repo`, `qualify` and `smoke` and `ci-ok` passes at once. The push to main
-  that lands it runs its paths' light set; that, the daily full run and the remote gate are the net after merging.
+- **The merge queue runs no test again; it compiles the group.** A PR enters only with its required checks green at
+  its head, so a `merge_group` run of `ci` skips `scope`, `repo`, `qualify` and `smoke`. Two PRs green alone can still
+  combine into code that does not build, so `group-check` compiles the combined code: `cargo check --workspace
+  --all-targets --locked` of `v2/` and `tsc --noEmit -p apps/web`, each only when the group changed what it builds
+  from (`groupChecks` in `.github/scripts/ci-scope.mjs`). It runs on the self-hosted pool with its toolchain and cargo
+  target kept per runner, and `ci-ok` waits for it. The push to main that lands it runs its paths' light set; that,
+  the daily full run and the remote gate are the net after merging.
 - **`proof-ok` and `fragment` never block.** Both report success on every PR and merge group: no proof tier, journal
   entry, maintainer sign-off or changelog fragment is required. `fragment` logs a warning for a malformed fragment.
 - **The full battery runs daily at 06:23 UTC and before each release, not per change** (Gene, 18 Nov: startup mode,
