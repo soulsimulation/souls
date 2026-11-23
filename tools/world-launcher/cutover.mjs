@@ -3,6 +3,7 @@ import { closeSync, existsSync, fstatSync, openSync, readFileSync, readSync } fr
 import { createHash } from 'node:crypto';
 import { isAbsolute, join } from 'node:path';
 import { worldIdOf } from './registry.mjs';
+import { scriptJson } from '../../apps/server/src/inline-config.ts';
 
 const files = new Set(['/v1/config', '/eden.mjs', '/skill.md', '/creator.md', '/instructions.md', '/llms.txt', '/replica.js', '/replica_bg.wasm']);
 const types = { 'eden.mjs': 'text/javascript; charset=utf-8', 'replica.js': 'text/javascript; charset=utf-8', 'replica_bg.wasm': 'application/wasm',
@@ -34,6 +35,19 @@ function answer(dir, path) {
     return { status: 200, type: types[name], body: readBounded(join(dir, name), 32 * 1024 * 1024) };
   } catch { return null; }
 }
+// The same public stream path the v2 origin's routes accept (v2/tools/origin/world-routes.mjs): `/s/…/`, no dot segments.
+const publicStream = (s) => typeof s === 'string' && /^\/s\/[A-Za-z0-9._/-]+\/$/.test(s) && !s.split('/').some(p => p === '.' || p === '..');
+const CONFIG = /<script>window\.__simConfig=(\{.*?\})<\/script>/s;
+/** #4177: the world page with `v2Stream` written into its inline config (apps/server/src/inline-config.ts writes that
+ *  `<script>` first in <head>; the page's use-v2-souls.ts reads the field). A page without one is returned unchanged. */
+export function withV2Stream(html, stream) {
+  const m = CONFIG.exec(html);
+  if (!m) return html;
+  let config;
+  try { config = JSON.parse(m[1]); } catch { return html; }
+  if (!config || typeof config !== 'object' || Array.isArray(config)) return html;
+  return html.slice(0, m.index) + `<script>window.__simConfig=${scriptJson({ ...config, v2Stream: stream })}</script>` + html.slice(m.index + m[0].length);
+}
 const unavailable = () => Object.assign(Error('cutover.activation-unavailable'), { code: 'cutover.activation-unavailable' });
 export const bindingId = ({ oldWorldId, canonicalSlug, routesFile, clientDir }) => createHash('sha256').update(JSON.stringify([oldWorldId, canonicalSlug, routesFile, clientDir])).digest('hex');
 
@@ -49,16 +63,17 @@ export function cutoverFence({ binding, file = process.env.SOULS_CUTOVER_BINDING
   if (!binding || typeof binding.oldWorldId !== 'string' || !binding.oldWorldId.length || binding.oldWorldId.length > 256 || /[\x00-\x1f\x7f]/.test(binding.oldWorldId) || !/^[a-z0-9][a-z0-9-]{0,62}$/.test(binding.canonicalSlug)
       || !isAbsolute(binding.routesFile ?? '') || !isAbsolute(binding.clientDir ?? '')) throw Error('cutover.binding-invalid');
   const { oldWorldId, canonicalSlug, routesFile, clientDir } = binding;
-  const active = () => {
+  const route = () => {
     try {
       const value = JSON.parse(readBounded(routesFile, 32 * 1024 * 1024));
       if (!value || value.schema !== 'souls/world-routes/1' || !value.worlds || typeof value.worlds !== 'object' || Array.isArray(value.worlds)
           || !Object.hasOwn(value.worlds, canonicalSlug)) throw unavailable();
       const route = value.worlds[canonicalSlug];
       if (!route || typeof route !== 'object' || Array.isArray(route) || (route.canonical !== undefined && typeof route.canonical !== 'boolean')) throw unavailable();
-      return route.canonical === true;
+      return route;
     } catch { throw unavailable(); }
   };
+  const active = () => route().canonical === true;
   const bound = (w) => !!w && worldIdOf(w) === oldWorldId;
   return {
     inspect(registry) {
@@ -73,6 +88,12 @@ export function cutoverFence({ binding, file = process.env.SOULS_CUTOVER_BINDING
         }
       } catch { throw Error('cutover.client-unavailable'); }
       return { configured: true, oldWorldId, canonicalSlug, bindingId: bindingId(binding), active: active() };
+    },
+    /** #4177: the v2 stream the bound world's page reads (its route's `stream`) while the world is routed to v2, else
+     *  null: another world, the switch off, or an activation that cannot be verified (its reads answer 503 then). */
+    v2Stream(w) {
+      if (!bound(w)) return null;
+      try { const r = route(); return r.canonical === true && publicStream(r.stream) ? r.stream : null; } catch { return null; }
     },
     handle(req, res, w, url) {
       if (!bound(w)) return false; // A damaged Eden activation never prevents another world from operating.

@@ -4,7 +4,7 @@ import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'nod
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { openLauncher } from './launcher.mjs';
-import { bindingId, cutoverFence } from './cutover.mjs';
+import { bindingId, cutoverFence, withV2Stream } from './cutover.mjs';
 import { testPort } from '../../apps/server/test/test-port.ts';
 
 const scratch = new URL('../../.local/', import.meta.url);
@@ -47,7 +47,18 @@ test('actual launcher fences stable identity and aliases, preserves reads/other 
   const prepared = await (await fetch(base + '/__sim/op/cutover')).json();
   assert.equal(prepared.configured, true); assert.equal(prepared.active, false);
   assert.equal(Object.hasOwn(prepared, 'routesFile'), false);
+  // #4177: the page names its v2 stream in its inline config when, and only when, the world is routed to v2
+  const pageConfig = async (path) => {
+    const html = await (await fetch(base + path, { headers: { accept: 'text/html' } })).text();
+    return JSON.parse(/<script>window\.__simConfig=(\{.*?\})<\/script>/.exec(html)[1]);
+  };
+  assert.equal(Object.hasOwn(await pageConfig('/w/eden/'), 'v2Stream'), false, 'not routed: no v2Stream');
   activate(routesFile);
+  for (let i = 0; i < 2; i++) {   // the world's answer, then the launcher's kept page
+    const eden = await pageConfig('/w/eden/');
+    assert.equal(eden.v2Stream, '/s/eden/', 'routed: the route\'s stream'); assert.equal(eden.worldKey, 'eden', 'the rest of the config kept');
+    assert.equal(Object.hasOwn(await pageConfig('/w/other/'), 'v2Stream'), false, 'another world is never given it');
+  }
   const before = readFileSync(hits, 'utf8');
   for (const path of ['/w/eden/v1/edge/act', '/w/eden-2026/v1/god/edit', '/worlds/w/eden-2026/v1/edge/act', '/worlds/__sim/worlds/eden-2026/unlisted']) {
     const r = await post(path); assert.equal(r.status, 409, path);
@@ -70,6 +81,7 @@ test('actual launcher fences stable identity and aliases, preserves reads/other 
   assert.equal((await post('/w/other/v1/edge/act')).status, 200, 'unrelated world never loads damaged Eden activation');
   writeFileSync(routesFile, JSON.stringify({ schema: 'souls/world-routes/1', worlds: { eden: { gateway: 'http://127.0.0.1:7312', stream: '/s/eden/', canonical: false } } }));
   assert.equal((await post('/w/eden-2026/v1/edge/act')).status, 200, 'rollback restores actual old act path');
+  assert.equal(Object.hasOwn(await pageConfig('/w/eden/'), 'v2Stream'), false, 'rollback: the kept page no longer names the stream');
   const old = await fetch(base + '/w/eden-2026/v1/config');
   assert.equal(old.headers.get('x-souls-engine'), 'old');
   assert.equal((await old.json()).worldId, 'eden-1', 'rollback returns the actual old world config with its engine header');
@@ -96,4 +108,13 @@ test('a mutation waiting for actual child boot is fenced again after activation 
   const r = await pending;
   assert.equal(r.status, 409); assert.equal((await r.json()).code, 'world.new-engine');
   assert.doesNotMatch(readFileSync(hits, 'utf8'), /\/v1\/edge\/act/, 'only startup health probes reached the old process');
+});
+
+test('#4177: withV2Stream writes the stream into the inline config and leaves a page without one alone', () => {
+  const page = '<html><head><script>window.__simConfig={"worldKey":"eden","n":"\\u003c/script>"}</script><title>x</title></head></html>';
+  const out = withV2Stream(page, '/s/eden/');
+  const config = JSON.parse(/<script>window\.__simConfig=(\{.*?\})<\/script>/.exec(out)[1]);
+  assert.deepEqual(config, { worldKey: 'eden', n: '</script>', v2Stream: '/s/eden/' });
+  assert.ok(out.endsWith('<title>x</title></head></html>'));
+  for (const other of ['<html><head></head></html>', '<script>window.__simConfig=[1]</script>', '<script>window.__simConfig={bad}</script>']) assert.equal(withV2Stream(other, '/s/eden/'), other);
 });
