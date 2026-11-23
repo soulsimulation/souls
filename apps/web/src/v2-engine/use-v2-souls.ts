@@ -66,6 +66,15 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
       const hour = /^([01]\d|2[0-3]):[0-5]\d$/.exec(new URLSearchParams(location.search).get('hour') ?? '')?.[0];
       const frame = { rulesVersion: scene?.renderSceneRef?.rulesVersion ?? 'souls-v2/1', ...(scene?.renderSceneRef ? { renderSceneRef: scene.renderSceneRef } : {}) };
       bridge = new V2Bridge(frame, hour);
+      // K4: a thing on a course (a balloon) and its riders move where its course has them: the reader's worker posts the
+      // places with each part (course-samples.ts), so the page never loads the replica itself
+      bridge.thingKey = (origin, at) => {
+        const m = (window as unknown as { __soulsEntity?: { layer?: LayerLike } }).__soulsEntity?.layer?.model;
+        if (!m) return undefined;
+        if (origin && m.entities.has(origin)) return origin;
+        for (const e of m.entities.values()) if (e.in?.parent === 'world' && e.p && Math.hypot(e.p[0] - at[0], e.p[2] - at[2]) < 0.05) return e.id;
+        return undefined;
+      };
       // R2: the old page's rewind reads this world's past from its history export (history.ts)
       const past = historyBase(stream, (window as unknown as { __simConfig?: unknown }).__simConfig);
       if (past) setV2History(new V2History(past, () => makeHistoryReader(new URL(apiPath('/replica.js'), location.href).href), frame, hour));

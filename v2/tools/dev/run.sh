@@ -127,11 +127,13 @@ if [ ! -f world/world.json ]; then
 fi
 [ -f creator ] || die "$DIR holds a world seeded before its creator was Ada's principal: use a new --dir"
 CREATOR=$(cat creator)
+# The owner's messages (R13): the directory keeps them, the gateway gives them to the Souls' sockets, sharing a key.
+[ -f mailbox.key ] || od -An -tx1 -N32 /dev/urandom | tr -d ' \n' > mailbox.key
 
 # The directory first: with the dev sign-in it refuses a page address that is not loopback, and nothing else starts.
 start directoryd "$BIN/directoryd" --listen "$DIRECTORY" --public-url "$BASE" --store "$DIR/accounts.sqlite" \
   --pairing "$DIR/pairing.sqlite" --gateway-tokens "$DIR/world/tokens" --view-key "$DIR/view.key" \
-  --test-sign-in --test-own "Ada=creator-$CREATOR"
+  --test-sign-in --test-own "Ada=creator-$CREATOR" --mailbox-key "$DIR/mailbox.key"
 until_ready directoryd grep -q '^listening' logs/directoryd.log
 
 # The world's folder and socket by their full paths: a `pkill -f` aimed at another run's world then cannot match this
@@ -140,7 +142,7 @@ rm -f w.sock
 start worldd "$BIN/worldd" serve --dir "$DIR/world" --socket "$DIR/w.sock"
 until_ready worldd test -S w.sock -a -f world/views/world.json
 start gatewayd "$BIN/gatewayd" --listen "$GATEWAY" --world "$DIR/w.sock" --tokens world/tokens --build "1220$(printf '%064d' 0)" \
-  --entries world/entries --view-key view.key --creator "$CREATOR" --directory "$DIRECTORY"
+  --entries world/entries --view-key view.key --creator "$CREATOR" --directory "$DIRECTORY" --mailbox "$DIRECTORY" --mailbox-key mailbox.key
 until_ready gatewayd grep -q '^listening' logs/gatewayd.log
 
 # The origin serves the world's stream and history as a placed world's (place-world.sh's links), and routes the

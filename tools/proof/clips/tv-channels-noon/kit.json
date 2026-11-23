@@ -1,1 +1,1 @@
-{ "template": "hello-hamlet", "viewport": "desktop", "timeOfDay": "12:00", "localStorage": { "sim.dev": "admin" } }
+{"template": "hello-hamlet", "viewport": "desktop", "timeOfDay": "12:00", "localStorage": {"sim.dev": "admin"}, "skip": "as tv-channels: the television has no new-engine form yet (0.135 K4)"}

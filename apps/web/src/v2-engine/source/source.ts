@@ -86,7 +86,9 @@ export type RunEndRec = { body: string; at: number; how: string };
 
 /** What one part changed, in the order played; `samples` is every motion sample in it, in entry order; `said` every
  * utterance in it (V1b). */
-export type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; hash: boolean | null; said?: SaidRec[]; happened?: Happened[]; moves?: MoveRec[]; runEnds?: RunEndRec[] };
+export type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; hash: boolean | null; said?: SaidRec[]; happened?: Happened[]; moves?: MoveRec[]; runEnds?: RunEndRec[];
+  /** K4 (0.135): where each node on a course is over the part (../course-samples.ts). */
+  courses?: Record<string, number[]> };
 
 /** The COMPLETE currently drawable public state, including no opaque-frame descendants. A new source/worker
  * cannot know the caller's previous nodes. No invented part time, effects, events or motion. */
