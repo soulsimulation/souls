@@ -41,6 +41,23 @@ use worldd::bodies::Bodies;
 use worldd::checkers::Rules;
 use worldd::words::{DESCRIPTION, NAME, WORDS};
 
+thread_local! {
+    /// The acts that had their one progress answer (C20) on this test's thread.
+    static PROGRESSED: std::cell::RefCell<std::collections::BTreeSet<(Vec<u8>, u64)>> =
+        std::cell::RefCell::default();
+}
+
+/// Whether `frame` is an act's progress answer (C20, W11 #4087), which the answer helpers read past. An act has at
+/// most one: a second fails the test.
+fn progress_once(frame: &[u8]) -> bool {
+    let Some(key) = answers::progress_of(frame) else {
+        return false;
+    };
+    let first = PROGRESSED.with(|p| p.borrow_mut().insert(key));
+    assert!(first, "a second progress answer for one act");
+    true
+}
+
 const LINEAGE: Scope = Scope([0xc3; 16]);
 const CHAIR: &str = include_str!("../../replica/fixtures/seats/chair.diag");
 
@@ -357,10 +374,16 @@ impl Client {
 
     /// The next answer: (its sequence, a receipt's entries or a refusal's reason).
     fn answer(&mut self) -> (u64, Result<Vec<u64>, String>) {
-        let mut len = [0u8; 4];
-        self.0.read_exact(&mut len).expect("an answer");
-        let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
-        self.0.read_exact(&mut frame).unwrap();
+        // A progress answer (C20, sent as a run starts) is read past.
+        let frame = loop {
+            let mut len = [0u8; 4];
+            self.0.read_exact(&mut len).expect("an answer");
+            let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
+            self.0.read_exact(&mut frame).unwrap();
+            if !progress_once(&frame) {
+                break frame;
+            }
+        };
         let Value::Map(m) = decode(&frame).unwrap().value else {
             panic!("a frame")
         };
@@ -1023,9 +1046,12 @@ fn motion_history_is_bit_identical_to_its_pinned_hash() {
     assert_eq!(hash, PINNED_MOTION_HISTORY, "the history is bit-identical");
 }
 
-/// [`motion_history_is_bit_identical_to_its_pinned_hash`]'s effect hash, as `origin/main` (c919d8126) writes it.
+/// [`motion_history_is_bit_identical_to_its_pinned_hash`]'s effect hash. Re-pinned by W11 (#4087): a walk's
+/// `souls:act-deadline` now counts from the tick its route is planned, not from the move's start. Same 810 records and
+/// 1,543 motion samples; with only that rule put back the run writes the previous pin (b18f5b81...), so the deadline
+/// values are the whole difference.
 const PINNED_MOTION_HISTORY: &str =
-    "b18f5b817f8e19faaf0174ffbc43f546e27dc4732af99949575138ad374be048";
+    "6a52c87d4b5129e91fe73a81329b978b0aea1242369b08a4117b81bad3c8655d";
 
 /// R21: private membership is checked against the joined actor's authoritative body, not its principal id.
 #[test]

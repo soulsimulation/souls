@@ -12,9 +12,9 @@
 //
 //   node v2/client/src/stats/stats.mjs --home <.souls> --soul <id>      the same answer, without the daemon
 
+import { isMain } from '../../../../tools/lib/is-main.mjs';
 import { existsSync, readdirSync, readFileSync, statSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { runtimeOf } from '../home/home.mjs';
 import { openTrace, SCHEMA } from './trace.mjs';
 
@@ -93,7 +93,7 @@ export function stats(records, { transcript = null } = {}) {
   };
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const arg = (n) => { const k = process.argv.indexOf(n); return k > 0 ? process.argv[k + 1] : undefined; };
   const home = arg('--home'), soul = arg('--soul');
   process.stdout.write(JSON.stringify(stats(openTrace(runtimeOf(home, soul).dir).read(), { transcript: transcriptOf(home) })) + '\n');

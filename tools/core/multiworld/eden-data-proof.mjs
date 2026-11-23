@@ -1,5 +1,6 @@
 // Qualify the exact Eden activity-data/descriptor pair on a compact read-only
 // copy. Every movement is an ordinary Edge act; never mutate the source DB.
+import { isMain } from '../../lib/is-main.mjs';
 import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync,readFileSync,mkdirSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';import {join,resolve} from 'node:path';
@@ -59,4 +60,4 @@ export async function proveEdenData({input,descriptor,sourceDb,dataFile,port=495
   if(output){mkdirSync(resolve(output,'..'),{recursive:true});writeFileSync(output,JSON.stringify(proof,null,2)+'\n');}return proof;
  }finally{if(app)await app.close();rmSync(dir,{recursive:true,force:true});}
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){const [input,descriptor,sourceDb,dataFile,output,mode]=process.argv.slice(2);console.log(JSON.stringify(await proveEdenData({input,descriptor,sourceDb,dataFile,output,restartOnly:mode==='restart-only'})));}
+if(isMain(import.meta.url)){const [input,descriptor,sourceDb,dataFile,output,mode]=process.argv.slice(2);console.log(JSON.stringify(await proveEdenData({input,descriptor,sourceDb,dataFile,output,restartOnly:mode==='restart-only'})));}
