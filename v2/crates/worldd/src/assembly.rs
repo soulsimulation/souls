@@ -24,10 +24,14 @@
 //!   a standing part admits as its holders (`part.not-a-crew`), the thing a part B18 reads (`part.not-a-part`), not in
 //!   a body's hand (`part.in-a-hand`), not riding or held by another activity (`part.held-by-another`), and within
 //!   its carriers' standing reach (`reach.too-high`).
-//! - **A seating refused at its track's end or at its commit** stops where it is: the crew's node is handed from its
-//!   track back to its mover there ([`Assembly::stop`]), the crew's carry starts again, and it may put again. The
-//!   part never leaves its crew's slot, and a crew holding a part in its slot cannot be left (`crew.holds-a-part`,
-//!   `crate::engine`), so no part goes with an activity that ends.
+//! - **Put from close by** (`part.out-of-reach` beyond [`PUT_REACH`] of where the part goes): the set-in track is
+//!   short and straight.
+//! - **A seating refused at its track's end or at its commit** stops where its track has it then, and goes back along
+//!   a straight track to where its set-in started ([`Assembly::stop`]); there it is handed back to the crew's carry
+//!   ([`Assembly::returned`]), and the crew may put again. The part never leaves its crew's slot. While a part is on its
+//!   way in or back, or its seating waits for its commit, its crew is not left (`crew.setting-in`, `crate::engine`);
+//!   otherwise a leave breaks the carry off and the part is set down where it is (C3), so no part goes with an
+//!   activity that ends.
 //!
 //! Not here: the gathering walk (each Soul walks to its end), a procedure or blueprint, more than one bay.
 
@@ -57,6 +61,9 @@ fn refusal(name: &'static str, detail: impl Into<String>) -> Refusal {
 
 /// How far the part's middle may be from the middle of its two carriers, along the ground, µm.
 pub const GRASP: i64 = 1_500_000;
+/// How far, along the ground, the crew's node may be from where the part goes when it is put: the set-in track is
+/// short and straight, not a way to move a part across the world.
+pub const PUT_REACH: i64 = 1_000_000;
 /// The set-in track's pace, µm a second, and its shortest and longest time.
 const SET_IN_PACE: i64 = 500_000;
 const SET_IN_LEAST: Micros = 1_000_000;
@@ -124,6 +131,10 @@ pub struct Setting {
     pub ground: Id,
     reach: i64,
     track: Owner,
+    /// Where the set-in track started (the crew's node between its carriers), when, and its velocity, µm a second.
+    pub start: (Vec3, Quat),
+    t0: Micros,
+    velocity: Vec3,
     pub end: (Vec3, Quat),
     /// Between its carriers along the ground when the put was asked, µm: the carry's span when it starts again.
     pub span: i64,
@@ -143,6 +154,8 @@ pub struct Assembly {
     pub refused: Vec<(Id, Id, Refusal)>,
     /// Seatings refused at their track's end or at their commit, by crew: to be stopped ([`Assembly::stop`]).
     pub stopped: Vec<(Id, Setting)>,
+    /// Crews' nodes going back along a track to where their set-in started, and when each gets there.
+    returning: BTreeMap<Id, (Setting, Micros, Owner)>,
 }
 
 fn kind_of(tree: &Tree, id: Id) -> R<Name> {
@@ -150,6 +163,17 @@ fn kind_of(tree: &Tree, id: Id) -> R<Name> {
         .and_then(|h| tree.node(h))
         .map(|n| n.kind().clone())
         .ok_or_else(|| refusal("part-missing", show(id)))
+}
+
+/// `reach.too-high` when a part `above` µm over its carriers' feet is beyond their standing `reach`.
+fn within_reach(above: i64, reach: i64) -> R<()> {
+    if above > reach {
+        return Err(refusal(
+            "reach.too-high",
+            format!("{above} µm above its carriers' feet, standing reach {reach} µm"),
+        ));
+    }
+    Ok(())
 }
 
 /// The conjugate of a unit quaternion: its inverse turn.
@@ -175,6 +199,7 @@ impl Assembly {
             ready: Vec::new(),
             refused: Vec::new(),
             stopped: Vec::new(),
+            returning: BTreeMap::new(),
         }
     }
 
@@ -293,15 +318,7 @@ impl Assembly {
             (front.y + back.y) / 2,
             (front.z + back.z) / 2,
         );
-        if at.pos.y - middle.y > reach {
-            return Err(refusal(
-                "reach.too-high",
-                format!(
-                    "{} µm above its carriers' feet, standing reach {reach} µm",
-                    at.pos.y - middle.y
-                ),
-            ));
-        }
+        within_reach(at.pos.y - middle.y, reach)?;
         let (dx, dz) = (
             i128::from(at.pos.x - middle.x),
             i128::from(at.pos.z - middle.z),
@@ -353,7 +370,7 @@ impl Assembly {
             .held
             .get(&activity)
             .ok_or_else(|| refusal("part.not-held", show(activity)))?;
-        if self.setting.contains_key(&activity) {
+        if self.busy(activity) {
             return Err(refusal("part.setting-in", show(activity)));
         }
         let s = &self.seating.structure;
@@ -381,6 +398,16 @@ impl Assembly {
             }
             (None, None) => return Err(refusal("part-needs-a-place", "parameter 2 or 3")),
         };
+        let (dx, dz) = (i128::from(at.x - from.0.x), i128::from(at.z - from.0.z));
+        if dx * dx + dz * dz > i128::from(PUT_REACH).pow(2) {
+            return Err(refusal(
+                "part.out-of-reach",
+                format!(
+                    "{} mm from where it would go",
+                    (dx * dx + dz * dz).isqrt() / 1000
+                ),
+            ));
+        }
         let joins = match joins {
             Some(j) => j,
             None if bay && !s.stands(pk.as_str()) => tree
@@ -455,6 +482,9 @@ impl Assembly {
                 ground,
                 reach,
                 track: Owner::Track(Track::Straight { t0: now, velocity }),
+                start: from,
+                t0: now,
+                velocity,
                 end: (at, from.1),
                 span: apart,
             },
@@ -464,7 +494,15 @@ impl Assembly {
 
     /// Whether a crew is setting a part in.
     pub fn setting_in(&self) -> bool {
-        !self.setting.is_empty()
+        !self.setting.is_empty() || !self.returning.is_empty()
+    }
+
+    /// Whether crew `activity`'s part is on its way in or back, or its seating waits for its commit: then the crew is
+    /// not left and does not put again.
+    pub fn busy(&self, activity: Id) -> bool {
+        self.setting.contains_key(&activity)
+            || self.committing.contains_key(&activity)
+            || self.returning.contains_key(&activity)
     }
 
     /// The seatings whose track has ended by `now`, written on `tree`: each waits in [`Assembly::ready`], or is refused
@@ -528,36 +566,41 @@ impl Assembly {
         }
     }
 
-    /// Stops crew `activity`'s refused seating `s` at `now`, writing on `tree`: its node handed from the set-in track
-    /// back to its mover where the track ended, the part still in its slot. The engine then starts the crew's carry
-    /// again from there, so it may put again or carry the part away.
-    pub fn stop(
+    #[allow(clippy::too_many_arguments)]
+    fn hand_off(
         &mut self,
         tree: &mut Tree,
         now: Micros,
         activity: Id,
-        s: &Setting,
+        ground: Id,
+        (from, to): (Owner, Owner),
+        (position, orientation): (Vec3, Quat),
+        linear: Vec3,
     ) -> R<Vec<Effect>> {
-        self.aim(tree, activity, s.ground)?;
-        let pose = Pose {
-            frame: Frame {
-                node: s.ground,
-                slot: None,
-            },
-            position: s.end.0,
-            orientation: s.end.1,
-            support: Support::Surface {
-                surface: s.ground,
+        self.aim(tree, activity, ground)?;
+        let support = match to {
+            Owner::Mover => Support::Surface {
+                surface: ground,
                 height: 0,
             },
+            _ => Support::Track,
+        };
+        let pose = Pose {
+            frame: Frame {
+                node: ground,
+                slot: None,
+            },
+            position,
+            orientation,
+            support,
         };
         let change = replica::effects::Change::Motion(HandOff {
             node: activity,
             at: now,
-            from: s.track,
-            to: Owner::Mover,
+            from,
+            to,
             pose,
-            linear: Vec3::ZERO,
+            linear,
             angular: Vec3::ZERO,
         });
         let body = replica::effects::Body::Changes(vec![replica::effects::ChangeRec {
@@ -570,10 +613,102 @@ impl Assembly {
         Ok(self.seating.parts.drain(..).flatten().collect())
     }
 
+    /// Stops crew `activity`'s refused seating `s` at `now`, writing on `tree`: its node, where its set-in track has it
+    /// now, handed to a straight track back to where the set-in started, the part still in its slot
+    /// ([`Assembly::returned`] hands it back to the carry there). Never a jump.
+    pub fn stop(
+        &mut self,
+        tree: &mut Tree,
+        now: Micros,
+        activity: Id,
+        s: Setting,
+    ) -> R<Vec<Effect>> {
+        let gone = i128::from(now.min(s.due).saturating_sub(s.t0));
+        let at = |a: i64, v: i64| a + (i128::from(v) * gone / 1_000_000) as i64;
+        let here = Vec3::new(
+            at(s.start.0.x, s.velocity.x),
+            at(s.start.0.y, s.velocity.y),
+            at(s.start.0.z, s.velocity.z),
+        );
+        let (dx, dy, dz) = (
+            i128::from(s.start.0.x - here.x),
+            i128::from(s.start.0.y - here.y),
+            i128::from(s.start.0.z - here.z),
+        );
+        let far = i64::try_from((dx * dx + dy * dy + dz * dz).isqrt()).unwrap_or(i64::MAX);
+        let span = (far / SET_IN_PACE * 1_000_000).clamp(SET_IN_LEAST, SET_IN_MOST);
+        let v = |d: i128| (d * 1_000_000 / i128::from(span)) as i64;
+        let back = Vec3::new(v(dx), v(dy), v(dz));
+        let track = Owner::Track(Track::Straight {
+            t0: now,
+            velocity: back,
+        });
+        let effects = self.hand_off(
+            tree,
+            now,
+            activity,
+            s.ground,
+            (s.track, track),
+            (here, s.end.1),
+            back,
+        )?;
+        self.returning.insert(activity, (s, now + span, track));
+        Ok(effects)
+    }
+
+    /// The crews' nodes back where their set-in started by `now`, written on `tree`: each handed from its return track
+    /// to its mover there, with the setting it came back from, so the engine starts its carry again.
+    pub fn returned(&mut self, tree: &mut Tree, now: Micros) -> Vec<(Id, Setting, Vec<Effect>)> {
+        let due: Vec<Id> = self
+            .returning
+            .iter()
+            .filter(|(_, (_, at, _))| *at <= now)
+            .map(|(a, _)| *a)
+            .collect();
+        let mut out = Vec::new();
+        for activity in due {
+            let Some((s, at, track)) = self.returning.remove(&activity) else {
+                continue;
+            };
+            match self.hand_off(
+                tree,
+                at,
+                activity,
+                s.ground,
+                (track, Owner::Mover),
+                s.start,
+                Vec3::ZERO,
+            ) {
+                Ok(effects) => out.push((activity, s, effects)),
+                Err(r) => {
+                    eprintln!("worldd: a crew's node did not come back: {r}");
+                    self.seating.parts.clear();
+                }
+            }
+        }
+        out
+    }
+
     /// The crew's activity ended: whatever it held stays where it is.
     pub fn ended(&mut self, activity: Id) {
         self.held.remove(&activity);
         self.setting.remove(&activity);
         self.committing.remove(&activity);
+        self.returning.remove(&activity);
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// A take of a part above its carriers' standing reach is refused by name (the served test world has none that
+    /// high: its frames stand on a low stand and its beams lie on the ground).
+    #[test]
+    fn a_part_above_standing_reach_is_refused_by_name() {
+        let reach = sim::slots::standing_reach(sim::slots::STANDARD_BUILD);
+        assert!(within_reach(reach, reach).is_ok());
+        let r = within_reach(reach + 1, reach).expect_err("refused");
+        assert_eq!(r.name, "reach.too-high");
     }
 }
