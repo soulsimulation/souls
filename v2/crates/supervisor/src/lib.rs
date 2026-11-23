@@ -16,12 +16,19 @@
 //! from [`RESTART_SEC_MS`] to [`RESTART_MAX_MS`].
 //!
 //! Moving a live world to another machine (O9, #2828) is [`moving`].
+//!
+//! - **Sleep and wake** (O2, #2731; [`sleep`], [`alarm`], [`wake`]): a still world with nothing due for a minute
+//!   checkpoints, leaves its next due time in the directory and exits; the machine's alarm daemon wakes it before
+//!   that time, or at once for an intent the gateway holds. Runbook: `v2/docs/runbook/sleep-and-wake.md`.
 
+pub mod alarm;
 pub mod bucket;
 pub mod deploy;
 pub mod folder;
 pub mod health;
 pub mod moving;
+pub mod sleep;
+pub mod wake;
 
 use std::path::{Path, PathBuf};
 

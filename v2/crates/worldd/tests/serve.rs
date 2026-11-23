@@ -121,8 +121,11 @@ fn serve_env(dir: &Path, socket: &Path, more: &[&std::ffi::OsStr], env: &[(&str,
 impl Served {
     /// The first line starting with `prefix`, within 60 s.
     fn line(&self, prefix: &str) -> String {
-        first_line(&self.lines, &self.early, prefix, Duration::from_secs(60))
-            .unwrap_or_else(|| panic!("no line {prefix:?}"))
+        first_line(&self.lines, &self.early, prefix, Duration::from_secs(60)).unwrap_or_else(|| {
+            // Say why: a process that ended closes its pipes and the wait ends early; what it printed says how.
+            let said = self.all.lock().map(|a| a.join("\n")).unwrap_or_default();
+            panic!("no line {prefix:?}; it printed:\n{said}")
+        })
     }
 
     fn kill(mut self) {
