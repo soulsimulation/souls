@@ -4031,3 +4031,111 @@ fn s4_a_sleeping_worlds_pointer_says_it_is_still_until_its_next_due_change() {
     assert_eq!(p.quiet_until, Some(7_000_000 - SETTLE_US));
     assert_eq!(asleep, None);
 }
+
+/// C5: a creator defining a kind never stops the public stream. A `souls:kind` node the header does not pin is public,
+/// and so is a thing of the kind it defines; a thing of a kind only a private definition names (which a public reader
+/// cannot check) is left out, logged by name, and the stream goes on, touched or not.
+#[test]
+fn c5_a_kind_defined_in_the_world_never_stops_the_public_stream() {
+    let h = header();
+    let definition = Name::new(&replica::kinds::defined::kind().0).unwrap();
+    assert!(
+        !h.kinds.contains(&definition),
+        "the header does not pin souls:kind"
+    );
+    let d = scratch("c5-defined");
+    let store = directoryd::directory::store::Memory::default();
+    let mut actual = Replica::start(h.stored()).unwrap();
+    let mut out = PublicWriter::open(
+        PublicStart {
+            root: &d.join("views"),
+            header: &h,
+            key: key(&h),
+            initial: actual.frozen(),
+            record: 0,
+            checkpoint: None,
+            text: None,
+            names: None,
+            clock_seed: None,
+            history: None,
+        },
+        &store,
+    )
+    .unwrap();
+    let id = |n| Id::new(Scope([0xc5; 16]), n).unwrap();
+    let (def, boxed, secret_def, secret, owner) = (id(1), id(2), id(3), id(4), id(5));
+    let kind = |k: &str| Name::new(&format!("c5:{k}@1220{}", "ab".repeat(32))).unwrap();
+    // A node of `kind` under the zone's root, of `audience`, with `fields`.
+    let made = |seq: u64, node: Id, k: Name, audience: Audience, fields: BTreeMap<u64, Value>| {
+        let mut e = w3e_create(&h, seq, node, h.zone, audience);
+        if let Body::Changes(cs) = &mut e.body
+            && let Change::Create {
+                kind: kk,
+                fields: f,
+                ..
+            } = &mut cs[0].change
+        {
+            *kk = k;
+            *f = fields;
+        }
+        e
+    };
+    let named = |k: &Name| BTreeMap::from([(1, Value::Text(k.clone()))]);
+    let (shown_kind, hidden_kind) = (kind("box"), kind("secret"));
+    let records = vec![
+        vec![made(
+            0,
+            def,
+            definition.clone(),
+            Audience::Everyone,
+            named(&shown_kind),
+        )],
+        vec![made(
+            1,
+            boxed,
+            shown_kind,
+            Audience::Everyone,
+            BTreeMap::new(),
+        )],
+        vec![made(
+            2,
+            secret_def,
+            definition,
+            Audience::Of(owner),
+            named(&hidden_kind),
+        )],
+        vec![made(
+            3,
+            secret,
+            hidden_kind,
+            Audience::Everyone,
+            BTreeMap::new(),
+        )],
+        vec![i3948_set(4, secret, 1), i3948_set(5, boxed, 2)],
+    ];
+    // The private definition changes nothing public: no part for it.
+    for (n, (effects, parts)) in records.into_iter().zip([1, 2, 2, 3, 4]).enumerate() {
+        let p = w3e_packet(&h, effects);
+        actual.apply_bytes(&p).unwrap();
+        out.push(n as u64, &p).unwrap();
+        out.flush().unwrap();
+        assert_eq!(out.player.next(), parts, "after record {n}");
+    }
+    assert!(i3948_holds(&out.player, def) && i3948_holds(&out.player, boxed));
+    assert!(
+        !i3948_holds(&out.player, secret),
+        "left out: its kind is not public"
+    );
+    assert!(
+        !i3948_holds(&out.player, secret_def),
+        "a private definition is private"
+    );
+    // A reader that plays the parts from the baseline holds the same state.
+    let mut reader = PublicPlayer::start(h.stored(), &out.baseline).unwrap();
+    for n in 0..4 {
+        reader
+            .play(&fs::read(out.generation_dir().join(n.to_string())).unwrap())
+            .unwrap();
+    }
+    assert_eq!(reader.state(), out.player.state());
+}
