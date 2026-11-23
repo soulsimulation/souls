@@ -16,7 +16,7 @@ import { fileURLToPath, pathToFileURL } from 'node:url';
 import { decode } from '../brief/copy.mjs';
 import { DEFAULT_PKG, request } from '../daemon/client.mjs';
 import { runtimeOf } from '../home/home.mjs';
-import { actEnd, requestOf, worldOf } from './souls.mjs';
+import { actEnd, lookParams, requestOf, worldOf } from './souls.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const v2 = resolve(here, '../../..');
@@ -99,6 +99,17 @@ test('the arguments: pair takes a world url, can and act take act words; a world
   assert.deepEqual(requestOf(['conversations']).req, { op: 'converse', do: 'list' });
   assert.deepEqual(requestOf(['act', 'sit:ab-1', 'walk:ab-2']).req, { op: 'act', acts: ['sit:ab-1', 'walk:ab-2'] });
   assert.deepEqual(requestOf(['can', 'fill:ab-1', 'ab-2']).req, { op: 'can', acts: ['fill:ab-1', 'ab-2'] });
+  // G3: look set takes a preset's name or a params file, and waits for the receipt.
+  const set = requestOf(['look', 'set', 'punk']);
+  assert.deepEqual([set.req, set.wait], [{ op: 'look-set', params: '{"preset":"punk"}' }, true]);
+  assert.deepEqual(requestOf(['look']).req, { op: 'look' }, 'look alone is the brief');
+  assert.equal(requestOf(['look', 'set']).refused, 'look-set-usage');
+  const files = { 'mine.json': '{"frame":"fem","hair":"bob"}', 'list.json': '[1]', 'big.json': JSON.stringify({ hair: 'x'.repeat(2100) }) };
+  const read = (f) => { if (!(f in files)) throw new Error('no file'); return files[f]; };
+  assert.deepEqual(lookParams('mine.json', read), { params: '{"frame":"fem","hair":"bob"}' });
+  assert.equal(lookParams('list.json', read).refused, 'look-params');
+  assert.equal(lookParams('big.json', read).refused, 'look-params');
+  assert.equal(lookParams('nowhere.json', read).refused, 'look-set-usage');
   // D1: --wait is the command's, not an act word.
   const waited = requestOf(['act', 'sit:ab-1', '--wait', '--for', 'm1']);
   assert.deepEqual([waited.req, waited.wait], [{ op: 'act', acts: ['sit:ab-1'], for: 'm1' }, true]);
