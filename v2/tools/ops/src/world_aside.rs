@@ -24,6 +24,7 @@
 #![allow(clippy::disallowed_methods)]
 
 use std::path::PathBuf;
+use std::time::Duration;
 
 use directoryd::directory::s3::S3;
 use directoryd::directory::store::{R, Store, When, refuse};
@@ -31,6 +32,9 @@ use replica::encode::to_hex;
 use replica::ids::sha256;
 use supervisor::World;
 use supervisor::folder::Folder;
+
+/// The largest object this tool copies: 4 GiB (Eden's largest, a stream-recovery object, passes 10 MiB).
+const OBJECT_LIMIT: u64 = 4 << 30;
 
 /// The keys that hold a world's objects: its record, then the prefixes under which the rest are.
 fn places(world: &World) -> (String, [String; 4]) {
@@ -219,8 +223,9 @@ fn main() {
     let s3;
     let folder;
     let store: &dyn Store = match S3::from_env() {
+        // Whole objects of any size (a world's stream-recovery objects pass ureq's 10 MiB), with time to move them.
         Some(Ok(s)) => {
-            s3 = s;
+            s3 = s.for_operator(OBJECT_LIMIT, Duration::from_secs(600));
             &s3
         }
         Some(Err(e)) => {
@@ -387,6 +392,50 @@ mod tests {
             "aside-foreign-key"
         );
         let _ = std::fs::remove_dir_all(d);
+    }
+
+    /// Over S3 (the local stand-in), an object past ureq's 10 MiB cap: the directory's own client refuses to read it,
+    /// this tool's moves it aside and back whole.
+    #[test]
+    fn an_object_past_ten_mib_moves_over_s3() {
+        use directoryd::directory::stand_in::{KEY_ID, StandIn};
+        let stand_in = StandIn::start(100).unwrap();
+        let s3 = || {
+            S3::from_url(&stand_in.url("souls"), |k| match k {
+                "AWS_ACCESS_KEY_ID" => KEY_ID.to_owned(),
+                _ => String::new(),
+            })
+            .unwrap()
+        };
+        let w = World::parse(WORLD).unwrap();
+        let l = &WORLD[..32];
+        let big: Vec<u8> = (0..30u32 << 20).map(|i| (i % 251) as u8).collect();
+        let key = format!("stream-recovery/{l}/{l}-0/0/objects/big");
+        let plain = s3();
+        plain.put(&key, &big, When::Absent).unwrap();
+        plain
+            .put(&format!("world/{l}/{l}-0"), b"record", When::Absent)
+            .unwrap();
+        assert_eq!(
+            plain.get(&key).unwrap_err().name,
+            "store-unreachable",
+            "ureq's cap"
+        );
+        let s = s3().for_operator(OBJECT_LIMIT, Duration::from_secs(60));
+        assert_eq!(
+            run(&s, &plan_aside(&s, &w, "t5").unwrap()).unwrap().objects,
+            2
+        );
+        assert!(keys(&s, &w).unwrap().is_empty());
+        assert_eq!(
+            s.get(&format!("aside/t5/{key}")).unwrap().unwrap().bytes,
+            big
+        );
+        assert_eq!(
+            run(&s, &plan_back(&s, &w, "t5").unwrap()).unwrap().objects,
+            2
+        );
+        assert_eq!(s.get(&key).unwrap().unwrap().bytes, big);
     }
 
     #[test]
