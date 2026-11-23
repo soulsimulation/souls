@@ -75,7 +75,8 @@ B7) and plans and schedules (the client's: I9, R15) are not here.
 10. **A cancel ends and a replace supersedes the actor's own earlier intent,** named by its sequence in field 10. A
     cancel without it is refused (`cancel-without-replaces`), and so is one that carries anything else
     (`cancel-not-bare`). A Soul's new act needs neither: sent while its own form run is open, it leaves that run as a
-    cancel does (the old act ends `left`) and starts at once, and a walk replaces it (`claim-taken`); `form-running`
+    cancel does (the old act ends `left`) and starts at once, or right after a seat taken or left or a ground
+    posture in progress ends (never half seated), and a walk replaces it (`claim-taken`); `form-running`
     is left only for a run of another actor (#4187).
     An answer's frame `{1: version, 2: answer}` may carry one optional field, 3: where the act's time went, in µs
     between stamps of one machine's steady clock (O4, #2694; `replica::intents::ANSWER_TIMES`). It is added as the

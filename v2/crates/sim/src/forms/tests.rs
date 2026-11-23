@@ -158,6 +158,8 @@ struct Bench {
     snap: Snap,
     forms: Forms,
     now: Micros,
+    /// Seats a form's sit takes, when the bench has any (#4187).
+    seats: Option<crate::slots::Slots>,
 }
 
 fn points(entry: &json::Value) -> BTreeMap<String, Vec3> {
@@ -207,6 +209,7 @@ impl Bench {
             snap: Snap::default(),
             forms: Forms::new(),
             now: 0,
+            seats: None,
         }
     }
 
@@ -241,7 +244,10 @@ impl Bench {
                 mint: &mut self.mint,
                 moves: &mut self.moves,
                 library: &self.library,
-                places: None,
+                places: self.seats.as_mut().map(|slots| super::Places {
+                    slots,
+                    floors: &self.surfaces,
+                }),
                 seed: 1,
             },
             &mut self.forms,
@@ -1062,4 +1068,156 @@ fn pending_form_plan_holds_the_existing_walk_claim_and_cleans_up_when_replaced()
     assert!(b.forms.planning.is_empty());
     b.c.release(body, newer).unwrap();
     b.clean();
+}
+
+/// #4187: a Soul's new act sent while its run is taking a seat or leaving one waits for that step to end (as a
+/// cancel lets it), then the old run is left and the new one starts. The body is never left half seated: mid-sit it
+/// ends in the seat, mid-rise standing at the seat's stand point, with no step between ticks longer than the seat's
+/// own hand-off, and nothing of the old run left behind.
+#[test]
+fn i4187_a_new_act_waits_for_a_seat_taken_or_left_then_starts() {
+    use skills::form_runner::Step;
+    const CHAIR: &str = include_str!("../../../replica/fixtures/seats/chair.diag");
+    let place = replica::moves::Place::from_value(
+        &decode(&fixture_bytes(CHAIR).expect("bytes"))
+            .expect("decodes")
+            .value,
+    )
+    .expect("the chair's place");
+    for mid in ["sit", "rise"] {
+        let mut b = Bench::new();
+        let chair = b.mint.mint().expect("id");
+        let at = crate::slots::PlaceAt {
+            thing: chair,
+            place: place.clone(),
+            point: Vec3::new(0, place.height, 0),
+            facing: Quat::IDENTITY,
+            floor: fixture(1),
+        };
+        let stand = at.stand().expect("a stand point");
+        let mut seats = crate::slots::Slots::new();
+        seats.add(at).expect("a place");
+        b.seats = Some(seats);
+        let body = b.mint.mint().expect("id");
+        let frame = Frame {
+            node: fixture(1),
+            slot: None,
+        };
+        let placed = b.surfaces[&fixture(1)]
+            .place(body, frame, stand, Quat::IDENTITY)
+            .expect("placed");
+        b.c.add(family(), placed).expect("added");
+        let sit = Step::Sit {
+            slot: place.slot,
+            lie: false,
+            stand: false,
+        };
+        let (steps, posture) = match mid {
+            "sit" => (vec![sit, Step::Wait(500_000)], 0),
+            _ => (vec![sit, Step::Rise, Step::Wait(500_000)], 1),
+        };
+        let start = |b: &mut Bench, steps: Vec<Step>, intent: Intent| {
+            b.look();
+            let now = b.now;
+            let (mut w, forms) = b.world();
+            forms.start(
+                &mut w,
+                body,
+                chair,
+                intent,
+                steps,
+                Vec::new(),
+                Limits::default(),
+                now,
+            )
+        };
+        start(&mut b, steps, intent(body, 0)).expect("started");
+        let mut last = b.c.body(body).expect("a body").pose.position;
+        let mut longest = 0;
+        let mut track = |b: &Bench, longest: &mut i64| {
+            let p = b.c.body(body).expect("a body").pose.position;
+            let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+            let step =
+                i64::try_from((d(p.x, last.x) + d(p.y, last.y) + d(p.z, last.z)).isqrt()).unwrap();
+            *longest = (*longest).max(step);
+            last = p;
+        };
+        while (b.moves.is_empty() || b.forms.at(body) != Some(posture)) && b.now < 30_000_000 {
+            b.tick();
+            track(&b, &mut longest);
+        }
+        assert!(!b.moves.is_empty(), "{mid}: the old run is mid-{mid}");
+        let sent = b.now;
+        let asked = start(&mut b, vec![Step::Wait(300_000)], intent(body, 1)).expect("accepted");
+        let Asked::Started(new) = asked else {
+            panic!("{asked:?}")
+        };
+        assert!(b.forms.ended.is_empty(), "{mid}: the {mid} runs on");
+        while b.forms.ended.is_empty() && b.now < 30_000_000 {
+            b.tick();
+            track(&b, &mut longest);
+        }
+        let [left] = b.forms.ended.as_slice() else {
+            panic!("{:?}", b.forms.ended)
+        };
+        let (how, ended) = (left.how.clone(), left.at);
+        let pose = b.c.body(body).expect("a body").pose;
+        let seated = b.seats.as_ref().and_then(|s| s.held_by(body));
+        println!(
+            "#4187 mid-{mid}: new act at {sent} µs; the old run left at {ended} µs, after its {mid}; body seated {:?}, \
+             support {:?}, at {:?}; the new run open: {}",
+            seated.is_some(),
+            pose.support,
+            pose.position,
+            b.forms.due(new).is_some()
+        );
+        assert_eq!(how.as_str(), "left");
+        assert!(ended > sent, "{mid}: the {mid} ran to its end first");
+        assert!(
+            b.forms.due(new).is_some(),
+            "{mid}: the new run started as the old was left"
+        );
+        match mid {
+            "sit" => {
+                assert_eq!(seated, Some(chair), "in the seat, not half seated");
+                assert_eq!(pose.support, replica::pose::Support::Slot);
+            }
+            _ => {
+                assert_eq!(seated, None, "out of the seat");
+                assert_ne!(pose.support, replica::pose::Support::Slot);
+                assert_eq!(
+                    (pose.position.x, pose.position.z),
+                    (stand.x, stand.z),
+                    "at the stand point"
+                );
+            }
+        }
+        b.forms.ended.clear();
+        b.run(30_000_000);
+        track(&b, &mut longest);
+        let [e] = b.forms.ended.as_slice() else {
+            panic!("{:?}", b.forms.ended)
+        };
+        assert_eq!(
+            (e.run, e.how.as_str()),
+            (new, "done"),
+            "the new act runs to its end"
+        );
+        assert!(
+            b.moves.is_empty() && b.due.is_empty(),
+            "nothing of either run left"
+        );
+        let hand_off = {
+            let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+            let p = Vec3::new(0, place.height, 0);
+            i64::try_from((d(p.x, stand.x) + d(p.y, stand.y) + d(p.z, stand.z)).isqrt()).unwrap()
+        };
+        println!(
+            "#4187 mid-{mid}: longest step between ticks {longest} µm; the seat's hand-off {hand_off} µm"
+        );
+        assert!(
+            longest <= hand_off + 1,
+            "{mid}: no jump beyond the seat's own hand-off"
+        );
+    }
 }
