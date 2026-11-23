@@ -79,7 +79,7 @@ test('B3-3: a Soul\'s card fields from the stream: its description, and what it 
   assert.equal(doingOf(body, [{ at: T0 }], T0, false, undefined), 'standing', 'one placement is not a walk');
 });
 
-test('B3-4: a walker\'s chunks are made 0.3 s behind the newest part and played 0.75 s behind them, and never stutter', () => {
+test('B3-4: a walker\'s chunks are made 0.3 s behind the newest part and played 0.6 s behind them, and never stutter', () => {
   const b = new V2Bridge({ rulesVersion: 'test/1' });
   b.receive({ t: 'snapshot', s: { nodes: [world, building, floor, body], removed: [] } });
   // a body walking 1.4 m/s along the floor, sampled every 0.2 s (as a walker is at 100 Souls), in 0.5 s parts
@@ -93,7 +93,7 @@ test('B3-4: a walker\'s chunks are made 0.3 s behind the newest part and played 
   }
   assert.equal(b.view.takes.playDelay, PLAY_DELAY);
   // as a part comes, what the page plays is at most the lag rounded to a whole chunk, plus the play delay, behind the
-  // part's end: 1.25 s, so with the stream's own half second an act shows within 2 s (it was 2 s + 1 s + 1.5 s)
+  // part's end: 1.1 s, so with the stream's own half second an act shows within 2 s (it was 2 s + 1 s + 1.5 s)
   const most = Math.ceil(BEHIND_US / (CHUNK * TICK_US)) * CHUNK * TICK_US + PLAY_DELAY * TICK_US;
   assert.equal(Math.max(...lags), most);
   assert.ok(most + 500_000 < 2_000_000, `${most} µs`);

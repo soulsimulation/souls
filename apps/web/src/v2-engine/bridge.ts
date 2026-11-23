@@ -68,9 +68,9 @@ const Q = 2 ** 30;
 export const BEHIND_US = 300_000;
 /** Ticks a chunk (B3-4): half a second, one stream part, so a new chunk is in as often as a part comes. */
 export const CHUNK = 10;
-/** Ticks the page plays behind the newest chunk's end (LiveWorld's live delay for this source, B3-4): one chunk and half
- *  of one more for a part that comes late, where the old socket's one-second chunks need 30. */
-export const PLAY_DELAY = 15;
+/** Ticks the page plays behind the newest chunk's end (LiveWorld's live delay for this source, B3-4): one chunk and 0.1 s
+ *  for a part that comes late, where the old socket's one-second chunks need 30. */
+export const PLAY_DELAY = 12;
 type Mat = { p: [number, number, number]; q: [number, number, number, number] };
 const rotate = (q: Mat['q'], v: [number, number, number]): [number, number, number] => {
   const [w, x, y, z] = q, [vx, vy, vz] = v;
