@@ -11,7 +11,8 @@
 #   /etc/souls/gateway-<name>.env                 GATEWAYD_ARGS for souls-gateway@<name>: its port, the world's
 #                                                 socket, its tokens file (the folder's `tokens`), its build, receipts,
 #                                                 and its kind entries (the folder's `entries`, served to its paired
-#                                                 clients at /v2/entries, #3760; gatewayd refuses to start without one)
+#                                                 clients at /v2/entries, #3760; gatewayd refuses to start without one),
+#                                                 and the alarm daemon's socket to wake it by (--wake, O2)
 #   /etc/systemd/system/worldd@<name>.service.d/place.conf   WORLDD_SOCKET, the socket worldd serve binds
 #   /etc/systemd/system/multi-user.target.wants/{worldd,souls-gateway}@<name>.service   the instances, enabled
 #   /var/lib/souls/views/w/<name>/{views,history}  links the origin serves, so the page's ?world=<name> finds them
@@ -98,7 +99,8 @@ if [ "$DATA_ONLY" = 0 ]; then
   # secrets file gives every worldd@; only a machine whose directory keeps a folder (--folder-store) names that folder.
   if [ -n "$DIRECTORY" ]; then EXCHANGE=" --creator $CREATOR --directory $DIRECTORY --creator-authority-required"; fi
   if [ -n "$DIRECTORY" ] && [ "$FOLDER_STORE" = 1 ]; then STORE=$(printf '\nEnvironment=WORLDD_STORE=%s' "$DATA/worlds/directory"); fi
-  ENV_TEXT=$(printf 'GATEWAYD_ARGS=--listen 127.0.0.1:%s --world %s --tokens %s --build %s --receipts %s --entries %s%s' "$PORT" "$SOCKET" "$WORLD/tokens" "$BUILD" "$WORLD/receipts" "$WORLD/entries" "$EXCHANGE")
+  # --wake (O2, 0.133 S3b): an intent for the world while it sleeps is held and the alarm daemon asked to wake it.
+  ENV_TEXT=$(printf 'GATEWAYD_ARGS=--listen 127.0.0.1:%s --world %s --tokens %s --build %s --receipts %s --entries %s --wake %s --world-name %s%s' "$PORT" "$SOCKET" "$WORLD/tokens" "$BUILD" "$WORLD/receipts" "$WORLD/entries" "$DATA/worlds/alarms.sock" "$NAME" "$EXCHANGE")
   DROP_TEXT=$(printf '# Written by place-world.sh (C1, #3365).\n[Service]\nEnvironment=WORLDD_SOCKET=%s%s' "$SOCKET" "$STORE")
   if [ -e "$R$ENV" ]; then [ "$(cat "$R$ENV")" = "$ENV_TEXT" ] || die "gateway configuration differs"; else printf '%s\n' "$ENV_TEXT" > "$R$ENV"; fi
   if [ -e "$R$DROPIN" ]; then [ "$(cat "$R$DROPIN")" = "$DROP_TEXT" ] || die "world configuration differs"; else printf '%s\n' "$DROP_TEXT" > "$R$DROPIN"; fi

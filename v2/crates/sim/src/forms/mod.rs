@@ -242,6 +242,8 @@ const KEY: &str = "souls:effect";
 /// A run's start and its end: fields 1 the run, 2 the body, and on the end 3 the ending's name.
 const STARTED: &str = "souls:form-started";
 const ENDED: &str = "souls:form-ended";
+/// The event of the entry that records a run's move as it starts (B2's record, field 3): observed by viewers only.
+const MOVED: &str = "souls:form-move";
 /// The reservation's link type: from the body to the thing.
 pub(crate) const RESERVES: &str = "souls:reserves";
 
@@ -468,7 +470,13 @@ pub struct Forms {
     settled: BTreeMap<Id, Driver>,
     /// By body, a Soul's new act waiting for its run's posture step to end (#4187).
     waiting: BTreeMap<Id, Waiting>,
+    /// The number of each kind's `posture` field, by the kind's full name: a seat a thing's form takes or leaves
+    /// writes it on the body ([`Forms::seat_posture`]).
+    postures: BTreeMap<String, u64>,
 }
+
+/// The state field a body's kind keeps its posture in (`stand`, `sit`, `lie`, ...), by name.
+const POSTURE: &str = "posture";
 
 /// The claim that holds a settled body's legs and its ground posture (C25, #3496): any later claim on its legs ends
 /// it, and the body stands.
@@ -1180,6 +1188,68 @@ impl Forms {
     /// [`Forms::new`] or [`Forms::recover`], and again when kinds load.
     pub fn kinds(&mut self, kinds: &replica::kinds::Kinds) {
         self.limits = amounts::limits(kinds);
+        self.postures = kinds
+            .admits()
+            .keys()
+            .filter_map(|k| kinds.get(k))
+            .filter_map(|def| {
+                let (n, _) = def.state.iter().find(|(_, f)| f.name.as_str() == POSTURE)?;
+                Some((def.name.as_str().to_owned(), *n))
+            })
+            .collect();
+    }
+
+    /// A seat a thing's form took or left (its sit or lie, or its rise, ended `done`) is written on the body's
+    /// `posture` field, when its kind has one: the slot's `sit` or `lie`, or `stand`. A body's own form writes its
+    /// posture in its own effects, so nothing is written for it here.
+    fn seat_posture(&mut self, tree: &Tree, run: RunId, at: Micros) {
+        let Some(fr) = self.runs.get(&run) else {
+            return;
+        };
+        if fr.node == fr.body {
+            return;
+        }
+        let to = match fr.runner.step() {
+            Some(Step::Sit {
+                lie, stand: false, ..
+            }) => {
+                if *lie {
+                    "lie"
+                } else {
+                    "sit"
+                }
+            }
+            Some(Step::Rise) => "stand",
+            _ => return,
+        };
+        let kind = tree
+            .handle(fr.body)
+            .and_then(|h| tree.node(h))
+            .map(|n| n.kind().as_str().to_owned());
+        let Some(&field) = kind.as_deref().and_then(|k| self.postures.get(k)) else {
+            return;
+        };
+        self.out.push(Effect {
+            envelope: Envelope {
+                sequence: 0,
+                at,
+                cause: Cause::Intent(fr.intent.id),
+                actor: fr.intent.actor,
+                audience: Audience::Everyone,
+                node: fr.body,
+            },
+            body: Body::Changes(vec![ChangeRec {
+                change: Change::Set {
+                    node: fr.body,
+                    field,
+                    to: Value::Text(name(to)),
+                    by: None,
+                },
+                rest: Rest::new(),
+            }]),
+            events: None,
+            rest: Rest::new(),
+        });
     }
 
     /// The zone's header, which B4's transfer (a take or a put) writes under.
@@ -1508,7 +1578,27 @@ impl Forms {
                     node,
                     now,
                 ) {
-                    Ok(n) => fr.mv = Some(n),
+                    Ok(n) => {
+                        fr.mv = Some(n);
+                        // The move's record (B2) for viewers: the page draws a gesture from it (#3741).
+                        if let Some(r) = w.moves.record(n) {
+                            let o = Open {
+                                run,
+                                body,
+                                node: fr.node,
+                                intent: fr.intent.id,
+                                actor: fr.intent.actor,
+                                link: None,
+                            };
+                            let fields = BTreeMap::from([
+                                (1, Value::Uint(run)),
+                                (2, body.to_value()),
+                                (3, as_bytes(r.to_value())),
+                            ]);
+                            self.out
+                                .push(entry(&o, now, Vec::new(), name(MOVED), fields));
+                        }
+                    }
                     Err(r) => self.wake(w, run, Woke::Moved(name(r.name)), now),
                 }
             }
@@ -1730,6 +1820,9 @@ impl Forms {
                         && fr.mv.take().is_some()
                     {
                         let how = rec.ended.map_or_else(|| name("done"), |e| e.how);
+                        if how.as_str() == "done" {
+                            self.seat_posture(w.tree, run, t.due);
+                        }
                         self.wake(w, run, Woke::Moved(how), t.due);
                     }
                 }
@@ -1845,6 +1938,17 @@ pub fn may(
             let words = who_may::sentence(&who, seen.then_some(named.as_slice()));
             refuse("not-permitted", format!("who may: {words}"))
         }
+    }
+}
+
+/// `v` with every text as bytes: a move record's names (a contact point such as `grip`) need not be namespaced, and an
+/// entry's texts must be (rule 10), so the record goes out as `souls:act-ended`'s how does (#3741).
+fn as_bytes(v: Value) -> Value {
+    match v {
+        Value::Text(t) => Value::Bytes(t.as_str().as_bytes().to_vec()),
+        Value::Array(a) => Value::Array(a.into_iter().map(as_bytes).collect()),
+        Value::Map(m) => Value::Map(m.into_iter().map(|(k, v)| (k, as_bytes(v))).collect()),
+        v => v,
     }
 }
 

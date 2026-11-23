@@ -5,7 +5,7 @@ import { dirname, join, resolve } from 'node:path';
 import { spawnSync } from 'node:child_process';
 import { readWorldRoutes } from '../../origin/world-routes.mjs';
 import { updateWorldRoute } from '../proxy/route-config.mjs';
-import { bindingId, cutoverFence } from '../../../../tools/world-launcher/cutover.mjs';
+import { bindingId, bindingsOf, cutoverFence } from '../../../../tools/world-launcher/cutover.mjs';
 
 const syncDir = (dir) => { const fd = openSync(dir, 'r'); try { fsyncSync(fd); } finally { closeSync(fd); } };
 export function record(file, row) {
@@ -93,7 +93,7 @@ if (isMain(import.meta.url)) {
     const port = /--port (\d+)/.exec(conf)?.[1];
     if (!port) throw Error('cutover.launcher-port-missing');
     const r = await fetch(`http://127.0.0.1:${port}/__sim/op/cutover`, { redirect: 'error', signal: AbortSignal.timeout(5000) });
-    const b = await r.json();
+    const all = await r.json(), b = Array.isArray(all.worlds) ? { configured: all.configured, ...all.worlds.find((w) => w.canonicalSlug === slug) } : all; // W1: a list binds several worlds
     if (r.status !== 200 || b.configured !== true || b.canonicalSlug !== slug || b.bindingId !== bindingId(binding)) throw Error('cutover.launcher-unprepared');
     if (b.active !== readWorldRoutes(routesFile)[slug]?.canonical) throw Error('cutover.activation-mismatch');
   };
@@ -102,7 +102,8 @@ if (isMain(import.meta.url)) {
     try { binding = JSON.parse(readFileSync(process.env.SOULS_CUTOVER_BINDING || `${root}/etc/souls/cutover-binding.json`, 'utf8')); }
     catch { throw Error('cutover.binding-unavailable'); }
     cutoverFence({ binding }); // Validate the operator's complete binding before asking the launcher to confirm it.
-    if (binding.canonicalSlug !== slug) throw Error('cutover.binding-target-mismatch');
+    binding = bindingsOf(binding).find((b) => b.canonicalSlug === slug); // W1: this world's, of one or several bound
+    if (!binding) throw Error('cutover.binding-target-mismatch');
     routesFile = binding.routesFile;
     const result = await transition({ command, dir, routesFile, slug, world, validate, prepare, news: () => run('news'), switchRoute: () => run('switch-route'), backRoute: () => run('back-route') });
     console.log(`cutover: ${result.step}${result.repeated ? ' (safe repeat; nothing changed)' : ''}`);
