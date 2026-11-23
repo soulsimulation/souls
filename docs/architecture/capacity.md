@@ -5,6 +5,48 @@ second (N) one world carried, the viewers (Q) it served, each limit's measured v
 Why and how to measure is in [scaling](scaling.md). These are measurements of one build on one machine. They are not
 promises.
 
+## 0.133, 23 Nov 2026: past 500 agents
+
+**Build:** main `456552d8b` with #4325 (C6: whose a thing is reads two marks, which keeps the clock on time at 500
+agents in bursts) merged in. The agent ladder now goes to 750 and 1,000 agents (`v2/tools/driver/loads.mjs`).
+**Machine, placement and load:** as in the run below. The agent ladder ran at 750 and 1,000 agents, `every4` and
+burst, even and uneven, 120 s per rung, two repeats side by side. The viewer ladder's top rungs (2,000, 3,500 and
+5,000) ran with 16 reader processes instead of 8. The readers' event loop stayed at a p99 of 11–24 ms, so the bench
+was not the limit this time.
+
+| | Value |
+| --- | --- |
+| **M** agents in one world | **750** with every limit met (`every4`, about 187 intents a second) |
+| **N** intents a second | **about 330** with every limit met (500 agents, burst, after #4325: ticks on time 100 %, viewer delay p95 639–783 ms) |
+| **Q** viewers of one world | **5,000** held once they are in: stream latency p99 330–610 ms, no drops. A join wave of 1,500 or more newcomers within 5 s misses the first picture (see below). |
+| **Gave way first** | Agents: **the planner thread's route searches**, at 750 agents in bursts (500 intents a second) and at 1,000 agents `every4` (250 a second). The planner is at a full core there. Acts wait for its answers before they start and move, so the viewer delay p95 passes 2 s on every verb alike (2.5–3.1 s by verb at 750 even burst), and in the even burst arm acceptance p95 rises to 1.5 s. The clock still keeps time there (96.7–100 % on time). It gives way only at 1,000 agents in bursts (667 a second: 61–72 % on time). |
+
+### Each limit, measured
+
+| Rung (agents, rate) | intents/s | accepted p95 ms | viewer delay p50 / p95 ms | ticks on time | planner / clock cores |
+| --- | --- | --- | --- | --- | --- |
+| 750, `every4` | 187 | 148–164 | 500–561 / 772–901 | 99.78–99.96 % | 0.38–0.84 / 0.32–0.39 |
+| 750, burst | 500 | 114–1540 | 511–605 / 1507–2652 | 96.67–99.74 % | 0.99–1.0 / 0.42–0.50 |
+| 1,000, `every4` | 246–250 | 79–96 | 434–584 / 1663–2662 | 99.96–100 % | 1.0 / 0.34–0.36 |
+| 1,000, burst | 667–671 | 356–1738 | 621–764 / 1977–8033 | 61.45–72.03 % | 1.0 / 0.71–0.77 |
+
+The stream writer stayed at 0.16–0.39 of a core with `idle.check` at 0. Stuck Souls on the uneven arms grew with
+the count (18–30 at 750, 47–49 at 1,000): the behaviour fault noted below, not a capacity limit.
+
+**Where the planner's core goes** (an in-process 199 Hz sampling profile of `worldd` at 1,000 agents, uneven
+`every4`; a measurement build only): 95 % is `walk::town::View::stand_near_shape`, a form's walk asking where to
+stand near a thing's outline (the planner's `FormQuery::Walk`). Under it: `mover::walk` 16 %, `mover::enter` 12 %,
+`routes::gap` 11 %, `routes::spot_for` 10 %, `routes::locate` 10 %, `walk::town::in_passage_but` 7 %,
+`mover::orient` 4 %, `routes::cross` 3 %. The next step is in routing and town code (lanes A2 and S): make
+`stand_near_shape` cheaper, or answer forms' walk questions on more than one thread. It was not changed here.
+
+**Viewers.** With 16 reader processes, 5,000 viewers keep a latency p99 of 330–610 ms and no drops once they are in.
+A step that starts 2,000 viewers in one 5 s wave gives a first picture p95 of 13–14 s. Adding 1,500 more gives
+3.8–4.6 s at 3,500 and 13.6–17.7 s at 5,000 (bar 3 s). Every joiner fetches an 8.9 MB baseline, so a wave of 1,500 is
+about 13 GB from the viewers' origin within seconds. That points to the origin's sending of baselines to a join wave,
+not to steady viewing. The origin's own processor share is still not sampled (it reads 0), so this is inferred,
+not measured.
+
 ## 0.132, 23 Nov 2026
 
 **Build:** main `ae5bae670`. That is A1, A2-1 (#4220), C1 (#4208), C4 (#4279) and #4003, plus C5 (#4288) merged in for

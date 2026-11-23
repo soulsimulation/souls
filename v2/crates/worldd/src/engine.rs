@@ -7,7 +7,7 @@
 //!   `souls:` verb is refused `order-unknown` before it reaches the world.
 //! - **Parameters.** The target is the place (propose, offer), the activity (join, start, leave, lift, set down) or the
 //!   offer (accept, decline). Propose: 1 the activity's kind. Offer: 1 the kind, 2 the asker's role, 3 the bodies
-//!   asked (ids), 4 for a give the thing the asker holds (0.133 R4: accepting hands it over, `sim::activity::offer`). Join: 1 the role, 2 the revision (default 1). Lift: 1 the thing carried. Its two carriers are the
+//!   asked (ids), 4 for a give the thing the asker holds (0.133 R4: accepting hands it over, `sim::activity::offer`). Join: 1 the role, 2 the revision (default 1). Lift: 1 the thing carried, 2 where its front goes (optional, `[x, y, z]` µm: the way there is swept first, 0.135 C2). Its two carriers are the
 //!   activity's first two members, the first in front. `carrier:steer`, `carrier:stop` and `carrier:land` steer the
 //!   boat the Soul sits in ([`crate::carrier`], #3603): the target the boat, steer's 1 a point `[x, z]` µm (land's 1
 //!   optional, a point by its home).
@@ -31,10 +31,12 @@ use replica::encode::{Name, Value};
 use replica::ids::{Id, Minter, Scope};
 use replica::moves::{Effector, Move};
 use replica::pose::Vec3;
+use replica::rules::json::Value as Json;
 use replica::time::{Mapping, Micros, Tempo, TickRate, Timeline};
 use replica::tree::{Rules, Tree};
+use replica::world_model::plain;
 use replica::world_model::show;
-use sim::activity::carry::Carry;
+use sim::activity::carry::{Carry, Fixed, Load};
 use sim::activity::{Activities, Ask};
 use sim::controller::Controller;
 use sim::moves::{Moves, Reach};
@@ -118,6 +120,8 @@ pub struct Engine {
     library: Vec<Move>,
     /// The world's clock, whose beats a dance's moves start on (0.134 T3): the world's own ([`Engine::with_beats`]).
     line: Timeline,
+    /// The loads the world's entries state, by plain kind (0.135 C2, [`Engine::with_loads`]).
+    loads: BTreeMap<String, Load>,
 }
 
 /// Where bodies stand, read from the controller before a move needs them (0.134 T1): a move one member of an activity
@@ -147,6 +151,25 @@ impl Reach for Feet {
         let ((f, a), (g, b)) = (self.0.get(&body)?, self.0.get(&target)?);
         let (dx, dz) = (i128::from(a[0] - b[0]), i128::from(a[1] - b[1]));
         (f == g).then(|| i64::try_from((dx * dx + dz * dz).isqrt()).unwrap_or(i64::MAX))
+    }
+}
+
+/// A point `[x, y, z]` µm, parameter `k`.
+fn param_point(p: &BTreeMap<u64, Value>, k: u64, what: &'static str) -> R<Option<Vec3>> {
+    let Some(v) = p.get(&k) else {
+        return Ok(None);
+    };
+    let int = |v: &Value| match v {
+        Value::Uint(n) => i64::try_from(*n).ok(),
+        Value::Nint(n) => i64::try_from(*n).ok().map(|n| -1 - n),
+        _ => None,
+    };
+    match v {
+        Value::Array(a) => match a.iter().map(int).collect::<Option<Vec<_>>>().as_deref() {
+            Some([x, y, z]) => Ok(Some(Vec3::new(*x, *y, *z))),
+            _ => Err(refusal(what, format!("parameter {k}: [x, y, z] µm"))),
+        },
+        _ => Err(refusal(what, format!("parameter {k}: [x, y, z] µm"))),
     }
 }
 
@@ -196,6 +219,17 @@ fn stands(c: &Controller, body: Id) -> R<(Id, Vec3)> {
 }
 
 impl Engine {
+    /// The engine carrying each load whose kind `entries` states as its entry says (0.135 C2): `entries` is the
+    /// world's kinds, an object of entries; one that is not a load (no bounds, fewer than two grips) is left out.
+    pub fn with_loads(mut self, entries: &Json) -> Engine {
+        for (_, e) in entries.obj().unwrap_or(&[]) {
+            if let (Some(kind), Ok(load)) = (e.get("kind").and_then(Json::str), Load::of(e)) {
+                self.loads.insert(kind.to_owned(), load);
+            }
+        }
+        self
+    }
+
     /// The earliest due time of the activities and the boats on their loops (O2: when a sleeping world must be up).
     pub fn next_due(&self) -> Option<Micros> {
         self.due.next_due()
@@ -214,6 +248,7 @@ impl Engine {
             mint: Minter::new(scope),
             out: Vec::new(),
             steered: BTreeSet::new(),
+            loads: BTreeMap::new(),
             library: crate::moves::library().unwrap_or_else(|r| {
                 eprintln!("worldd: no moves for activities: {r}");
                 Vec::new()
@@ -425,6 +460,7 @@ impl Engine {
                 if !members.iter().any(|m| m.body == a.body) {
                     return Err(refusal("not-a-member", show(a.body)));
                 }
+                let crew = members.len();
                 let (front, back) = match members {
                     [f, b, ..] => (f.body, b.body),
                     _ => return Err(refusal("carry-needs-two", show(activity))),
@@ -442,6 +478,41 @@ impl Engine {
                         return Err(refusal("carry-lifted", show(activity)));
                     }
                     let board = param_id(&a.params, 1, "lift-needs-a-thing")?;
+                    // 0.135 C2: a load whose kind has an entry is checked as it states, before anything is written.
+                    let node = tree
+                        .handle(board)
+                        .and_then(|h| tree.node(h))
+                        .ok_or_else(|| refusal("lift-needs-a-thing", show(board)))?;
+                    if let Some(load) = self.loads.get(plain(node.kind().as_str())) {
+                        let middle = match (node.parent(), node.place()) {
+                            (Some(p), Some(at)) if p == ground => at.position,
+                            _ => {
+                                return Err(refusal(
+                                    "carry-grip-out-of-reach",
+                                    format!(
+                                        "{} is not on the floor its carriers stand on",
+                                        show(board)
+                                    ),
+                                ));
+                            }
+                        };
+                        let to = param_point(&a.params, 2, "lift-destination")?;
+                        let fixed = match to {
+                            Some(_) => Some(
+                                Fixed::of(&tree, ground)
+                                    .map_err(|e| refusal("carry-geometry", e))?,
+                            ),
+                            None => None,
+                        };
+                        let xz = |v: Vec3| [v.x, v.z];
+                        load.check(
+                            crew,
+                            xz(f),
+                            xz(k),
+                            xz(middle),
+                            to.map(xz).zip(fixed.as_ref()),
+                        )?;
+                    }
                     let audience = tree
                         .handle(activity)
                         .and_then(|h| tree.node(h))
