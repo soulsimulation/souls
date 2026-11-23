@@ -5,6 +5,7 @@ import { test } from 'node:test';
 import { addresses, runArgs, WORLD } from './world.mjs';
 import { lastJson, pairArgs, seatEnv } from './seat.mjs';
 import { noOldServer } from './smoke.mjs';
+import { frontDoor, templateName, withRoute } from './old-page.mjs';
 
 test('run.sh is given its port, folder and facts, and its programs are where its header says', () => {
   assert.deepEqual(runArgs({ dir: '/x/world', port: 7400, facts: '/x/g.facts.json' }), ['--port', '7400', '--dir', '/x/world', '--facts', '/x/g.facts.json']);
@@ -35,4 +36,14 @@ test('the run is refused when the old server or launcher is among its programs',
   assert.equal(noOldServer(['/b/worldd serve --dir /w', 'caddy run']), true);
   assert.equal(noOldServer(['node apps/server/src/main.ts']), false);
   assert.equal(noOldServer(['node tools/world-launcher/launcher.mjs --port 1']), false);
+});
+
+test("the old page: the production front door with this run's addresses, and the template's world routed like run.sh's", () => {
+  const front = 'https://soul.game {\n reverse_proxy localhost:@@PRODUCTION_PORT@@\n reverse_proxy localhost:7310\n reverse_proxy localhost:7320\n reverse_proxy localhost:7330\n root /usr/local/lib/souls/web\n root /var/lib/souls-routes/slugs\n}';
+  const c = frontDoor(front, { base: 'http://127.0.0.1:9000', launcher: 9001, directory: '127.0.0.1:7801', origin: '127.0.0.1:7803', web: '/web', slugs: '/slugs', caddyDir: '/caddy' });
+  assert.ok(c.includes('http://127.0.0.1:9000 {') && c.includes('127.0.0.1:9001') && c.includes('127.0.0.1:7801') && c.includes('root /web') && c.includes('root /slugs'));
+  assert.ok(!/soul\.game|@@PRODUCTION_PORT@@|localhost:73[123]0|\/usr\/local|\/var\/lib/.test(c), 'no production address is left');
+  const routes = { schema: 'souls/world-routes/1', worlds: { dev: { gateway: 'http://127.0.0.1:7802', stream: '/s/w/dev/x/', canonical: true } } };
+  assert.deepEqual(withRoute(routes, 'hello-hamlet').worlds['hello-hamlet'], { gateway: 'http://127.0.0.1:7802', stream: '/s/w/dev/x/', canonical: false });
+  assert.equal(templateName('worlds/templates/hello-hamlet.json'), 'hello-hamlet');
 });

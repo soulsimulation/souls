@@ -23,6 +23,8 @@
 // --time-of-day: on a local world URL (127.0.0.1/localhost …/w/<slug>) the world is set to that hour with its clock paused
 //          before the page opens (default 12, midday; the god env route as the dev owner, one entry in the world's god
 //          history; the clock stays paused afterwards). `keep` leaves the clock alone (use it for god history/undo proofs).
+//          A page on the new engine (its config names `v2Stream`) keeps the engine's clock: the hour goes on its address
+//          as `?hour=HH:MM`, which lights the picture only.
 // --arrival-seconds: how long the page may take to arrive before the take starts (default 120). A page that never
 //          shows a world fails (exit 1) with a still of where it stuck (<out>.open-failed.png) and a sidecar.
 //
@@ -266,6 +268,22 @@ function burnIn(src, dst, { width, durationSec, sprite, panel = null, plan = nul
   return { ok: false };
 }
 
+/** --time-of-day as the page's `hour=HH:MM` (`12` → `12:00`, `6.5` → `06:30`, `19:45` as is), or null. */
+export function hourOf(timeOfDay) {
+  const s = String(timeOfDay);
+  if (/^([01]\d|2[0-3]):[0-5]\d$/.test(s)) return s;
+  const h = Number(s);
+  if (!/^\d+(\.\d+)?$/.test(s) || !(h >= 0 && h < 24)) return null;
+  const m = Math.round(h * 60);
+  return `${String(Math.floor(m / 60) % 24).padStart(2, '0')}:${String(m % 60).padStart(2, '0')}`;
+}
+/** The address with `hour=` set (any earlier one replaced). */
+export function withHour(url, hour) { const u = new URL(url); u.searchParams.set('hour', hour); return u.href; }
+/** True when the page at `url` is a world page on the new engine: its inline config names `v2Stream`. Never throws. */
+export async function namesV2Stream(url) {
+  try { return /"v2Stream"\s*:/.test(await (await fetch(url, { headers: { accept: 'text/html' }, signal: AbortSignal.timeout(15_000) })).text()); } catch { return false; }
+}
+
 /** worldTimePlan({url, timeOfDay}, tools) → {base, time} to set, or {why} when the clock is left alone. Throws on an
  *  invalid --time-of-day. */
 export function worldTimePlan(a, tools) {
@@ -288,8 +306,13 @@ async function main() {
   const out = resolve(a.out); mkdirSync(dirname(out), { recursive: true });
   const tools = await clipTools();
   // World time first (#888), before the page opens: a local world is shown at midday with its clock paused.
-  const plan = worldTimePlan(a, tools);
-  let worldTime = { requested: plan.time ?? a.timeOfDay, applied: false, why: plan.why ?? null };
+  // 0.135 P5: a page on the new engine (its inline config names `v2Stream`) keeps the engine's clock; the picture's
+  // light comes from `?hour=HH:MM` on its address instead.
+  const hour = a.timeOfDay === 'keep' ? null : hourOf(a.timeOfDay);
+  const v2 = hour !== null && await namesV2Stream(a.url);
+  if (v2) a.url = withHour(a.url, hour);
+  const plan = v2 ? { why: `new engine: ?hour=${hour}` } : worldTimePlan(a, tools);
+  let worldTime = v2 ? { requested: hour, applied: true, via: 'hour' } : { requested: plan.time ?? a.timeOfDay, applied: false, why: plan.why ?? null };
   if (plan.base) {
     const r = await tools.applyWorldTime({ base: plan.base, time: plan.time, note: 'proof recorder world time (#888)' });
     worldTime = { requested: plan.time, applied: r.ok, ...(r.ok ? { clock: r.applied } : { why: r.error }) };
