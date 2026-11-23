@@ -18,7 +18,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 0,
               "untouched": 73
@@ -65,7 +65,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 1,
               "untouched": 73
@@ -114,7 +114,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 0,
               "untouched": 73
@@ -163,7 +163,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 0,
               "untouched": 73
@@ -212,7 +212,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 1,
               "untouched": 73
@@ -259,7 +259,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 2,
               "untouched": 73
@@ -308,7 +308,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 1,
               "untouched": 73
@@ -357,7 +357,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 1,
               "untouched": 73
@@ -406,7 +406,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 2,
               "untouched": 73
@@ -453,7 +453,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 3,
               "untouched": 73
@@ -502,7 +502,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 2,
               "untouched": 73
@@ -551,7 +551,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 2,
               "untouched": 73
@@ -600,7 +600,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 3,
               "untouched": 73
@@ -647,7 +647,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 4,
               "untouched": 73
@@ -696,7 +696,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 3,
               "untouched": 73
@@ -745,7 +745,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 3,
               "untouched": 73
@@ -794,7 +794,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 4,
               "untouched": 73
@@ -841,7 +841,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 5,
               "untouched": 73
@@ -890,7 +890,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 4,
               "untouched": 73
@@ -939,7 +939,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 4,
               "untouched": 73
@@ -988,7 +988,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 5,
               "untouched": 73
@@ -1035,7 +1035,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 6,
               "untouched": 73
@@ -1084,7 +1084,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 5,
               "untouched": 73
@@ -1133,7 +1133,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 5,
               "untouched": 73
@@ -1182,7 +1182,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 6,
               "untouched": 73
@@ -1229,7 +1229,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 7,
               "untouched": 73
@@ -1278,7 +1278,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 6,
               "untouched": 73
@@ -1327,7 +1327,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 6,
               "untouched": 73
@@ -1376,7 +1376,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 1,
               "untouched": 73
@@ -1423,7 +1423,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 2,
               "untouched": 73
@@ -1472,7 +1472,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 1,
               "untouched": 73
@@ -1521,7 +1521,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 1,
               "untouched": 73
@@ -1570,7 +1570,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 2,
               "untouched": 73
@@ -1617,7 +1617,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 3,
               "untouched": 73
@@ -1666,7 +1666,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 2,
               "untouched": 73
@@ -1715,7 +1715,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 2,
               "untouched": 73
@@ -1764,7 +1764,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 3,
               "untouched": 73
@@ -1811,7 +1811,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 4,
               "untouched": 73
@@ -1860,7 +1860,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 3,
               "untouched": 73
@@ -1909,7 +1909,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 3,
               "untouched": 73
@@ -1958,7 +1958,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 4,
               "untouched": 73
@@ -2005,7 +2005,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 5,
               "untouched": 73
@@ -2054,7 +2054,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 4,
               "untouched": 73
@@ -2103,7 +2103,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 4,
               "untouched": 73
@@ -2152,7 +2152,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 5,
               "untouched": 73
@@ -2199,7 +2199,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 6,
               "untouched": 73
@@ -2248,7 +2248,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 5,
               "untouched": 73
@@ -2297,7 +2297,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 5,
               "untouched": 73
@@ -2346,7 +2346,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 6,
               "untouched": 73
@@ -2393,7 +2393,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 7,
               "untouched": 73
@@ -2442,7 +2442,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 6,
               "untouched": 73
@@ -2491,7 +2491,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 6,
               "untouched": 73
@@ -2540,7 +2540,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 7,
               "untouched": 73
@@ -2587,7 +2587,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 0,
               "untouched": 73
@@ -2636,7 +2636,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 7,
               "untouched": 73
@@ -2685,7 +2685,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 7,
               "untouched": 73

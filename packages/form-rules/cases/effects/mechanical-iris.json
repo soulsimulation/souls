@@ -14,7 +14,7 @@
             ]
           },
           "c1": {
-            "kind": "eden:mechanical-iris",
+            "kind": "eden:mechanical_iris",
             "fields": {
               "phase": 0,
               "untouched": 73
@@ -490,7 +490,7 @@
       ],
       "after": {
         "c1": {
-          "kind": "eden:mechanical-iris",
+          "kind": "eden:mechanical_iris",
           "fields": {
             "phase": 0,
             "untouched": 73

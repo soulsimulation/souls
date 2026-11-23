@@ -1,6 +1,6 @@
 {
   "format": "souls-entry/1",
-  "kind": "eden:mechanical-iris",
+  "kind": "eden:mechanical_iris",
   "owner": "thing",
   "state": {
     "phase": {
@@ -610,7 +610,7 @@
     "ever": true
   },
   "looks": {
-    "model": "look:mechanical-iris",
+    "model": "look:mechanical_iris",
     "table": [
       {
         "part": "ring",
