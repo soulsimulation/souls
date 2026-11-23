@@ -70,10 +70,11 @@ const PAIR: &str = "test:pair";
 const CARRY: &str = "test:carry";
 const COURT: &str = "test:court";
 const CAN: &str = "test:can";
+const CHAIR: &str = "test:chair";
 
 /// The kinds in pinned order: (plain name, full name).
 fn kinds() -> Vec<(&'static str, String)> {
-    [PLACE, WALKER, VESSEL, RACK, PLANK, PAIR, CARRY, COURT, CAN]
+    [PLACE, WALKER, VESSEL, RACK, PLANK, PAIR, CARRY, COURT, CAN, CHAIR]
         .iter()
         .enumerate()
         .map(|(i, k)| (*k, full(k, i as u8 + 1)))
@@ -156,6 +157,10 @@ fn court() -> Id {
 }
 /// #4086: three watering cans south of the first walker, 100 m, 2.2 m and 1.5 m away (a can's reach from a body is
 /// its half size, 0.38 m, and 1.5 m).
+fn chair() -> Id {
+    id(40)
+}
+
 fn far_can() -> Id {
     id(7)
 }
@@ -227,6 +232,15 @@ fn tree_rules() -> TreeRules {
             (fullname(CARRY), k("activity", &[], &[1], None)),
             (fullname(COURT), k("thing", &[], &[], None)),
             (fullname(CAN), k("thing", &[], &[], Some(1))),
+            (
+                fullname(CHAIR),
+                Kind {
+                    owner: "thing".into(),
+                    children: Default::default(),
+                    slots: BTreeMap::from([(1, BTreeSet::from(["body".to_owned()]))]),
+                    hands: None,
+                },
+            ),
         ]),
         souls: [w1(), w2()].into(),
         audiences: BTreeMap::new(),
@@ -315,7 +329,10 @@ fn entries() -> Json {
       "motion": { "how": "one_hand" }, "loose": { "ever": true } }"#,
     )
     .unwrap();
+    // An armchair's seat and its sit (`content/kinds/seating/armchair.json`): N2's mid-sit at a restart.
+    let chair = parse(r#"{"format": "souls-entry/1", "kind": "test:chair", "owner": "thing", "slots": {"seat": {"admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 510, 80], "stand": "front"}}, "forms": {"sit": {"who": "anyone", "starts": "act", "takes": {"seat": {"type": "slot", "select": {"of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1}}}, "needs": [{"need": "slot_free", "slot": {"arg": "seat"}}], "steps": [{"step": "walk_to", "point": {"arg": "seat"}}, {"step": "sit", "slot": {"arg": "seat"}}], "effects": [{"change": "reparent", "what": "actor", "into": {"arg": "seat"}, "event": "sat_down"}]}}}"#).unwrap();
     Json::Obj(vec![
+        (CHAIR.into(), chair),
         (VESSEL.into(), vessel),
         (RACK.into(), rack),
         (COURT.into(), court),
@@ -369,6 +386,7 @@ fn world() -> Replica {
         create(far_can(), CAN, g, south(100_000_000)),
         create(beyond_can(), CAN, g, south(2_200_000)),
         create(near_can(), CAN, g, south(1_500_000)),
+        create(chair(), CHAIR, g, Vec3::new(at1().x + 6_000_000, 0, at1().z)),
     ];
     let effects: Vec<Value> = changes
         .into_iter()
@@ -418,7 +436,7 @@ fn bodies() -> Result<Bodies, replica::effects::Refusal> {
 }
 
 /// A scripted client on the world's socket, one per Soul.
-struct Client(UnixStream, Id, u64);
+struct Client(UnixStream, Id, u64, Vec<u8>);
 
 impl Client {
     fn send(&mut self, verb: &str, target: Option<Id>, parameters: BTreeMap<u64, Value>) {
@@ -444,10 +462,16 @@ impl Client {
             reflex: false,
         };
         let bytes = encode(&i.to_value()).unwrap();
+        self.raw(&bytes);
+        self.3 = bytes;
+    }
+
+    /// Sends `bytes` as they are: an intent sent again, as the gateway sends the unanswered ones on a reconnect.
+    fn raw(&mut self, bytes: &[u8]) {
         self.0
             .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
             .unwrap();
-        self.0.write_all(&bytes).unwrap();
+        self.0.write_all(bytes).unwrap();
     }
 
     /// The next answer: a receipt's entries, or a refusal's reason. A progress answer (C20, sent as a run starts) is
@@ -522,7 +546,11 @@ struct Run {
 }
 
 fn serve(tag: &str) -> (Run, Client, Client) {
-    let store = Mem::with(Vec::new());
+    serve_on(tag, Mem::with(Vec::new()))
+}
+
+/// [`serve`] on the log `store` holds: a world started again after a stop reads it back.
+fn serve_on(tag: &str, store: Mem) -> (Run, Client, Client) {
     let mut cfg = Config::new(LINEAGE, 1);
     cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
     cfg.engine = Some((
@@ -550,7 +578,7 @@ fn serve(tag: &str) -> (Run, Client, Client) {
     let client = |soul| {
         let s = UnixStream::connect(&path).unwrap();
         s.set_read_timeout(Some(Duration::from_secs(20))).unwrap();
-        Client(s, soul, 0)
+        Client(s, soul, 0, Vec::new())
     };
     let (a, b) = (client(w1()), client(w2()));
     (Run { world, store, path }, a, b)
@@ -1090,5 +1118,72 @@ fn i4187_a_form_act_sent_during_an_open_form_run() {
         Some(w1()),
         "the can in the body's hand"
     );
+    run.stop();
+}
+
+#[test]
+fn n2_probe_a_run_open_at_a_stop_and_its_intent_sent_again() {
+    let store = Mem::with(Vec::new());
+    let (run, mut a, _) = serve_on("n2p1", store.clone());
+    a.send("test:take", Some(vessel()), BTreeMap::new());
+    a.started();
+    std::thread::sleep(Duration::from_millis(300));
+    let bytes = a.3.clone();
+    run.world.stop();
+    let (run, mut a, _) = serve_on("n2p2", store);
+    PROGRESSED.with(|p| p.borrow_mut().clear());
+    let t0 = std::time::Instant::now();
+    a.raw(&bytes);
+    let got = a.answer_of();
+    println!("N2 probe: resent after restart answered {got:?} in {:?}", t0.elapsed());
+    let r = run.replay();
+    println!("N2 probe: body at {:?}, vessel parent {:?}", at(&r, w1()), parent(&r, vessel()));
+    run.stop();
+}
+
+#[test]
+fn n2_probe_a_walk_open_at_a_stop_and_its_intent_sent_again() {
+    let store = Mem::with(Vec::new());
+    let (run, mut a, _) = serve_on("n2w1", store.clone());
+    a.send("test:walk", Some(ground()), point(south(12_000_000)));
+    a.started();
+    std::thread::sleep(Duration::from_millis(1500));
+    let bytes = a.3.clone();
+    let mid = at(&run.replay(), w1());
+    run.world.stop();
+    let (run, mut a, _) = serve_on("n2w2", store);
+    println!("N2 walk probe: body at {mid:?} at the stop, {:?} after the restart", at(&run.replay(), w1()));
+    PROGRESSED.with(|p| p.borrow_mut().clear());
+    let t0 = std::time::Instant::now();
+    a.raw(&bytes);
+    let got = a.answer_of();
+    println!("N2 walk probe: resent after restart answered {got:?} in {:?}", t0.elapsed());
+    println!("N2 walk probe: body at {:?}, goal {:?}", at(&run.replay(), w1()), south(12_000_000));
+    run.stop();
+}
+
+#[test]
+fn n2_probe_a_sit_open_at_a_stop_and_its_intent_sent_again() {
+    let store = Mem::with(Vec::new());
+    let (run, mut a, _) = serve_on("n2s1", store.clone());
+    a.send("test:sit", Some(chair()), BTreeMap::new());
+    let mut len = [0u8; 4];
+    a.0.read_exact(&mut len).unwrap();
+    let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
+    a.0.read_exact(&mut frame).unwrap();
+    println!("N2 sit probe: first answer {:?}", decode(&frame).unwrap().value);
+    std::thread::sleep(Duration::from_millis(1500));
+    let bytes = a.3.clone();
+    let mid = at(&run.replay(), w1());
+    run.world.stop();
+    let (run, mut a, _) = serve_on("n2s2", store);
+    println!("N2 sit probe: body at {mid:?} at the stop, {:?} after the restart", at(&run.replay(), w1()));
+    PROGRESSED.with(|p| p.borrow_mut().clear());
+    let t0 = std::time::Instant::now();
+    a.raw(&bytes);
+    let got = a.answer_of();
+    println!("N2 sit probe: resent after restart answered {got:?} in {:?}", t0.elapsed());
+    let r = run.replay();
+    println!("N2 sit probe: body parent {:?}", parent(&r, w1()));
     run.stop();
 }
