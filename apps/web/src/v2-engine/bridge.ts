@@ -40,6 +40,7 @@ const mul = (a: Mat['q'], b: Mat['q']): Mat['q'] => [a[0] * b[0] - a[1] * b[1] -
 
 /** A body: a node with a public Soul (its body-of link), or one of a body kind. */
 const isBody = (n: NodeRec) => !!n.soul || /:(humanoid|body)$/.test(n.kind.split('@')[0]);
+const samePlace = (a: NodeRec, b: NodeRec) => a.parent === b.parent && a.slot === b.slot && a.pos.every((v, i) => v === b.pos[i]);
 /** Chunks the page keeps, as useSouls keeps the socket's. */
 const KEEP = 12;
 /** Samples kept a body: a minute of world time before the oldest chunk kept. */
@@ -89,7 +90,12 @@ export class V2Bridge {
       this.nodes.set(n.id, n);
       if (!isBody(n)) continue;
       const t = this.tracks.get(n.id);
-      if (t) { t.node = n; t.gone = null; }
+      if (t) {
+        // Every later move of its record (a frame, slot or place) with no motion sample: the body is where its record has
+        // it from then on, so a body first seen standing is not held there until its next motion sample (#4217).
+        if (n.parent && (!t.node || !samePlace(t.node, n))) this.sample(n.id, n.parent, n.slot, n.at ?? at, n.pos);
+        t.node = n; t.gone = null;
+      }
       // A placed body with no motion yet stands where its record has it.
       else if (n.parent) this.sample(n.id, n.parent, n.slot, n.at ?? 0, n.pos);
     }

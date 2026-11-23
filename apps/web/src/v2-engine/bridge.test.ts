@@ -49,3 +49,27 @@ test('no chunk until the world is past it by the v2 page\'s lag; a body the copy
   assert.equal(b.view.takes.serverTick, chunks.at(-1)!.toTick);
   assert.equal((chunks.at(-1)!.toTick - chunks[0].fromTick) % TICKS, 0);
 });
+
+test('a body first seen standing that later moves by its record is drawn where it moves, with no jump', () => {
+  const b = new V2Bridge({ rulesVersion: 'test/1' });
+  // a second floor in the same building, 3 m along the first's +x and level with it
+  const next = node('w.3', 'w.1', [3_000_000, 3_000_000, 0]);
+  b.receive({ t: 'snapshot', s: { nodes: [world, building, floor, next, body], removed: [] } });
+  // stands 2 s at 1 m along the floor, then its record walks 1 m/s along +x, onto the second floor at 3 m, with no
+  // motion samples; its motion samples start 6 s in, on the second floor, and go on at the same pace
+  const x = (n: number) => 1_000_000 + Math.max(0, n - 4) * 500_000; // floor-frame µm at part n
+  for (let n = 0; n < 20; n++) {
+    const at = T0 + n * 500_000, onNext = x(n) >= 3_000_000;
+    const rec = n >= 5 && n < 12 ? [{ ...body, parent: onNext ? 'w.3' : 'w.2', pos: [x(n) - (onNext ? 3_000_000 : 0), 0, 0] as [number, number, number], at }] : [];
+    const samples: [string, string, number | null, number, number, number, number][] = n >= 12 && n < 15 ? [['b.7', 'w.3', null, at, x(n) - 3_000_000, 0, 0]] : [];
+    b.receive(part(n, samples, { nodes: rec }));
+  }
+  const chunks = b.view.takes.chunks, path: number[][] = [];
+  for (const c of chunks) for (let k = 0; k < TICKS; k++) path.push(sampleTake(c.take as unknown as Take, k * TICK_US / 1e6).entities.v2_b_7.p);
+  assert.ok(path.length >= 8 * TICKS, 'chunks cover the stand, the walk and the samples');
+  const walked = Math.hypot(path.at(-1)![0] - path[0][0], path.at(-1)![1] - path[0][1], path.at(-1)![2] - path[0][2]);
+  assert.ok(walked > 4, `it walks the whole way (${walked.toFixed(2)} m)`);
+  // 1 m/s is 5 cm a tick; allow twice that
+  const step = Math.max(...path.slice(1).map((p, i) => Math.hypot(p[0] - path[i][0], p[1] - path[i][1], p[2] - path[i][2])));
+  assert.ok(step <= 0.1, `no step over 10 cm a tick (largest ${step.toFixed(2)} m)`);
+});
