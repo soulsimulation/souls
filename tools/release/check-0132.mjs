@@ -241,7 +241,7 @@ const timeline = (page, soul, pt0) => page.evaluate(({ soul, pt0 }) => {
     framed: of((p) => { const n = p.framed.find((n) => mine(n.parent)); return n ? { at: p.from, what: `${n.id}, its record at ${n.at === undefined ? '?' : ms(n.at)}` } : undefined; }),
     playDelayTicks: v.takes.playDelay,
     // G-late: when the first part after the send that touches this Soul reached the page, on the machine's wall clock (ms)
-    arrivedWall: (() => { const p = after.find((p) => (p.touched ?? []).some(mine)); return p ? Math.round(performance.timeOrigin + p.at) : null; })(),
+    arrivedAt: after.find((p) => (p.touched ?? []).some(mine))?.at ?? null,
     // how long after its end each part of the step came, on the same mapping (worldd writes a part 250 ms after its end)
     partLagMs: worldAt === null ? null : after.slice(0, 12).map((p) => Math.round(p.at - pageAt(p.to))),
   };
@@ -310,18 +310,23 @@ else if (ONLY.has('2')) {
    *  next act sent while it still walked). The bound only keeps a check from hanging on a world that never answers. */
   const walked = (seq) => ended(seq, 20 * 60_000);
   /** One timed step: the act sent, then the page polled until `shown` holds (at most 6 s). G-late: it passes when the
-   *  act's first drawn sign (a new activity of the Soul's, or `shown` itself) is on the page within 2 s of the client
-   *  command's start; when `shown` (labelled `what`, such as the thing in hand) held is a second, informational time. */
+   *  act's first drawn sign (`first`, the step's own early sign such as a take's approach walk, or `shown` itself) is
+   *  on the page within 2 s of the client command's start; when `shown` (labelled `what`, such as the thing in hand)
+   *  held is a second, informational time. */
   let soul = null, arrivalT0 = null;
-  const step = async (name, send, shown, what = 'shown done') => {
-    const b = soul ? await probe(page, soul) : null, pt0 = await page.evaluate(() => performance.now());
-    // The world's tick at the send, as the page maps it (window.__worldAt, from the stream's own timestamps; a little
-    // early by the soonest sample's lag): a step counts as shown only when the page draws a moment at or after it, never a moment
-    // before the act (B3-7: a carry sent while the page still played the take's slide was seen walking at once).
-    const since = await page.evaluate((pt0) => { const w = window.__worldAt?.(pt0); return w ? Math.floor(w / 50_000) : 0; }, pt0);
+  const step = async (name, send, shown, what = 'shown done', first = () => false) => {
+    const b = soul ? await probe(page, soul) : null;
     // G-late: every time below is on one clock, this machine's, from the moment the client command starts (what an
-    // agent waits through): the page's moments, the client's sentAt and the world's answers as the client stamped them.
-    const t0 = Date.now(), sent = send(), back = Date.now();
+    // agent waits through): the client's sentAt and the world's answers as the client stamped them, and the page's
+    // moments placed by the page's own clock read just before the send (pt0, at the middle of that read).
+    const before = Date.now(), pt0 = await page.evaluate(() => performance.now()), pageAt = (before + Date.now()) / 2;
+    // The world's tick at the send: a step counts as drawn only when the page draws a moment at or after it, never one
+    // before the act (B3-7: a carry sent while the page still played the take's slide was seen walking at once). The
+    // world's clock is this machine's (worldd's `answers::now`, µs from the epoch), so the send's own tick is exact; the
+    // page's mapping (window.__worldAt, early by its soonest sample's lag) is the floor where they differ.
+    const t0 = Date.now(), mapped = await page.evaluate((pt0) => { const w = window.__worldAt?.(pt0); return w ? Math.floor(w / 50_000) : 0; }, pt0);
+    const since = Math.max(mapped, Math.floor(Date.now() / 50) - 1);
+    const sent = send(), back = Date.now();
     let seenMs = null, firstMs = null;
     while (Date.now() - t0 < (soul ? 6000 : 30_000)) { // a Soul not on the page yet: wait longer, to say when it came
       if (!soul) {
@@ -332,7 +337,7 @@ else if (ONLY.has('2')) {
       }
       const s = soul ? await probe(page, soul, since) : null;
       const done = s && s.tick >= since && shown(s, b ?? s);
-      if (s && s.tick >= since && firstMs === null && (done || s.acts.some((a) => a !== (b ?? s).activity))) firstMs = Date.now() - t0;
+      if (s && s.tick >= since && firstMs === null && (done || first(s, b ?? s))) firstMs = Date.now() - t0;
       if (done) { seenMs = Date.now() - t0; break; }
       if (soul && !s && Date.now() - t0 > 6000) break;
       await sleep(100);
@@ -353,11 +358,12 @@ else if (ONLY.has('2')) {
     const last = soul ? await probe(page, soul) : null;
     const trace = soul ? await timeline(page, soul, pt0).catch(() => null) : null;
     if (trace) log(`timeline ${name}: ${JSON.stringify(trace)}`);
-    const daemonLog = (() => { try { return readFileSync(join(OUT, 'agent', '.souls', 'souls', agent.soul, 'runtime', 'daemon.log'), 'utf8').split('\n').filter((l) => l.includes(' act check: ')).at(-1)?.replace(/^\S+ /, '') ?? 'none'; } catch { return 'none'; } })();
-    log(`client ${name}: its last form check: ${daemonLog}`);
+    // this step's own form check, by the daemon log's time (none for an act that is not a form's)
+    const daemonLog = (() => { try { return readFileSync(join(OUT, 'agent', '.souls', 'souls', agent.soul, 'runtime', 'daemon.log'), 'utf8').split('\n').filter((l) => l.includes(' act check: ') && Date.parse(l.split(' ')[0]) >= t0).at(0)?.replace(/^\S+ /, '') ?? 'none'; } catch { return 'none'; } })();
+    log(`client ${name}: its form check: ${daemonLog}`);
     log(`client ${name}: sent ${sentMs ?? '?'} ms after the command started, the command answered at ${commandMs} ms; the daemon has ${status?.entries ?? '?'} entries, ${status?.follows ?? '?'} follows, last syncs ${syncs || 'none'}`);
     // the first part touching the Soul after the send, on the same clock: the page's own delay is drawn less arrived
-    const partMs = trace?.arrivedWall ? trace.arrivedWall - t0 : null;
+    const partMs = typeof trace?.arrivedAt === 'number' ? Math.round(pageAt + (trace.arrivedAt - pt0) - t0) : null;
     report.lines[2].steps.push({ name, answer: sent?.ok === false ? sent : { ok: true, sequence: sent?.sequence }, answers, timed, sentMs, commandMs, partMs, firstMs, seenMs, afterAnswer, page: last, trace });
     const shows = last ? `it shows ${last.doing ?? '?'}, ${last.activity ?? '?'}${last.prop ? `, holding ${last.prop}` : ''}` : 'no such Soul';
     row(2, name, pass, `${sent?.ok === false ? `refused: ${JSON.stringify(sent).slice(0, 160)}` : `from the command's start: sent at ${sentMs ?? '?'} ms; world: ${answers || 'no answer yet'}`}; `
@@ -386,7 +392,7 @@ else if (ONLY.has('2')) {
     if (r?.sequence) await ended(r.sequence, 15_000);
     await rise();
     if (cup) { const w = cli('act', cup); if (w.sequence) await walked(w.sequence); }
-    r = await step('take', () => cup ? cli('act', `take:${cup}`) : { ok: false, detail: 'no thing to take found' }, (s) => !!s.prop, 'the thing in hand');
+    r = await step('take', () => cup ? cli('act', `take:${cup}`) : { ok: false, detail: 'no thing to take found' }, (s) => !!s.prop, 'the thing in hand', (s) => s.acts.includes('walk'));
     if (r?.sequence) await ended(r.sequence, 15_000);
     r = await step('carry', () => bench ? cli('act', bench) : { ok: false, detail: 'no place to carry it to' }, (s) => !!s.prop && walking(s));
     if (r?.sequence) await walked(r.sequence);
