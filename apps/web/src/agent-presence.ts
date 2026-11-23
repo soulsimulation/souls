@@ -5,6 +5,7 @@ import {useEffect,useState} from 'react';
 import {whenVisible} from './poll-pace.ts';
 import type {Api} from './useSouls.ts';
 import {readLink,type Link} from './soul-state.ts';
+import {v2Stream} from './v2-engine/use-v2-souls.ts';
 
 // PRESENCE (SOUL3): a Soul's agent is listening while a listen is open or closed <= 60 s ago (the server decides; its other
 // calls never count). `since` = when it last listened (`listenedAt`; an older server's `lastSeenAt`), null = never seen;
@@ -50,7 +51,7 @@ export function useOwnedAgentPresence(api:Api|undefined,ids:readonly string[]){
  useTick();
  const key=ids.join(',');
  useEffect(()=>{
-  if(!api||!key)return;
+  if(!api||!key||v2Stream())return;  // #4178: a v2 world serves no owner inbox route; its box reads the mailbox
   let live=true,timer:ReturnType<typeof setTimeout>|undefined;
   const read=async()=>{
    await Promise.all(key.split(',').map(async id=>{
