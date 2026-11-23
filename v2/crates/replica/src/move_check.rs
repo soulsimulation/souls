@@ -150,9 +150,23 @@ pub fn read(intent: &Intent) -> Option<Result<Vec<Ask>, &'static str>> {
         Ok(a) => a,
         Err(r) => return Some(Err(r)),
     };
+    // A walk's fallbacks that name no gait go at the first one's (0.135 G1).
+    let pace = match first {
+        Ask::Walk { gait, .. } => gait,
+        _ => None,
+    };
     let mut out = vec![first];
     for f in &intent.fallbacks {
         match one(&f.verb, f.target.as_ref(), &f.parameters) {
+            Some(Ok(Ask::Walk {
+                node,
+                point,
+                gait: None,
+            })) if out[0].form() == "walk" => out.push(Ask::Walk {
+                node,
+                point,
+                gait: pace,
+            }),
             Some(Ok(a)) if a.form() == out[0].form() => out.push(a),
             Some(Err(r)) => return Some(Err(r)),
             _ => return Some(Err("move.fallback-not-alike")),
@@ -268,6 +282,43 @@ pub fn move_check(input: &str) -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    /// 0.135 G1: a walk's fallbacks that name no gait go at the first walk's; one that names its own keeps it.
+    #[test]
+    fn a_walks_fallbacks_take_its_gait() {
+        let node = |n| Some(Target::Node(Id::new(Scope([7; 16]), n).unwrap()));
+        let gait = |g: &str| BTreeMap::from([(2, Value::Text(Name::new(g).unwrap()))]);
+        let fallback = |n, parameters| crate::intents::Fallback {
+            verb: Name::new("eden:walk").unwrap(),
+            target: node(n),
+            parameters,
+            resources: Vec::new(),
+        };
+        let intent = Intent {
+            actor: crate::effects::Actor::World,
+            verb: Name::new("eden:walk").unwrap(),
+            target: node(1),
+            parameters: gait("gait:run"),
+            sequence: 1,
+            basis: Value::Uint(0),
+            expiry: 0,
+            resources: Vec::new(),
+            fallbacks: vec![fallback(2, BTreeMap::new()), fallback(3, gait("gait:jog"))],
+            replaces: None,
+            body: None,
+            reflex: false,
+        };
+        let gaits: Vec<_> = read(&intent)
+            .unwrap()
+            .unwrap()
+            .into_iter()
+            .map(|a| match a {
+                Ask::Walk { gait, .. } => gait,
+                _ => panic!("a walk"),
+            })
+            .collect();
+        assert_eq!(gaits, [Some("run"), Some("run"), Some("jog")]);
+    }
 
     #[test]
     fn a_verdict_from_what_is_known_and_unknown_for_the_rest() {
