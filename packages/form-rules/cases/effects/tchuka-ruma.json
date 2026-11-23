@@ -1,0 +1,4406 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Every whole sow/restart with exact ordered changes/events, generic same-receipt replay, solution/loss/restart and capacity refusal without partial debit.",
+  "cases": [
+    {
+      "name": "sow_1_2_to_3_whole_batch_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 2,
+              "house4": 2,
+              "ruma": 0,
+              "relay": 0
+            }
+          },
+          "other": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 2,
+              "house4": 2,
+              "ruma": 0,
+              "relay": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              480
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_1_2_to_3"
+          },
+          "receipt": "sow_1_2_to_3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house1",
+                "n": 28,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house2",
+                "n": 29,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house3",
+                "n": 30,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  3
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 0,
+            "house2": 3,
+            "house3": 3,
+            "house4": 2,
+            "ruma": 0,
+            "relay": 3
+          }
+        },
+        "other": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 2,
+            "house2": 2,
+            "house3": 2,
+            "house4": 2,
+            "ruma": 0,
+            "relay": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "sow_1_2_to_5_whole_batch_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 0,
+              "house4": 3,
+              "ruma": 1,
+              "relay": 0
+            }
+          },
+          "other": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 2,
+              "house4": 2,
+              "ruma": 0,
+              "relay": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              480
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_1_2_to_5"
+          },
+          "receipt": "sow_1_2_to_5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house1",
+                "n": 28,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house2",
+                "n": 29,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house3",
+                "n": 30,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 5
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  3
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 0,
+            "house2": 3,
+            "house3": 1,
+            "house4": 3,
+            "ruma": 1,
+            "relay": 5
+          }
+        },
+        "other": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 2,
+            "house2": 2,
+            "house3": 2,
+            "house4": 2,
+            "ruma": 0,
+            "relay": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "sow_1_3_to_4_whole_batch_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 3,
+              "house2": 0,
+              "house3": 1,
+              "house4": 1,
+              "ruma": 3,
+              "relay": 0
+            }
+          },
+          "other": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 2,
+              "house4": 2,
+              "ruma": 0,
+              "relay": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              480
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_1_3_to_4"
+          },
+          "receipt": "sow_1_3_to_4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house1",
+                "n": 28,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house2",
+                "n": 29,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house3",
+                "n": 30,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house4",
+                "n": 31,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 4
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  3
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  4
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 0,
+            "house2": 1,
+            "house3": 2,
+            "house4": 2,
+            "ruma": 3,
+            "relay": 4
+          }
+        },
+        "other": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 2,
+            "house2": 2,
+            "house3": 2,
+            "house4": 2,
+            "ruma": 0,
+            "relay": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "sow_1_3_to_5_whole_batch_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 3,
+              "house2": 2,
+              "house3": 2,
+              "house4": 0,
+              "ruma": 1,
+              "relay": 1
+            }
+          },
+          "other": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 2,
+              "house4": 2,
+              "ruma": 0,
+              "relay": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              480
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_1_3_to_5"
+          },
+          "receipt": "sow_1_3_to_5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house1",
+                "n": 28,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house2",
+                "n": 29,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house3",
+                "n": 30,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house4",
+                "n": 31,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 5
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  3
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  4
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 0,
+            "house2": 3,
+            "house3": 3,
+            "house4": 1,
+            "ruma": 1,
+            "relay": 5
+          }
+        },
+        "other": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 2,
+            "house2": 2,
+            "house3": 2,
+            "house4": 2,
+            "ruma": 0,
+            "relay": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "sow_1_4_to_0_whole_batch_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 4,
+              "house2": 0,
+              "house3": 0,
+              "house4": 0,
+              "ruma": 4,
+              "relay": 1
+            }
+          },
+          "other": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 2,
+              "house4": 2,
+              "ruma": 0,
+              "relay": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              480
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_1_4_to_0"
+          },
+          "receipt": "sow_1_4_to_0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house1",
+                "n": 28,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house2",
+                "n": 29,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house3",
+                "n": 30,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house4",
+                "n": 31,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ruma",
+                "n": 32,
+                "to": 5
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  3
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  4
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  5
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 0,
+            "house2": 1,
+            "house3": 1,
+            "house4": 1,
+            "ruma": 5,
+            "relay": 0
+          }
+        },
+        "other": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 2,
+            "house2": 2,
+            "house3": 2,
+            "house4": 2,
+            "ruma": 0,
+            "relay": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "sow_2_1_to_3_whole_batch_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 0,
+              "house2": 1,
+              "house3": 1,
+              "house4": 1,
+              "ruma": 5,
+              "relay": 0
+            }
+          },
+          "other": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 2,
+              "house4": 2,
+              "ruma": 0,
+              "relay": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              480
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_2_1_to_3"
+          },
+          "receipt": "sow_2_1_to_3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house2",
+                "n": 29,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house3",
+                "n": 30,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 0,
+            "house2": 0,
+            "house3": 2,
+            "house4": 1,
+            "ruma": 5,
+            "relay": 3
+          }
+        },
+        "other": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 2,
+            "house2": 2,
+            "house3": 2,
+            "house4": 2,
+            "ruma": 0,
+            "relay": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "sow_2_1_to_5_whole_batch_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 3,
+              "house2": 1,
+              "house3": 0,
+              "house4": 1,
+              "ruma": 3,
+              "relay": 0
+            }
+          },
+          "other": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 2,
+              "house4": 2,
+              "ruma": 0,
+              "relay": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              480
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_2_1_to_5"
+          },
+          "receipt": "sow_2_1_to_5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house2",
+                "n": 29,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house3",
+                "n": 30,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 5
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 3,
+            "house2": 0,
+            "house3": 1,
+            "house4": 1,
+            "ruma": 3,
+            "relay": 5
+          }
+        },
+        "other": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 2,
+            "house2": 2,
+            "house3": 2,
+            "house4": 2,
+            "ruma": 0,
+            "relay": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "sow_2_2_to_4_whole_batch_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 2,
+              "house4": 2,
+              "ruma": 0,
+              "relay": 0
+            }
+          },
+          "other": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 2,
+              "house4": 2,
+              "ruma": 0,
+              "relay": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              480
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_2_2_to_4"
+          },
+          "receipt": "sow_2_2_to_4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house2",
+                "n": 29,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house3",
+                "n": 30,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house4",
+                "n": 31,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 4
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  3
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 2,
+            "house2": 0,
+            "house3": 3,
+            "house4": 3,
+            "ruma": 0,
+            "relay": 4
+          }
+        },
+        "other": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 2,
+            "house2": 2,
+            "house3": 2,
+            "house4": 2,
+            "ruma": 0,
+            "relay": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "sow_2_3_to_0_whole_batch_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 3,
+              "house2": 3,
+              "house3": 0,
+              "house4": 0,
+              "ruma": 2,
+              "relay": 2
+            }
+          },
+          "other": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 2,
+              "house4": 2,
+              "ruma": 0,
+              "relay": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              480
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_2_3_to_0"
+          },
+          "receipt": "sow_2_3_to_0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house2",
+                "n": 29,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house3",
+                "n": 30,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house4",
+                "n": 31,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ruma",
+                "n": 32,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  3
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  4
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 3,
+            "house2": 0,
+            "house3": 1,
+            "house4": 1,
+            "ruma": 3,
+            "relay": 0
+          }
+        },
+        "other": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 2,
+            "house2": 2,
+            "house3": 2,
+            "house4": 2,
+            "ruma": 0,
+            "relay": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "sow_3_1_to_4_whole_batch_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 3,
+              "house2": 0,
+              "house3": 1,
+              "house4": 1,
+              "ruma": 3,
+              "relay": 0
+            }
+          },
+          "other": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 2,
+              "house4": 2,
+              "ruma": 0,
+              "relay": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              480
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_3_1_to_4"
+          },
+          "receipt": "sow_3_1_to_4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house3",
+                "n": 30,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house4",
+                "n": 31,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 4
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 3,
+            "house2": 0,
+            "house3": 0,
+            "house4": 2,
+            "ruma": 3,
+            "relay": 4
+          }
+        },
+        "other": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 2,
+            "house2": 2,
+            "house3": 2,
+            "house4": 2,
+            "ruma": 0,
+            "relay": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "sow_3_1_to_5_whole_batch_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 3,
+              "house2": 0,
+              "house3": 1,
+              "house4": 0,
+              "ruma": 4,
+              "relay": 0
+            }
+          },
+          "other": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 2,
+              "house4": 2,
+              "ruma": 0,
+              "relay": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              480
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_3_1_to_5"
+          },
+          "receipt": "sow_3_1_to_5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house3",
+                "n": 30,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house4",
+                "n": 31,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 5
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 3,
+            "house2": 0,
+            "house3": 0,
+            "house4": 1,
+            "ruma": 4,
+            "relay": 5
+          }
+        },
+        "other": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 2,
+            "house2": 2,
+            "house3": 2,
+            "house4": 2,
+            "ruma": 0,
+            "relay": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "sow_3_2_to_0_whole_batch_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 2,
+              "house4": 2,
+              "ruma": 0,
+              "relay": 0
+            }
+          },
+          "other": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 2,
+              "house4": 2,
+              "ruma": 0,
+              "relay": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              480
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_3_2_to_0"
+          },
+          "receipt": "sow_3_2_to_0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house3",
+                "n": 30,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house4",
+                "n": 31,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ruma",
+                "n": 32,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  3
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 2,
+            "house2": 2,
+            "house3": 0,
+            "house4": 3,
+            "ruma": 1,
+            "relay": 0
+          }
+        },
+        "other": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 2,
+            "house2": 2,
+            "house3": 2,
+            "house4": 2,
+            "ruma": 0,
+            "relay": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "sow_3_3_to_5_whole_batch_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 0,
+              "house2": 3,
+              "house3": 3,
+              "house4": 2,
+              "ruma": 0,
+              "relay": 3
+            }
+          },
+          "other": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 2,
+              "house4": 2,
+              "ruma": 0,
+              "relay": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              480
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_3_3_to_5"
+          },
+          "receipt": "sow_3_3_to_5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house3",
+                "n": 30,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house4",
+                "n": 31,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ruma",
+                "n": 32,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house1",
+                "n": 28,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 5
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  3
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  4
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 1,
+            "house2": 3,
+            "house3": 0,
+            "house4": 3,
+            "ruma": 1,
+            "relay": 5
+          }
+        },
+        "other": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 2,
+            "house2": 2,
+            "house3": 2,
+            "house4": 2,
+            "ruma": 0,
+            "relay": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "sow_4_1_to_0_whole_batch_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 3,
+              "house2": 0,
+              "house3": 1,
+              "house4": 1,
+              "ruma": 3,
+              "relay": 0
+            }
+          },
+          "other": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 2,
+              "house4": 2,
+              "ruma": 0,
+              "relay": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              480
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_4_1_to_0"
+          },
+          "receipt": "sow_4_1_to_0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house4",
+                "n": 31,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ruma",
+                "n": 32,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 3,
+            "house2": 0,
+            "house3": 1,
+            "house4": 0,
+            "ruma": 4,
+            "relay": 0
+          }
+        },
+        "other": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 2,
+            "house2": 2,
+            "house3": 2,
+            "house4": 2,
+            "ruma": 0,
+            "relay": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "sow_4_2_to_1_whole_batch_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 2,
+              "house4": 2,
+              "ruma": 0,
+              "relay": 0
+            }
+          },
+          "other": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 2,
+              "house4": 2,
+              "ruma": 0,
+              "relay": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              480
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_4_2_to_1"
+          },
+          "receipt": "sow_4_2_to_1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house4",
+                "n": 31,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ruma",
+                "n": 32,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house1",
+                "n": 28,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  3
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 3,
+            "house2": 2,
+            "house3": 2,
+            "house4": 0,
+            "ruma": 1,
+            "relay": 1
+          }
+        },
+        "other": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 2,
+            "house2": 2,
+            "house3": 2,
+            "house4": 2,
+            "ruma": 0,
+            "relay": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "sow_4_2_to_5_whole_batch_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 0,
+              "house2": 1,
+              "house3": 2,
+              "house4": 2,
+              "ruma": 3,
+              "relay": 4
+            }
+          },
+          "other": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 2,
+              "house4": 2,
+              "ruma": 0,
+              "relay": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              480
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_4_2_to_5"
+          },
+          "receipt": "sow_4_2_to_5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house4",
+                "n": 31,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ruma",
+                "n": 32,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house1",
+                "n": 28,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 5
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  3
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 1,
+            "house2": 1,
+            "house3": 2,
+            "house4": 0,
+            "ruma": 4,
+            "relay": 5
+          }
+        },
+        "other": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 2,
+            "house2": 2,
+            "house3": 2,
+            "house4": 2,
+            "ruma": 0,
+            "relay": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "sow_4_3_to_2_whole_batch_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 0,
+              "house4": 3,
+              "ruma": 1,
+              "relay": 0
+            }
+          },
+          "other": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 2,
+              "house4": 2,
+              "ruma": 0,
+              "relay": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              480
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_4_3_to_2"
+          },
+          "receipt": "sow_4_3_to_2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house4",
+                "n": 31,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ruma",
+                "n": 32,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house1",
+                "n": 28,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house2",
+                "n": 29,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  3
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  4
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 3,
+            "house2": 3,
+            "house3": 0,
+            "house4": 0,
+            "ruma": 2,
+            "relay": 2
+          }
+        },
+        "other": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 2,
+            "house2": 2,
+            "house3": 2,
+            "house4": 2,
+            "ruma": 0,
+            "relay": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "sow_4_3_to_5_whole_batch_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 0,
+              "house3": 3,
+              "house4": 3,
+              "ruma": 0,
+              "relay": 4
+            }
+          },
+          "other": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 2,
+              "house4": 2,
+              "ruma": 0,
+              "relay": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              480
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_4_3_to_5"
+          },
+          "receipt": "sow_4_3_to_5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house4",
+                "n": 31,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ruma",
+                "n": 32,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house1",
+                "n": 28,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house2",
+                "n": 29,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 5
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  3
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  4
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 3,
+            "house2": 1,
+            "house3": 3,
+            "house4": 0,
+            "ruma": 1,
+            "relay": 5
+          }
+        },
+        "other": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 2,
+            "house2": 2,
+            "house3": 2,
+            "house4": 2,
+            "ruma": 0,
+            "relay": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "sow_4_4_to_3_whole_batch_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 0,
+              "house3": 1,
+              "house4": 4,
+              "ruma": 1,
+              "relay": 4
+            }
+          },
+          "other": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 2,
+              "house4": 2,
+              "ruma": 0,
+              "relay": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              480
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_4_4_to_3"
+          },
+          "receipt": "sow_4_4_to_3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house4",
+                "n": 31,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ruma",
+                "n": 32,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house1",
+                "n": 28,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house2",
+                "n": 29,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house3",
+                "n": 30,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  3
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  4
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  5
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 3,
+            "house2": 1,
+            "house3": 2,
+            "house4": 0,
+            "ruma": 2,
+            "relay": 3
+          }
+        },
+        "other": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 2,
+            "house2": 2,
+            "house3": 2,
+            "house4": 2,
+            "ruma": 0,
+            "relay": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "restart_whole_batch_replay",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 2,
+              "house4": 2,
+              "ruma": 0,
+              "relay": 0
+            }
+          },
+          "other": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 2,
+              "house4": 2,
+              "ruma": 0,
+              "relay": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              480
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "restart"
+          },
+          "receipt": "restart",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house1",
+                "n": 28,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house2",
+                "n": 29,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house3",
+                "n": 30,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house4",
+                "n": 31,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ruma",
+                "n": 32,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  3
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  4
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  5
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 2,
+            "house2": 2,
+            "house3": 2,
+            "house4": 2,
+            "ruma": 0,
+            "relay": 0
+          }
+        },
+        "other": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 2,
+            "house2": 2,
+            "house3": 2,
+            "house4": 2,
+            "ruma": 0,
+            "relay": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "ten_sows_and_restart",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 2,
+              "house4": 2,
+              "ruma": 0,
+              "relay": 0
+            }
+          },
+          "other": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 2,
+              "house4": 2,
+              "ruma": 0,
+              "relay": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              480
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_3_2_to_0"
+          },
+          "receipt": "ten_sows_and_restart0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house3",
+                "n": 30,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house4",
+                "n": 31,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ruma",
+                "n": 32,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  3
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_4_3_to_2"
+          },
+          "receipt": "ten_sows_and_restart1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house4",
+                "n": 31,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ruma",
+                "n": 32,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house1",
+                "n": 28,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house2",
+                "n": 29,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  3
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  4
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_2_3_to_0"
+          },
+          "receipt": "ten_sows_and_restart2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house2",
+                "n": 29,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house3",
+                "n": 30,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house4",
+                "n": 31,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ruma",
+                "n": 32,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  3
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  4
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_3_1_to_4"
+          },
+          "receipt": "ten_sows_and_restart3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house3",
+                "n": 30,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house4",
+                "n": 31,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 4
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_4_2_to_1"
+          },
+          "receipt": "ten_sows_and_restart4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house4",
+                "n": 31,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ruma",
+                "n": 32,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house1",
+                "n": 28,
+                "to": 4
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  3
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_1_4_to_0"
+          },
+          "receipt": "ten_sows_and_restart5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house1",
+                "n": 28,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house2",
+                "n": 29,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house3",
+                "n": 30,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house4",
+                "n": 31,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ruma",
+                "n": 32,
+                "to": 5
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  3
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  4
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  5
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_4_1_to_0"
+          },
+          "receipt": "ten_sows_and_restart6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house4",
+                "n": 31,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ruma",
+                "n": 32,
+                "to": 6
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_2_1_to_3"
+          },
+          "receipt": "ten_sows_and_restart7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house2",
+                "n": 29,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house3",
+                "n": 30,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_3_2_to_0"
+          },
+          "receipt": "ten_sows_and_restart8",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house3",
+                "n": 30,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house4",
+                "n": 31,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ruma",
+                "n": 32,
+                "to": 7
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  3
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_4_1_to_0"
+          },
+          "receipt": "ten_sows_and_restart9",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house4",
+                "n": 31,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ruma",
+                "n": 32,
+                "to": 8
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "restart"
+          },
+          "receipt": "ten_sows_and_restart10",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house1",
+                "n": 28,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house2",
+                "n": 29,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house3",
+                "n": 30,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house4",
+                "n": 31,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ruma",
+                "n": 32,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  3
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  4
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  5
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 2,
+            "house2": 2,
+            "house3": 2,
+            "house4": 2,
+            "ruma": 0,
+            "relay": 0
+          }
+        },
+        "other": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 2,
+            "house2": 2,
+            "house3": 2,
+            "house4": 2,
+            "ruma": 0,
+            "relay": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "loss_and_restart",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 2,
+              "house4": 2,
+              "ruma": 0,
+              "relay": 0
+            }
+          },
+          "other": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 2,
+              "house4": 2,
+              "ruma": 0,
+              "relay": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              480
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_1_2_to_3"
+          },
+          "receipt": "loss_and_restart0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house1",
+                "n": 28,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house2",
+                "n": 29,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house3",
+                "n": 30,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  3
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_3_3_to_5"
+          },
+          "receipt": "loss_and_restart1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house3",
+                "n": 30,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house4",
+                "n": 31,
+                "to": 3
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ruma",
+                "n": 32,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house1",
+                "n": 28,
+                "to": 1
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 5
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  3
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  4
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "restart"
+          },
+          "receipt": "loss_and_restart2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house1",
+                "n": 28,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house2",
+                "n": 29,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house3",
+                "n": 30,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "house4",
+                "n": 31,
+                "to": 2
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "ruma",
+                "n": 32,
+                "to": 0
+              },
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "relay",
+                "n": 33,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  1
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  2
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  3
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  4
+                ]
+              },
+              {
+                "event": "eden:counts_updated",
+                "node": "p1",
+                "changes": [
+                  5
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 2,
+            "house2": 2,
+            "house3": 2,
+            "house4": 2,
+            "ruma": 0,
+            "relay": 0
+          }
+        },
+        "other": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 2,
+            "house2": 2,
+            "house3": 2,
+            "house4": 2,
+            "ruma": 0,
+            "relay": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "full_receiver_refuses_without_debit_or_fanout",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1",
+              "other"
+            ]
+          },
+          "p1": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 3,
+              "house3": 2,
+              "house4": 1,
+              "ruma": 0,
+              "relay": 0
+            }
+          },
+          "other": {
+            "kind": "eden:tchuka_ruma",
+            "fields": {
+              "house1": 2,
+              "house2": 2,
+              "house3": 2,
+              "house4": 2,
+              "ruma": 0,
+              "relay": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              480
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "sow_1_2_to_3"
+          },
+          "receipt": "capacity-fail",
+          "expect": {
+            "verdict": "no",
+            "need": 6,
+            "reason": "field_differs"
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:tchuka_ruma",
+          "fields": {
+            "house1": 2,
+            "house2": 3,
+            "house3": 2,
+            "house4": 1,
+            "ruma": 0,
+            "relay": 0
+          }
+        }
+      }
+    }
+  ]
+}

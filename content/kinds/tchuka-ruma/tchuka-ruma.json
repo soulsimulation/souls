@@ -1,0 +1,3855 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:tchuka_ruma",
+  "owner": "thing",
+  "state": {
+    "house1": {
+      "n": 28,
+      "type": "int",
+      "unit": "count",
+      "default": 2,
+      "min": 0,
+      "max": 4,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "house2": {
+      "n": 29,
+      "type": "int",
+      "unit": "count",
+      "default": 2,
+      "min": 0,
+      "max": 3,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "house3": {
+      "n": 30,
+      "type": "int",
+      "unit": "count",
+      "default": 2,
+      "min": 0,
+      "max": 3,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "house4": {
+      "n": 31,
+      "type": "int",
+      "unit": "count",
+      "default": 2,
+      "min": 0,
+      "max": 4,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "ruma": {
+      "n": 32,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 8,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "relay": {
+      "n": 33,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 5,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        1050
+      ],
+      "yaw_mdeg": 180000
+    },
+    "board": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        850,
+        480
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1620,
+      900,
+      1220
+    ]
+  },
+  "forms": {
+    "sow_1_2_to_3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "house1",
+          "at_least": 2,
+          "at_most": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 4,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 5,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house3",
+          "at_least": 1,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house2",
+          "at_most": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house3",
+          "at_most": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "house1",
+          "to": 0,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house2",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house3",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "relay",
+          "to": 3,
+          "event": "counts_updated"
+        }
+      ]
+    },
+    "sow_1_2_to_5": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "house1",
+          "at_least": 2,
+          "at_most": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 4,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 5,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house3",
+          "is": 0,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house2",
+          "at_most": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house3",
+          "at_most": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "house1",
+          "to": 0,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house2",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house3",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "relay",
+          "to": 5,
+          "event": "counts_updated"
+        }
+      ]
+    },
+    "sow_1_3_to_4": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "house1",
+          "at_least": 3,
+          "at_most": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 4,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 5,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house4",
+          "at_least": 1,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house2",
+          "at_most": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house3",
+          "at_most": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house4",
+          "at_most": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "house1",
+          "to": 0,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house2",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house3",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house4",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "relay",
+          "to": 4,
+          "event": "counts_updated"
+        }
+      ]
+    },
+    "sow_1_3_to_5": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "house1",
+          "at_least": 3,
+          "at_most": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 4,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 5,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house4",
+          "is": 0,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house2",
+          "at_most": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house3",
+          "at_most": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house4",
+          "at_most": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "house1",
+          "to": 0,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house2",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house3",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house4",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "relay",
+          "to": 5,
+          "event": "counts_updated"
+        }
+      ]
+    },
+    "sow_1_4_to_0": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "house1",
+          "at_least": 4,
+          "at_most": 4,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 4,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 5,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house2",
+          "at_most": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house3",
+          "at_most": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house4",
+          "at_most": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "ruma",
+          "at_most": 7,
+          "says": "read_counts"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "house1",
+          "to": 0,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house2",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house3",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house4",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "ruma",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "relay",
+          "to": 0,
+          "event": "counts_updated"
+        }
+      ]
+    },
+    "sow_2_1_to_3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "house2",
+          "at_least": 1,
+          "at_most": 1,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 1,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 4,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 5,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house3",
+          "at_least": 1,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house3",
+          "at_most": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "house2",
+          "to": 0,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house3",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "relay",
+          "to": 3,
+          "event": "counts_updated"
+        }
+      ]
+    },
+    "sow_2_1_to_5": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "house2",
+          "at_least": 1,
+          "at_most": 1,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 1,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 4,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 5,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house3",
+          "is": 0,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house3",
+          "at_most": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "house2",
+          "to": 0,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house3",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "relay",
+          "to": 5,
+          "event": "counts_updated"
+        }
+      ]
+    },
+    "sow_2_2_to_4": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "house2",
+          "at_least": 2,
+          "at_most": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 1,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 4,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 5,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house4",
+          "at_least": 1,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house3",
+          "at_most": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house4",
+          "at_most": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "house2",
+          "to": 0,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house3",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house4",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "relay",
+          "to": 4,
+          "event": "counts_updated"
+        }
+      ]
+    },
+    "sow_2_3_to_0": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "house2",
+          "at_least": 3,
+          "at_most": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 1,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 4,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 5,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house3",
+          "at_most": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house4",
+          "at_most": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "ruma",
+          "at_most": 7,
+          "says": "read_counts"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "house2",
+          "to": 0,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house3",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house4",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "ruma",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "relay",
+          "to": 0,
+          "event": "counts_updated"
+        }
+      ]
+    },
+    "sow_3_1_to_4": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "house3",
+          "at_least": 1,
+          "at_most": 1,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 1,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 4,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 5,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house4",
+          "at_least": 1,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house4",
+          "at_most": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "house3",
+          "to": 0,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house4",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "relay",
+          "to": 4,
+          "event": "counts_updated"
+        }
+      ]
+    },
+    "sow_3_1_to_5": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "house3",
+          "at_least": 1,
+          "at_most": 1,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 1,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 4,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 5,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house4",
+          "is": 0,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house4",
+          "at_most": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "house3",
+          "to": 0,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house4",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "relay",
+          "to": 5,
+          "event": "counts_updated"
+        }
+      ]
+    },
+    "sow_3_2_to_0": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "house3",
+          "at_least": 2,
+          "at_most": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 1,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 4,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 5,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house4",
+          "at_most": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "ruma",
+          "at_most": 7,
+          "says": "read_counts"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "house3",
+          "to": 0,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house4",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "ruma",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "relay",
+          "to": 0,
+          "event": "counts_updated"
+        }
+      ]
+    },
+    "sow_3_3_to_5": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "house3",
+          "at_least": 3,
+          "at_most": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 1,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 4,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 5,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house1",
+          "is": 0,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house4",
+          "at_most": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "ruma",
+          "at_most": 7,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house1",
+          "at_most": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "house3",
+          "to": 0,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house4",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "ruma",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house1",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "relay",
+          "to": 5,
+          "event": "counts_updated"
+        }
+      ]
+    },
+    "sow_4_1_to_0": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "house4",
+          "at_least": 1,
+          "at_most": 1,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 1,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 5,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "ruma",
+          "at_most": 7,
+          "says": "read_counts"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "house4",
+          "to": 0,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "ruma",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "relay",
+          "to": 0,
+          "event": "counts_updated"
+        }
+      ]
+    },
+    "sow_4_2_to_1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "house4",
+          "at_least": 2,
+          "at_most": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 1,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 5,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house1",
+          "at_least": 1,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "ruma",
+          "at_most": 7,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house1",
+          "at_most": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "house4",
+          "to": 0,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "ruma",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house1",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "relay",
+          "to": 1,
+          "event": "counts_updated"
+        }
+      ]
+    },
+    "sow_4_2_to_5": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "house4",
+          "at_least": 2,
+          "at_most": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 1,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 5,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house1",
+          "is": 0,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "ruma",
+          "at_most": 7,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house1",
+          "at_most": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "house4",
+          "to": 0,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "ruma",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house1",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "relay",
+          "to": 5,
+          "event": "counts_updated"
+        }
+      ]
+    },
+    "sow_4_3_to_2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "house4",
+          "at_least": 3,
+          "at_most": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 1,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 5,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house2",
+          "at_least": 1,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "ruma",
+          "at_most": 7,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house1",
+          "at_most": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house2",
+          "at_most": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "house4",
+          "to": 0,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "ruma",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house1",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house2",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "relay",
+          "to": 2,
+          "event": "counts_updated"
+        }
+      ]
+    },
+    "sow_4_3_to_5": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "house4",
+          "at_least": 3,
+          "at_most": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 1,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 5,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house2",
+          "is": 0,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "ruma",
+          "at_most": 7,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house1",
+          "at_most": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house2",
+          "at_most": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "house4",
+          "to": 0,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "ruma",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house1",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house2",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "relay",
+          "to": 5,
+          "event": "counts_updated"
+        }
+      ]
+    },
+    "sow_4_4_to_3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "house4",
+          "at_least": 4,
+          "at_most": 4,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 1,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "relay",
+          "not": 5,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house3",
+          "at_least": 1,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "ruma",
+          "at_most": 7,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house1",
+          "at_most": 3,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house2",
+          "at_most": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "state",
+          "field": "house3",
+          "at_most": 2,
+          "says": "read_counts"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "house4",
+          "to": 0,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "ruma",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house1",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house2",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house3",
+          "by": 1,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "relay",
+          "to": 3,
+          "event": "counts_updated"
+        }
+      ]
+    },
+    "restart": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "empty_hands"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "house1",
+          "to": 2,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house2",
+          "to": 2,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house3",
+          "to": 2,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "house4",
+          "to": 2,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "ruma",
+          "to": 0,
+          "event": "counts_updated"
+        },
+        {
+          "change": "set",
+          "field": "relay",
+          "to": 0,
+          "event": "counts_updated"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:tchuka_ruma",
+    "table": [
+      {
+        "part": "pit1_count1",
+        "field": "house1",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 1,
+          "2": 1,
+          "3": 1,
+          "4": 1
+        }
+      },
+      {
+        "part": "pit1_count2",
+        "field": "house1",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 1,
+          "3": 1,
+          "4": 1
+        }
+      },
+      {
+        "part": "pit1_count3",
+        "field": "house1",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 1,
+          "4": 1
+        }
+      },
+      {
+        "part": "pit1_count4",
+        "field": "house1",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": 1
+        }
+      },
+      {
+        "part": "pit2_count1",
+        "field": "house2",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 1,
+          "2": 1,
+          "3": 1
+        }
+      },
+      {
+        "part": "pit2_count2",
+        "field": "house2",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 1,
+          "3": 1
+        }
+      },
+      {
+        "part": "pit2_count3",
+        "field": "house2",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 1
+        }
+      },
+      {
+        "part": "pit3_count1",
+        "field": "house3",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 1,
+          "2": 1,
+          "3": 1
+        }
+      },
+      {
+        "part": "pit3_count2",
+        "field": "house3",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 1,
+          "3": 1
+        }
+      },
+      {
+        "part": "pit3_count3",
+        "field": "house3",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 1
+        }
+      },
+      {
+        "part": "pit4_count1",
+        "field": "house4",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 1,
+          "2": 1,
+          "3": 1,
+          "4": 1
+        }
+      },
+      {
+        "part": "pit4_count2",
+        "field": "house4",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 1,
+          "3": 1,
+          "4": 1
+        }
+      },
+      {
+        "part": "pit4_count3",
+        "field": "house4",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 1,
+          "4": 1
+        }
+      },
+      {
+        "part": "pit4_count4",
+        "field": "house4",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": 1
+        }
+      },
+      {
+        "part": "pit5_count1",
+        "field": "ruma",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 1,
+          "2": 1,
+          "3": 1,
+          "4": 1,
+          "5": 1,
+          "6": 1,
+          "7": 1,
+          "8": 1
+        }
+      },
+      {
+        "part": "pit5_count2",
+        "field": "ruma",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 1,
+          "3": 1,
+          "4": 1,
+          "5": 1,
+          "6": 1,
+          "7": 1,
+          "8": 1
+        }
+      },
+      {
+        "part": "pit5_count3",
+        "field": "ruma",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 1,
+          "4": 1,
+          "5": 1,
+          "6": 1,
+          "7": 1,
+          "8": 1
+        }
+      },
+      {
+        "part": "pit5_count4",
+        "field": "ruma",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": 1,
+          "5": 1,
+          "6": 1,
+          "7": 1,
+          "8": 1
+        }
+      },
+      {
+        "part": "pit5_count5",
+        "field": "ruma",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": 0,
+          "5": 1,
+          "6": 1,
+          "7": 1,
+          "8": 1
+        }
+      },
+      {
+        "part": "pit5_count6",
+        "field": "ruma",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": 0,
+          "5": 0,
+          "6": 1,
+          "7": 1,
+          "8": 1
+        }
+      },
+      {
+        "part": "pit5_count7",
+        "field": "ruma",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": 0,
+          "5": 0,
+          "6": 0,
+          "7": 1,
+          "8": 1
+        }
+      },
+      {
+        "part": "pit5_count8",
+        "field": "ruma",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 0,
+          "4": 0,
+          "5": 0,
+          "6": 0,
+          "7": 0,
+          "8": 1
+        }
+      },
+      {
+        "part": "relay_pointer",
+        "field": "relay",
+        "do": "slide_x",
+        "at": {
+          "0": 0,
+          "1": 170,
+          "2": 410,
+          "3": 650,
+          "4": 890,
+          "5": 1420
+        }
+      },
+      {
+        "part": "relay_pointer",
+        "field": "relay",
+        "do": "slide_z",
+        "at": {
+          "0": 0,
+          "1": -780,
+          "2": -780,
+          "3": -780,
+          "4": -780,
+          "5": 0
+        }
+      }
+    ],
+    "shape": {
+      "round": 2,
+      "palette": {
+        "wood": "#77563d",
+        "paper": "#e3ddc9",
+        "pit": "#658ca1",
+        "rim": "#263b46",
+        "count": "#e5aa35",
+        "ink": "#25282b",
+        "choice": "#4261a3",
+        "lost": "#ad3e3e",
+        "pointer": "#662b83"
+      },
+      "shapes": [
+        {
+          "at": [
+            0,
+            790,
+            0
+          ],
+          "size": [
+            1600,
+            40,
+            1200
+          ],
+          "tint": "wood"
+        },
+        {
+          "at": [
+            -730,
+            385,
+            -530
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "at": [
+            -730,
+            385,
+            530
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "at": [
+            730,
+            385,
+            -530
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "at": [
+            730,
+            385,
+            530
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "at": [
+            0,
+            817,
+            0
+          ],
+          "size": [
+            1560,
+            14,
+            1160
+          ],
+          "tint": "paper"
+        },
+        {
+          "at": [
+            -540,
+            828,
+            0
+          ],
+          "size": [
+            180,
+            8,
+            180
+          ],
+          "tint": "pit"
+        },
+        {
+          "at": [
+            -540,
+            834,
+            -86
+          ],
+          "size": [
+            180,
+            4,
+            8
+          ],
+          "tint": "rim"
+        },
+        {
+          "at": [
+            -540,
+            834,
+            86
+          ],
+          "size": [
+            180,
+            4,
+            8
+          ],
+          "tint": "rim"
+        },
+        {
+          "at": [
+            -626,
+            834,
+            0
+          ],
+          "size": [
+            8,
+            4,
+            164
+          ],
+          "tint": "rim"
+        },
+        {
+          "at": [
+            -454,
+            834,
+            0
+          ],
+          "size": [
+            8,
+            4,
+            164
+          ],
+          "tint": "rim"
+        },
+        {
+          "at": [
+            -575,
+            836,
+            -35
+          ],
+          "size": [
+            50,
+            8,
+            50
+          ],
+          "role": "pit1_count1",
+          "tint": "count"
+        },
+        {
+          "at": [
+            -505,
+            836,
+            -35
+          ],
+          "size": [
+            50,
+            8,
+            50
+          ],
+          "role": "pit1_count2",
+          "tint": "count"
+        },
+        {
+          "at": [
+            -575,
+            836,
+            35
+          ],
+          "size": [
+            50,
+            8,
+            50
+          ],
+          "role": "pit1_count3",
+          "tint": "count"
+        },
+        {
+          "at": [
+            -505,
+            836,
+            35
+          ],
+          "size": [
+            50,
+            8,
+            50
+          ],
+          "role": "pit1_count4",
+          "tint": "count"
+        },
+        {
+          "at": [
+            -300,
+            828,
+            0
+          ],
+          "size": [
+            180,
+            8,
+            180
+          ],
+          "tint": "pit"
+        },
+        {
+          "at": [
+            -300,
+            834,
+            -86
+          ],
+          "size": [
+            180,
+            4,
+            8
+          ],
+          "tint": "rim"
+        },
+        {
+          "at": [
+            -300,
+            834,
+            86
+          ],
+          "size": [
+            180,
+            4,
+            8
+          ],
+          "tint": "rim"
+        },
+        {
+          "at": [
+            -386,
+            834,
+            0
+          ],
+          "size": [
+            8,
+            4,
+            164
+          ],
+          "tint": "rim"
+        },
+        {
+          "at": [
+            -214,
+            834,
+            0
+          ],
+          "size": [
+            8,
+            4,
+            164
+          ],
+          "tint": "rim"
+        },
+        {
+          "at": [
+            -335,
+            836,
+            -35
+          ],
+          "size": [
+            50,
+            8,
+            50
+          ],
+          "role": "pit2_count1",
+          "tint": "count"
+        },
+        {
+          "at": [
+            -265,
+            836,
+            -35
+          ],
+          "size": [
+            50,
+            8,
+            50
+          ],
+          "role": "pit2_count2",
+          "tint": "count"
+        },
+        {
+          "at": [
+            -335,
+            836,
+            35
+          ],
+          "size": [
+            50,
+            8,
+            50
+          ],
+          "role": "pit2_count3",
+          "tint": "count"
+        },
+        {
+          "at": [
+            -60,
+            828,
+            0
+          ],
+          "size": [
+            180,
+            8,
+            180
+          ],
+          "tint": "pit"
+        },
+        {
+          "at": [
+            -60,
+            834,
+            -86
+          ],
+          "size": [
+            180,
+            4,
+            8
+          ],
+          "tint": "rim"
+        },
+        {
+          "at": [
+            -60,
+            834,
+            86
+          ],
+          "size": [
+            180,
+            4,
+            8
+          ],
+          "tint": "rim"
+        },
+        {
+          "at": [
+            -146,
+            834,
+            0
+          ],
+          "size": [
+            8,
+            4,
+            164
+          ],
+          "tint": "rim"
+        },
+        {
+          "at": [
+            26,
+            834,
+            0
+          ],
+          "size": [
+            8,
+            4,
+            164
+          ],
+          "tint": "rim"
+        },
+        {
+          "at": [
+            -95,
+            836,
+            -35
+          ],
+          "size": [
+            50,
+            8,
+            50
+          ],
+          "role": "pit3_count1",
+          "tint": "count"
+        },
+        {
+          "at": [
+            -25,
+            836,
+            -35
+          ],
+          "size": [
+            50,
+            8,
+            50
+          ],
+          "role": "pit3_count2",
+          "tint": "count"
+        },
+        {
+          "at": [
+            -95,
+            836,
+            35
+          ],
+          "size": [
+            50,
+            8,
+            50
+          ],
+          "role": "pit3_count3",
+          "tint": "count"
+        },
+        {
+          "at": [
+            180,
+            828,
+            0
+          ],
+          "size": [
+            180,
+            8,
+            180
+          ],
+          "tint": "pit"
+        },
+        {
+          "at": [
+            180,
+            834,
+            -86
+          ],
+          "size": [
+            180,
+            4,
+            8
+          ],
+          "tint": "rim"
+        },
+        {
+          "at": [
+            180,
+            834,
+            86
+          ],
+          "size": [
+            180,
+            4,
+            8
+          ],
+          "tint": "rim"
+        },
+        {
+          "at": [
+            94,
+            834,
+            0
+          ],
+          "size": [
+            8,
+            4,
+            164
+          ],
+          "tint": "rim"
+        },
+        {
+          "at": [
+            266,
+            834,
+            0
+          ],
+          "size": [
+            8,
+            4,
+            164
+          ],
+          "tint": "rim"
+        },
+        {
+          "at": [
+            145,
+            836,
+            -35
+          ],
+          "size": [
+            50,
+            8,
+            50
+          ],
+          "role": "pit4_count1",
+          "tint": "count"
+        },
+        {
+          "at": [
+            215,
+            836,
+            -35
+          ],
+          "size": [
+            50,
+            8,
+            50
+          ],
+          "role": "pit4_count2",
+          "tint": "count"
+        },
+        {
+          "at": [
+            145,
+            836,
+            35
+          ],
+          "size": [
+            50,
+            8,
+            50
+          ],
+          "role": "pit4_count3",
+          "tint": "count"
+        },
+        {
+          "at": [
+            215,
+            836,
+            35
+          ],
+          "size": [
+            50,
+            8,
+            50
+          ],
+          "role": "pit4_count4",
+          "tint": "count"
+        },
+        {
+          "at": [
+            520,
+            828,
+            0
+          ],
+          "size": [
+            320,
+            8,
+            180
+          ],
+          "tint": "pit"
+        },
+        {
+          "at": [
+            520,
+            834,
+            -86
+          ],
+          "size": [
+            320,
+            4,
+            8
+          ],
+          "tint": "rim"
+        },
+        {
+          "at": [
+            520,
+            834,
+            86
+          ],
+          "size": [
+            320,
+            4,
+            8
+          ],
+          "tint": "rim"
+        },
+        {
+          "at": [
+            364,
+            834,
+            0
+          ],
+          "size": [
+            8,
+            4,
+            164
+          ],
+          "tint": "rim"
+        },
+        {
+          "at": [
+            676,
+            834,
+            0
+          ],
+          "size": [
+            8,
+            4,
+            164
+          ],
+          "tint": "rim"
+        },
+        {
+          "at": [
+            415,
+            836,
+            -35
+          ],
+          "size": [
+            50,
+            8,
+            50
+          ],
+          "role": "pit5_count1",
+          "tint": "count"
+        },
+        {
+          "at": [
+            485,
+            836,
+            -35
+          ],
+          "size": [
+            50,
+            8,
+            50
+          ],
+          "role": "pit5_count2",
+          "tint": "count"
+        },
+        {
+          "at": [
+            555,
+            836,
+            -35
+          ],
+          "size": [
+            50,
+            8,
+            50
+          ],
+          "role": "pit5_count3",
+          "tint": "count"
+        },
+        {
+          "at": [
+            625,
+            836,
+            -35
+          ],
+          "size": [
+            50,
+            8,
+            50
+          ],
+          "role": "pit5_count4",
+          "tint": "count"
+        },
+        {
+          "at": [
+            415,
+            836,
+            35
+          ],
+          "size": [
+            50,
+            8,
+            50
+          ],
+          "role": "pit5_count5",
+          "tint": "count"
+        },
+        {
+          "at": [
+            485,
+            836,
+            35
+          ],
+          "size": [
+            50,
+            8,
+            50
+          ],
+          "role": "pit5_count6",
+          "tint": "count"
+        },
+        {
+          "at": [
+            555,
+            836,
+            35
+          ],
+          "size": [
+            50,
+            8,
+            50
+          ],
+          "role": "pit5_count7",
+          "tint": "count"
+        },
+        {
+          "at": [
+            625,
+            836,
+            35
+          ],
+          "size": [
+            50,
+            8,
+            50
+          ],
+          "role": "pit5_count8",
+          "tint": "count"
+        },
+        {
+          "at": [
+            25,
+            827,
+            150
+          ],
+          "size": [
+            8,
+            6,
+            1250
+          ],
+          "yaw": 90000,
+          "tint": "ink"
+        },
+        {
+          "at": [
+            638,
+            827,
+            141
+          ],
+          "size": [
+            8,
+            6,
+            31
+          ],
+          "yaw": -125754,
+          "tint": "ink"
+        },
+        {
+          "at": [
+            638,
+            827,
+            159
+          ],
+          "size": [
+            8,
+            6,
+            31
+          ],
+          "yaw": -54246,
+          "tint": "ink"
+        },
+        {
+          "at": [
+            650,
+            827,
+            285
+          ],
+          "size": [
+            8,
+            6,
+            130
+          ],
+          "yaw": 0,
+          "tint": "ink"
+        },
+        {
+          "at": [
+            0,
+            827,
+            350
+          ],
+          "size": [
+            8,
+            6,
+            1300
+          ],
+          "yaw": -90000,
+          "tint": "ink"
+        },
+        {
+          "at": [
+            -650,
+            827,
+            285
+          ],
+          "size": [
+            8,
+            6,
+            130
+          ],
+          "yaw": 180000,
+          "tint": "ink"
+        },
+        {
+          "at": [
+            -659,
+            827,
+            232
+          ],
+          "size": [
+            8,
+            6,
+            31
+          ],
+          "yaw": -35754,
+          "tint": "ink"
+        },
+        {
+          "at": [
+            -641,
+            827,
+            232
+          ],
+          "size": [
+            8,
+            6,
+            31
+          ],
+          "yaw": 35754,
+          "tint": "ink"
+        },
+        {
+          "at": [
+            -530,
+            827,
+            -220
+          ],
+          "size": [
+            10,
+            6,
+            80
+          ],
+          "yaw": 0,
+          "tint": "ink"
+        },
+        {
+          "at": [
+            -540,
+            827,
+            -250
+          ],
+          "size": [
+            10,
+            6,
+            28
+          ],
+          "yaw": 135000,
+          "tint": "ink"
+        },
+        {
+          "at": [
+            -535,
+            827,
+            -180
+          ],
+          "size": [
+            10,
+            6,
+            40
+          ],
+          "yaw": 90000,
+          "tint": "ink"
+        },
+        {
+          "at": [
+            -300,
+            827,
+            -260
+          ],
+          "size": [
+            10,
+            6,
+            50
+          ],
+          "yaw": 90000,
+          "tint": "ink"
+        },
+        {
+          "at": [
+            -275,
+            827,
+            -240
+          ],
+          "size": [
+            10,
+            6,
+            40
+          ],
+          "yaw": 0,
+          "tint": "ink"
+        },
+        {
+          "at": [
+            -300,
+            827,
+            -220
+          ],
+          "size": [
+            10,
+            6,
+            50
+          ],
+          "yaw": -90000,
+          "tint": "ink"
+        },
+        {
+          "at": [
+            -325,
+            827,
+            -200
+          ],
+          "size": [
+            10,
+            6,
+            40
+          ],
+          "yaw": 0,
+          "tint": "ink"
+        },
+        {
+          "at": [
+            -300,
+            827,
+            -180
+          ],
+          "size": [
+            10,
+            6,
+            50
+          ],
+          "yaw": 90000,
+          "tint": "ink"
+        },
+        {
+          "at": [
+            -60,
+            827,
+            -260
+          ],
+          "size": [
+            10,
+            6,
+            50
+          ],
+          "yaw": 90000,
+          "tint": "ink"
+        },
+        {
+          "at": [
+            -60,
+            827,
+            -220
+          ],
+          "size": [
+            10,
+            6,
+            50
+          ],
+          "yaw": 90000,
+          "tint": "ink"
+        },
+        {
+          "at": [
+            -60,
+            827,
+            -180
+          ],
+          "size": [
+            10,
+            6,
+            50
+          ],
+          "yaw": 90000,
+          "tint": "ink"
+        },
+        {
+          "at": [
+            -35,
+            827,
+            -220
+          ],
+          "size": [
+            10,
+            6,
+            80
+          ],
+          "yaw": 0,
+          "tint": "ink"
+        },
+        {
+          "at": [
+            155,
+            827,
+            -240
+          ],
+          "size": [
+            10,
+            6,
+            40
+          ],
+          "yaw": 0,
+          "tint": "ink"
+        },
+        {
+          "at": [
+            180,
+            827,
+            -220
+          ],
+          "size": [
+            10,
+            6,
+            50
+          ],
+          "yaw": 90000,
+          "tint": "ink"
+        },
+        {
+          "at": [
+            205,
+            827,
+            -220
+          ],
+          "size": [
+            10,
+            6,
+            80
+          ],
+          "yaw": 0,
+          "tint": "ink"
+        },
+        {
+          "at": [
+            495,
+            827,
+            -220
+          ],
+          "size": [
+            10,
+            6,
+            80
+          ],
+          "yaw": 0,
+          "tint": "ink"
+        },
+        {
+          "at": [
+            520,
+            827,
+            -260
+          ],
+          "size": [
+            10,
+            6,
+            50
+          ],
+          "yaw": 90000,
+          "tint": "ink"
+        },
+        {
+          "at": [
+            545,
+            827,
+            -240
+          ],
+          "size": [
+            10,
+            6,
+            40
+          ],
+          "yaw": 0,
+          "tint": "ink"
+        },
+        {
+          "at": [
+            520,
+            827,
+            -220
+          ],
+          "size": [
+            10,
+            6,
+            50
+          ],
+          "yaw": -90000,
+          "tint": "ink"
+        },
+        {
+          "at": [
+            532,
+            827,
+            -200
+          ],
+          "size": [
+            10,
+            6,
+            47
+          ],
+          "yaw": 32005,
+          "tint": "ink"
+        },
+        {
+          "at": [
+            -640,
+            827,
+            420
+          ],
+          "size": [
+            10,
+            6,
+            50
+          ],
+          "yaw": -90000,
+          "tint": "choice"
+        },
+        {
+          "at": [
+            -665,
+            827,
+            460
+          ],
+          "size": [
+            10,
+            6,
+            80
+          ],
+          "yaw": 0,
+          "tint": "choice"
+        },
+        {
+          "at": [
+            -640,
+            827,
+            500
+          ],
+          "size": [
+            10,
+            6,
+            50
+          ],
+          "yaw": 90000,
+          "tint": "choice"
+        },
+        {
+          "at": [
+            640,
+            827,
+            460
+          ],
+          "size": [
+            10,
+            6,
+            94
+          ],
+          "yaw": 32005,
+          "tint": "lost"
+        },
+        {
+          "at": [
+            640,
+            827,
+            460
+          ],
+          "size": [
+            10,
+            6,
+            94
+          ],
+          "yaw": -32005,
+          "tint": "lost"
+        },
+        {
+          "at": [
+            -710,
+            827,
+            460
+          ],
+          "size": [
+            20,
+            6,
+            20
+          ],
+          "role": "relay_pointer",
+          "tint": "pointer"
+        }
+      ],
+      "tags": [
+        "game",
+        "sowing",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "game": "game",
+    "sowing": "relay sowing",
+    "tchuka": "Tchuka Ruma",
+    "card": "Sow a house count rightward; follow the forced relay to collect eight in Ruma.",
+    "read_counts": "Read all five counts and the relay pointer; choose an offered sow with that house count and landing condition.",
+    "empty_hands": "Put down what you hold before using the sowing board.",
+    "rules": "Classic fixed start: houses 1 to 4 each show two units; Ruma R starts empty. One action sows the chosen nonempty house: remove its entire count and add one to each successive pit to the right, including Ruma, wrapping from Ruma to house 1. Never sow from Ruma. When the last unit lands in Ruma, choose any nonempty house. Otherwise, if its landing house was already occupied, the next action must sow that house. Landing in a previously empty house loses. All eight in Ruma is the goal. Each action is one sow, not an automatic chain.",
+    "display": "Each gold mounted cap represents one count unit. The purple pointer beside blue C means choice, above a numbered house means that house is forced, and beside red X means loss. The rightward and wrap arrows show direction. Houses have maximum counts 4,3,3,4 and Ruma 8 in this classic setup. Inspect house1, house2, house3, house4, ruma and relay for exact values; relay 0=choice,1 to 4=forced house,5=loss.",
+    "solution": "One complete solution uses houses 3,4,2,3,4,1,4,2,3,4. These are ten separate sow actions, including mandatory relays, or six completed chains in the paper terminology. The board stores no move count or solution solver.",
+    "loss_restart": "Starting with house 1 forces house 3; sowing house 3 then loses by landing in a previously empty house. Explicit restart restores two in each house, empty Ruma and choice. Restart is a trainer control for a new attempt, not continuing a lost game. It is available from any state.",
+    "limits": "This board supports the classic 2222|0 start and its reachable histories. It is not arbitrary setup or generalized Mancala. Some natural sows in unreachable externally authored histories have no offered form. The twenty-two integral potential count caps are a symbolic display, not eight portable physical beans. No per-bean trajectory, custody, material transfer, score, turn, history or automatic relay is claimed.",
+    "source": "Rules follow Campbell and Chavey, Tchuka Ruma Solitaire, The UMAP Journal 16(4), 1995, pages 343 to 345. Original mounted drawing; no source artwork copied and no definite cultural-origin attribution."
+  },
+  "card": {
+    "text": "card",
+    "category": "game",
+    "synonyms": [
+      "sowing",
+      "tchuka"
+    ]
+  },
+  "howtos": {
+    "rules": {
+      "text": "rules",
+      "steps": [
+        {
+          "form": "sow_3_2_to_0"
+        },
+        {
+          "form": "restart"
+        }
+      ]
+    },
+    "read_display": {
+      "text": "display",
+      "steps": [
+        {
+          "form": "sow_3_2_to_0"
+        },
+        {
+          "form": "restart"
+        }
+      ]
+    },
+    "ten_sow_example": {
+      "text": "solution",
+      "steps": [
+        {
+          "form": "sow_3_2_to_0"
+        },
+        {
+          "form": "sow_4_3_to_2"
+        },
+        {
+          "form": "sow_2_3_to_0"
+        },
+        {
+          "form": "sow_3_1_to_4"
+        },
+        {
+          "form": "sow_4_2_to_1"
+        },
+        {
+          "form": "sow_1_4_to_0"
+        },
+        {
+          "form": "sow_4_1_to_0"
+        },
+        {
+          "form": "sow_2_1_to_3"
+        },
+        {
+          "form": "sow_3_2_to_0"
+        },
+        {
+          "form": "sow_4_1_to_0"
+        },
+        {
+          "form": "restart"
+        }
+      ]
+    },
+    "loss_and_new_attempt": {
+      "text": "loss_restart",
+      "steps": [
+        {
+          "form": "sow_1_2_to_3"
+        },
+        {
+          "form": "sow_3_3_to_5"
+        },
+        {
+          "form": "restart"
+        }
+      ]
+    },
+    "integral_count_display": {
+      "text": "limits",
+      "steps": [
+        {
+          "form": "sow_3_2_to_0"
+        },
+        {
+          "form": "restart"
+        }
+      ]
+    },
+    "primary_rules": {
+      "text": "source",
+      "steps": [
+        {
+          "form": "sow_3_2_to_0"
+        },
+        {
+          "form": "restart"
+        }
+      ]
+    }
+  }
+}
