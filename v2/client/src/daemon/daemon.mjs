@@ -941,7 +941,8 @@ function towardOf(req) {
   const them = found[0], forms = heldKinds()[me?.kind]?.forms ?? {};
   const takes = (f) => Object.keys(forms[f]?.takes ?? {});
   const gestures = Object.entries(forms).filter(([, f]) => f.steps?.length && f.steps.every((x) => x.step === 'move') && Object.keys(f.takes ?? {}).every((k) => k === 'toward'));
-  const g = req.gesture === undefined ? null : String(req.gesture);
+  // Today's verbs are hyphenated (`shake-head`); a kind's form names are snake_case (`shake_head_at`).
+  const g = req.gesture === undefined ? null : String(req.gesture).replace(/-/g, '_');
   let form = g === null ? (forms.look_at && takes('look_at').includes('target') ? 'look_at' : null) : null, arg = 'target';
   if (g !== null) {
     form = [`${g}_at`, `${g}_to`, g].find((f) => gestures.some(([n]) => n === f) && takes(f).includes('toward')) ?? (gestures.some(([n]) => n === g) ? g : null);

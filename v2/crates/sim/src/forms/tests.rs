@@ -681,6 +681,66 @@ fn f2_a3_a_resend_across_a_restart_gets_the_first_receipt() {
     assert_eq!(effect_entries(&log).len(), 1);
 }
 
+/// Whether entry `e` is a run's move record for viewers (#3741).
+fn is_move_record(e: &Effect) -> bool {
+    e.events
+        .iter()
+        .flatten()
+        .any(|v| v.name.as_str() == "souls:form-move")
+}
+
+/// #3741: a run's move writes its B2 record for viewers (the body, and the move's name, start and phase ends), seen
+/// by everyone, changing nothing; and a restart from a log holding it recovers exactly as from the same log without.
+#[test]
+fn a_runs_move_record_is_written_for_viewers_and_a_restart_ignores_it() {
+    let (entry, form) = effecting();
+    let mut b = Bench::new();
+    let (body, node) = b.add(&entry, Vec3::new(0, 0, 3_000_000), Vec3::ZERO);
+    let it = intent(body, 11);
+    assert!(matches!(
+        b.ask(body, node, &entry, &form, Limits::default(), it),
+        Ok(Asked::Started(_))
+    ));
+    let mut log = Vec::new();
+    while !log.iter().any(is_move_record) {
+        assert!(!b.forms.is_empty(), "the run ended without a move record");
+        b.tick();
+        b.flush(&mut log);
+    }
+    let rec = log.iter().find(|e| is_move_record(e)).expect("the record");
+    assert_eq!(
+        rec.envelope.audience,
+        replica::world_model::Audience::Everyone
+    );
+    assert_eq!(rec.envelope.cause, Cause::Intent(it.id));
+    assert!(
+        matches!(&rec.body, Body::Changes(c) if c.is_empty()),
+        "it changes nothing"
+    );
+    let ev = &rec.events.as_ref().expect("events")[0];
+    assert_eq!(ev.fields.get(&2), Some(&body.to_value()));
+    let Some(Value::Map(m)) = ev.fields.get(&3) else {
+        panic!("a move record: {ev:?}")
+    };
+    assert!(
+        matches!(m.get(&2), Some(Value::Bytes(_))),
+        "the move's name"
+    );
+    assert!(
+        matches!(m.get(&8), Some(Value::Array(a)) if !a.is_empty()),
+        "its phase ends"
+    );
+    // A restart mid-run: the same endings, entries and runs with the record as without it.
+    let now = b.now;
+    let without: Vec<Effect> = log.iter().filter(|e| !is_move_record(e)).cloned().collect();
+    let (a, c) = (Forms::recover(&log, now), Forms::recover(&without, now));
+    assert_eq!(a.ended, c.ended);
+    assert_eq!(a.out, c.out);
+    assert_eq!((a.is_empty(), a.len()), (c.is_empty(), c.len()));
+    b.run(now + 60_000_000);
+    b.clean();
+}
+
 fn splitmix(x: &mut u64) -> u64 {
     *x = x.wrapping_add(0x9e37_79b9_7f4a_7c15);
     let mut z = *x;
