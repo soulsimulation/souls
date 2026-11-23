@@ -217,6 +217,7 @@ fn eden_things_indoors_are_reached_from_their_doorways() {
                 node: ground,
                 from,
                 target,
+                carried: false,
             };
             let t2 = Instant::now();
             let wrote = spots.write(g, &[ask], 0).is_ok();

@@ -13,7 +13,8 @@
 # writes the v2 stream into the old page and serves the replica (tools/world-launcher/cutover.mjs; v2/docs/cutover.md).
 # Only these go to the new system:
 # - Streams: /s/* to the viewers' origin (7320), the stream a switched world's old page reads.
-# - A switched world's gateway: /w/<slug>/v2/(ws|creator-token|entries) to the agents' relay (7330, #4152), only for a
+# - A switched world's gateway: /w/<slug>/v2/(ws|creator-token|entries) and its allowed uploads, /w/<slug>/v2/uploads/
+#   <hash> (K3: a creator's kind's model, which the old page draws), to the agents' relay (7330, #4152), only for a
 #   slug with an activation file in /var/lib/souls-routes/slugs (routes.mjs, run each minute by souls-routes.timer).
 #   Every other address under /w/<slug>/ stays with today's launcher; an unmapped slug's v2 paths do too.
 # - A switched world's bootstrap, /w/<slug>/v1/bootstrap, to the viewers' origin (7320), under the same activation
@@ -33,7 +34,7 @@ https://soul.game {
 	@api path /__sim/* /v1/* /w/*/v1/* /w/*/v2/* /s/*
 	header @api ?X-Robots-Tag "noindex, nofollow"
 
-	@agents path_regexp agents ^/w/([a-z0-9][a-z0-9-]{0,62})/v2/(ws|creator-token|entries)$
+	@agents path_regexp agents ^/w/([a-z0-9][a-z0-9-]{0,62})/v2/(ws|creator-token|entries|uploads/1220[0-9a-f]{64})$
 	handle @agents {
 		# The outer match sets the slug capture before the dependent activation-file lookup.
 		@active file {

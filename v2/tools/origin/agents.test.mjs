@@ -19,7 +19,8 @@ test('the front door sends every agent path to the relay on 7330; the page and i
   const agents = matcher('agents');
   assert.equal(upstream('agents'), '7330');
   for (const base of ['/w/eden', '/w/new-town']) {
-    for (const path of ['v2/ws', 'v2/creator-token', 'v2/entries']) assert.ok(agents.test(`${base}/${path}`), `${base}/${path} reaches the relay`);
+    for (const path of ['v2/ws', 'v2/creator-token', 'v2/entries', `v2/uploads/1220${'ab'.repeat(32)}`]) assert.ok(agents.test(`${base}/${path}`), `${base}/${path} reaches the relay`);
+    for (const path of ['v2/uploads/abc', `v2/uploads/1220${'ab'.repeat(32)}/x`, 'v2/uploads/']) assert.ok(!agents.test(`${base}/${path}`), `${base}/${path} is no upload`);
     for (const path of ['', 'views/world.json', 'eden.mjs', 'v1/config']) assert.ok(!agents.test(`${base}/${path}`), `${base}/${path} stays with today's launcher`);
   }
   // a switched world's bootstrap goes to the viewers' origin, for the new Soul client's pairing (F4)
@@ -36,7 +37,8 @@ before(async () => {
   mkdirSync(scratch, { recursive: true });
   dir = mkdtempSync(join(scratch, 'v2-agents-'));
   // A gateway stand-in: answers its socket path with 101 and echoes what follows.
-  gateway = createServer((req, res) => res.writeHead(404).end());
+  // K3: an allowed upload answers its bytes, immutable; any other path 404
+  gateway = createServer((req, res) => (req.url === `/v2/uploads/1220${'cd'.repeat(32)}` ? res.writeHead(200, { 'content-type': 'model/gltf-binary', 'cache-control': 'public, max-age=31536000, immutable' }).end('glb') : res.writeHead(404).end()));
   gateway.on('upgrade', (req, socket) => {
     if (req.url !== '/v2/ws') return socket.end('HTTP/1.1 404 Not Found\r\n\r\n');
     socket.write('HTTP/1.1 101 Switching Protocols\r\nUpgrade: websocket\r\nConnection: Upgrade\r\n\r\n');
@@ -94,4 +96,15 @@ test('the relay refuses as the origin does: unrouted, archived, foreign Origin, 
   }
   assert.equal((await fetch(`http://127.0.0.1:${port}/s/eden/pointer`)).status, 404);
   assert.equal((await fetch(`http://127.0.0.1:${port}/w/eden/v2/ws`)).status, 405);
+});
+
+test('K3: a switched world\'s allowed upload passes through the relay as the gateway serves it, GET and HEAD only', async () => {
+  const at = `http://127.0.0.1:${port}/w/eden/v2/uploads/1220`;
+  const r = await fetch(`${at}${'cd'.repeat(32)}`);
+  assert.equal(r.status, 200); assert.equal(await r.text(), 'glb');
+  assert.equal(r.headers.get('cache-control'), 'public, max-age=31536000, immutable', 'immutable, as the gateway says');
+  assert.equal((await fetch(`${at}${'cd'.repeat(32)}`, { method: 'HEAD' })).status, 200);
+  assert.equal((await fetch(`${at}${'ef'.repeat(32)}`)).status, 404, 'not an allowed upload');
+  assert.equal((await fetch(`${at}${'cd'.repeat(32)}`, { method: 'POST' })).status, 405);
+  assert.equal((await fetch(`http://127.0.0.1:${port}/w/old/v2/uploads/1220${'cd'.repeat(32)}`)).status, 410, 'an archived world serves none');
 });

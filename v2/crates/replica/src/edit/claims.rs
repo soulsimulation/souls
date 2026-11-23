@@ -19,15 +19,18 @@
 //! The claim check, in [`super::check`] before the safety rule: an edit sent under a claim (its parameter 6) touches
 //! only things inside that claim's area, before and after each operation, and never the root's fields
 //! (`edit.outside-claim`); an edit sent under no claim does not touch anything inside a live claim (`edit.claimed`);
-//! an edit naming a claim that is not live is refused `edit.claim-unknown`. Where a thing is: its origin in the root's
-//! frame; a removal tests the whole subtree, and the owning end of the doorway its field 7 names, whose rows the
-//! unlink rewrites; a place tests its spot in its parent (a slot's offset aside).
+//! an edit naming a claim that is not live is refused `edit.claim-unknown`. Where a thing is: the points of its
+//! outline (field 11) and line (16) when it has a shape, a road or a lawn standing at its parent's origin (#3962),
+//! else its origin, in the root's frame; a removal tests the whole subtree, a move each node before and after; a place
+//! tests its spot in its parent (a slot's offset aside); a set of an outline or line tests the old and the new shape;
+//! a removal also tests the owning end of the doorway its field 7 names, whose rows the unlink rewrites.
 
 use super::{Edit, Op, Ref, Refused, refuse};
 use crate::apply::Replica;
 use crate::encode::{Name, Value};
 use crate::ids::Id;
-use crate::pose::Vec3;
+use crate::pose::{Quat, Vec3};
+use crate::tree::Tree;
 use std::collections::{BTreeMap, BTreeSet};
 
 /// The root's field holding the district plans.
@@ -350,6 +353,63 @@ pub fn admits(edit: &Edit, copy: &Replica, creator: Id) -> bool {
     }
 }
 
+/// A node's slot, place and turn as a move would set them (see [`crate::select::to_root_point_moved`]).
+type Moved = (Id, Option<u64>, Vec3, Quat);
+
+/// Where a thing is in its own frame, µm: the points of its outline and line when it has a shape (a road, a lawn,
+/// which stand at their parent's origin, #3962), read as `select` reads a shape; else its origin. `None` for a shape
+/// that does not read.
+fn locals(fields: &BTreeMap<u64, Value>) -> Vec<Option<Vec3>> {
+    match crate::select::shape_points(fields) {
+        Some(p) if p.is_empty() => vec![Some(Vec3::ZERO)],
+        Some(p) => p.into_iter().map(Some).collect(),
+        None => vec![None],
+    }
+}
+
+/// Whether a set of `field` reshapes a thing.
+fn reshapes(field: u64) -> bool {
+    field == crate::select::F_OUTLINE || field == crate::select::F_LINE
+}
+
+/// A node's own fields on the copy (none for a node it does not hold).
+fn fields_of(tree: &Tree, id: Id) -> BTreeMap<u64, Value> {
+    tree.handle(id)
+        .and_then(|h| tree.node(h))
+        .map(|n| n.fields().clone())
+        .unwrap_or_default()
+}
+
+/// Where a node on the copy is ([`locals`]) in the root's frame, as `moved` would put it.
+fn node_points(
+    tree: &Tree,
+    id: Id,
+    fields: &BTreeMap<u64, Value>,
+    moved: Option<Moved>,
+) -> Vec<Option<Vec3>> {
+    locals(fields)
+        .into_iter()
+        .map(|q| match moved {
+            None => crate::select::to_root_point(tree, id, q?),
+            Some(m) => crate::select::to_root_point_moved(tree, id, q?, m),
+        })
+        .collect()
+}
+
+/// Where a thing with `fields` set at `position`, turned `orientation`, would be: `to_root` takes a point in its
+/// parent's frame into the root's.
+fn set_points(
+    fields: &BTreeMap<u64, Value>,
+    position: Vec3,
+    orientation: Quat,
+    to_root: impl Fn(Vec3) -> Option<Vec3>,
+) -> Vec<Option<Vec3>> {
+    locals(fields)
+        .into_iter()
+        .map(|q| to_root(position.plus(orientation.rotate(q?).ok()?).ok()?))
+        .collect()
+}
+
 /// The claim check for an undo or a redo (#3727): the lead's, under no claim, so no change it would write may touch
 /// a live claim's area, before or after. Run on the checker's copy and again on the live copy at the tick.
 pub fn judge_effects(copy: &Replica, effects: &[crate::effects::Effect]) -> Result<(), Refused> {
@@ -360,7 +420,7 @@ pub fn judge_effects(copy: &Replica, effects: &[crate::effects::Effect]) -> Resu
     }
     let tree = copy.tree();
     let root = tree.node(tree.root()).map(|n| n.id());
-    let at = |id: Id| crate::select::to_root_point(tree, id, Vec3::ZERO);
+    let at = |id: Id| node_points(tree, id, &fields_of(tree, id), None);
     let below = |id: Id| {
         let mut out = Vec::new();
         let mut stack = vec![id];
@@ -377,11 +437,11 @@ pub fn judge_effects(copy: &Replica, effects: &[crate::effects::Effect]) -> Resu
         let Body::Changes(cs) = &e.body else { continue };
         for c in cs {
             match &c.change {
-                Change::Create { pose, .. } => points.push(crate::select::to_root_point(
-                    tree,
-                    pose.frame.node,
-                    pose.position,
-                )),
+                Change::Create { pose, fields, .. } => {
+                    points.extend(set_points(fields, pose.position, pose.orientation, |p| {
+                        crate::select::to_root_point(tree, pose.frame.node, p)
+                    }))
+                }
                 Change::Reparent { node, pose, .. } => {
                     let same = tree
                         .handle(*node)
@@ -389,31 +449,36 @@ pub fn judge_effects(copy: &Replica, effects: &[crate::effects::Effect]) -> Resu
                         .and_then(|n| n.parent())
                         == Some(pose.frame.node);
                     for d in below(*node) {
-                        points.push(at(d));
-                        points.push(if same {
-                            crate::select::to_root_point_moved(
+                        let f = fields_of(tree, d);
+                        points.extend(node_points(tree, d, &f, None));
+                        if same {
+                            points.extend(node_points(
                                 tree,
                                 d,
-                                Vec3::ZERO,
-                                (*node, pose.frame.slot, pose.position, pose.orientation),
-                            )
+                                &f,
+                                Some((*node, pose.frame.slot, pose.position, pose.orientation)),
+                            ));
                         } else if d == *node {
-                            crate::select::to_root_point(tree, pose.frame.node, pose.position)
-                        } else {
-                            None
-                        });
+                            points.extend(set_points(&f, pose.position, pose.orientation, |p| {
+                                crate::select::to_root_point(tree, pose.frame.node, p)
+                            }));
+                        }
                     }
                 }
-                Change::Set { node, .. } if Some(*node) != root => points.push(at(*node)),
-                Change::Remove { node } => points.extend(below(*node).into_iter().map(at)),
-                // A link (or its end) is judged at both its ends, since the walkers' map changes at each (#3728,
-                // #3934 review); the row's and the door's own sets are judged above.
-                Change::Link { ends, .. } => points.extend(ends.iter().map(|e| at(*e))),
-                Change::Unlink { link } => {
-                    if let Some((_, ends, ..)) = tree.link(*link) {
-                        points.extend(ends.iter().map(|e| at(*e)));
+                Change::Set {
+                    node, field, to, ..
+                } if Some(*node) != root => {
+                    let mut f = fields_of(tree, *node);
+                    points.extend(node_points(tree, *node, &f, None));
+                    if reshapes(*field) {
+                        f.insert(*field, to.clone());
+                        points.extend(node_points(tree, *node, &f, None));
                     }
                 }
+                Change::Remove { node } => points.extend(below(*node).into_iter().flat_map(at)),
+                // A link is judged at both its ends, since the walkers' map changes at each (#3728, #3934 review); an
+                // unlink is written with its owning end's rows, a set judged above.
+                Change::Link { ends, .. } => points.extend(ends.iter().flat_map(|e| at(*e))),
                 _ => {}
             }
         }
@@ -451,6 +516,50 @@ struct Touch {
     points: Vec<Vec3>,
     root: bool,
     lost: bool,
+}
+
+/// A node placed earlier in the batch: its parent, its spot there, its fields, and how far moves of a node on the copy
+/// above it have carried it (`None` once that cannot be read).
+struct Placed {
+    parent: Ref,
+    position: Vec3,
+    orientation: Quat,
+    fields: BTreeMap<u64, Value>,
+    shift: Option<Vec3>,
+}
+
+/// A point in `parent`'s frame (µm) in the root's; a node placed in this batch is taken at its origin, unturned.
+fn point_in(tree: &Tree, placed: &BTreeMap<u64, Placed>, parent: Ref, p: Vec3) -> Option<Vec3> {
+    match parent {
+        Ref::Node(id) => crate::select::to_root_point(tree, id, p),
+        Ref::New(_) => origin(tree, placed, parent)?.plus(p).ok(),
+    }
+}
+
+/// Where a node's origin is in the root's frame.
+fn origin(tree: &Tree, placed: &BTreeMap<u64, Placed>, r: Ref) -> Option<Vec3> {
+    match r {
+        Ref::Node(id) => crate::select::to_root_point(tree, id, Vec3::ZERO),
+        Ref::New(n) => {
+            let x = placed.get(&n)?;
+            point_in(tree, placed, x.parent, x.position)?
+                .plus(x.shift?)
+                .ok()
+        }
+    }
+}
+
+/// Where a node is ([`locals`]) in the root's frame.
+fn points_of(tree: &Tree, placed: &BTreeMap<u64, Placed>, r: Ref) -> Vec<Option<Vec3>> {
+    match r {
+        Ref::Node(id) => node_points(tree, id, &fields_of(tree, id), None),
+        Ref::New(n) => match placed.get(&n) {
+            None => vec![None],
+            Some(x) => set_points(&x.fields, x.position, x.orientation, |p| {
+                point_in(tree, placed, x.parent, p)?.plus(x.shift?).ok()
+            }),
+        },
+    }
 }
 
 /// The claim check (see the module's notes). Runs after the structure checks, so every node it names is there.
@@ -494,29 +603,8 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
     if claims.is_empty() {
         return Ok(());
     }
-    let at = |id: Id, p: Vec3| crate::select::to_root_point(tree, id, p);
-    // Placed nodes by their batch name: where each is, and its parent.
-    let mut placed: BTreeMap<u64, (Option<Vec3>, Ref)> = BTreeMap::new();
-    let point_in = |placed: &BTreeMap<u64, (Option<Vec3>, Ref)>, parent: Ref, p: Vec3| match parent
-    {
-        Ref::Node(id) => at(id, p),
-        Ref::New(n) => placed
-            .get(&n)
-            .and_then(|(o, _)| *o)
-            .and_then(|o| o.plus(p).ok()),
-    };
-    let origin = |placed: &BTreeMap<u64, (Option<Vec3>, Ref)>, r: Ref| match r {
-        Ref::Node(id) => at(id, Vec3::ZERO),
-        Ref::New(n) => placed.get(&n).and_then(|(o, _)| *o),
-    };
-    let parent_of = |placed: &BTreeMap<u64, (Option<Vec3>, Ref)>, r: Ref| match r {
-        Ref::Node(id) => tree
-            .handle(id)
-            .and_then(|h| tree.node(h))
-            .and_then(|n| n.parent())
-            .map(Ref::Node),
-        Ref::New(n) => placed.get(&n).map(|(_, p)| *p),
-    };
+    // Nodes placed in this batch, by their batch name.
+    let mut placed: BTreeMap<u64, Placed> = BTreeMap::new();
     // Each node's doorway link (its field 7) as the batch leaves it: removing the node unlinks that doorway and
     // rewrites its owning end's rows (`sim::edit`), so a removal touches the owner too (#3934 review).
     let mut aimed: BTreeMap<Ref, Value> = BTreeMap::new();
@@ -533,9 +621,13 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
     };
     for (i, op) in edit.ops.iter().enumerate() {
         let mut t = Touch::default();
-        let add = |t: &mut Touch, p: Option<Vec3>| match p {
-            Some(p) => t.points.push(p),
-            None => t.lost = true,
+        let add = |t: &mut Touch, ps: Vec<Option<Vec3>>| {
+            for p in ps {
+                match p {
+                    Some(p) => t.points.push(p),
+                    None => t.lost = true,
+                }
+            }
         };
         match op {
             Op::Place {
@@ -545,74 +637,82 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
                 fields,
                 ..
             } => {
-                let p = point_in(&placed, *parent, at.position);
-                placed.insert(*name, (p, *parent));
+                placed.insert(
+                    *name,
+                    Placed {
+                        parent: *parent,
+                        position: at.position,
+                        orientation: at.orientation,
+                        fields: fields.clone(),
+                        shift: Some(Vec3::ZERO),
+                    },
+                );
                 if let Some(v) = fields.get(&DOOR_LINK) {
                     aimed.insert(Ref::New(*name), v.clone());
                 }
-                add(&mut t, p);
+                add(&mut t, points_of(tree, &placed, Ref::New(*name)));
             }
             Op::Move { node, at: spot } => {
-                // Everything below the moved node moves with it: each node's point before and after (#3879 review).
-                let before = origin(&placed, *node);
-                let after = match node {
-                    Ref::Node(id) => crate::select::to_root_point_moved(
-                        tree,
-                        *id,
-                        Vec3::ZERO,
-                        (*id, spot.slot, spot.position, spot.orientation),
-                    ),
-                    Ref::New(_) => {
-                        parent_of(&placed, *node).and_then(|q| point_in(&placed, q, spot.position))
-                    }
-                };
-                let shift = before.zip(after).and_then(|(b, a)| a.minus(b).ok());
+                // Everything below the moved node moves with it: each one's points before and after (#3879 review).
+                let mut below = Vec::new();
                 let mut stack = vec![*node];
                 while let Some(r) = stack.pop() {
-                    match r {
-                        Ref::Node(d) => {
-                            add(&mut t, at(d, Vec3::ZERO));
-                            add(
-                                &mut t,
-                                match node {
-                                    Ref::Node(id) => crate::select::to_root_point_moved(
-                                        tree,
-                                        d,
-                                        Vec3::ZERO,
-                                        (*id, spot.slot, spot.position, spot.orientation),
-                                    ),
-                                    Ref::New(_) => None,
-                                },
-                            );
-                            if let Some(cs) = tree.handle(d).and_then(|h| tree.children(h)) {
-                                stack.extend(
-                                    cs.iter()
-                                        .filter_map(|c| tree.node(*c))
-                                        .map(|n| Ref::Node(n.id())),
-                                );
-                            }
-                        }
-                        Ref::New(n) => {
-                            // A node placed in this batch: its point shifts with the move.
-                            let was = placed.get(&n).and_then(|(o, _)| *o);
-                            let now = if r == *node {
-                                after
-                            } else {
-                                was.zip(shift).and_then(|(w, s)| w.plus(s).ok())
-                            };
-                            add(&mut t, was);
-                            add(&mut t, now);
-                            if let Some(e) = placed.get_mut(&n) {
-                                e.0 = now;
-                            }
-                        }
+                    below.push(r);
+                    if let Ref::Node(d) = r
+                        && let Some(cs) = tree.handle(d).and_then(|h| tree.children(h))
+                    {
+                        stack.extend(
+                            cs.iter()
+                                .filter_map(|c| tree.node(*c))
+                                .map(|n| Ref::Node(n.id())),
+                        );
                     }
                     stack.extend(
                         placed
                             .iter()
-                            .filter(|(_, (_, p))| *p == r)
+                            .filter(|(_, x)| x.parent == r)
                             .map(|(n, _)| Ref::New(*n)),
                     );
+                }
+                for r in &below {
+                    add(&mut t, points_of(tree, &placed, *r));
+                }
+                match node {
+                    Ref::Node(id) => {
+                        let m = (*id, spot.slot, spot.position, spot.orientation);
+                        for r in &below {
+                            match r {
+                                Ref::Node(d) => add(
+                                    &mut t,
+                                    node_points(tree, *d, &fields_of(tree, *d), Some(m)),
+                                ),
+                                // A node placed in this batch on one that moves is carried as its spot is.
+                                Ref::New(n) => {
+                                    if let Some(x) = placed.get_mut(n)
+                                        && let Ref::Node(p) = x.parent
+                                    {
+                                        let now = crate::select::to_root_point_moved(
+                                            tree, p, x.position, m,
+                                        );
+                                        let was = crate::select::to_root_point(tree, p, x.position);
+                                        x.shift = x
+                                            .shift
+                                            .zip(now.zip(was).and_then(|(a, b)| a.minus(b).ok()))
+                                            .and_then(|(s, d)| s.plus(d).ok());
+                                    }
+                                }
+                            }
+                        }
+                    }
+                    Ref::New(n) => {
+                        if let Some(x) = placed.get_mut(n) {
+                            x.position = spot.position;
+                            x.orientation = spot.orientation;
+                        }
+                    }
+                }
+                for r in below.iter().filter(|r| matches!(r, Ref::New(_))) {
+                    add(&mut t, points_of(tree, &placed, *r));
                 }
             }
             Op::Set { node, field, to } => {
@@ -622,16 +722,33 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
                 if *node == root.map_or(Ref::New(u64::MAX), Ref::Node) {
                     t.root = true;
                 } else {
-                    add(&mut t, origin(&placed, *node));
+                    // A set touches the thing where it is, and a new outline or line where that puts it (#3962).
+                    add(&mut t, points_of(tree, &placed, *node));
+                    if reshapes(*field) {
+                        match node {
+                            Ref::Node(id) => {
+                                let mut f = fields_of(tree, *id);
+                                f.insert(*field, to.clone());
+                                add(&mut t, node_points(tree, *id, &f, None));
+                            }
+                            Ref::New(n) => {
+                                if let Some(x) = placed.get_mut(n) {
+                                    x.fields.insert(*field, to.clone());
+                                }
+                                add(&mut t, points_of(tree, &placed, *node));
+                            }
+                        }
+                    }
                 }
             }
             Op::Remove { node } => {
+                // The doorway's owning end is judged where it is: its outline's points when it has one (#3962).
                 if let Some(owner) = doorway_owner(&aimed, *node) {
-                    add(&mut t, origin(&placed, Ref::Node(owner)));
+                    add(&mut t, points_of(tree, &placed, Ref::Node(owner)));
                 }
                 let mut stack = vec![*node];
                 while let Some(r) = stack.pop() {
-                    add(&mut t, origin(&placed, r));
+                    add(&mut t, points_of(tree, &placed, r));
                     if let Ref::Node(id) = r
                         && let Some(cs) = tree.handle(id).and_then(|h| tree.children(h))
                     {
@@ -644,7 +761,7 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
                     stack.extend(
                         placed
                             .iter()
-                            .filter(|(_, (_, p))| *p == r)
+                            .filter(|(_, x)| x.parent == r)
                             .map(|(n, _)| Ref::New(*n)),
                     );
                 }
@@ -660,20 +777,25 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
                 // The leaf's spot (in its owning end's axes), the leaf, the wall and both ends (#3879 review).
                 add(
                     &mut t,
-                    point_in(&placed, *from, Vec3::new(spot[0] * 1000, 0, spot[1] * 1000)),
+                    vec![point_in(
+                        tree,
+                        &placed,
+                        *from,
+                        Vec3::new(spot[0] * 1000, 0, spot[1] * 1000),
+                    )],
                 );
                 for r in [*door, *wall, *from, *to] {
-                    add(&mut t, origin(&placed, r));
+                    add(&mut t, vec![origin(tree, &placed, r)]);
                 }
             }
             Op::Link { ends, door, .. } => {
                 // A link writes its row to the owning end and names itself on its door (#3728), and changes the
                 // walkers' map at both ends, as a doorway does (#3934 review): judged as an edit of all of them.
                 for end in ends {
-                    add(&mut t, origin(&placed, *end));
+                    add(&mut t, vec![origin(tree, &placed, *end)]);
                 }
                 if let Some(d) = door {
-                    add(&mut t, origin(&placed, *d));
+                    add(&mut t, vec![origin(tree, &placed, *d)]);
                 }
             }
         }

@@ -2,6 +2,8 @@
 // (or lies, on a bed); a thing whose frame is a body is held by it. Pure: the bridge records these as parts arrive and
 // takes.ts writes them into each chunk as the old server's changes (`activity`, `seatHeight`, `prop`).
 
+import { lookBody } from '../humanoid/look.ts';
+
 /** A body's seat while it is in a slot: the slot's height above its thing's base (mm), and whether it lies there. */
 export type Seat = { height: number; lie: boolean };
 
@@ -68,6 +70,13 @@ export function legacyBodyOf(hash: string | undefined, catalogue: ReadonlyMap<st
   const b = hash ? catalogue?.get(hash)?.legacy?.[0] : null;
   return b && typeof b === 'object' && !Array.isArray(b) && ((b as { family?: unknown }).family === 'humanoid' || (b as { family?: unknown }).family === 'floater')
     ? (b as Record<string, unknown>) : null;
+}
+
+/** V3: the old body record (BODY-v1, the old renderer's humanoid look) for a body's own look, field 33's params as
+ *  JSON (G2's `life:look`); null when there are none or they are not a look the old page's look code takes. */
+export function lookBodyOf(params: string | undefined): Record<string, unknown> | null {
+  if (!params) return null;
+  try { return lookBody(JSON.parse(params)); } catch { return null; }
 }
 
 /** The catalogue's rows from `bodies.json` (`souls/bodies/1`); null for anything else. */

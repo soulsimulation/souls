@@ -52,6 +52,7 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 | `check <verb> ...` | the same, checked on your copy only: nothing is sent and nothing changes |
 | `define <record.json>` | a kind of your own, from a `souls-entry/1` record; the answer's `defines` is its full name |
 | `define-kit <kit.json> [--ns <namespace>]` | a kind of your own from a kit: a name and primitive shapes, in metres |
+| `upload <file.glb\|png\|jpg>` | a model or a picture, through the world's check: `{hash, state}` |
 | `find <words> [--category c] [--has slot:sit]` | kinds that match, best first, each with why |
 | `recommend <what you want to make>` | kinds for each need it names, the words no kind answers, and an example batch |
 | `catalog [--category c] [--has ...]` / `taxonomy` | every kind, one each / categories and what kinds offer (`--has` names) |
@@ -125,7 +126,8 @@ the root, which `describe` shows), and from then on you place it like any other 
 - **A record** says what a thing is and does: the `souls-entry/1` format of the world's own kinds (`kind`, `owner`,
   `state`, `points`, `slots`, `geometry` with `bounds_mm` and `parts`, `forms`, `text`). Whole numbers only: mm,
   millidegrees and permille. Its `forms` must pass the same checks the world's own kinds pass, and a `create` names
-  the made kind's full name (`namespace:name@hash`, from `describe`).
+  the made kind's full name (`namespace:name@hash`, from `describe`). Souls then use them as they use the world's own:
+  `inspect <id>` lists each form as an offer, `act <form>:<id>` runs it, and a wrong act is refused by the same name.
 - **Your namespace:** any namespace that is not `souls`, `eden` or one the world's own kinds use (`kind.namespace`).
 - **Revisions:** a changed record is a new revision with a new full name; what you placed from the old one keeps it.
   `place` by `namespace:name` works while one revision exists; with several, copy the full name from `describe`.
@@ -151,6 +153,17 @@ the root, which `describe` shows), and from then on you place it like any other 
 - The new ground is flat, level with the old ground's edge, and Souls walk on it. The world only grows. The whole
   ground goes in one edit, so a refusal `expand.too-large` names the largest size one edit carries.
 
+## Your own models and pictures
+
+`upload models/kalama.glb` (or a `.png` or `.jpg`) sends the file through the world's check: it is measured, its
+metadata (camera, place, author) is stripped, and it passes the world's hold point. The answer is
+`{"ok": true, "hash": "1220…", "state": "allowed", "url": "…"}`: an allowed upload is served at `url`, by its hash. A
+`"held"` upload is kept for the owner's review and is not shown until they release it; say so when you report.
+
+Get the file within budget before sending it: a model at most 3 MB and 80,000 triangles, self-contained (every
+texture inside the GLB), textures at most 2,048 px; a picture at most 2 MB. A refusal names what was over
+(`upload.size`, `upload.triangle-budget`, `upload.texture-side`, `upload.external-resource`, `upload.format`, ...).
+
 ## Answers and refusals
 
 - Success: `{"ok": true, "names": {...}, "at": <version>, "changed": ...}`.
@@ -168,7 +181,7 @@ the root, which `describe` shows), and from then on you place it like any other 
 | `edit.not-the-creator` | this token is not the creator's |
 | `kind.invalid` | the record is not one the world can keep: its `detail` names the part |
 | `kind.too-large` | the record is over 64 KiB, or a `bounds_mm` is over 1 km |
-| `kind.effects` | a form would fail every time it ran: it creates a kind the world has not got (use its full name), into a slot that does not admit it, or its timers start each other sooner than 50 ms in a ring |
+| `kind.effects` | a form would fail every time it ran: it creates a kind the world has not got (use its full name), into a slot that does not admit it, a kind with solids into a slot rather than a hand, or its timers start each other sooner than 50 ms in a ring |
 | `kind.audience` | a kind is defined for everyone |
 | `kind.namespace` | that namespace is not yours |
 | `kind.collision` | that kind is defined already: place it by the name `describe` lists |
@@ -176,6 +189,7 @@ the root, which `describe` shows), and from then on you place it like any other 
 | `kit.invalid`, `kit.program` | the kit is not one `define-kit` reads, or it uses a program |
 | `edit.would-bury`, `edit.would-cut-off`, `edit.in-use` | a Soul is there, would be shut in, or is using it: an edit or an undo is refused, never forced |
 | `undo.nothing`, `undo.nothing-to-redo` | nothing left to undo, or nothing undone to redo |
+| `solid-into-slot` | a Soul's form would put a thing of your kind that has solids into a slot with a fixed point, where it would stand unjudged: such a thing is made into a hand and set down, which is judged |
 | `undo.conflict` | something the undo would change has changed since: put it back by hand |
 
 ## Good habits
