@@ -53,6 +53,12 @@ pub fn awake(socket: &Path, world: &str) {
     let _ = ask(socket, &format!("awake {world}"));
 }
 
+/// As [`awake`], with how long its own start took (µs): the daemon learns a world's start even when it did not start
+/// it (the first start, by its unit), so its first alarm already wakes it early enough (0.133 S3b).
+pub fn awake_after(socket: &Path, world: &str, took_us: i64) {
+    let _ = ask(socket, &format!("awake {world} {took_us}"));
+}
+
 /// Asks the daemon at `socket` to wake `world` now (the gateway, holding an intent for it).
 pub fn wake(socket: &Path, world: &str) -> Result<(), String> {
     match ask(socket, &format!("wake {world}"))?.as_str() {

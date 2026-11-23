@@ -1962,7 +1962,9 @@ fn creator(spec: &str, built: &Built) -> R<Arc<Creator>> {
 /// [--store <store>] [--machine <name>] [--rate <num>/<den>]`: runs the world until killed. A checkpoint is taken each
 /// `--checkpoint-every` bytes of log (default 8 MiB); the log is compacted once every reader has passed at least
 /// `--compact-after` bytes of it (default 64 MiB, `compactor`). The clock's rate is world µs per real µs (default 1/1); a start whose rate differs from the
-/// last logged applies a new mapping, and the mapping in force is on the zone root for every copy (E7b, #3516).
+/// last logged applies a new mapping, and the mapping in force is on the zone root for every copy (E7b, #3516). With
+/// `--sleep <alarm daemon's socket> [--world-name <name>]` (O2, the launcher's), a still world with nothing due for a
+/// minute goes to sleep and exits 75 (`sleep.rs`); its name is its folder's unless given.
 pub fn run(args: &[String]) -> i32 {
     match serve(args) {
         Ok(()) => 0,
@@ -1985,7 +1987,8 @@ fn serve(args: &[String]) -> R<()> {
     }
     let dir = PathBuf::from(arg(args, "--dir").ok_or(
         "usage: worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] \
-         [--compact-after <bytes>] [--store <store>] [--machine <name>] [--directory <file>] [--rate <num>/<den>]",
+         [--compact-after <bytes>] [--store <store>] [--machine <name>] [--directory <file>] [--rate <num>/<den>] \
+         [--sleep <alarm socket> [--world-name <name>]]",
     )?);
     let socket = arg(args, "--socket")
         .map(PathBuf::from)
@@ -2557,6 +2560,22 @@ fn serve(args: &[String]) -> R<()> {
     stamp("listening");
     println!("listening {}", socket.display());
     crate::ready();
+    // O2 (0.133 S3b): asleep when still and nothing is due for a minute (`sleep.rs`).
+    if let Some(alarms) = arg(args, "--sleep") {
+        let name = arg(args, "--world-name").cloned().unwrap_or_else(|| {
+            dir.file_name()
+                .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+        });
+        crate::sleep::watch(
+            name,
+            PathBuf::from(alarms),
+            Arc::clone(&world.quiet),
+            world.durable.clone(),
+            STARTED.get().map_or(0, |t| {
+                i64::try_from(t.elapsed().as_micros()).unwrap_or(i64::MAX)
+            }),
+        );
+    }
     for stream in listener.incoming().flatten() {
         let door = door.clone();
         std::thread::spawn(move || answers::serve(door, stream));

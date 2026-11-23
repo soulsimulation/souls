@@ -2,6 +2,7 @@
 //!
 //! ```text
 //! supervisor launch <world>     the unit's ExecStart: record the start, read the pin, run builds/<hash>/worldd serve
+//!                               (with --sleep $WORLDS_ROOT/alarms.sock: a quiet world sleeps, O2)
 //! supervisor ready <world>      the unit's ExecStartPost (after worldd said READY=1): record that it serves
 //! supervisor exited <world>     the unit's ExecStopPost: record how it ended, from $SERVICE_RESULT and $EXIT_*
 //! supervisor health [<world>]   print the health record (every world's, without a name)
@@ -114,6 +115,9 @@ fn launch(root: &Path, world: &World) -> i32 {
         .arg("serve")
         .arg("--dir")
         .arg(&state)
+        // O2 (0.133 S3b): the world sleeps through the machine's alarm daemon when still and nothing is due.
+        .arg("--sleep")
+        .arg(root.join("alarms.sock"))
         .env("WORLDD_BUILD", &hex)
         .exec();
     eprintln!("launch: build.missing: {hex}: {err}");

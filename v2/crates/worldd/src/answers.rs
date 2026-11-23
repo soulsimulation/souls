@@ -727,6 +727,48 @@ impl Config {
     }
 }
 
+/// Whether the world is still and when its next change is due (O2, #2731; 0.133 S3b): the clock writes it after
+/// each run of ticks, and `worldd serve`'s sleep watch reads it (`supervisor::sleep::may_sleep`).
+#[derive(Debug)]
+pub struct Quiet {
+    still: std::sync::atomic::AtomicBool,
+    /// The earliest due time over the world's due lists (world time, µs), `i64::MAX` for none.
+    next: std::sync::atomic::AtomicI64,
+    /// Log records written: what must be durable before the world sleeps.
+    records: std::sync::atomic::AtomicU64,
+}
+
+impl Default for Quiet {
+    fn default() -> Quiet {
+        Quiet {
+            still: std::sync::atomic::AtomicBool::new(false),
+            next: std::sync::atomic::AtomicI64::new(i64::MAX),
+            records: std::sync::atomic::AtomicU64::new(0),
+        }
+    }
+}
+
+impl Quiet {
+    fn set(&self, still: bool, next: Option<Micros>, records: u64) {
+        use std::sync::atomic::Ordering::SeqCst;
+        self.records.store(records, SeqCst);
+        self.next.store(next.unwrap_or(i64::MAX), SeqCst);
+        self.still.store(still, SeqCst);
+    }
+
+    /// Still, the next due time (none: nothing is due) and the log records written.
+    pub fn read(&self) -> (bool, Option<Micros>, u64) {
+        use std::sync::atomic::Ordering::SeqCst;
+        let still = self.still.load(SeqCst);
+        let next = self.next.load(SeqCst);
+        (
+            still,
+            (next != i64::MAX).then_some(next),
+            self.records.load(SeqCst),
+        )
+    }
+}
+
 /// The running world: send it [`Event`]s; [`World::stop`] ends it once the answers already due are sent.
 pub struct World {
     pub events: Sender<Event>,
@@ -741,6 +783,8 @@ pub struct World {
     pub restart: Restart,
     /// The log's durable mark: a tier of the caller's own waits on it (C1).
     pub durable: Durable,
+    /// Still and next due, for sleep (O2).
+    pub quiet: Arc<Quiet>,
     clock: Option<JoinHandle<()>>,
 }
 
@@ -4084,6 +4128,36 @@ impl Clock {
 
     /// K5's checkpoint, when due and the log is on the disk up to every record handed to it (K18c, #3176): the
     /// tree, where the log resumes (K4b) and what a restart needs besides the tree ([`Carry`], in the root's seed).
+    /// Nothing in hand (O2, 0.133 S3b): no intent queued or open, no act forming or checking, no body moving for one.
+    /// A form's own timers outlive no act, so an open act covers them.
+    fn still(&self) -> bool {
+        self.pending.is_empty()
+            && self.scheduled.is_empty()
+            && self.outstanding == 0
+            && self.open.is_empty()
+            && self.in_flight.is_empty()
+            && self.moving.is_empty()
+            && self.walks.is_empty()
+            && self.forming.is_empty()
+            && self.engine_acts.is_empty()
+            && self.inputs.is_empty()
+            && self.bodies.as_ref().is_none_or(Bodies::still)
+    }
+
+    /// The earliest due time over the world's due lists (O2): the sky's, the bodies' (moves and the wind-down), the
+    /// activities' and the loose things' ends.
+    fn next_due(&self) -> Option<Micros> {
+        [
+            self.sky.as_ref().and_then(|h| h.due.next_due()),
+            self.bodies.as_ref().and_then(Bodies::next_due),
+            self.engine.as_ref().and_then(Engine::next_due),
+            self.loose.next_due(),
+        ]
+        .into_iter()
+        .flatten()
+        .min()
+    }
+
     fn checkpoint(&mut self) {
         let Some(c) = self.checkpoints.as_mut() else {
             return;
@@ -4936,6 +5010,8 @@ pub fn start<S: Storage + 'static>(
     };
     let lockstep = cfg.lockstep;
     let thread_beat = Arc::clone(&beat);
+    let quiet = Arc::new(Quiet::default());
+    let thread_quiet = Arc::clone(&quiet);
     let clock_syncs = syncs.clone();
     let clock = thread::Builder::new()
         .name("clock".into())
@@ -5138,6 +5214,7 @@ pub fn start<S: Storage + 'static>(
                     eprintln!("worldd: {}", e.name());
                     break;
                 }
+                thread_quiet.set(c.still(), c.next_due(), c.records);
                 let Ok(due) = ticker.due() else { break };
                 let wait = due - pace.now();
                 if wait <= 0 {
@@ -5166,6 +5243,7 @@ pub fn start<S: Storage + 'static>(
         measures,
         restart,
         durable: world_durable,
+        quiet,
         clock: Some(clock),
     })
 }
