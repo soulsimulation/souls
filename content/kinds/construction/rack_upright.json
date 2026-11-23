@@ -424,8 +424,16 @@
  },
  "children": {
   "crew": {
-   "kind": "mars:rack_crew",
+   "kind": "mars:rack_upright_activity",
    "most": 2
+  }
+ },
+ "roles": {
+  "crew-front": {
+   "need": "required"
+  },
+  "crew-back": {
+   "need": "required"
   }
  },
  "motion": {

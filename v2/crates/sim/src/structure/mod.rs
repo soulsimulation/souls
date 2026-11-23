@@ -75,6 +75,8 @@ pub struct Structure {
     roles: BTreeMap<String, Role>,
     bays: BTreeMap<String, BTreeMap<u64, Spot>>,
     joints: BTreeSet<String>,
+    /// Each joining kind's connectors: (its connector's kind, the kind it mates), by plain kind name.
+    connectors: BTreeMap<String, BTreeSet<(String, String)>>,
     checks: AtomicU64,
 }
 
@@ -182,6 +184,15 @@ impl Structure {
             })
         };
         let mut s = Structure::default();
+        for k in defs.iter().filter(|k| k.joins()) {
+            let set = k
+                .points
+                .values()
+                .filter_map(|p| p.connector.as_ref())
+                .map(|c| (c.kind.as_str().to_owned(), c.mates.as_str().to_owned()))
+                .collect();
+            s.connectors.insert(plain(k.name.as_str()).to_owned(), set);
+        }
         // Bearing kinds declare a link to a kind that joins; that kind stands.
         for k in &defs {
             if !k.joins() {
@@ -406,6 +417,40 @@ impl Structure {
             .map(|e| e.link)
             .collect();
         Some((state == STARTED, members))
+    }
+
+    /// Whether `kind` (a plain or full name) stands: others join to it, and it is held until it is braced.
+    pub fn stands(&self, kind: &str) -> bool {
+        matches!(self.roles.get(plain(kind)), Some(Role::Standing { .. }))
+    }
+
+    /// Whether `kind` (a plain or full name) is a bay: its slots take standing and bearing parts.
+    pub fn is_bay(&self, kind: &str) -> bool {
+        self.bays.contains_key(plain(kind))
+    }
+
+    /// The joints' link type, when the kinds declare one (a running world's seating makes its joints of it).
+    pub fn joint_type(&self) -> Option<&str> {
+        self.joints.iter().next().map(String::as_str)
+    }
+
+    /// `connectors-do-not-mate` unless a connector of kind `a` mates one of kind `b` both ways (plain or full names):
+    /// a part joins only where its kind and the other's have mating connectors.
+    pub fn mates(&self, a: &str, b: &str) -> R<()> {
+        let of = |k: &str| self.connectors.get(plain(k));
+        let fits = match (of(a), of(b)) {
+            (Some(ca), Some(cb)) => ca
+                .iter()
+                .any(|(ka, ma)| cb.iter().any(|(kb, mb)| ma == kb && mb == ka)),
+            _ => false,
+        };
+        if fits {
+            return Ok(());
+        }
+        Err(Refusal {
+            name: "connectors-do-not-mate",
+            detail: format!("{} has no connector that mates with {}", plain(a), plain(b)),
+        })
     }
 
     /// Whether links of type `ty` (a full link type name) are joints: the rule reads them.
