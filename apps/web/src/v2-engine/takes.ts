@@ -1,0 +1,128 @@
+// Stage 3 of the 0.131 recovery plan (#4153): the old page draws a world the new engine runs. The page does not run an
+// engine: it samples recorded take chunks (mars/viewer/engine/take/replay.ts). This module turns the new engine's public
+// body samples (v2/web/src/source's reader: world time in µs, positions in µm) into those chunks, so LiveWorld, its
+// renderer and its camera stay as they are. Pure: no page, no socket, no clock.
+//
+// A chunk is TICKS ticks of DT seconds, aligned to whole multiples of TICKS of world time, as the old server's are. Each
+// body is sampled at every tick between its own samples (never past its newest, as the v2 page draws it: no
+// extrapolation), faces the way it moves (the old take's yaw: atan2(dz, dx)), and walks while it moves.
+
+/** Seconds a tick, as the old engine's takes. */
+export const DT = 0.05;
+export const TICK_US = DT * 1_000_000;
+/** Ticks a chunk: one second, as the old server streams them. */
+export const TICKS = 20;
+/** The take's quanta (mars/viewer/engine/take/types.ts): mm, mrad, cm/s. */
+const POS_Q = 1000, ANG_Q = 1000, SPEED_Q = 100;
+/** Slower than this (m/s) a body stands. */
+const WALKING = 0.05;
+
+/** A body sample in the world frame: world time µs, position mm. */
+export type WorldSample = { at: number; p: [number, number, number] };
+/** One Soul's body as the chunks need it. */
+export type Body = {
+  /** The take's entity id. */
+  entity: string;
+  /** The public Soul id the page lists. */
+  soul: string;
+  name: string;
+  /** In time order. */
+  samples: WorldSample[];
+  /** Heading (radians, atan2(dz, dx)) before it first moves: from its placed orientation. */
+  heading: number;
+  /** World time (µs) from which it is not drawn: the public copy can no longer place it (a frame that is not public, or
+   *  it left); absent while it is drawn. */
+  until?: number;
+};
+
+export type RecordedChunk = { fromTick: number; toTick: number; take: Record<string, unknown> };
+
+/** Position (mm) at world time t, between the samples around it; the first before any, the newest after all. */
+export function positionAt(s: readonly WorldSample[], t: number): [number, number, number] | null {
+  if (!s.length) return null;
+  if (t <= s[0].at) return s[0].p;
+  const last = s[s.length - 1];
+  if (t >= last.at) return last.p;
+  let i = 0;
+  while (s[i + 1].at <= t) i++;
+  const a = s[i], b = s[i + 1], f = (t - a.at) / (b.at - a.at);
+  return [a.p[0] + (b.p[0] - a.p[0]) * f, a.p[1] + (b.p[1] - a.p[1]) * f, a.p[2] + (b.p[2] - a.p[2]) * f];
+}
+
+/** Ground speed (m/s) and heading at t: of the segment around t; heading of the last segment that moved before it. */
+export function motionAt(s: readonly WorldSample[], t: number, heading: number): { speed: number; heading: number } {
+  if (s.length < 2 || t < s[0].at || t >= s[s.length - 1].at) return { speed: 0, heading: lastHeading(s, s.length - 1, t, heading) };
+  let i = 0;
+  while (s[i + 1].at <= t) i++;
+  const a = s[i], b = s[i + 1];
+  const d = Math.hypot(b.p[0] - a.p[0], b.p[2] - a.p[2]) / POS_Q, secs = (b.at - a.at) / 1e6;
+  const speed = secs > 0 ? d / secs : 0;
+  return { speed, heading: lastHeading(s, i + 1, t, heading) };
+}
+
+function lastHeading(s: readonly WorldSample[], upTo: number, t: number, fallback: number): number {
+  for (let k = Math.min(upTo, s.length - 1); k > 0; k--) {
+    if (s[k - 1].at > t) continue;
+    const dx = s[k].p[0] - s[k - 1].p[0], dz = s[k].p[2] - s[k - 1].p[2];
+    if (Math.hypot(dx, dz) >= 1) return Math.atan2(dz, dx);
+  }
+  return fallback;
+}
+
+/** The last whole chunk's end tick at or before world time `t` µs. */
+export const chunkEnd = (t: number) => Math.floor(t / TICK_US / TICKS) * TICKS;
+
+/** The static part of every chunk's final state: the world clock and anything else the page reads beside entities. */
+export type Frame = { rulesVersion: string; datetime: string | null; renderSceneRef?: unknown };
+
+/**
+ * The recorded chunk [fromTick, fromTick + TICKS] for these bodies, in the shape the old server streams (mars-take/4).
+ * A body with no sample at or before the chunk's end is not in it, nor one the copy stopped placing before it began.
+ */
+export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame): RecordedChunk {
+  const tracks: Record<string, number[][]> = {}, changes: [number, string, string, unknown][] = [], entities: Record<string, unknown> = {};
+  const endUs = (fromTick + TICKS) * TICK_US;
+  for (const b of bodies) {
+    if (!b.samples.length || b.samples[0].at > endUs || (b.until !== undefined && fromTick * TICK_US >= b.until)) continue;
+    const track: number[][] = [];
+    let activity = '', speedQ: number | null = -1, heading = b.heading, p: [number, number, number] = b.samples[0].p;
+    for (let k = 0; k <= TICKS; k++) {
+      const t = (fromTick + k) * TICK_US;
+      p = positionAt(b.samples, t)!;
+      const m = motionAt(b.samples, t, heading);
+      heading = m.heading;
+      const walking = m.speed >= WALKING;
+      track.push([k, Math.round(p[0]), Math.round(p[1]), Math.round(p[2]), Math.round(heading * ANG_Q)]);
+      if (k === 0) { changes.push([0, b.entity, 'present', true], [0, b.entity, 'level', 0]); }
+      const nextActivity = walking ? 'walk' : 'idle';
+      if (nextActivity !== activity && k < TICKS) { changes.push([k, b.entity, 'activity', nextActivity]); activity = nextActivity; }
+      const q = walking ? Math.round(m.speed * SPEED_Q) : null;
+      if (k < TICKS && (q === null ? speedQ !== null : speedQ === null || Math.abs(q - speedQ) > 2)) { changes.push([k, b.entity, 'speed', q]); speedQ = q; }
+    }
+    tracks[b.entity] = thin(track);
+    entities[b.entity] = {
+      id: b.entity, def: 'human', kind: 'human', label: b.name,
+      pose: { p: [p[0] / POS_Q, p[1] / POS_Q, p[2] / POS_Q], yaw: heading },
+      provenance: { origin: 'simulation', confidence: 'hypothetical' },
+      human: { activity: activity || 'idle', level: 0, soul: b.soul, ...(speedQ !== null && speedQ >= 0 ? { speed: speedQ / SPEED_Q } : {}) },
+    };
+  }
+  changes.sort((a, b) => a[0] - b[0]);
+  const id = `v2-${fromTick}`;
+  return {
+    fromTick, toTick: fromTick + TICKS,
+    take: {
+      schema: 'mars-take/4', id, baselineStateHash: `v2-state-${fromTick}`, finalStateHash: `v2-state-${fromTick + TICKS}`,
+      rulesVersion: frame.rulesVersion, ...(frame.renderSceneRef ? { renderSceneRef: frame.renderSceneRef } : {}),
+      dt: DT, startTick: fromTick, ticks: TICKS, keyframeEvery: TICKS,
+      tracks, changes, events: [], removed: [], entities0: {},
+      finalState: { tick: fromTick + TICKS, entities, regions: {}, env: { datetime: frame.datetime } },
+    },
+  };
+}
+
+/** Drops samples equal to both neighbours (a body standing still), keeping the first and the last. */
+function thin(track: number[][]): number[][] {
+  const same = (a: number[], b: number[]) => a[1] === b[1] && a[2] === b[2] && a[3] === b[3] && a[4] === b[4];
+  return track.filter((x, i) => i === 0 || i === track.length - 1 || !same(track[i - 1], x) || !same(x, track[i + 1]));
+}

@@ -30,6 +30,7 @@ import { createServer } from 'node:http';
 import { availableParallelism } from 'node:os';
 import { basename, normalize, resolve, sep } from 'node:path';
 import { fileURLToPath } from 'node:url';
+import { realpathSync } from 'node:fs';
 import { noPage, siteRoutes, wantsPage } from './site.mjs';
 import { upgradeRefusal } from './upgrade-refusal.mjs';
 import { worldRoutes } from './world-routes.mjs';
@@ -288,7 +289,9 @@ async function supervise(n, dir, port, host, every) {
   process.on('SIGINT', stop);
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+// tools/lib/is-main.mjs, inlined: this file is bundled or copied alone. A start through a symlink still runs main.
+const startedAsScript = () => { try { return !!process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url)); } catch { return false; } };
+if (startedAsScript()) {
   const [dir, port = '0', host = '127.0.0.1'] = process.argv.slice(2);
   if (!dir) throw new Error('usage: node origin.mjs <dir> [port] [host]');
   const every = Number(process.env.ORIGIN_STATS_MS || 10_000);

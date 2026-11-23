@@ -1,4 +1,5 @@
 #!/usr/bin/env node
+import { isMain } from '../lib/is-main.mjs';
 import { createHash } from 'node:crypto';
 import { isUtf8 } from 'node:buffer';
 import { execFileSync, spawn } from 'node:child_process';
@@ -1082,4 +1083,4 @@ export async function main(args = process.argv.slice(2), deps = {}) {
   return receipt.status === 'blocked' ? 1 : 0;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = await main();
+if (isMain(import.meta.url)) process.exitCode = await main();

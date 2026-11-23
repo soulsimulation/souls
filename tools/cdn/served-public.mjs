@@ -14,11 +14,11 @@
 //   node tools/cdn/served-public.mjs            check served-public.json is current (exit 1 if stale)
 //   node tools/cdn/served-public.mjs --write    regenerate it after a core index or rendition changes
 // No network, no credentials.
+import { isMain } from '../lib/is-main.mjs';
 import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { existsSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { extname, join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { CLIENT_EXTENSIONS, ROOT, shaFile } from './inventory.mjs';
 
 export const RULE = { by: 'Gene', date: '2026-10-20', text: 'yes put it on cdn. anything that loads faster from cdn should be on cdn. as a rule.' };
@@ -124,4 +124,4 @@ async function main() {
   if (now !== next) { console.error('served-public.json is stale: run node tools/cdn/served-public.mjs --write and review the diff'); process.exitCode = 1; }
   else console.log('served-public.json is current');
 }
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) main().catch((e) => { console.error(e.message); process.exitCode = 1; });
+if (isMain(import.meta.url)) main().catch((e) => { console.error(e.message); process.exitCode = 1; });

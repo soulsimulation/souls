@@ -12,9 +12,9 @@
 //
 // serves the files over HTTP on 127.0.0.1 and times the three questions, five times each.
 
+import { isMain } from '../../../../tools/lib/is-main.mjs';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
-import { fileURLToPath } from 'node:url';
 import { deflateRawSync } from 'node:zlib';
 import { DAY, HOUR, TEN_MINUTES, YEAR_DAYS, history, keys } from './history.mjs';
 
@@ -145,7 +145,7 @@ export const getter = (base) => async (key) => {
   return r.ok ? new Uint8Array(await r.arrayBuffer()) : null;
 };
 
-if (process.argv[1] === fileURLToPath(import.meta.url) && process.argv[2] === 'bench') {
+if (isMain(import.meta.url) && process.argv[2] === 'bench') {
   const opt = (n, d) => { const k = process.argv.indexOf(n); return k > 0 ? Number(process.argv[k + 1]) : d; };
   const souls = opt('--souls', 100), perMinute = opt('--per-minute', 1), days = opt('--days', 4);
   const s = script({ souls, perMinute, days });

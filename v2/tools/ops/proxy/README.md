@@ -77,6 +77,12 @@ BACK
 
 The map in `/var/lib/souls-routes` is kept (it holds no data); today's file never reads it.
 
+**Temporary drop-in, 0.131 only:** before 0.131.1, `routes.mjs` (and `cutover/state.mjs`) exited 0 without running when
+started through `/srv/sim-worlds/production`, a link to the live release, so the host was given
+`/etc/systemd/system/souls-routes.service.d/10-realpath.conf`. Once a release with `tools/lib/is-main.mjs` is live,
+remove it: `rm /etc/systemd/system/souls-routes.service.d/10-realpath.conf && systemctl daemon-reload && systemctl
+start souls-routes.service && journalctl -u souls-routes -n 1 -o cat` prints `routes: <n> slugs …`.
+
 ## World gateway/bootstrap metadata (O19b)
 
 The origin reads `SOULS_WORLD_ROUTES`, default `/var/lib/souls/routes/worlds.json`. This is trusted writable

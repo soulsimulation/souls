@@ -23,7 +23,7 @@
 // --map reaches a name at another address (a local stand-in); redirects are still checked against the names.
 // Read-only: GETs and HEADs, plus a POST to an unknown path that each older domain redirects before anything reads it.
 // Exit 0 on PASS.
-import { fileURLToPath } from 'node:url';
+import { isMain } from '../../../tools/lib/is-main.mjs';
 import { createHash } from 'node:crypto';
 import { canonicalRows, signInHref } from '../../web/src/home/list.ts';
 
@@ -184,7 +184,7 @@ export async function frontCheck({ public: pub = 'https://soul.game', primary = 
   return { pass: problems.length === 0, problems, seen };
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (isMain(import.meta.url)) {
   const a = process.argv.slice(2), opt = (k, d) => { const i = a.indexOf(k); return i >= 0 ? a[i + 1] : d; };
   const list = (k) => opt(k)?.split(',').filter(Boolean);
   const pairs = (k) => (list(k) ?? []).map((p) => { const i = p.indexOf('='); return [p.slice(0, i), p.slice(i + 1)]; });

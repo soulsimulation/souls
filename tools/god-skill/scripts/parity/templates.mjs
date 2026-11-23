@@ -8,6 +8,7 @@
 // <port> it boots each template once in a scratch world on that port, asks L2's furnish recipes
 // (tools/god-skill/lib/furnish.mjs) for each building's furniture against the live model, and
 // appends those ops as a final batch, so the templates carry fully furnished interiors.
+import { isMain } from '../../../lib/is-main.mjs';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -293,7 +294,7 @@ async function furnish(t, port) {
 const BUILDERS = { lm: ['littlemartians-garden', lmGarden], mars: ['mars-camp', marsCamp], eden: ['eden-district', edenDistrict] };
 export { BUILDERS };
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const fi = process.argv.indexOf('--furnish'), port = fi > 0 ? Number(process.argv[fi + 1]) : 0;
   const want = process.argv.slice(2).filter((a) => BUILDERS[a]);
   for (const k of want.length ? want : Object.keys(BUILDERS)) {

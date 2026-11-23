@@ -2,10 +2,10 @@
 // Read-only over run folders; chosen thumbnails are copied (resized to ≤ 640 px JPEG: sips on macOS, ImageMagick/ffmpeg on Linux) into an assets dir
 // and referenced by relative path. No external resources, no base64.
 // node tools/playtest/review/summary.mjs [--runs-root dir] [--out file.html] [--assets dir] [--max-shots 12] [--night-log file]
+import { isMain } from '../../lib/is-main.mjs';
 import { existsSync, mkdirSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, sep } from 'node:path';
 import { toJpeg } from '../lib/platform.mjs';
-import { fileURLToPath } from 'node:url';
 import { DEFAULT_RUNS_ROOT, esc as esc0, chip, md2html, listRuns, loadBundle } from './booklet.mjs';
 import { computeMetrics } from './metrics.mjs';
 import { similar } from './reviewer.mjs';
@@ -273,7 +273,7 @@ export function buildSummary({ runsRoot = DEFAULT_RUNS_ROOT, outFile = null, ass
   return { out, assets, bytes: Buffer.byteLength(html), runs: bundles.length };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const a = process.argv.slice(2); const opt = (k) => { const i = a.indexOf(k); return i >= 0 ? a[i + 1] : null; };
   const r = buildSummary({ runsRoot: opt('--runs-root') ?? DEFAULT_RUNS_ROOT, outFile: opt('--out'), assetsDir: opt('--assets'), maxShots: Number(opt('--max-shots') ?? 12), nightLog: opt('--night-log') ?? DEFAULT_NIGHT_LOG });
   process.stdout.write(JSON.stringify({ ok: true, ...r }) + '\n');

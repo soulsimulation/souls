@@ -9,8 +9,8 @@
 //        last release reachable from --main (nothing ships backwards), and its tree has this file: the eyes job runs the
 //        pin's own eyes.mjs, and only a tree with pinned-sha support matches a run at main's head to the sha it ships;
 //        prints last=<tag> (or last= with no release yet)
+import { isMain } from '../../../lib/is-main.mjs';
 import { execFileSync } from 'node:child_process';
-import { fileURLToPath } from 'node:url';
 
 export const RELEASE_TAGS = 'v0.*';
 /** A pin's tree must hold this: it came with eyes.mjs's pinned-run match (a run whose title names the sha). */
@@ -38,7 +38,7 @@ export function pinProblem(sha, { main = 'origin/main', cwd = process.cwd() } = 
   return null;
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const [cmd, rev, ...rest] = process.argv.slice(2);
   const i = rest.indexOf('--main'), main = i >= 0 ? rest[i + 1] : 'origin/main';
   if (cmd === 'last' && rev) {

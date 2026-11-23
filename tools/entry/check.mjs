@@ -9,9 +9,10 @@
 // is reported under the rule it breaks; the rules the format cannot see are checked here. Nothing here reads a
 // float or a clock, and nothing here names a part of today's engine. Rules, and which the format already makes
 // impossible to break: docs/soul-actions/entry-format.md ("The check gate").
+import { isMain as isMainModule } from '../lib/is-main.mjs';
 import {existsSync, readFileSync} from 'node:fs';
 import {join, relative} from 'node:path';
-import {fileURLToPath, pathToFileURL} from 'node:url';
+import { fileURLToPath } from 'node:url';
 import * as F from './format.mjs';
 
 const ROOT = fileURLToPath(new URL('../../', import.meta.url));
@@ -273,7 +274,7 @@ export function checkFiles(files, all = files) {
   return rows;
 }
 
-const isMain = process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href;
+const isMain = isMainModule(import.meta.url);
 // `entry prove <family>` runs every gate that needs no engine (prove.mjs, SA-P8).
 if (isMain && process.argv[2] === 'prove') import('./prove.mjs').then(m => { process.exitCode = m.main(process.argv.slice(3)); });
 // `entry run <family> --world <address>` drives a world from outside through the family's cases (run.mjs, SA-P3a).

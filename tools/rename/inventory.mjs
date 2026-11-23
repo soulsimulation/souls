@@ -4,8 +4,8 @@
 //   node tools/rename/inventory.mjs --lines    every occurrence: path:line kind text
 // Not occurrences of the name: "Sim Score" and `Sim.<api>` (the music work and its engine API), "The Sims" and SimCity
 // (other people's games), and "simulation". They are listed as `other` or not matched, so a stage never edits them by accident.
+import { isMain } from '../lib/is-main.mjs';
 import { execFileSync } from 'node:child_process';
-import { pathToFileURL } from 'node:url';
 
 export const KINDS = [
   ['other', /\bSim Score\b|\bSim\.[a-zA-Z]+|\bThe Sims\b|\bSims-style\b|\bSimCity\b|\bregister\(Sim\b/g],
@@ -32,7 +32,7 @@ export const areaOf = (path) => {
   return ['apps', 'packages', 'tools', 'docs', 'worlds'].includes(parts[0]) && parts.length > 2 ? `${parts[0]}/${parts[1]}` : parts[0];
 };
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMain(import.meta.url)) {
   let out = '';
   try { out = execFileSync('git', ['grep', '-n', '-I', '-i', 'sim', '--', '.'], { encoding: 'utf8', maxBuffer: 1 << 30 }); } catch (e) { if (e.status !== 1) throw e; }
   const lines = process.argv.includes('--lines'), totals = {}, areas = {};
