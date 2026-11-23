@@ -17,6 +17,9 @@
 //! - **A role may name a move (0.134 T1).** When an activity of such a kind starts, each member whose role names
 //!   one aims it at the other member through [`Activities::aim`] ([`Activities::begin_moves`]), and the move's record
 //!   goes out for viewers as a form's does (`souls:form-move`): a handshake, a hug, a high-five.
+//! - **A touch ends with its moves.** When every member's move of a touch has ended by itself, each member leaves it
+//!   ([`Activities::finish`]), so its role claims are let go: both arms are free, and the next touch between the
+//!   same two starts and plays its moves. A touch whose move holds (T2) is not ended this way.
 //! - **A held move lasts while both stay (0.134 T2).** A role's move whose last phase holds (`hold_hand`) holds until
 //!   a member leaves: then every member's held move is released, so both hands come free, and each release goes out
 //!   for viewers as its record again, ended `released` ([`Activities::leave`]). A walk sent by a member ends it the same
@@ -201,6 +204,8 @@ pub struct Activities {
     /// again.
     beats: BTreeMap<Id, Micros>,
     stalled: BTreeSet<(Id, Id)>,
+    /// Touches that end when their moves end (0.134 T1: a handshake, a hug, a high-five), by activity.
+    ending: BTreeSet<Id>,
 }
 
 impl Activities {
@@ -220,6 +225,7 @@ impl Activities {
             begun: Vec::new(),
             beats: BTreeMap::new(),
             stalled: BTreeSet::new(),
+            ending: BTreeSet::new(),
         }
     }
 
@@ -699,6 +705,10 @@ impl Activities {
                     Some((m.clone(), other.map(|o| o.body), mv))
                 })
                 .collect();
+            // A touch whose moves all end by themselves ends with them ([`Activities::finish`]); one that holds (T2's
+            // hands) lasts until a member leaves.
+            let mut held_any = false;
+            let touches = !aims.is_empty();
             for (m, other, mv) in aims {
                 let Some(found) = library.iter().find(|x| x.name == mv) else {
                     refused.push((
@@ -723,6 +733,7 @@ impl Activities {
                 let Some(r) = moves.record(n) else {
                     continue;
                 };
+                held_any |= r.ends.contains(&Micros::MAX);
                 let fields = BTreeMap::from([
                     (1, activity.to_value()),
                     (2, m.body.to_value()),
@@ -734,6 +745,9 @@ impl Activities {
                 {
                     refused.push((m.body, r));
                 }
+            }
+            if touches && !held_any {
+                self.ending.insert(activity);
             }
         }
         for activity in self.dancing() {
@@ -794,6 +808,56 @@ impl Activities {
             }
         }
         refused
+    }
+
+    /// Ends each touch whose moves have all ended (0.134 T1: a handshake, a hug, a high-five): every member leaves it,
+    /// as its own `activity:leave` would (caused by the intent that joined it, at `at`), so its role claims are let
+    /// go and both arms are free for the next act or the next touch. Returns the leaves refused, by body.
+    #[allow(clippy::too_many_arguments)]
+    pub fn finish(
+        &mut self,
+        tree: &mut Tree,
+        c: &mut Controller,
+        moves: &mut Moves,
+        due: &mut DueList,
+        mint: &mut Minter,
+        at: Micros,
+    ) -> Vec<(Id, Refusal)> {
+        let done: Vec<Id> = self
+            .ending
+            .iter()
+            .filter(|a| {
+                self.live
+                    .get(a)
+                    .is_none_or(|l| l.moves.values().all(|n| moves.record(*n).is_none()))
+            })
+            .copied()
+            .collect();
+        let mut refused = Vec::new();
+        for activity in done {
+            self.ending.remove(&activity);
+            let members = self
+                .live
+                .get(&activity)
+                .map(|l| l.node.members.clone())
+                .unwrap_or_default();
+            for m in members {
+                let ask = Ask {
+                    soul: m.soul,
+                    intent: m.intent,
+                    at,
+                };
+                if let Err(r) = self.leave(tree, c, moves, due, mint, ask, m.body, activity) {
+                    refused.push((m.body, r));
+                }
+            }
+        }
+        refused
+    }
+
+    /// Whether a touch that ends with its moves is waiting for them to end.
+    pub fn finishing(&self) -> bool {
+        !self.ending.is_empty()
     }
 
     /// `ask.soul` takes `body` out of `activity`. Always accepted: membership ends now, in the log, and the activity

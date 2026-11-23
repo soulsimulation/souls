@@ -709,6 +709,17 @@ impl Engine {
             self.begin_moves(tr, c, now);
         }
         let _ = self.activities.settle(c, &self.moves, &mut self.due);
+        // A handshake, a hug or a high-five whose moves have ended ends: both arms free (0.134 T1).
+        if self.activities.finishing() {
+            let tr = tree.get_or_insert_with(|| live.frozen());
+            self.activities.next = tr.next();
+            for (body, r) in
+                self.activities
+                    .finish(tr, c, &mut self.moves, &mut self.due, &mut self.mint, now)
+            {
+                eprintln!("worldd: {} did not leave its touch: {r}", show(body));
+            }
+        }
         // 0.135 C3: loads found riding at a restart are set down where their carry last had them.
         for (activity, load) in std::mem::take(&mut self.riding) {
             let tr = tree.get_or_insert_with(|| live.frozen());
