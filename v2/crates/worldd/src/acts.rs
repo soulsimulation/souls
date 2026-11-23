@@ -2427,6 +2427,17 @@ impl Acts {
                 }
             }
             *DIAG_SEEN.lock().unwrap_or_else(|e| e.into_inner()) = next;
+            static WAITS: std::sync::Mutex<BTreeMap<(Id, sim::forms::RunId), Micros>> = std::sync::Mutex::new(BTreeMap::new());
+            let mut waits = WAITS.lock().unwrap_or_else(|e| e.into_inner());
+            let now_waiting = self.forms.diag_waiting();
+            waits.retain(|k, _| now_waiting.iter().any(|(b, r, _)| (*b, *r) == *k));
+            for (b, r, old) in now_waiting {
+                let first = *waits.entry((b, r)).or_insert(now);
+                let held = (now - first) / 1_000_000;
+                if held >= 20 && (held - 20) % 30 < 10 {
+                    eprintln!("s11-diag act-waits s={held} old-step={old}");
+                }
+            }
         }
         let timers = self.timers.keys().copied().collect::<BTreeSet<Id>>();
         let mut watch = std::mem::take(&mut self.watch);

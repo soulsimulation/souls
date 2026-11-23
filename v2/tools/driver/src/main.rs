@@ -866,6 +866,7 @@ async fn agent(
     // socket.
     let mut pending: BTreeMap<u64, (Instant, u64, Vec<u8>)> = BTreeMap::new();
     let mut verb_of: HashMap<u64, Name> = HashMap::new();
+    let mut prev_verbs: Vec<(u64, String)> = Vec::new();
     // The newest sequence sent: a `claim-taken` on an older act is this agent's own act replacing it.
     let mut newest = 0u64;
     // Sequences with a receipt (kind 1): a second is a duplicate.
@@ -901,8 +902,9 @@ async fn agent(
                 let end = unix_ms();
                 out.stall_window = (end.saturating_sub(stall), end);
                 out.stall_act = format!(
-                    "{} {} {}ms",
+                    "{}<-{} {} {}ms",
                     verb_of.get(&seq).map_or("?", |v| v.as_str()),
+                    prev_verbs.iter().rev().take(3).map(|(s, v)| if *s < seq { v.as_str() } else { "" }).collect::<Vec<_>>().join(","),
                     if accepted.contains(&seq) {
                         "accepted"
                     } else {
@@ -950,6 +952,7 @@ async fn agent(
                         takes.insert(d.sequence, t);
                     }
                     newest = newest.max(d.sequence);
+                    prev_verbs.push((d.sequence, d.verb.as_str().to_owned()));
                     verb_of.insert(d.sequence, d.verb);
                     out.late_us.push(now.duration_since(d.at).as_micros() as u64);
                     if tx.send(Message::Binary(d.bytes.into())).await.is_err() {

@@ -706,6 +706,22 @@ impl Forms {
             .collect()
     }
 
+    /// S11 diagnostic only: each act waiting on its body's run's posture step, and that run's step kind.
+    pub fn diag_waiting(&self) -> Vec<(Id, RunId, String)> {
+        self.waiting
+            .iter()
+            .map(|(body, p)| {
+                let old = self
+                    .by_body
+                    .get(body)
+                    .and_then(|r| self.runs.get(r))
+                    .and_then(|fr| fr.runner.step())
+                    .map_or("none".to_owned(), |s| format!("{s:?}").chars().take(30).collect());
+                (*body, p.run, old)
+            })
+            .collect()
+    }
+
     /// The number of the step in progress of `body`'s run.
     pub fn at(&self, body: Id) -> Option<usize> {
         let run = self.by_body.get(&body)?;
