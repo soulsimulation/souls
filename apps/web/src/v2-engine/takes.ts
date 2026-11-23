@@ -22,8 +22,9 @@ const POS_Q = 1000, ANG_Q = 1000, SPEED_Q = 100;
 const WALKING = 0.05;
 
 /** A body sample in the world frame: world time µs, position mm; `seat` while it is in a slot (take-bodies.ts), its
- *  position then the floor under the seat. */
-export type WorldSample = { at: number; p: [number, number, number]; seat?: Seat };
+ *  position then the floor under the seat. K4 (0.135): `on` while its frame moves on a course (a balloon's rider): its
+ *  world position (mm) at a later time, until its next sample; `p` is where it was at `at`. */
+export type WorldSample = { at: number; p: [number, number, number]; seat?: Seat; on?: (t: number) => [number, number, number] | null };
 /** One Soul's body as the chunks need it. */
 export type Body = {
   /** The take's entity id. */
@@ -50,6 +51,13 @@ export type Body = {
   look?: Record<string, unknown>;
 };
 
+/** K4 (0.135): a thing the take carries beside the bodies, so the camera can follow it and the page can frame a ride with
+ *  it: a thing on a course (a balloon) today. `at`: its place (mm) and heading at world time t µs, null where the copy
+ *  cannot place it. Drawn by the page's own layers, not by the take: its record is a `vehicle` (never a stand-in box). */
+export type Thing = { entity: string; label: string; def: string; at: (t: number) => { p: [number, number, number]; yaw: number } | null;
+  /** Whether it is a ride (its record has a `carrier`: the page frames a rider with it). */
+  carrier?: boolean };
+
 export type RecordedChunk = { fromTick: number; toTick: number; take: Record<string, unknown> };
 
 /** Position (mm) at world time t, between the samples around it; the first before any, the newest after all. */
@@ -57,10 +65,12 @@ export function positionAt(s: readonly WorldSample[], t: number): [number, numbe
   if (!s.length) return null;
   if (t <= s[0].at) return s[0].p;
   const last = s[s.length - 1];
-  if (t >= last.at) return last.p;
+  if (t >= last.at) return last.on?.(t) ?? last.p;
   let i = 0;
   while (s[i + 1].at <= t) i++;
   const a = s[i], b = s[i + 1], f = (t - a.at) / (b.at - a.at);
+  // In a frame on a course the body goes where its frame goes until its next sample.
+  if (a.on) return a.on(t) ?? a.p;
   // Into or out of a seat the body changes frame: it is never slid between the two (as the v2 page keeps a track a frame).
   if (a.seat || b.seat) return a.p;
   return [a.p[0] + (b.p[0] - a.p[0]) * f, a.p[1] + (b.p[1] - a.p[1]) * f, a.p[2] + (b.p[2] - a.p[2]) * f];
@@ -120,7 +130,7 @@ export type Frame = { rulesVersion: string; datetime: string | null; renderScene
  * The recorded chunk [fromTick, fromTick + ticks] (TICKS unless given) for these bodies, in the shape the old server streams (mars-take/4).
  * A body with no sample at or before the chunk's end is not in it, nor one the copy stopped placing before it began.
  */
-export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame, ticks = TICKS): RecordedChunk {
+export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame, ticks = TICKS, things: readonly Thing[] = []): RecordedChunk {
   const tracks: Record<string, number[][]> = {}, changes: [number, string, string, unknown][] = [], entities: Record<string, unknown> = {};
   const events: ReturnType<typeof markOf>[] = [];
   const endUs = (fromTick + ticks) * TICK_US;
@@ -161,7 +171,7 @@ export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame,
       if (k < ticks && nextHold !== (hold ?? null)) { changes.push([k, b.entity, 'handHold', held]); hold = nextHold; }
       track.push([k, Math.round(p[0]), Math.round(p[1]), Math.round(p[2]), Math.round(drawn * ANG_Q)]);
       if (k === 0) { changes.push([0, b.entity, 'present', true], [0, b.entity, 'level', 0]); if (b.look) changes.push([0, b.entity, 'body', b.look]); }
-      const seat = walking ? null : seatAt(b.samples, t), nextSeat = seat ? seat.height / POS_Q : null, nextProp = heldAt(b.held, t);
+      const seat = walking ? null : seatAt(b.samples, t), nextSeat = seat && !seat.ride ? seat.height / POS_Q : null, nextProp = heldAt(b.held, t);
       if (k < ticks && nextSeat !== (seatH ?? null)) { changes.push([k, b.entity, 'seatHeight', nextSeat]); seatH = nextSeat; }
       if (k < ticks && nextProp !== prop && (nextProp !== null || prop !== undefined)) { changes.push([k, b.entity, 'prop', nextProp]); prop = nextProp; }
       // A gesture plays where the body stands; seated or lying it keeps its posture (the old poses are standing ones).
@@ -179,6 +189,22 @@ export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame,
       human: { activity: activity || 'idle', level: 0, soul: b.soul, ...(speedQ !== null && speedQ >= 0 ? { speed: speedQ / SPEED_Q } : {}),
         ...(seatH ? { seatHeight: seatH } : {}), ...(prop ? { prop } : {}) },
     };
+  }
+  for (const th of things) {
+    const track: number[][] = [];
+    let last: { p: [number, number, number]; yaw: number } | null = null;
+    for (let k = 0; k <= ticks; k++) {
+      const here = th.at((fromTick + k) * TICK_US);
+      if (!here) continue;
+      last = here;
+      track.push([k, Math.round(here.p[0]), Math.round(here.p[1]), Math.round(here.p[2]), Math.round(here.yaw * ANG_Q)]);
+    }
+    if (!last) continue;
+    tracks[th.entity] = thin(track);
+    changes.push([0, th.entity, 'present', true]);
+    const p: [number, number, number] = [last.p[0] / POS_Q, last.p[1] / POS_Q, last.p[2] / POS_Q];
+    entities[th.entity] = { id: th.entity, def: th.def, kind: 'vehicle', label: th.label, pose: { p, yaw: last.yaw },
+      provenance: { origin: 'simulation', confidence: 'hypothetical' }, ...(th.carrier ? { carrier: { contract: 'carrier-state/1', home: p } } : {}) };
   }
   changes.sort((a, b) => a[0] - b[0]);
   events.sort((a, b) => a.t - b.t);
