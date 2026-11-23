@@ -180,6 +180,9 @@ impl Parser<'_> {
             Some(b'{') => {
                 self.i += 1;
                 let mut entries: Vec<(String, Value)> = Vec::new();
+                // Each key's place in `entries`: a repeated key is found in log time, not by a scan of all before it,
+                // which made a client's state of 10,000 nodes take a second to read (G-late, 0.132).
+                let mut at: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
                 self.ws();
                 if self.b.get(self.i) == Some(&b'}') {
                     self.i += 1;
@@ -193,9 +196,12 @@ impl Parser<'_> {
                     let k = self.string()?;
                     self.eat(b':')?;
                     let v = self.value(depth + 1)?;
-                    match entries.iter_mut().find(|(key, _)| *key == k) {
-                        Some(e) => e.1 = v,
-                        None => entries.push((k, v)),
+                    match at.get(&k) {
+                        Some(&n) => entries[n].1 = v,
+                        None => {
+                            at.insert(k.clone(), entries.len());
+                            entries.push((k, v));
+                        }
                     }
                     self.ws();
                     match self.b.get(self.i) {
