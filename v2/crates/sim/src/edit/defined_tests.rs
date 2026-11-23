@@ -42,6 +42,7 @@ struct W {
     intents: Minter,
     parts: Vec<Arc<Part>>,
     at: Micros,
+    history: undo::History,
 }
 
 impl W {
@@ -80,6 +81,7 @@ impl W {
             intents: Minter::new(Scope([0x11; 16])),
             parts: Vec::new(),
             at: 0,
+            history: undo::History::default(),
         };
         let room = pinned(&w.header, "souls:room");
         w.room = w
@@ -100,7 +102,14 @@ impl W {
         let checked = check(edit, &copy, &self.world)?;
         let planned = plan(checked, &copy, None)?;
         self.at += 1_000;
-        let c = commit(&mut self.live, &mut self.minter, &planned, &[], self.at)?;
+        let c = self.history.edit(
+            &mut self.live,
+            &mut self.minter,
+            &planned,
+            &[],
+            self.at,
+            None,
+        )?;
         self.parts.push(c.part);
         Ok(c.names)
     }
@@ -391,8 +400,13 @@ fn review_blockers_are_refused_at_define_by_name() {
     assert_eq!(w.code(vec![private]), "kind.audience");
     // kind.effects: a create of a kind the world neither pins nor defines (by its full name) ...
     let (seed_def, seed) = w
-        .define(1, &BIRDBATH.replace("birdbath", "seed"))
-        .expect("a seed");
+        .define(
+            1,
+            &BIRDBATH
+                .replace("birdbath", "seed")
+                .replace("[1000,1200,1000]", "[100,100,100]"),
+        )
+        .expect("a seed, too low to have solids");
     let day = 86_400_000_000;
     for makes in ["eden:apple@1220aa", "gene:typo", "gene:seed"] {
         let r = pod("\"gene:seed\"", makes, day, None);
@@ -426,6 +440,29 @@ fn review_blockers_are_refused_at_define_by_name() {
         },
     ])
     .expect("removed together");
+}
+
+/// #3697 re-review: a made thing is not judged for what it would bury, so a form that would make a thing with solids
+/// into a slot (where a Soul may stand, fixed geometry once the slot has a point) is refused at define,
+/// `kind.effects`; the same thing made into a hand defines, and keeps its solids for when it is set down and judged.
+#[test]
+fn a_form_that_would_make_a_thing_with_solids_into_a_slot_is_refused() {
+    let mut w = W::new();
+    let root = w.root;
+    let (_, birdbath) = w.define(1, BIRDBATH).expect("a birdbath, 1.2 m tall");
+    let day = 86_400_000_000;
+    let into_slot = pod("\"gene:birdbath\"", &birdbath, day, None);
+    let no = w
+        .edit(vec![define_op(1, root, &into_slot)])
+        .expect_err("refused");
+    println!("a pod that makes a birdbath into its tray: {}", no.detail);
+    assert_eq!(no.name, "kind.effects", "{}", no.detail);
+    assert!(no.detail.contains("made only into a hand"), "{}", no.detail);
+    let into_hand = into_slot.replace(r#""into":"tray""#, r#""into":"actor_hand""#);
+    w.define(1, &into_hand)
+        .expect("made into a hand, it defines");
+    let made = crate::forms::amounts::made_fields(w.live.tree(), &full(&birdbath));
+    assert!(made.contains_key(&12), "a made birdbath keeps its solids");
 }
 
 /// A chain of forms, each starting the next by many 1 µs timers (#3697 re-review): with no ring, the ring search
@@ -493,4 +530,155 @@ fn a_thing_made_after_the_check_still_refuses_the_removal() {
             .name,
         "kind.in-use"
     );
+}
+
+/// #3697 review: a thing a creator's form makes stands as its kind's bounds say, as a placed one does (field 12, the
+/// solids walkers go round and the safety rule judges); a boot kind's made thing starts with no fields, as before.
+#[test]
+fn a_made_thing_of_a_creators_kind_has_its_solids() {
+    let mut w = W::new();
+    let (_, name) = w.define(1, BIRDBATH).expect("defined");
+    let made = crate::forms::amounts::made_fields(w.live.tree(), &full(&name));
+    let record = defined::read(BIRDBATH.as_bytes(), &|_| false).expect("a record");
+    assert_eq!(
+        made.get(&12),
+        defined::solids_of(&record.entry).as_ref(),
+        "the record's solids"
+    );
+    assert!(made.contains_key(&12));
+    let room = pinned(&w.header, "souls:room");
+    assert!(crate::forms::amounts::made_fields(w.live.tree(), &room).is_empty());
+}
+
+/// #3697 re-review: an undo or a redo that would remove a creator's definition while a thing of its kind is left (one
+/// a Soul's form made since, outside the creator's batches) is refused `kind.in-use`, as an edit's removal is: in the
+/// preview the checker plans on and at the tick. Without a thing left, the same undo goes through.
+#[test]
+fn an_undo_or_redo_that_removes_a_kind_a_thing_still_has_is_refused() {
+    let mut w = W::new();
+    let (def, name) = w.define(1, BIRDBATH).expect("defined");
+    let removal = vec![Op::Remove {
+        node: Ref::Node(def),
+    }];
+    w.edit(removal).expect("removed, nothing uses it");
+    let creator = Actor::Creator(w.world.creator);
+    let next = |w: &mut W| {
+        w.at += 1_000;
+        w.at
+    };
+    let at = next(&mut w);
+    w.history
+        .undo(&mut w.live, &w.world, creator, at, &mut |_, _| Ok(()))
+        .expect("the removal undone, the definition back");
+    // A thing of the kind made outside the history, as a Soul's form makes one.
+    let history = std::mem::take(&mut w.history);
+    let room = w.room;
+    let thing = w
+        .edit(vec![place(
+            1,
+            &full(&name),
+            Ref::Node(room),
+            BTreeMap::new(),
+        )])
+        .expect("a birdbath made")[&1];
+    w.history = history;
+    let at = next(&mut w);
+    let preview = w
+        .history
+        .preview(true, &w.live, &w.world, creator, at)
+        .expect_err("refused");
+    println!("redo of the removal while {thing:?} is a birdbath: {preview:?}");
+    assert_eq!(preview.name, "kind.in-use");
+    let redo = w
+        .history
+        .redo(&mut w.live, &w.world, creator, at, &mut |_, _| Ok(()))
+        .expect_err("refused at the tick");
+    assert_eq!(redo.name, "kind.in-use");
+    // Undo, past the redo: the definition's own batch, which would remove it from under the birdbath.
+    let undo = w
+        .history
+        .undo(&mut w.live, &w.world, creator, at, &mut |_, _| Ok(()))
+        .expect_err("refused");
+    println!("undo of the definition while {thing:?} is a birdbath: {undo:?}");
+    assert_eq!(undo.name, "kind.in-use");
+    assert!(w.live.tree().handle(def).is_some(), "the definition stays");
+    // With the thing gone (outside the history again), the undo goes through.
+    let history = std::mem::take(&mut w.history);
+    w.edit(vec![Op::Remove {
+        node: Ref::Node(thing),
+    }])
+    .expect("the birdbath removed");
+    w.history = history;
+    let at = next(&mut w);
+    w.history
+        .undo(&mut w.live, &w.world, creator, at, &mut |_, _| Ok(()))
+        .expect("nothing has the kind now");
+    assert!(w.live.tree().handle(def).is_none(), "the definition undone");
+}
+
+/// #3697 round 3: a form's put (and a reparent into a slot, which binds to the same put) of a creator's thing with
+/// solids into a slot its holder gives a point would make it fixed geometry no one judged, so a Soul could be buried
+/// by a thing made into its hand and then put away. It is refused `solid-into-slot` by name; into a slot with no
+/// point (carried, never ground) the put goes through.
+#[test]
+fn a_form_cannot_put_a_creators_solid_thing_into_a_slot_with_a_point() {
+    use crate::forms::amounts::{Cx, View};
+    use skills::form_runner::{Effect as Bound, Of};
+    let mut w = W::new();
+    let (_, birdbath) = w.define(1, BIRDBATH).expect("a birdbath, 1.2 m tall");
+    let bay = r#"{"format":"souls-entry/1","kind":"gene:bay","owner":"thing",
+  "slots":{"bay":{"kinds":["gene:birdbath"],"at_mm":[0,0,600]}},
+  "forms":{"make":{"who":"anyone","effects":[{"change":"create","kind":"BIRDBATH","into":"actor_hand"}]}}}"#
+        .replace("BIRDBATH", &birdbath);
+    let (_, bay) = w
+        .define(2, &bay)
+        .expect("a bay whose form makes a birdbath into a hand");
+    let room = w.room;
+    // The bay with a point for its slot (a Soul may stand there), one without, and a birdbath standing in for the
+    // one the bay's form made into the Soul's hand (the room stands in for that Soul's body).
+    let point = Value::Array(vec![Value::Array(
+        [1u64, 0, 0, 600].map(Value::Uint).to_vec(),
+    )]);
+    let names = w
+        .edit(vec![
+            place(
+                1,
+                &full(&bay),
+                Ref::Node(room),
+                BTreeMap::from([(13, point)]),
+            ),
+            place(2, &full(&bay), Ref::Node(room), BTreeMap::new()),
+            place(3, &full(&birdbath), Ref::Node(room), BTreeMap::new()),
+        ])
+        .expect("placed");
+    let (fixed, carried, thing) = (names[&1], names[&2], names[&3]);
+    let limits = crate::forms::amounts::Limits::default();
+    let mut minter = Minter::new(Scope([0x3a; 16]));
+    let put = |node: Id, minter: &mut Minter| {
+        let cx = Cx {
+            view: View {
+                tree: w.live.tree(),
+                out: &[],
+            },
+            limits: &limits,
+            header: Some(&w.header),
+            body: room,
+            soul: room,
+            hands: &[],
+            node,
+            reserved: &[],
+            now: 0,
+        };
+        cx.entries(
+            minter,
+            &Bound::Put {
+                what: Of::Node(thing),
+                slot: 1,
+            },
+        )
+    };
+    let no = put(fixed, &mut minter).expect_err("refused");
+    println!("put the birdbath into the bay's pointed slot: {no:?}");
+    assert_eq!(no.name, "solid-into-slot", "{}", no.detail);
+    put(carried, &mut minter).expect("into a slot with no point, it is carried");
 }

@@ -409,7 +409,7 @@ test('ci.yml: the window reaches the scope step, and a deferred run fails ci-ok'
   assert.match(ok, /if: needs\.scope\.outputs\.deferred == 'true'[\s\S]*?exit 1/);
 });
 
-test('ci.yml: a merge group runs nothing again; ci-ok passes at once there (F1)', () => {
+test('ci.yml: a merge group runs no test again; ci-ok there waits only for group-check (F1, B1-8)', () => {
   const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
   const scope = workflow.slice(workflow.indexOf('\n  scope:'), workflow.indexOf('\n  repo:'));
   assert.match(scope, /if: github\.event_name != 'merge_group'/);
@@ -422,8 +422,10 @@ test('ci.yml: a merge group runs nothing again; ci-ok passes at once there (F1)'
   const script = ok.slice(ok.indexOf('        run: |\n', ok.indexOf('SCOPE:')) + 15).split('\n').filter(l => l.startsWith('          ')).map(l => l.slice(10)).join('\n');
   const verdict = env => { try { execFileSync('bash', ['-e', '-c', script], { env: { PATH: process.env.PATH, ...env }, stdio: 'ignore' }); return 'pass'; } catch { return 'fail'; } };
   const skipped = { SCOPE: 'skipped', REPO: 'skipped', QUALIFY: 'skipped', SMOKE: 'skipped', ANY: '', SMOKE_SELECTED: '', GREEN: '' };
-  assert.equal(verdict({ ...skipped, EVENT: 'merge_group' }), 'pass');
-  assert.equal(verdict({ ...skipped, EVENT: 'pull_request' }), 'fail', 'everything skipped anywhere else fails');
+  assert.equal(verdict({ ...skipped, EVENT: 'merge_group', GROUP: 'success' }), 'pass');
+  assert.equal(verdict({ ...skipped, EVENT: 'merge_group', GROUP: 'failure' }), 'fail', 'a group that does not compile fails');
+  assert.equal(verdict({ ...skipped, EVENT: 'merge_group', GROUP: 'skipped' }), 'fail', 'a group-check that did not run fails');
+  assert.equal(verdict({ ...skipped, EVENT: 'pull_request', GROUP: 'skipped' }), 'fail', 'everything skipped anywhere else fails');
 });
 
 // Low-risk paths (Gene, 17 Nov): a change confined to entry, content, form-rules, docs or changelog fragments runs no
@@ -615,4 +617,31 @@ test('ci-ok: on a green head it passes with repo, qualify and smoke skipped; a s
   assert.equal(verdict({ ...skipped, GREEN: 'false' }), 'fail', 'repo skipped without a green head');
   assert.equal(verdict({ ...skipped, SCOPE: 'failure' }), 'fail');
   assert.equal(verdict({ ...skipped, REPO: 'success', GREEN: '' }), 'pass', 'an ordinary run, green unset');
+});
+
+// B1-8: a merge group compiles its combined code (cargo check of v2, tsc of apps/web, by what changed); nothing else
+// runs again, and a pull request or a push never runs it.
+test('a merge group compiles what it changed: v2 with cargo check, the web app with tsc', async () => {
+  const { groupChecks } = await import('./ci-scope.mjs');
+  const g = (...files) => groupChecks(files);
+  assert.deepEqual(g('v2/crates/worldd/src/acts.rs'), { rust: true, web: false });
+  assert.deepEqual(g('v2/Cargo.lock'), { rust: true, web: false });
+  assert.deepEqual(g('content/moves/nod.json'), { rust: true, web: false }, 'worldd includes the content moves');
+  assert.deepEqual(g('apps/web/src/LiveWorld.tsx'), { rust: false, web: true });
+  assert.deepEqual(g('v2/web/src/source/worker.ts'), { rust: false, web: true }, 'apps/web bundles the v2 reader');
+  assert.deepEqual(g('pnpm-lock.yaml'), { rust: false, web: true });
+  assert.deepEqual(g('docs/testing.md', 'v2/docs/TRUNK.md', 'v2/crates/sim/README.md'), { rust: false, web: false });
+  assert.deepEqual(g('v2/client/src/cli/souls.mjs'), { rust: false, web: false });
+  assert.deepEqual(g('.github/workflows/ci.yml'), { rust: true, web: true });
+  assert.deepEqual(groupChecks(null), { rust: true, web: true }, 'no diff: both');
+  const workflow = readFileSync(fileURLToPath(new URL('../workflows/ci.yml', import.meta.url)), 'utf8');
+  const job = workflow.slice(workflow.indexOf('\n  group-check:'), workflow.indexOf('\n  ci-ok:'));
+  assert.match(job, /if: github\.event_name == 'merge_group'\n/, 'only in a merge group');
+  assert.match(job, /cargo check --workspace --all-targets --locked/);
+  assert.match(job, /npx tsc --noEmit -p apps\/web/);
+  assert.match(job, /self-hosted/);
+  assert.doesNotMatch(job, /cargo test|node --test|pnpm test/, 'compile only');
+  const ok = workflow.slice(workflow.indexOf('\n  ci-ok:'));
+  assert.match(ok, /needs: \[scope, repo, qualify, smoke, group-check\]/, 'ci-ok waits for it');
+  assert.match(ok, /merge_group \]; then [^\n]*test "\$GROUP" = success/, 'a merge group passes only when the group compiles');
 });

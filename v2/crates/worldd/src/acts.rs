@@ -106,18 +106,16 @@ pub fn limits() -> Limits {
     }
 }
 
-/// A gateway walk's route deadline and C21 progress watch. The route is read once N9 grants its actual spot;
-/// unrelated ticks do no route search. Waiting for a link or being carried is not a stalled walking tick. The deadline
-/// counts from the tick the route is read, not from the move's start, so a walk whose planning or spot waited still
-/// gets its whole route's time (W11, #4087).
+/// A gateway walk's route deadline. The route is read once N9 grants its actual spot; unrelated ticks do no route
+/// search. The deadline counts from the tick the route is read, not from the move's start, so a walk whose planning or
+/// spot waited still gets its whole route's time (W11, #4087). A walk that makes no progress is the never-stuck
+/// ladder's (0.133 N1, [`crate::unstick`]): routed again at 3 s, still bodies stepped aside at 5 s, a shoulder turn at
+/// 9 s, its order ended `goal-unreachable` at 15 s; C21's 3 s watch no longer ends it.
 pub(crate) struct Walk {
     body: Id,
     order: Id,
     planned: bool,
-    watch: Watch,
-    /// The leg's end last seen on the walk's line.
-    leg: Option<[i64; 2]>,
-    /// Still bodies were stepped aside for it once (0.132 A2-3): a second stall ends it.
+    /// Still bodies were stepped aside for it once (0.132 A2-3).
     made_way: bool,
 }
 
@@ -136,6 +134,9 @@ fn walk_span(length_mm: u64, links: usize) -> Micros {
                 .unwrap_or(i64::MAX)
                 .saturating_mul(5_000_000),
         )
+        // And the ladder's whole climb: a walk that stops making progress is ended by the ladder, by name, before its
+        // deadline (0.133 N1).
+        .saturating_add(sim::unstick::END)
 }
 
 impl Walk {
@@ -144,8 +145,6 @@ impl Walk {
             body,
             order,
             planned: false,
-            watch: Watch::new(),
-            leg: None,
             made_way: false,
         }
     }
@@ -155,22 +154,14 @@ impl Walk {
         self.body
     }
 
-    /// Whether still bodies may be stepped aside for this walk's stall: once a walk (0.132 A2-3). Marks it done, and
-    /// watches the walk again from now.
+    /// Whether still bodies may be stepped aside for this walk's stall: once a walk (0.132 A2-3). Marks it done.
     pub(crate) fn make_way_once(&mut self) -> bool {
-        if self.made_way {
-            return false;
-        }
-        self.made_way = true;
-        self.watch = Watch::new();
-        true
+        !std::mem::replace(&mut self.made_way, true)
     }
 
-    /// A newly planned deadline, and whether the walk stalled. Neither changes the mover's path or authority.
+    /// A newly planned deadline, and whether the walk stalled: never, now (the ladder ends a walk that makes no
+    /// progress, 0.133 N1). Neither changes the mover's path or authority.
     pub(crate) fn step(&mut self, b: &mut Bodies, now: Micros) -> (Option<Micros>, bool) {
-        let Some(me) = b.runner.controller.body(self.body).copied() else {
-            return (None, false);
-        };
         if !b.runner.running(self.body) {
             return (None, false);
         }
@@ -181,31 +172,7 @@ impl Walk {
             due = Some(now.saturating_add(walk_span(metrics.length_mm, metrics.links)));
             self.planned = true;
         }
-        let fields = b.runner.fields.get(&self.body);
-        let waiting = sim::host::waiting(fields).is_some()
-            || fields.is_some_and(|f| f.contains_key(&replica::host::F_HELD));
-        // The corner and the leg's end its line goes toward, as a form's walk asks them: never the walk's granted
-        // place, which on a route with crossings lies past the leg's end, so a leg heading away from it gained nothing
-        // and a Soul walking at full speed was ended `walk.blocked` (#1960).
-        let aim = b
-            .town
-            .next_corner_toward(self.body)
-            .filter(|(node, _, _)| *node == sim::walk::node_of(&me));
-        let Some((_, aim, to)) =
-            aim.filter(|_| !waiting && b.runner.controller.carrying(self.body).is_none())
-        else {
-            self.watch.keep(&BTreeSet::new());
-            return (due, false);
-        };
-        // A line forgotten while the planner finds the next one keeps its corner, not its leg's end: the last leg's
-        // end seen stands for it (the new line goes toward the same one), so a walk trapped between lines is still
-        // watched.
-        let to = match to {
-            Some(t) => *self.leg.insert(t),
-            None => self.leg.unwrap_or(aim),
-        };
-        let here = [me.pose.position.x, me.pose.position.z];
-        (due, self.watch.seen(self.body, here, aim, to, now))
+        (due, false)
     }
 }
 
@@ -494,8 +461,7 @@ impl Sight<'_> {
         if n.parent() != Some(node) {
             return None;
         }
-        self.kinds
-            .get(entry_of(&n))?
+        entry_in(self.kinds, self.tree, &n)?
             .get("areas")?
             .get(point.as_str())?;
         let place = n.place()?;
@@ -1209,7 +1175,7 @@ impl Sight<'_> {
         let radius = build.size.radius_mm() * 1000;
         self.with_view(body, |view| {
             let n = self.tree.node(self.tree.handle(target)?)?;
-            let entry = self.kinds.get(entry_of(&n))?;
+            let entry = entry_in(self.kinds, self.tree, &n)?;
             // A body on one of the thing's own floors (inside a greenhouse, C34 #3599) is in the thing's frame: a floor
             // is placed at its building's origin. Carried up the tree, the point would land on the ground cut out under it.
             let own_floor = self
@@ -1259,7 +1225,7 @@ impl Sight<'_> {
                 .and_then(|p| p.get("at_mm")))
             .and_then(on)
             .map(|p| gap(flat(q, [p.x, p.z]), p.y, p.y));
-            let surface = sim::spots::footprint(entry).and_then(|(corners, height)| {
+            let surface = sim::spots::footprint(&entry).and_then(|(corners, height)| {
                 let [a, b, c, d] = corners;
                 let corners = [on(a)?, on(b)?, on(c)?, on(d)?];
                 let ring = corners.map(|p| [p.x, p.z]);
@@ -1498,6 +1464,8 @@ pub struct Acts {
     pub fired: Vec<(Id, R<Asked>)>,
     /// The form's walks watched for progress (C21).
     watch: Watch,
+    /// The form walks still bodies were stepped aside for (0.133 N1, A2-3's rule): the body and its run's step, once.
+    made_way: BTreeSet<(Id, usize)>,
     /// What blocked each body whose walk ended [`BLOCKED`], until its run's ending is read.
     blocked: BTreeMap<Id, String>,
     planning: RefCell<Planning>,
@@ -1724,6 +1692,22 @@ fn entry_of<'a>(n: &'a replica::tree::NodeRef<'_>) -> &'a str {
     import_eden::entry_name(n.kind().as_str(), n.fields())
 }
 
+/// A node's entry: the world's entry for its kind (or the entry it names), else the record of a creator's kind the
+/// world defines, read by the one loader (`replica::kinds::defined`, #3697), so a creator's forms run as content's do.
+fn entry_in<'a>(
+    kinds: &'a Json,
+    tree: &Tree,
+    n: &replica::tree::NodeRef<'_>,
+) -> Option<std::borrow::Cow<'a, Json>> {
+    kinds
+        .get(entry_of(n))
+        .map(std::borrow::Cow::Borrowed)
+        .or_else(|| {
+            replica::kinds::defined::entry_named(tree, n.kind().as_str())
+                .map(std::borrow::Cow::Owned)
+        })
+}
+
 /// The plain name (`namespace:name`) of a node's kind.
 fn plain(kind: &Name) -> &str {
     let k = kind.as_str();
@@ -1776,8 +1760,8 @@ impl Acts {
         // By the entry the node goes by (#3980): a thing that borrows `eden:chair` (field 27) sits as a chair does.
         tree.handle(*node)
             .and_then(|h| tree.node(h))
-            .and_then(|n| self.kinds.get(entry_of(&n)))
-            .is_some_and(|entry| fixture_seat(entry, "sit").is_some())
+            .and_then(|n| entry_in(&self.kinds, tree, &n))
+            .is_some_and(|entry| fixture_seat(&entry, "sit").is_some())
     }
 }
 
@@ -1823,6 +1807,7 @@ impl Acts {
             timers: BTreeMap::new(),
             fired: Vec::new(),
             watch: Watch::new(),
+            made_way: BTreeSet::new(),
             blocked: BTreeMap::new(),
             planning: RefCell::new(Planning::default()),
             hatches: BTreeMap::new(),
@@ -1994,7 +1979,7 @@ impl Acts {
         let Some(entry) = tree
             .handle(node)
             .and_then(|h| tree.node(h))
-            .and_then(|n| self.kinds.get(plain(n.kind())))
+            .and_then(|n| entry_in(&self.kinds, tree, &n))
         else {
             return false;
         };
@@ -2048,19 +2033,20 @@ impl Acts {
         let mut bodies = bodies;
         let mut first = None;
         for (node, form) in candidates {
-            let kind = tree
+            let found = tree
                 .handle(*node)
                 .and_then(|h| tree.node(h))
-                .map(|n| entry_of(&n).to_owned());
+                .map(|n| (entry_of(&n).to_owned(), entry_in(&self.kinds, tree, &n)));
             // A thing already gone is refused by name here, never handed to the runner (F4's known gap).
-            let Some(kind) = kind else {
+            let Some((kind, entry)) = found else {
                 first.get_or_insert(refusal("thing-missing", replica::world_model::show(*node)));
                 continue;
             };
-            let Some(entry) = self.kinds.get(&kind) else {
+            let Some(entry) = entry else {
                 first.get_or_insert(refusal("no_such_kind", kind));
                 continue;
             };
+            let entry: &Json = &entry;
             if let Some(key) = args.things.keys().find(|k| args.slots.contains_key(*k)) {
                 first.get_or_insert(refusal("arg-ambiguous", key));
                 continue;
@@ -2350,12 +2336,22 @@ impl Acts {
         let timers = self.timers.keys().copied().collect::<BTreeSet<Id>>();
         let mut watch = std::mem::take(&mut self.watch);
         let mut blocked = Vec::new();
+        let mut stalled = Vec::new();
+        let made_way = self.made_way.clone();
         let fired = self.with(tree, bodies.as_deref_mut(), tick, |forms, w| {
             forms.tick(w, now);
             let asked = std::mem::take(&mut *w.geometry.asked.borrow_mut());
             watch.keep(&asked.keys().copied().collect());
             for (body, (node, here, aim, to)) in asked {
-                if watch.seen(body, here, aim, to, now) && forms.stall(w, body, BLOCKED, now) {
+                if !watch.seen(body, here, aim, to, now) {
+                    continue;
+                }
+                // The only way blocked (A2-3's rule): a form's walk that stalls has the still bodies on its line
+                // stepped aside once, below, before it ends `walk.blocked`.
+                let step = forms.at(body).unwrap_or(0);
+                if !made_way.contains(&(body, step)) {
+                    stalled.push((body, step, node, here));
+                } else if forms.stall(w, body, BLOCKED, now) {
                     blocked.push((body, blocker(w.tree, node, here)));
                 }
             }
@@ -2367,6 +2363,38 @@ impl Acts {
             }
             fired
         });
+        for (body, step, node, here) in stalled {
+            self.made_way.insert((body, step));
+            let aside = bodies
+                .as_deref_mut()
+                .map(|b| b.make_way(body))
+                .unwrap_or_default();
+            if !aside.is_empty() {
+                watch.forget(body);
+                let at = bodies
+                    .as_deref()
+                    .and_then(|b| b.runner.controller.body(body))
+                    .map_or(node, sim::walk::node_of);
+                for (moved, from, to) in aside {
+                    self.forms.out.push(crate::unstick::stepped_aside(
+                        now, body, moved, at, from, to,
+                    ));
+                }
+                continue;
+            }
+            let ended = self.with(tree, bodies.as_deref_mut(), tick, |forms, w| {
+                forms
+                    .stall(w, body, BLOCKED, now)
+                    .then(|| blocker(w.tree, node, here))
+            });
+            if let Some(why) = ended {
+                blocked.push((body, why));
+            }
+        }
+        // A body with no run any more keeps no step aside.
+        let running: BTreeSet<Id> = self.forms.walks().keys().copied().collect();
+        self.made_way
+            .retain(|(b, _)| running.contains(b) || self.forms.at(*b).is_some());
         self.watch = watch;
         self.blocked.extend(blocked);
         for t in fired {
@@ -2408,7 +2436,7 @@ impl Acts {
         let entry = tree
             .handle(node)
             .and_then(|h| tree.node(h))
-            .and_then(|n| self.kinds.get(entry_of(&n)).cloned());
+            .and_then(|n| entry_in(&self.kinds, tree, &n).map(std::borrow::Cow::into_owned));
         let asked = match entry {
             None => Err(refusal("thing-missing", replica::world_model::show(node))),
             Some(entry) => {
@@ -2516,8 +2544,9 @@ mod gateway_walk_tests {
 
     #[test]
     fn a_gateway_walks_route_time_includes_margin_and_links_with_no_ceiling() {
-        assert_eq!(walk_span(14_000, 0), 15_000_000);
-        assert_eq!(walk_span(14_000, 2), 25_000_000);
+        // 10 s of walking, 5 s of margin, and the ladder's 15 s climb (0.133 N1).
+        assert_eq!(walk_span(14_000, 0), 30_000_000);
+        assert_eq!(walk_span(14_000, 2), 40_000_000);
         assert!(walk_span(20_000, 0) > 14_000_000);
         assert!(walk_span(70_000, 0) >= 75_000_000);
         // A 600 m route is not capped at the old 180 s: 429 s of walking, plus half again.
