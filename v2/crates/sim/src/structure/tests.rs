@@ -61,6 +61,14 @@ fn rack(height: i64, crew: u64) -> Rack {
         .expect("the construction kinds")
         .map(|e| e.expect("an entry").path())
         .filter(|p| p.extension().is_some_and(|x| x == "json"))
+        // An activity's entry (its `roles`, 0.135 C4's carry) is not a rack kind.
+        .filter(|p| {
+            let json = std::fs::read_to_string(p).expect("read");
+            replica::rules::json::parse(&json)
+                .expect("json")
+                .get("roles")
+                .is_none()
+        })
         .map(|p| {
             let mut json = std::fs::read_to_string(&p).expect("read");
             if p.ends_with("rack_upright.json") {
@@ -909,12 +917,12 @@ fn leave_one(crew: u64) -> Result<(), (String, String, Id)> {
     acts.start(&mut tree, &mut c, ask(0, 3_000), act)
         .expect("started");
     acts.structure = rack.structure;
-    let (moves, mut due) = (Moves::new(), DueList::new());
+    let (mut moves, mut due) = (Moves::new(), DueList::new());
     let before = tree.to_state();
     let r = acts.leave(
         &mut tree,
         &mut c,
-        &moves,
+        &mut moves,
         &mut due,
         &mut mint,
         ask(1, 4_000),

@@ -21,7 +21,7 @@ try{
  const context=await browser.newContext({viewport:{width:1200,height:850}});
  await context.addInitScript(()=>{localStorage.setItem('sim.dev','admin');localStorage.setItem('sim.authUi','1');});
  assert.equal((await context.request.post(base+'/w/eden/v1/admin',{headers:{authorization:'Bearer dev:admin'},data:{action:'clock_rate',rate:4}})).status(),200);
- page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));await page.goto(base+'/w/eden?rewind=1');
+ page=await context.newPage();page.on('pageerror',e=>errors.push(e.message));await page.goto(base+'/w/eden');
  await page.locator('[data-viewer-status]').filter({hasText:'Live'}).waitFor({timeout:120000});
  const broadcast=page.locator('.viewer-broadcast');
  check('Broadcast is an on/off pill beside Live in the top bar; no camera mode menu',await broadcast.getAttribute('aria-pressed')==='true'&&await page.getByRole('radiogroup').count()===0&&await data('mode')==='broadcast');

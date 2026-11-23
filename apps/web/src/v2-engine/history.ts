@@ -27,7 +27,9 @@ export class V2History {
   private readonly base: string;
   private readonly make: () => Worker;
   private readonly frame: Omit<Frame, 'datetime'>;
-  constructor(base: string, make: () => Worker, frame: Omit<Frame, 'datetime'>) { this.base = base; this.make = make; this.frame = frame; }
+  /** V6 (0.133): `hour=HH:MM`, as the live bridge has it: the past is drawn in that light too, its clock unchanged. */
+  private readonly hour: string | undefined;
+  constructor(base: string, make: () => Worker, frame: Omit<Frame, 'datetime'>, hour?: string) { this.base = base; this.make = make; this.frame = frame; this.hour = hour; }
 
   private seek(at: number): Promise<Seeked> {
     if (!this.worker) {
@@ -48,7 +50,7 @@ export class V2History {
   /** The recorded chunks from take tick `from` to `to`, at most `limit`, as the old server's `/v1/takes` gives them. */
   async chunks(from: number, to: number, limit: number, signal?: AbortSignal): Promise<RecordedChunk[]> {
     // one-second chunks, as the old /v1/takes gives a past window (B3-4: the live page plays half-second ones)
-    const bridge = new V2Bridge(this.frame, undefined, TICKS), got = new Map<number, RecordedChunk>(), endUs = to * TICK_US;
+    const bridge = new V2Bridge(this.frame, this.hour, TICKS), got = new Map<number, RecordedChunk>(), endUs = to * TICK_US;
     let at = from * TICK_US, first = true, next: number | null = null;
     // K3: once the first moment is known, a window before it starts there (no walk back through empty days)
     const known = this.firstAt ? await this.firstAt.catch(() => null) : null;

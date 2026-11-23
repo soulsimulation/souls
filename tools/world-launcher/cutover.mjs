@@ -95,6 +95,7 @@ export function cutoverFence({ binding, file = process.env.SOULS_CUTOVER_BINDING
   return {
     inspect: (registry) => load()?.inspect(registry),
     v2Stream: (w) => load()?.v2Stream(w) ?? null,
+    v2World: (w) => load()?.v2World(w) ?? null,
     v2Bodies: (w) => load()?.v2Bodies(w) ?? null,
     v2Fields: (w) => load()?.v2Fields(w) ?? null,
     publish: (w, read) => load()?.publish(w, read) ?? Promise.resolve(null),
@@ -117,6 +118,7 @@ function fenceOf(binding) {
   return {
     inspect: (registry) => ({ configured: true, worlds: fences.map((f) => f.inspect(registry)) }),
     v2Stream: (w) => of(w)?.v2Stream(w) ?? null,
+    v2World: (w) => of(w)?.v2World(w) ?? null,
     v2Bodies: (w) => of(w)?.v2Bodies(w) ?? null,
     v2Fields: (w) => of(w)?.v2Fields(w) ?? null,
     publish: (w, read) => of(w)?.publish(w, read) ?? Promise.resolve(null),
@@ -180,6 +182,9 @@ function oneFence(binding) {
       if (!stream && staticDir && !publishing && existsSync(join(staticDir, 'manifest.json'))) clear();
       return stream;
     },
+    /** The world's name in the new engine (its routes key, the `world` its Souls are paired for), under the same rule as
+     *  `v2Stream` (routed, else null): the home page's My Souls reads a moved world's Souls from the directory by it. */
+    v2World(w) { return this.v2Stream(w) ? canonicalSlug : null; },
     /** #4177: the body catalogue's directory for the page, under the same rule as `v2Stream` (routed, else null). */
     v2Bodies(w) { return v2Bodies && this.v2Stream(w) ? v2Bodies : null; },
     /** B3-2b: every v2 field the routed page's inline config carries beside `v2Stream` (null when not routed): the body
@@ -220,7 +225,9 @@ function oneFence(binding) {
       if (!bound(w)) return false; // A damaged Eden activation never prevents another world from operating.
       const path = url.pathname.replace(/^.*\/(?:w|__sim\/worlds)\/[^/]+/, '') || '/';
       const read = req.method === 'GET' || req.method === 'HEAD';
-      const mutating = !read || (path === '/v1/edge/view' && url.searchParams.has('gaze'));
+      // V4 (0.133): Explore's place pictures are asked for by POST but change nothing: the old world renders its own
+      // architecture, which a moved world keeps (its ground and buildings are the old twin's), so they pass through.
+      const mutating = (!read && !(req.method === 'POST' && path === '/v1/world/context/views')) || (path === '/v1/edge/view' && url.searchParams.has('gaze'));
       const body = bodiesDir && !mutating && path.startsWith('/v2/bodies/') ? path.slice('/v2/bodies/'.length) : null;
       if (!mutating && !files.has(path) && !SERVED.has(path) && body === null) return false;
       let on;
