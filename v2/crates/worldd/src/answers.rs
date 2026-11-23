@@ -2442,6 +2442,16 @@ impl Clock {
                         })
                     })
             });
+            // A retiring holder's set-down whose maps went stale as its body left is checked again (0.135 A2).
+            if r.step == crate::assembly::Step::Retired
+                && done
+                    .as_ref()
+                    .is_err_and(|e| matches!(e.name, "edit.body-stale" | "edit.stale"))
+                && let Some(e) = self.engine.as_mut()
+                && e.retry(r.clone())
+            {
+                continue;
+            }
             let written = done.is_ok();
             if let Some(e) = self.engine.as_mut() {
                 e.part_written(&r, written, now, self.replica.tree());
