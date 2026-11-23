@@ -161,11 +161,20 @@ async function worldPage(video) {
   // what the world says happened, by name, as the page's v2 reader hands its parts on (the world's own records, such as
   // an act ended at its deadline): counted from the reader worker's messages, read-only
   await page.addInitScript(() => {
-    const W = window.Worker, seen = (window.__happened = {});
+    const W = window.Worker, seen = (window.__happened = {}), parts = (window.__parts = []), pub = (window.__published = []);
+    // B3-7: when the page's newest whole chunk moved on (its serverTick), by the page's clock
+    const poll = () => { const t = window.__soulsV2?.takes; if (t && t.serverTick !== pub.at(-1)?.tick) { pub.push({ tick: t.serverTick, at: performance.now() }); if (pub.length > 400) pub.shift(); } requestAnimationFrame(poll); };
+    requestAnimationFrame(poll);
     window.Worker = class extends W {
       constructor(...a) {
         super(...a);
-        this.addEventListener('message', (e) => { for (const h of e.data?.p?.happened ?? []) if (h?.name) seen[h.name] = (seen[h.name] ?? 0) + 1; });
+        this.addEventListener('message', (e) => {
+          for (const h of e.data?.p?.happened ?? []) if (h?.name) seen[h.name] = (seen[h.name] ?? 0) + 1;
+          // B3-7: each part's world span and when the page had it, with its moves and the things it moved into a frame
+          const p = e.data?.t === 'part' ? e.data.p : null;
+          if (p) parts.push({ from: p.from, to: p.to, at: performance.now(), moves: (p.moves ?? []).map((m) => ({ body: m.body, name: m.name, start: m.start, end: m.ends?.at(-1) })),
+            framed: (p.nodes ?? []).filter((n) => n.parent).map((n) => ({ id: n.id, parent: n.parent, at: n.at })) }), parts.length > 400 && parts.shift();
+        });
       }
     };
   });
@@ -194,6 +203,26 @@ const probe = (page, soul) => page.evaluate((soul) => {
   }
   return { doing: s.doing, activity, acts: [...acts], prop, said, p, tick };
 }, soul);
+
+/** B3-7: where the time went for a step sent at page time `pt0` (ms): the world's time then (the newest part's end and the
+ *  time since the page had it), and for this Soul's first move started and first thing put in its frame after that, the
+ *  world time it happened (ms after the send), when the page had the part saying so, and when the chunk holding it was
+ *  whole on the page (each ms after the send). The page then plays it `playDelay` ticks behind that chunk's end. */
+const timeline = (page, soul, pt0) => page.evaluate(({ soul, pt0 }) => {
+  const v = window.__soulsV2, parts = window.__parts ?? [], pub = window.__published ?? [];
+  const ent = v?.souls.get(soul)?.entityId; if (!ent) return null;
+  const mine = (id) => { const e = `v2_${String(id).replace(/[^0-9a-z]/gi, '_')}`; return ent === e || ent.startsWith(`${e}_`); };
+  const before = [...parts].reverse().find((p) => p.at <= pt0), worldAt = before ? before.to + (pt0 - before.at) * 1000 : null;
+  const ms = (us) => (worldAt === null ? null : Math.round((us - worldAt) / 1000));
+  const shown = (us) => { const end = Math.ceil(us / 50_000 / 10) * 10; const q = pub.find((x) => x.tick >= end && x.at >= pt0); return q ? Math.round(q.at - pt0) : null; };
+  const after = parts.filter((p) => p.at >= pt0);
+  const of = (pick) => { for (const p of after) { const x = pick(p); if (x !== undefined) return { worldMs: ms(x.at), part: [ms(p.from), ms(p.to)], hadMs: Math.round(p.at - pt0), chunkWholeMs: shown(x.at), what: x.what }; } return null; };
+  return {
+    move: of((p) => { const m = p.moves.find((m) => mine(m.body)); return m ? { at: m.start, what: `${m.name} to ${ms(m.end)}` } : undefined; }),
+    framed: of((p) => { const n = p.framed.find((n) => mine(n.parent)); return n ? { at: p.from, what: `${n.id}, its record at ${n.at === undefined ? '?' : ms(n.at)}` } : undefined; }),
+    playDelayTicks: v.takes.playDelay,
+  };
+}, { soul, pt0 });
 
 // ---- 2: a freshly paired agent ----
 if (ONLY.has('2') && gl.software) row(2, 'line 2 needs a hardware GL renderer', false, `not reported: the browser's renderer is ${gl.renderer ?? 'none'} (software); run where WEBGL_debug_renderer_info names a GPU`);
@@ -260,7 +289,7 @@ else if (ONLY.has('2')) {
   /** One timed step: the act sent, then the page polled until `shown` holds (at most 6 s); passes within 2 s. */
   let soul = null, arrivalT0 = null;
   const step = async (name, send, shown) => {
-    const b = soul ? await probe(page, soul) : null, t0 = Date.now(), sent = send();
+    const b = soul ? await probe(page, soul) : null, pt0 = await page.evaluate(() => performance.now()), t0 = Date.now(), sent = send();
     let seenMs = null;
     while (Date.now() - t0 < (soul ? 6000 : 30_000)) { // a Soul not on the page yet: wait longer, to say when it came
       if (!soul) {
@@ -285,7 +314,9 @@ else if (ONLY.has('2')) {
     const afterAnswer = seenMs !== null && shownBy ? seenMs - shownBy.ms : null;
     const pass = sent?.ok !== false && afterAnswer !== null && afterAnswer <= 2000;
     const last = soul ? await probe(page, soul) : null;
-    report.lines[2].steps.push({ name, answer: sent?.ok === false ? sent : { ok: true, sequence: sent?.sequence }, answers, timed, seenMs, afterAnswer, page: last });
+    const trace = soul ? await timeline(page, soul, pt0).catch(() => null) : null;
+    if (trace) log(`timeline ${name}: ${JSON.stringify(trace)}`);
+    report.lines[2].steps.push({ name, answer: sent?.ok === false ? sent : { ok: true, sequence: sent?.sequence }, answers, timed, seenMs, afterAnswer, page: last, trace });
     row(2, name, pass, `${sent?.ok === false ? `refused: ${JSON.stringify(sent).slice(0, 160)}` : `world: ${answers || 'no answer yet'}`}; on the page ${seenMs === null ? `not within 6 s (it shows ${last ? `${last.doing ?? '?'}, ${last.activity ?? '?'}${last.prop ? `, holding ${last.prop}` : ''}` : 'no such Soul'})` : `after ${seenMs} ms, ${afterAnswer ?? '?'} ms after the world's ${shownBy?.name ?? 'answer'}`}`);
     return sent;
   };
