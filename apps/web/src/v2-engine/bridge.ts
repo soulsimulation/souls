@@ -45,6 +45,8 @@ export type V2View = {
   /** R3 (take-talk.ts): private turns as the dock shows them to anyone (members, a `…` line a turn), and the ticker. */
   conversations: (NonNullable<ReturnType<typeof privateTurnOf>>[number] | TurnLine)[];
   ticker: { tick: number; text: string }[];
+  /** G1 (0.133): the world's own node (the one with no parent), for the creator panel's weather. */
+  world: string | null;
 };
 
 /** R3b: a private turn with its words, for a member's page (an edge `conversation.turn`, dialogue-threads.ts). */
@@ -97,7 +99,7 @@ const samePlace = (a: NodeRec, b: NodeRec) => a.parent === b.parent && a.slot ==
 const KEEP_CHUNKS_US = 12_000_000;
 
 export class V2Bridge {
-  readonly view: V2View = { unplaced: 0, unplacedFrames: [], takes: { serverTick: 0, chunks: [], receivedAt: 0, playDelay: PLAY_DELAY }, souls: new Map(), newestTo: null, error: null, parts: 0, speech: [], conversations: [], ticker: [] };
+  readonly view: V2View = { unplaced: 0, unplacedFrames: [], takes: { serverTick: 0, chunks: [], receivedAt: 0, playDelay: PLAY_DELAY }, souls: new Map(), newestTo: null, error: null, parts: 0, speech: [], conversations: [], ticker: [], world: null };
   private readonly nodes = new Map<string, NodeRec>();
   /** Each body's samples, its last record and, while the public copy cannot draw it (a frame that is not public, or it
    *  left), since when: it is not drawn from then until it is back. */
@@ -197,6 +199,7 @@ export class V2Bridge {
     for (const id of removed) { this.nodes.delete(id); const t = this.tracks.get(id); if (t) t.gone ??= at; this.letGo(id, at); }
     for (const n of nodes) {
       this.nodes.set(n.id, n);
+      if (n.parent === null) this.view.world = n.id;
       if (!isBody(n)) {
         // A thing whose frame is a body is in its hand (souls:hold); put down, it is not.
         const holder = n.parent && this.tracks.has(n.parent) ? n.parent : null;
