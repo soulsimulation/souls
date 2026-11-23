@@ -348,8 +348,14 @@ impl Cx<'_> {
                 _ => None,
             }
         };
+        // A thing whose map row borrows an entry (field 27, W14 #4090) is read by that entry's amounts too.
+        let borrowed = match self.view.field(node, 27) {
+            Some(Value::Text(e)) => by_plain(e.as_str()),
+            _ => None,
+        };
         kind.as_ref()
             .and_then(|k| self.limits.get(k.as_str()).or_else(|| by_plain(k.as_str())))
+            .or(borrowed)
             .and_then(|fs| fs.get(&field))
             .copied()
             .ok_or_else(|| Refusal {
