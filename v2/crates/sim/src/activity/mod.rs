@@ -21,8 +21,8 @@
 //!   ([`Activities::finish`]), so its role claims are let go: both arms are free, and the next touch between the
 //!   same two starts and plays its moves. A touch whose move holds (T2) is not ended this way.
 //! - **A held move lasts while both stay (0.134 T2).** A role's move whose last phase holds (`hold_hand`) holds until
-//!   a member leaves: then every member's held move is released, so both hands come free, and each release goes out
-//!   for viewers as its record again, ended `released` ([`Activities::leave`]). A walk sent by a member ends it the same
+//!   a member leaves: then every member's held move is released, so both hands come free, each release goes out
+//!   for viewers as its record again, ended `released`, and the others leave the hold too ([`Activities::leave`]). A walk sent by a member ends it the same
 //!   way ([`Activities::walk_leaves`] names the activity; worldd sends the leave).
 //! - **Dancing together on one beat (0.134 T3).** A kind whose moves go on the beat (`beat`) takes up to its `most`
 //!   members, offered to several at once; each later accept joins the offer's own activity ([`offer`]). Its first
@@ -825,6 +825,44 @@ impl Activities {
     /// is let go now and nothing is written.
     #[allow(clippy::too_many_arguments)]
     pub fn leave(
+        &mut self,
+        tree: &mut Tree,
+        c: &mut Controller,
+        moves: &mut Moves,
+        due: &mut DueList,
+        mint: &mut Minter,
+        ask: Ask,
+        body: Id,
+        activity: Id,
+    ) -> R<Micros> {
+        // A hold (T2) lasts while both stay: when one leaves, the rest leave it too, so nobody is kept in a hold that
+        // is over and the next hold between them starts.
+        let holds = self.live.get(&activity).is_some_and(|l| {
+            l.node.members.iter().any(|m| m.body == body)
+                && l.moves.values().any(|n| held(moves, *n))
+        });
+        let at = self.leave_one(tree, c, moves, due, mint, ask, body, activity)?;
+        if holds {
+            let rest: Vec<Member> = self
+                .live
+                .get(&activity)
+                .map(|l| l.node.members.clone())
+                .unwrap_or_default();
+            for m in rest {
+                let theirs = Ask {
+                    soul: m.soul,
+                    intent: m.intent,
+                    at: ask.at,
+                };
+                self.leave_one(tree, c, moves, due, mint, theirs, m.body, activity)?;
+            }
+        }
+        Ok(at)
+    }
+
+    /// One member's leave ([`Activities::leave`]).
+    #[allow(clippy::too_many_arguments)]
+    fn leave_one(
         &mut self,
         tree: &mut Tree,
         c: &mut Controller,
