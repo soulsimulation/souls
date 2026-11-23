@@ -320,3 +320,122 @@ fn no_birth_effect_holds_an_account_id() {
     assert_eq!(b.body.scope(), WORLD, "the world mints the body");
     assert_eq!(b.link.scope(), WORLD);
 }
+
+/// A flat floor `half` mm each way from its middle.
+fn floor_of(half: i32) -> (Id, Surface) {
+    let floor = fixture(1);
+    let corners = vec![
+        [-half, 0, -half],
+        [half, 0, -half],
+        [half, 0, half],
+        [-half, 0, half],
+    ];
+    let surface = Surface::new(
+        floor,
+        vec![Piece {
+            outline: vec![corners.clone()],
+            vertices: corners,
+            triangles: vec![[0, 2, 1], [0, 3, 2]],
+            ground: sim::gaits::Ground::Dry,
+        }],
+    );
+    (floor, surface)
+}
+
+/// #4216: 200 births by an entry with Eden's 96 spots (12 directions × 8 rings, 1 m apart) leave no two bodies closer
+/// than 0.3 m: a held spot is passed over, and when all are held a birth takes a further ring. The same births give
+/// the same places every run.
+#[test]
+fn two_hundred_births_by_96_entry_spots_never_stack() {
+    let run = || {
+        let (floor, surface) = floor_of(40_000);
+        let entry = fixture(2);
+        let ring = Ring {
+            entries: BTreeMap::from([(entry, (floor, Vec3::new(0, 0, 0)))]),
+            radius: 1_000_000,
+            gap: 1_000_000,
+            rings: 8,
+        };
+        let floors = BTreeMap::from([(floor, surface)]);
+        let mut runner = Runner::new(TICK);
+        let mut life = Life::new(WORLD, 8);
+        for n in 1..=200 {
+            life.ask(Birth {
+                soul: soul(n),
+                entry,
+                asked: 0,
+            })
+            .expect("asked");
+        }
+        let mut at = Vec::new();
+        for t in 1..=100 {
+            for b in life.tick(t * TICK, &mut runner, &floors, &ring, &family()) {
+                let p = runner
+                    .controller
+                    .body(b.body)
+                    .expect("in the controller")
+                    .pose
+                    .position;
+                at.push((p.x, p.z));
+            }
+            if life.waiting() == 0 {
+                break;
+            }
+        }
+        (at, life.waiting())
+    };
+    let (at, waiting) = run();
+    assert_eq!((at.len(), waiting), (200, 0), "every birth taken");
+    let mut closest = i64::MAX;
+    for (i, a) in at.iter().enumerate() {
+        for b in &at[i + 1..] {
+            let d = (((a.0 - b.0) as i128).pow(2) + ((a.1 - b.1) as i128).pow(2)).isqrt() as i64;
+            closest = closest.min(d);
+        }
+    }
+    assert!(closest >= 300_000, "two bodies {closest} µm apart");
+    assert_eq!(run().0, at, "the same places every run");
+}
+
+/// #4216: with every place by the entry and beyond it held, a birth waits by name and never stacks.
+#[test]
+fn a_birth_with_every_place_held_waits_by_name() {
+    let (floor, surface) = floor_of(40_000);
+    let entry = fixture(2);
+    // One ring of twelve, 0.1 m out, and its further rings: the first body holds the near ring's spots.
+    let ring = Ring {
+        entries: BTreeMap::from([(entry, (floor, Vec3::new(0, 0, 0)))]),
+        radius: 100_000,
+        gap: 100_000,
+        rings: 1,
+    };
+    let floors = BTreeMap::from([(floor, surface)]);
+    let mut runner = Runner::new(TICK);
+    let mut life = Life::new(WORLD, 64);
+    for n in 1..=64 {
+        life.ask(Birth {
+            soul: soul(n),
+            entry,
+            asked: 0,
+        })
+        .expect("asked");
+    }
+    let born = life.tick(TICK, &mut runner, &floors, &ring, &family());
+    assert!(
+        !born.is_empty() && born.len() < 64,
+        "some born, the rest wait: {}",
+        born.len()
+    );
+    let first_waiting = soul(born.len() as u64 + 1);
+    assert_eq!(
+        life.held_back(first_waiting),
+        Some(sim::life::NO_FREE_PLACE)
+    );
+    let mut at: Vec<Vec3> = born
+        .iter()
+        .map(|b| runner.controller.body(b.body).expect("body").pose.position)
+        .collect();
+    at.sort_by_key(|p| (p.x, p.z));
+    at.dedup();
+    assert_eq!(at.len(), born.len(), "no two on one point");
+}

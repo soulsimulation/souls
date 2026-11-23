@@ -1784,8 +1784,13 @@ impl Clock {
         {
             let (stopped, body) = (o.sequence, o.body);
             let cut = self.bodies.as_mut().and_then(|b| b.cancel(open));
-            self.forms
-                .leave(self.replica.tree(), self.bodies.as_mut(), body, now);
+            self.forms.leave(
+                self.replica.tree(),
+                self.bodies.as_mut(),
+                body,
+                Some(open),
+                now,
+            );
             if cut == Some(Cut::Stopped) {
                 self.note(open, MOVE_ENDED, Some(STOPPED), now);
             }
@@ -2992,7 +2997,7 @@ impl Clock {
             held = self.held(body);
             // A form's run on the body is left first, while the body is still the controller's.
             self.forms
-                .leave(self.replica.tree(), self.bodies.as_mut(), body, now);
+                .leave(self.replica.tree(), self.bodies.as_mut(), body, None, now);
         }
         let retired = match (self.life.as_mut(), self.bodies.as_mut()) {
             (Some(l), Some(b)) => b.retire(&mut l.life, soul, now),
@@ -3644,8 +3649,13 @@ impl Clock {
                     continue;
                 };
                 let (id, actor, sequence, body) = (o.0, o.1.actor, o.1.sequence, o.1.body);
-                self.forms
-                    .leave(self.replica.tree(), self.bodies.as_mut(), body, now);
+                self.forms.leave(
+                    self.replica.tree(),
+                    self.bodies.as_mut(),
+                    body,
+                    Some(id),
+                    now,
+                );
                 self.end(id, |c| c.refusal(actor, sequence, r.name));
             }
         }
@@ -3669,6 +3679,10 @@ impl Clock {
         }
         for (id, how, why) in self.forms.ended() {
             self.form_ended(id, how, why, now);
+        }
+        // An act that waited on its body's posture step gets its run's deadline and progress answer as it starts.
+        for (id, run) in self.forms.started_late() {
+            self.form_started(id, run, now);
         }
     }
 
@@ -3869,9 +3883,15 @@ impl Clock {
             };
             let (actor, sequence, body) = (o.actor, o.sequence, o.body);
             let cut = self.bodies.as_mut().and_then(|b| b.cancel(id));
-            // A form's run whose act timed out is left: it ends at its next stable moment (F3).
-            self.forms
-                .leave(self.replica.tree(), self.bodies.as_mut(), body, now);
+            // A form's run whose act timed out is left: it ends at its next stable moment (F3). An act still waiting
+            // on its body's run (#4187) is left alone, and never starts.
+            self.forms.leave(
+                self.replica.tree(),
+                self.bodies.as_mut(),
+                body,
+                Some(id),
+                now,
+            );
             match cut {
                 Some(Cut::Stopped) => self.note(id, MOVE_ENDED, Some(TIMED_OUT), now),
                 Some(Cut::Finishing) => {
@@ -5170,6 +5190,47 @@ pub fn start<S: Storage + 'static>(
     })
 }
 
+/// A creator's definitions' forms (#3697) pass the entry checker content entries pass: the import check, and each form
+/// that takes no arguments binds, its steps and its effects. Refused `kind.invalid`, naming the form.
+fn definitions_form_checked(c: &edit::Checked) -> Result<(), Refused> {
+    use replica::kinds::defined;
+    for (i, op) in c.edit.ops.iter().enumerate() {
+        let edit::Op::Place { kind, fields, .. } = op else {
+            continue;
+        };
+        let Some(replica::encode::Value::Bytes(b)) = fields.get(&defined::ENTRY) else {
+            continue;
+        };
+        if !defined::is_definition(kind.as_str()) {
+            continue;
+        }
+        let no = |detail: String| Refused {
+            op: Some(i),
+            name: "kind.invalid",
+            detail,
+        };
+        let d = defined::read(b, &|_| false).map_err(|(_, why)| no(why))?;
+        skills::form_runner::check(&d.entry)
+            .map_err(|r| no(format!("{}: {}", r.name, r.detail)))?;
+        for (form, f) in d
+            .entry
+            .get("forms")
+            .and_then(replica::rules::json::Value::obj)
+            .unwrap_or(&[])
+        {
+            // A form that takes no arguments binds its steps and its effects now, as its run would (#3697 review);
+            // what `kind.effects` cannot see without the run's arguments is refused for that run alone.
+            if f.get("takes").is_none() {
+                skills::form_runner::bind(&d.entry, form)
+                    .map_err(|r| no(format!("{form}: {}: {}", r.name, r.detail)))?;
+                skills::form_runner::bind_effects(&d.entry, form)
+                    .map_err(|r| no(format!("{form}: {}: {}", r.name, r.detail)))?;
+            }
+        }
+    }
+    Ok(())
+}
+
 /// The edit checker's thread (G1b): each edit is checked (`replica::edit::check`) and planned (`sim::edit::plan_on`,
 /// G2's safety guard on the town, G2b) on the newest frozen copy that stands at the version it was planned against
 /// (and after the last edit committed), or after a second whatever it stands at, never on the live tree. G2 is given
@@ -5390,6 +5451,7 @@ fn edit_checker(
                         Some(c) => {
                             world.creator = c;
                             edit::check(e, &copy, world)
+                                .and_then(|c| definitions_form_checked(&c).map(|()| c))
                         }
                         None => Err(Refused {
                             op: None,

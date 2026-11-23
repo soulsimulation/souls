@@ -290,7 +290,7 @@ impl Stage {
     pub fn leave(&mut self) {
         let (body, now) = (self.body, self.now);
         let (mut w, forms) = self.world();
-        forms.leave(&mut w, body, now).expect("taken");
+        forms.leave(&mut w, body, None, now).expect("taken");
         self.flush();
     }
 

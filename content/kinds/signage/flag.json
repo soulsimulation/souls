@@ -1,0 +1,32 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:flag",
+  "owner": "thing",
+  "geometry": {
+    "bounds_mm": [
+      600,
+      2500,
+      100
+    ]
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "text": {
+    "card": "A labelled flag on a pole, a marker to find a place by.",
+    "signs": "signs",
+    "marker": "marker",
+    "pole": "pole"
+  },
+  "card": {
+    "text": "card",
+    "category": "signs",
+    "synonyms": [
+      "marker",
+      "pole"
+    ]
+  }
+}
