@@ -1,0 +1,55 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:altar",
+  "owner": "thing",
+  "points": {
+    "front": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        900
+      ],
+      "yaw_mdeg": 180000
+    },
+    "top": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        1000,
+        0
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1860,
+      1500,
+      865
+    ]
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:altar",
+    "shape": {"round":4,"shapes":[{"kind":"extrude","at":[0,30,0],"polygon":[[-870,-370],[870,-370],[870,370],[-870,370]],"h":900,"tint":"stone"},{"kind":"box","at":[0,980,0],"size":[1860,40,860],"round":0,"tint":"cloth"},{"kind":"box","at":[0,750,430],"size":[1000,450,10],"round":0,"tint":"runner"},{"kind":"cyl","at":[-600,1080,-150],"r":50,"h":160,"segments":6,"r2":20,"tint":"brass"},{"kind":"cyl","at":[-600,1250,-150],"r":20,"h":180,"segments":5,"tint":"wax"},{"kind":"cone","at":[-600,1380,-150],"r":15,"h":50,"segments":4,"tint":"flame","glow":1000},{"kind":"cyl","at":[600,1080,-150],"r":50,"h":160,"segments":6,"r2":20,"tint":"brass"},{"kind":"cyl","at":[600,1250,-150],"r":20,"h":180,"segments":5,"tint":"wax"},{"kind":"cone","at":[600,1380,-150],"r":15,"h":50,"segments":4,"tint":"flame","glow":1000},{"kind":"box","at":[0,1250,-250],"size":[40,500,30],"round":0,"tint":"brass"},{"kind":"box","at":[0,1360,-250],"size":[240,40,30],"round":0,"tint":"brass"}],"palette":{"stone":"#d8cfbd","cloth":"#f4f2ec","runner":"#7a2f2f","brass":"#b8913f","wax":"#f2ead8","flame":"#ffb347"},"tags":["ritual","altar","chapel","furniture"]}
+  },
+  "text": {
+    "card": "A stone altar under a white cloth, with two candlesticks and a cross.",
+    "ritual": "ritual",
+    "altar_table": "altar table",
+    "shrine": "shrine"
+  },
+  "card": {
+    "text": "card",
+    "category": "ritual",
+    "synonyms": [
+      "altar_table",
+      "shrine"
+    ]
+  }
+}
