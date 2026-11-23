@@ -62,7 +62,7 @@ export function weatherOf(sky: Record<number, unknown> | undefined | null): OldW
 /** The entity layer, the parts read here (WorldEntityLayer's model and diff sequence, private there, read as world-env.ts
  *  reads them). */
 export type LayerLike = { seq?: unknown; model?: { entities: Map<string, { id: string; state?: Record<string, unknown> }>; state?: { weather?: unknown } } | null };
-export type WorldDiff = { type: 'edge'; kind: 'world-diff'; seq: number; at: number; by: 'engine';
+export type WorldDiff = { type: 'edge'; kind: 'world-diff'; seq: number; at: number; by: 'engine'; tick?: number;
   diff: { upserts: unknown[]; removes: string[]; defs: unknown[]; tiles: string[]; world?: { weather: OldWeather } } };
 
 const sameWeather = (a: unknown, b: OldWeather) => {
@@ -71,19 +71,25 @@ const sameWeather = (a: unknown, b: OldWeather) => {
 };
 
 /** The one diff that brings the layer to v2's state (next in its sequence), or null when it draws it already (or has no
- *  model yet). A thing whose entity the layer does not hold is left out. */
-export function worldDiff(layer: LayerLike | null | undefined, things: ReadonlyMap<string, Record<string, boolean | number>>, weather: OldWeather | null, at: number): WorldDiff | null {
+ *  model yet). A thing whose entity the layer does not hold is left out. `ticks`: the take tick each thing's state (and,
+ *  under '', the weather) was read at; the diff carries the latest, so the layer draws a door's or lamp's change when the
+ *  page's picture reaches it (light-diff-clock.ts), not seconds before the bodies around it. */
+export function worldDiff(layer: LayerLike | null | undefined, things: ReadonlyMap<string, Record<string, boolean | number>>, weather: OldWeather | null, at: number,
+  ticks: ReadonlyMap<string, number> = new Map()): WorldDiff | null {
   const m = layer?.model, seq = layer?.seq;
   if (!m || typeof seq !== 'number') return null;
   const upserts: unknown[] = [];
+  let tick = 0;
   for (const [id, want] of things) {
     const e = m.entities.get(id);
     if (!e || Object.entries(want).every(([k, v]) => e.state?.[k] === v)) continue;
     upserts.push({ ...e, state: { ...e.state, ...want } });
+    tick = Math.max(tick, ticks.get(id) ?? 0);
   }
   const world = weather && !sameWeather(m.state?.weather, weather) ? { weather } : undefined;
+  if (world) tick = Math.max(tick, ticks.get('') ?? 0);
   if (!upserts.length && !world) return null;
-  return { type: 'edge', kind: 'world-diff', seq: seq + 1, at, by: 'engine', diff: { upserts, removes: [], defs: [], tiles: [], ...(world ? { world } : {}) } };
+  return { type: 'edge', kind: 'world-diff', seq: seq + 1, at, by: 'engine', ...(tick > 0 ? { tick } : {}), diff: { upserts, removes: [], defs: [], tiles: [], ...(world ? { world } : {}) } };
 }
 
 /** What the v2 stream says of things' state and the weather, kept from the reader worker's messages. */
@@ -91,6 +97,8 @@ export class WorldState {
   /** Old entity id (a node's `origin`) → its door or lamp state. */
   readonly things = new Map<string, Record<string, boolean | number>>();
   private readonly origins = new Map<string, string>();
+  /** The take tick each state was read at (a part's end; 0 from a snapshot); '' is the weather's. */
+  private readonly ticks = new Map<string, number>();
   weather: OldWeather | null = null;
 
   /** Listens to the reader worker beside the bridge (which takes its `onmessage`); returns it. */
@@ -100,17 +108,19 @@ export class WorldState {
   }
 
   receive(m: Msg): void {
-    const c = m.t === 'part' ? (m as { p: { nodes: NodeLike[]; removed: string[] } }).p : m.t === 'snapshot' ? (m as { s: { nodes: NodeLike[]; removed: string[] } }).s : null;
+    const c = m.t === 'part' ? (m as { p: { nodes: NodeLike[]; removed: string[]; to?: number } }).p : m.t === 'snapshot' ? (m as { s: { nodes: NodeLike[]; removed: string[] } }).s : null;
     if (!c) return;
-    for (const id of c.removed) { const o = this.origins.get(id); if (o) { this.things.delete(o); this.origins.delete(id); } }
+    // a node record does not say when in its part it changed: its end, so a change is never drawn before it happened
+    const tick = 'to' in c && typeof c.to === 'number' ? Math.ceil(c.to / TICK_US) : 0;
+    for (const id of c.removed) { const o = this.origins.get(id); if (o) { this.things.delete(o); this.ticks.delete(o); this.origins.delete(id); } }
     for (const n of c.nodes) {
-      if (n.parent === null && n.sky) this.weather = weatherOf(n.sky) ?? this.weather;
+      if (n.parent === null && n.sky) { const w = weatherOf(n.sky); if (w) { this.weather = w; this.ticks.set('', tick); } }
       if (!n.origin) continue;
       const s = thingState(n);
-      if (s) { this.things.set(n.origin, s); this.origins.set(n.id, n.origin); }
+      if (s) { this.things.set(n.origin, s); this.ticks.set(n.origin, tick); this.origins.set(n.id, n.origin); }
     }
   }
 
   /** The diff for the page's entity layer now, or null (see worldDiff). */
-  diff(layer: LayerLike | null | undefined, at: number): WorldDiff | null { return worldDiff(layer, this.things, this.weather, at); }
+  diff(layer: LayerLike | null | undefined, at: number): WorldDiff | null { return worldDiff(layer, this.things, this.weather, at, this.ticks); }
 }

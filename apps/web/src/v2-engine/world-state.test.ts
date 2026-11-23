@@ -42,6 +42,7 @@ test('a door opened and a lamp lit on v2 are drawn so with the part that says it
   const d = ws.diff(l, 0)!;
   assert.deepEqual(d.diff.upserts, [{ id: 'e_door', state: { open: true, locked: false } }, { id: 'e_lamp', state: { on: true } }]);
   assert.equal(d.by, 'engine');
+  assert.equal(d.tick, 500_000 / TICK_US, 'drawn when the picture reaches the part that says it, never before (light-diff-clock)');
   apply(d);
   assert.equal(ws.diff(l, 0), null, 'once drawn, no diff again');
   ws.receive(part([node('a.1', 'eden:door', 'e_door', { 6: 0 })]));
