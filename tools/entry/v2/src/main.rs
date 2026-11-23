@@ -619,7 +619,7 @@ impl Stage {
         let (body, now) = (self.body, self.now);
         let r = {
             let (mut w, forms) = self.world();
-            forms.leave(&mut w, body, now)
+            forms.leave(&mut w, body, None, now)
         };
         self.flush();
         match r {

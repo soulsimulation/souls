@@ -36,7 +36,7 @@
 //   souls.mjs converse list                   the conversations in the copy
 //   souls.mjs give <thing id> --to <body id>   offers that body a thing this Soul holds; it is handed over if accepted
 //   souls.mjs give accept|decline <offer id>   takes an offered thing into a free hand, or declines it
-//   souls.mjs together offer <handshake|hug|high-five|hold-hands> <body id>   offers that body a touch; when it accepts, each
+//   souls.mjs together offer <handshake|hug|high-five|hold-hands|fist-bump|harvest> <body id>   offers that body a touch; when it accepts, each
 //                                             one's move is aimed at the other (0.134 T1); hands stay held until either leaves or walks (T2)
 //   souls.mjs together offer dance <body id> [<body id> ...]   up to seven; all who accept dance on one beat (T3)
 //   souls.mjs together accept|decline <offer id>   accepts the touch, or declines it and nobody moves

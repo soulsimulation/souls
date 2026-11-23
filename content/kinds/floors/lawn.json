@@ -2,10 +2,47 @@
   "format": "souls-entry/1",
   "kind": "eden:lawn",
   "owner": "place",
+  "points": {
+    "middle": { "role": "stand", "at_mm": [0, 0, 0] }
+  },
   "geometry": {"bounds_mm":[20000,100,20000]},
+  "forms": {
+    "wander": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        { "step": "walk_to", "point": "middle" },
+        { "step": "wait", "us": 30000000 }
+      ],
+      "effects": []
+    },
+    "nap": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        { "step": "walk_to", "point": "middle" },
+        { "step": "settle", "posture": "lie" },
+        { "step": "wait", "us": 60000000 }
+      ],
+      "effects": []
+    },
+    "stargaze": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        { "step": "walk_to", "point": "middle" },
+        { "step": "settle", "posture": "lie" },
+        { "step": "wait", "us": 60000000 }
+      ],
+      "effects": []
+    }
+  },
   "looks": {"model":"look:lawn"},
   "text": {
-    "card": "A mown lawn: open grass to walk across, or to sit and lie on.",
+    "card": "A mown lawn: wander across it, or lie on the grass to nap or watch the sky.",
     "ground": "ground",
     "grass": "grass",
     "park": "park"
