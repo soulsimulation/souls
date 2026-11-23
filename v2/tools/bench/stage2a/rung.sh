@@ -87,5 +87,8 @@ kill "$SP" 2> /dev/null
 cp "$W/health.json" "$D/health.final.json" 2> /dev/null
 kill "$GP" "$OP" "$WP" 2> /dev/null
 wait "$GP" "$OP" $TP 2> /dev/null; while kill -0 "$WP" 2> /dev/null; do sleep 0.2; done
-[ -n "${WORLD_ROOT:-}" ] && du -sh "$W" > "$D/world-size.txt" 2>&1 && rm -rf "$(dirname "$W")"
+# The world's folder (a few hundred MB at 500 Souls) goes once measured, unless KEEP_WORLD=1: a ladder on a disk
+# would otherwise fill it (a full disk ends the world's log: `log-failed`, every act after it refused).
+du -sh "$W" > "$D/world-size.txt" 2>&1
+if [ "${KEEP_WORLD:-0}" != 1 ]; then rm -rf "$W"; [ -n "${WORLD_ROOT:-}" ] && rm -rf "$(dirname "$W")"; fi
 node "$V2/tools/bench/stage2a/analyze.mjs" "$D"

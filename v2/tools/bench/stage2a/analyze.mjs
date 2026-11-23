@@ -83,7 +83,7 @@ export function tables(rows, label = '') {
   for (const r of rows) t.push(`| ${r.rung} | ${keys.map((k) => (r.phases[k] ? `${r.phases[k].meanUs} (${r.phases[k].p99Us})` : '-')).join(' | ')} |`);
   t.push('', '**Busiest threads** (cores over the load window):', '');
   for (const r of rows) if (r.threads?.world?.length) t.push(`- ${r.rung}: world ${r.threads.world.map(([n, c]) => `${n} ${c}`).join(', ')}; gateway ${r.threads.gateway.map(([n, c]) => `${n} ${c}`).join(', ')}`);
-  t.push('', '**Accuracy by position** (Gene\'s measure: each agent\'s last act naming a place, checked by where its body is 15 s after the last act, not by receipt; shares of those checked):', '');
+  t.push('', '**Accuracy by position** (Gene\'s measure: each agent\'s last act naming a place, checked by where its body is 15 s after the last act, not by receipt; shares of those checked. Not yet trustworthy: the position check (the frame positions composed without rotation) finds no body at its place even where the world said the act was done; the not-taken and under-way shares come from the answers and stand):', '');
   t.push('| Rung | checked | at the place | world said done, body elsewhere | still under way | not taken (refused) | refused acts / sent, all acts |', '|---|---|---|---|---|---|---|');
   for (const r of rows) { const a = r.accuracy; const refused = Object.values(r.refusals).reduce((x, y) => x + y, 0); t.push(`| ${r.rung} | ${a?.checked ?? '-'} | ${a?.atPlaceShare ?? '-'} | ${a?.doneButElsewhereShare ?? '-'} | ${a?.underWayShare ?? '-'} | ${a?.notTakenShare ?? '-'} | ${r.sent ? (refused / r.sent).toFixed(3) : '-'} |`); }
   t.push('', '**Refusals by name** (verb and reason):', '');
