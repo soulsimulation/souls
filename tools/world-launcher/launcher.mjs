@@ -1209,7 +1209,7 @@ export async function openLauncher(cfg = {}) {
     let keep, pageStream = null, pageBodies = null;
     if (req.method === 'GET' && /\btext\/html\b/.test(String(req.headers.accept ?? '')) && !/^\/(?:v1|mcp|__)(?:\/|$)/.test(edgeRest) && !extname(edgeRest)) {
       const st = pool.status(slug), pageKey = `page ${slug} ${edgeRest} ${st.pid ?? ''}:${st.upSince ?? ''} ${req.headers['x-forwarded-host'] ?? ''} ${req.headers['x-forwarded-proto'] ?? ''} ${req.headers.host ?? ''}`;
-      pageStream = cutover?.v2Stream(w) ?? null; pageBodies = pageStream ? cutover.v2Bodies(w) : null;
+      pageStream = cutover?.v2Stream(w) ?? null; pageBodies = pageStream ? cutover.v2Fields(w) : null;   // B3-2b: v2Bodies, v2Gateway, v2Directory
       // #4177: at route time the old world's static views are published beside the stream (once; cutover.mjs publish)
       if (pageStream && p) void cutover.publish(w, async (path) => { const r = await fetch(`http://127.0.0.1:${p}${path}`, { signal: AbortSignal.timeout(10_000) }); return { status: r.status, body: Buffer.from(await r.arrayBuffer()) }; }).catch((e) => log(`cutover: ${slug}'s static views not published (${e?.message ?? e})`));
       let kept = c3.peek(pageKey, PAGE_TTL_MS), tag = 'hit';
@@ -1397,6 +1397,17 @@ export async function openLauncher(cfg = {}) {
     }
     dash.noteWatch(req);   // lane DASH: sim-watch's last check (and what it saw down)
     try {
+      // B3-2c: the site's public sign-in fields, in the shape the new system's pages read them (v2/web/src/source/signin.ts
+      // SignInConfig, as v2/tools/origin/site.mjs answers): the pairing card (`/pair`, the directory's) then signs in with
+      // this site's own provider session, the one the old page holds, and approves with it as a bearer. No secret here.
+      if (path === '/v1/auth/config' && (req.method === 'GET' || req.method === 'HEAD')) {
+        const p = auth?.public, host = String(req.headers.host ?? '');
+        const loopback = /^(?:localhost|127\.(?:\d{1,3}\.){2}\d{1,3})(?::\d+)?$/.test(host) || host.startsWith('[::1]');
+        if (!p || (p.clerkPublishableKey.startsWith('pk_test_') && !loopback)) json(res, 503, { code: 'auth-unconfigured', message: 'Sign-in is not configured. Ask the operator to configure the public provider.' });
+        else json(res, 200, { authProvider: 'clerk', clerkPublishableKey: p.clerkPublishableKey, clerkIssuer: p.clerkIssuer,
+          ...(p.clerkSatellite ? { clerkSatellite: { domain: p.clerkSatellite.domain, signInUrl: p.clerkSatellite.signInUrl } } : {}) }, { 'x-content-type-options': 'nosniff' });
+        return;
+      }
       if (path === '/__sim/op/cutover' && req.method === 'GET') {
         if (!direct(req)) { json(res, 403, { ok: false, code: 'operator-only' }); return; }
         try { json(res, 200, { ok: true, ...(cutover?.inspect(registry) ?? { configured: false }) }); }

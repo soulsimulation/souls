@@ -48,8 +48,17 @@ restart. It never starts or touches a v2 world, the front door or a store.
 ```sh
 node tools/world-launcher/v2-switch.mjs --slug <world> --stream /s/<stream>/ --routes <abs routes.json> \
   --client <abs client dir> --static <abs static dir> --bodies <abs body-assets dir> [--old-world <id>] [--port <launcher port>]
-node tools/world-launcher/v2-switch.mjs --back [--port <launcher port>]
+node tools/world-launcher/v2-switch.mjs --back [--slug <world>] [--port <launcher port>]
 ```
+
+Several worlds (W1, 0.133): one binding file binds a list, `{"schema":"souls/cutover-binding/2","worlds":[<one world's
+binding>, …]}`. Eden's one-world file above is read as it is, and stays that form while it binds one world. `--slug`
+names the world a run switches: a world not yet bound is added, with the first world's routes, client and bodies folders
+unless given, and its own `--static` folder (two worlds never share one). `--back --slug <world>` turns back that world
+only. With several bound, `--slug` is required. Each switched world's page names its own route's stream and its own
+body path, and publishes into its own static folder. `--stream` is the world's full stream path, from its seed's
+`views/world.json`. The launcher's `/__sim/op/cutover` then answers `{configured, worlds: [one world's answer, …]}`, and
+`cutover.sh`'s check reads its `SLUG`'s entry.
 
 - `--binding` names the binding file (default as the launcher: `SOULS_CUTOVER_BINDING`, else `/etc/souls/cutover-binding.json`).
 - `--old-world` is the world's registry id (default `<slug>-1`, which is what a world without its own id has).
@@ -59,6 +68,11 @@ node tools/world-launcher/v2-switch.mjs --back [--port <launcher port>]
   `/w/<world>/v2/bodies/` while routed, and that is the page's `v2Bodies` unless the binding names another.
 - `--stream` must reach the v2 origin on the page's origin (the front door's `/s/` route).
 - With `--port`, it reads the world's page afterwards and prints the `v2Stream` and `v2Bodies` the page carries.
+
+While routed the page also names where its owner's box reaches (B3-2b): `v2Gateway`, the world's agent socket path
+(the binding's `v2Gateway`, else `/w/<world>/v2/ws`, which the front door sends to the agents' relay) and
+`v2Directory`, `/` (the front door sends `/v1/account/*` to the directory). The box exchanges the page's own sign-in
+there: Clerk on the stages, the same provider the directory verifies with its `--issuer` and `--parties`.
 
 Run with only `--binding` (or nothing), it switches the bound world on again. `--back` clears only the flag: the next page
 names neither field, the published files are removed, the body folder is no longer served and the old world answers.
