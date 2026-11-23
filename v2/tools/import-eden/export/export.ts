@@ -270,7 +270,9 @@ const bake: Record<string, number> = {}, byRef: Record<string, number> = {};
 const add = (k: string, n = 1) => { bake[k] = (bake[k] ?? 0) + n; };
 for (const e of m.entities.values()) {
   const d = m.resolvedDef(e.def)!, b = m.bake(d, e.params ?? {}, e.seed ?? 0, e.shape);
-  add('things'); byRef[d.ref] = (byRef[d.ref] ?? 0) + 1;
+  // keyed by the def as the thing names it (its facts' `def`, the tree's def field): an old spelling (`core/humanoid@1` for
+  // `core-humanoid@1`) is counted under the same name on both sides (W2b, 0.133)
+  add('things'); byRef[e.def] = (byRef[e.def] ?? 0) + 1;
   if (isDoorDef(d as never)) add('doors');
   add('rooms', b.rooms?.length ?? 0);
   add('floors', new Set([...(b.rooms ?? []).map((r) => r.floor), ...(b.surfaces ?? []).map((s) => s.level), ...(b.links ?? []).flatMap((l) => [l.from, l.to])]).size);

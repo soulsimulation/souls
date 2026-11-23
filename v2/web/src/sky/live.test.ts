@@ -86,7 +86,9 @@ test('Step 0 and A2: rain starts and stops with the weather effect, live and in 
     const w = p ? p.anchorWorld + (now - p.anchorWallMs) * 1000 : null;
     const t = w === null ? null : clock.step(now - last, w, caughtUp(live.parts.at(-1)?.to ?? null, p?.quietUntil));
     last = now;
-    if (t !== null) (sky.update(t, cam), drawn.push([t, sky.state.rain]));
+    // A frame before the first part is applied has no sky yet (the pointer can arrive first): the page draws its default
+    // there, so only frames with the world node's sky count (the flake: an early dry frame before 20:00).
+    if (t !== null && applied > 0) (sky.update(t, cam), drawn.push([t, sky.state.rain]));
     await sleep(16);
   }
   world.kill('SIGKILL');
