@@ -182,7 +182,8 @@ impl Parser<'_> {
                 let mut entries: Vec<(String, Value)> = Vec::new();
                 // Each key's place in `entries`: a repeated key is found in log time, not by a scan of all before it,
                 // which made a client's state of 10,000 nodes take a second to read (G-late, 0.132).
-                let mut at: std::collections::BTreeMap<String, usize> = std::collections::BTreeMap::new();
+                let mut at: std::collections::BTreeMap<String, usize> =
+                    std::collections::BTreeMap::new();
                 self.ws();
                 if self.b.get(self.i) == Some(&b'}') {
                     self.i += 1;
@@ -379,5 +380,32 @@ fn write_value(out: &mut String, v: &Value) {
             }
             out.push('}');
         }
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    /// G-late (0.132): a repeated key keeps its first place and its last value, as JavaScript's `JSON.parse` does, and
+    /// an object of 20,000 keys (a client's state of a big world) is read whole.
+    #[test]
+    fn a_repeated_key_keeps_its_place_and_its_last_value() {
+        let v = parse(r#"{"a":1,"b":2,"a":3}"#).unwrap();
+        let Value::Obj(e) = &v else {
+            panic!("an object")
+        };
+        assert_eq!(
+            e.iter().map(|(k, _)| k.as_str()).collect::<Vec<_>>(),
+            ["a", "b"]
+        );
+        assert!(same(v.get("a").unwrap(), &parse("3").unwrap()));
+        let keys: Vec<String> = (0..20_000)
+            .map(|i| format!("\"{}-{i}\":{i}", "ab".repeat(16)))
+            .collect();
+        let Value::Obj(e) = parse(&format!("{{{}}}", keys.join(","))).unwrap() else {
+            panic!("an object")
+        };
+        assert_eq!(e.len(), 20_000);
     }
 }
