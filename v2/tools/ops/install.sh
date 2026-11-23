@@ -14,8 +14,10 @@
 # What it makes: the unprivileged user souls; the programs in /usr/local/lib/souls (supervisor, worldd, gatewayd,
 # directoryd, register-world, deploy, gateway-upgrade, import-accounts, import-world, publish-template, the origin and the page's files); data in
 # /var/lib/souls; settings in /etc/souls (751), the secrets file root-owned; the units souls.slice, worldd@ (with its drop-in), souls-gateway@,
-# souls-directory, souls-origin and souls-agents.
-# Carried over from today's installer: idempotent, and it starts, enables and restarts nothing. It never reads or
+# souls-directory, souls-origin, souls-agents and souls-alarms (with its drop-in).
+# Carried over from today's installer: idempotent, and it starts, enables and restarts nothing but the alarm daemon
+# (souls-alarms, O2 #2731), which it enables and starts: it wakes only worlds that went to sleep, and with none it
+# waits. Uninstall stops and disables it. It never reads or
 # writes today's units, users, data, proxy, DNS or firewall: it refuses, changing nothing, when anything it would
 # make is already there and not its own (install.state records what it made).
 set -euo pipefail
@@ -32,10 +34,12 @@ PROGRAMS=(supervisor worldd gatewayd directoryd register-world deploy gateway-up
 # A program's cargo binary: the `templates` crate's is installed as publish-template, since $LIB/templates is the
 # catalogue it writes (W3b's placement.json `templates`).
 built() { if [ "$1" = publish-template ]; then echo templates; else echo "$1"; fi; }
-UNIT_FILES=(souls.slice worldd@.service souls-gateway@.service souls-directory.service souls-origin.service souls-agents.service souls-place.path souls-place.service)
+UNIT_FILES=(souls.slice worldd@.service souls-gateway@.service souls-directory.service souls-origin.service souls-agents.service souls-place.path souls-place.service souls-alarms.service)
 DROPIN=$UNITS/worldd@.service.d
+ALARMS_DROPIN=$UNITS/souls-alarms.service.d
+ALARMS=souls-alarms.service
 # Everything it may make, and so everything it may remove: the user, three folders it owns whole, its units.
-OWNED=("user $ACCOUNT" "tree $LIB" "tree $DATA" "tree $ETC" "tree $DROPIN")
+OWNED=("user $ACCOUNT" "tree $LIB" "tree $DATA" "tree $ETC" "tree $DROPIN" "tree $ALARMS_DROPIN")
 for u in "${UNIT_FILES[@]}"; do OWNED+=("file $UNITS/$u"); done
 
 die() {
@@ -224,6 +228,10 @@ SOULS_OPS_DIRECTORY=http://127.0.0.1:$DIRECTORY_PORT"
   done
   ensure_dir "$DROPIN" 755 root root "tree $DROPIN"
   ensure_file "$from/units/worldd-install.conf" "$DROPIN/10-install.conf" 644 root root
+  # The alarm daemon runs as root (it starts worlds) in the group souls, its socket group-writable, so a world and its
+  # gateway, both the user souls, can reach it.
+  ensure_dir "$ALARMS_DROPIN" 755 root root "tree $ALARMS_DROPIN"
+  ensure_file "$from/units/alarms-install.conf" "$ALARMS_DROPIN/10-install.conf" 644 root root
   # Per-world limits: each world units/world-limits.json lists and this machine has placed gets
   # worldd@<world>.service.d/limits.conf (world-limits.mjs; a world not listed keeps the unit's own).
   local l limits
@@ -234,6 +242,15 @@ SOULS_OPS_DIRECTORY=http://127.0.0.1:$DIRECTORY_PORT"
     UNITS_CHANGED=1
   fi
   if [ "$UNITS_CHANGED" = 1 ]; then act "systemctl daemon-reload" systemctl daemon-reload; fi
+  # The one unit it starts (see the top): enabled at boot, started now, restarted when its unit or drop-in changed.
+  if [ -n "$R" ] || ! systemctl is-enabled --quiet "$ALARMS" 2> /dev/null; then
+    act "enable $ALARMS" systemctl enable --quiet "$ALARMS"
+  fi
+  if [ -n "$R" ] || ! systemctl is-active --quiet "$ALARMS"; then
+    act "start $ALARMS" systemctl start "$ALARMS"
+  elif [ "$UNITS_CHANGED" = 1 ]; then
+    act "restart $ALARMS" systemctl restart "$ALARMS"
+  fi
 }
 
 # The machine: Linux with systemd 254 or later (worldd@ uses RestartSteps) and cgroup v2; node for the origin.
@@ -271,6 +288,11 @@ units_quiet() {
 # apply takes them back as its own. Removing the data is a production delete, the owner's to do by hand.
 uninstall() {
   local item keep=0
+  # The alarm daemon is the install's own to stop (it started it); every other unit is the operator's.
+  if recorded "file $UNITS/$ALARMS"; then
+    if systemctl is-active --quiet "$ALARMS"; then act "stop $ALARMS" systemctl stop "$ALARMS"; fi
+    if systemctl is-enabled --quiet "$ALARMS" 2> /dev/null; then act "disable $ALARMS" systemctl disable --quiet "$ALARMS"; fi
+  fi
   units_quiet
   [ -f "$STATE" ] || {
     echo "nothing installed (no $STATE)"
@@ -465,7 +487,7 @@ main() {
       machine
       preflight
       install_all "${from:?apply --from <bundle>}"
-      echo "applied: $CHANGES changes (nothing started)"
+      echo "applied: $CHANGES changes (nothing started but $ALARMS)"
       ;;
     uninstall)
       [ -z "$R" ] || die "INSTALL_ROOT is for plans only"

@@ -56,4 +56,4 @@ large numbers, without building that now.
 | Worlds | Memory for worlds with something moving; disk for the rest | The launcher's health page and the hundred-world bench |
 
 Numbers are deliberately not kept here: they change with every release. The measurement issues and the tranche
-carry them.
+carry them, and each release's published capacity run is in [capacity](capacity.md).

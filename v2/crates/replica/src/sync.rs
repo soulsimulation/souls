@@ -174,6 +174,16 @@ impl Records {
         }
     }
 
+    /// How far back, in seals, each window reaches now: the seals since the oldest replaced record still kept was
+    /// replaced (0 when none is kept). The small window falls under [`SMALL_SEALS`] when [`SMALL_BYTES`] binds.
+    pub fn windows(&self) -> Windows {
+        let back = |q: &VecDeque<Replaced>| q.front().map_or(0, |r| self.seals - r.seal);
+        Windows {
+            small: back(&self.small),
+            big: back(&self.big),
+        }
+    }
+
     pub fn len(&self) -> usize {
         self.by_hash.len()
     }
@@ -186,6 +196,13 @@ impl Records {
     pub fn bytes(&self) -> usize {
         self.by_hash.values().map(Vec::len).sum()
     }
+}
+
+/// How far back each of [`Records`]' windows reaches, in seals ([`Records::windows`]).
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Windows {
+    pub small: u64,
+    pub big: u64,
 }
 
 /// The world's end of a sync: its tree as last sealed, and its records.

@@ -6,7 +6,8 @@
 //!   sequence is taken (Kafka's idempotent producer refuses gaps; this does not). The table is rebuilt from the log on
 //!   a restart, so a repeat after a restart gets the same answer.
 //! - **A receipt is not a table** ([`Receipts`]): it is the entries whose cause is the intent, found by an index on
-//!   the cause, built as entries commit and again from the log on a restart.
+//!   the cause, built as entries commit and again from the log on a restart. An intent's entries are read when it is
+//!   answered; once it has ended they are dropped after [`KEEP_ENDED`] of world time, so the index stays bounded.
 //! - **Every open act has a deadline on the due list** (K9's [`DueList`], [`Deadlines`]); at it the act ends
 //!   `act.timed-out`.
 //! - **Expiry** is world time, compared at arrival and again at commit ([`expired`]).
@@ -89,10 +90,17 @@ impl Sequences {
     }
 }
 
+/// How long an ended intent's entries stay in [`Receipts`]: ten minutes of world time.
+pub const KEEP_ENDED: Micros = 600_000_000;
+
 /// The index from an intent to the entries it caused: its receipt.
 #[derive(Default)]
 pub struct Receipts {
     by_intent: BTreeMap<Id, Vec<u64>>,
+    /// Intents answered since the last [`Receipts::trim`], not yet given an end time.
+    ended: Vec<Id>,
+    /// Ended intents with the world time they were first trimmed at, oldest first.
+    ending: VecDeque<(Micros, Id)>,
 }
 
 impl Receipts {
@@ -111,6 +119,34 @@ impl Receipts {
     /// The entries that carried out intent `id`, in log order.
     pub fn entries(&self, id: Id) -> &[u64] {
         self.by_intent.get(&id).map_or(&[], Vec::as_slice)
+    }
+
+    /// Intent `id` has had its last answer: its entries are dropped [`KEEP_ENDED`] after the next trim.
+    pub fn ended(&mut self, id: Id) {
+        self.ended.push(id);
+    }
+
+    /// Gives the intents ended since the last trim the world time `now`, then drops the entries of every intent
+    /// that ended at least [`KEEP_ENDED`] before it.
+    pub fn trim(&mut self, now: Micros) {
+        self.ending.extend(self.ended.drain(..).map(|id| (now, id)));
+        while let Some(&(at, id)) = self.ending.front() {
+            if now.saturating_sub(at) < KEEP_ENDED {
+                break;
+            }
+            self.ending.pop_front();
+            self.by_intent.remove(&id);
+        }
+    }
+
+    /// How many intents the index holds.
+    pub fn len(&self) -> usize {
+        self.by_intent.len()
+    }
+
+    /// Whether the index holds none.
+    pub fn is_empty(&self) -> bool {
+        self.by_intent.is_empty()
     }
 }
 
@@ -195,5 +231,40 @@ mod tests {
         assert_eq!(d.due(100), Some(a));
         assert_eq!(d.due(1_000), None);
         assert!(expired(100, 100) && !expired(101, 100));
+    }
+
+    #[test]
+    fn an_ended_intents_entries_are_dropped_ten_minutes_after_it_ends() {
+        use replica::effects::{Actor, Body, Cause, Effect, Envelope};
+        use replica::world_model::Audience;
+        let id = |n| Id::new(Scope([3; 16]), n).unwrap();
+        let effect = |sequence, intent| Effect {
+            envelope: Envelope {
+                sequence,
+                at: 0,
+                cause: Cause::Intent(intent),
+                actor: Actor::World,
+                audience: Audience::Everyone,
+                node: id(0),
+            },
+            body: Body::Changes(Vec::new()),
+            events: None,
+            rest: replica::effects::Rest::new(),
+        };
+        let (done, open) = (id(1), id(2));
+        let mut r = Receipts::default();
+        r.index(&[effect(1, done), effect(2, open), effect(3, done)]);
+        r.ended(done);
+        r.trim(1_000);
+        r.trim(1_000 + KEEP_ENDED - 1);
+        assert_eq!(
+            r.entries(done),
+            &[1, 3],
+            "kept for ten minutes after it ends"
+        );
+        r.trim(1_000 + KEEP_ENDED);
+        assert_eq!(r.entries(done), &[] as &[u64], "dropped after ten minutes");
+        assert_eq!(r.entries(open), &[2], "an open intent's entries stay");
+        assert_eq!(r.len(), 1);
     }
 }

@@ -390,3 +390,45 @@ fn a_new_walk_drops_the_old_route_and_a_crossing_is_not_asked_from_afar() {
     let r = w.town.track(&b, link, SPEED, w.runner.now + TICK);
     assert_eq!(r.map(|_| ()).unwrap_err().name, "link-not-here");
 }
+
+/// #4215 (keeping apart, the hard rule): a walker whose line runs through a body standing still never steps into
+/// its space (0.3 m between them, two personal radii); it goes around and arrives. The push alone lets it creep
+/// through at a tenth of its speed.
+#[test]
+fn a_walker_never_steps_into_a_standing_body() {
+    let (t, nodes) = town();
+    let ground = nodes["ground"];
+    let mut w = Walk::new(t);
+    let (a, b) = (id(1), id(2));
+    let (west, mid, east) = (
+        Vec3::new(-40_000_000, 0, 30_000_000),
+        Vec3::new(-35_000_000, 0, 30_000_000),
+        Vec3::new(-30_000_000, 0, 30_000_000),
+    );
+    let standing: Body = w.town.surfaces[&ground]
+        .place(
+            b,
+            Frame {
+                node: ground,
+                slot: None,
+            },
+            mid,
+            Quat::IDENTITY,
+        )
+        .unwrap();
+    w.runner.add_body(common::humanoid(), standing).unwrap();
+    w.add(a, ground, west, ground, east);
+    w.run(600);
+    let ended = w.ended();
+    println!("ended: {ended:?}; nearest {} mm", w.nearest / 1000);
+    assert!(
+        w.nearest >= 300_000,
+        "it never steps into the standing body's space: nearest {} µm",
+        w.nearest
+    );
+    assert_eq!(
+        ended.get(&a).map(|(_, h)| h.as_str()),
+        Some("Done"),
+        "it goes around and arrives"
+    );
+}

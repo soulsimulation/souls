@@ -16,12 +16,19 @@
 //! from [`RESTART_SEC_MS`] to [`RESTART_MAX_MS`].
 //!
 //! Moving a live world to another machine (O9, #2828) is [`moving`].
+//!
+//! - **Sleep and wake** (O2, #2731; [`sleep`], [`alarm`], [`wake`]): a still world with nothing due for a minute
+//!   checkpoints, leaves its next due time in the directory and exits; the machine's alarm daemon wakes it before
+//!   that time, or at once for an intent the gateway holds. Runbook: `v2/docs/runbook/sleep-and-wake.md`.
 
+pub mod alarm;
 pub mod bucket;
 pub mod deploy;
 pub mod folder;
 pub mod health;
 pub mod moving;
+pub mod sleep;
+pub mod wake;
 
 use std::path::{Path, PathBuf};
 
@@ -114,10 +121,7 @@ pub fn pin<S: Store>(store: S, root: &Path, world: &World) -> Result<(Vec<u8>, F
             // A cache that cannot be written loses nothing but the next start's way round an unreachable store.
             if let Ok(bytes) = record.to_bytes() {
                 let _ = std::fs::create_dir_all(root.join("cache"));
-                let tmp = path.with_extension("new");
-                if std::fs::write(&tmp, bytes).is_ok() {
-                    let _ = std::fs::rename(&tmp, &path);
-                }
+                let _ = health::write_synced(&path, &bytes);
             }
             Ok((record.build, From::Store))
         }
