@@ -999,14 +999,47 @@ use crate::closed::{Closed, Inside};
 fn shown(header: &Header, closed: Option<&Closed>, tree: &replica::tree::Tree) -> R<Value> {
     let mut state = tree.to_state();
     let hidden = closed.map(|c| c.hidden(tree)).unwrap_or_default();
-    if !hidden.is_empty() {
-        state.nodes.retain(|id, _| !hidden.contains(id));
-        state
-            .links
-            .retain(|_, l| !l.ends.iter().any(|e| hidden.contains(e)));
-        state.timers.retain(|_, t| !hidden.contains(&t.node));
+    leave_out(&mut state, &hidden);
+    // A node the public state cannot hold (a kind it cannot check, a frame or pose it cannot read) is left out and
+    // logged by name, never the stream stopped for every viewer (C5). Leaving one out can leave out another (a
+    // definition), so until none is left.
+    loop {
+        let bad = replica::stream::public::unplaceable(header, &state);
+        if bad.is_empty() {
+            break;
+        }
+        for (id, e) in &bad {
+            left_out(*id, e);
+        }
+        leave_out(&mut state, &bad.into_iter().map(|(id, _)| id).collect());
     }
     project(header, &state)
+}
+
+/// `state` without `ids`, the links with an end in them and their timers.
+fn leave_out(state: &mut replica::effects::State, ids: &std::collections::BTreeSet<Id>) {
+    if ids.is_empty() {
+        return;
+    }
+    state.nodes.retain(|id, _| !ids.contains(id));
+    state
+        .links
+        .retain(|_, l| !l.ends.iter().any(|e| ids.contains(e)));
+    state.timers.retain(|_, t| !ids.contains(&t.node));
+}
+
+/// Logs a node the public stream leaves out, once per node a process (C5).
+fn left_out(id: Id, e: &Refusal) {
+    static LOGGED: std::sync::Mutex<std::collections::BTreeSet<Id>> =
+        std::sync::Mutex::new(std::collections::BTreeSet::new());
+    if LOGGED.lock().is_ok_and(|mut l| l.insert(id)) {
+        eprintln!(
+            "worldd: the public stream leaves out {}: {} ({})",
+            replica::world_model::show(id),
+            e.name,
+            e.detail
+        );
+    }
 }
 
 /// The public place names a value's public nodes reference (#3574), under #3571's rule: a node of the public
@@ -3229,9 +3262,34 @@ impl<S: ObjectStore> PublicWriter<S> {
                 }
             }
         }
+        // A whole cut names change versions only of nodes in the state before or after it: one left out (C5) is
+        // in neither, and a reader refuses a version for it.
+        let rows_of = |v: &Value| -> std::collections::BTreeSet<Id> {
+            match v {
+                Value::Map(m) => match m.get(&2) {
+                    Some(Value::Array(rows)) => rows
+                        .iter()
+                        .filter_map(|r| match r {
+                            Value::Array(p) => {
+                                p.first().and_then(|i| replica::effects::read_id(i).ok())
+                            }
+                            _ => None,
+                        })
+                        .collect(),
+                    _ => Default::default(),
+                },
+                _ => Default::default(),
+            }
+        };
+        let shown_ids = after.as_ref().map(|a| {
+            let mut ids = rows_of(a);
+            ids.extend(rows_of(self.player.state()));
+            ids
+        });
         let changed = self
             .changes
             .iter()
+            .filter(|(i, _)| shown_ids.as_ref().is_none_or(|s| s.contains(i)))
             .map(|(i, v)| (*i, *v))
             .collect::<Vec<_>>();
         // A whole cut's rows that differ from the published state: its context's delta, and what the words index
