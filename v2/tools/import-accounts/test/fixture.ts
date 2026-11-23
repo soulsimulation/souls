@@ -10,6 +10,7 @@
 // - Then today's backup (tools/world-launcher/deploy/backup.mjs) copies the stage, and the set's folder is returned.
 //
 //   node v2/tools/import-accounts/test/fixture.ts [<dir>]     (from the repository root; default .local/import-accounts/fixture)
+import { isMain } from '../../../../tools/lib/is-main.mjs';
 import { execFileSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { mkdirSync, readdirSync, writeFileSync } from 'node:fs';
@@ -87,6 +88,6 @@ export async function makeFixture(dir: string): Promise<Fixture> {
   return { set: join(out, day), stage, forks, worlds, tokens, creature };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === resolve(import.meta.filename)) {
+if (isMain(import.meta.url)) {
   console.log(JSON.stringify(await makeFixture(resolve(process.argv[2] ?? '.local/import-accounts/fixture')), null, 1));
 }

@@ -16,11 +16,11 @@
 // harness config (CLAUDE_CONFIG_DIR, ~/.claude or --claude-dir) and never lists or reads any other project's. Codex keeps
 // sessions by date, not by folder, so a Codex transcript (or any other) is taken only when named with --transcript, and
 // only if its recorded working directory is <folder>.
+import { isMain } from '../lib/is-main.mjs';
 import { createHash } from 'node:crypto';
 import { closeSync, existsSync, mkdirSync, openSync, readSync, readdirSync, readFileSync, realpathSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
 import { basename, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 
 export const BUNDLE_SCHEMA = 'soul-session-bundle/1';
 const WINDOW_BEFORE_MS = 30 * 60_000, WINDOW_AFTER_MS = 10 * 60_000, MAX_FETCH = 400;
@@ -276,7 +276,7 @@ export async function collect(o) {
   return { out, files: manifestFiles.length + 1, records: rows.length, transcripts: t.found.length, receipts: receipts.size, messages: messages.size, secretsReplaced: manifest.secrets.replaced, private: true };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   try { process.stdout.write(JSON.stringify(await collect(parseArgs(process.argv.slice(2))), null, 1) + '\n'); }
   catch (e) { process.stderr.write(`error: ${e.message}\n`); process.exit(1); }
 }

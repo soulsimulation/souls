@@ -13,9 +13,10 @@
 // (`requests.md` beside the files) on every run, so a request cannot drift. The share is a measure, not a gate: the
 // command fails only on a malformed or drifted file. It also reads Engine v2's frozen list of requests (E25, #2794)
 // when that file exists. The format and how to add a request: content/asks/eden/README.md.
+import { isMain } from '../lib/is-main.mjs';
 import {existsSync, readdirSync, readFileSync} from 'node:fs';
 import {join, relative} from 'node:path';
-import {fileURLToPath, pathToFileURL} from 'node:url';
+import { fileURLToPath } from 'node:url';
 import {allowsBase, moveBy, place} from './format.mjs';
 import {loadKinds} from '../../packages/form-rules/src/load.ts';
 import {apply, effects} from '../../packages/form-rules/src/effects.ts';
@@ -285,4 +286,4 @@ export function main(argv) {
   return r.problems.length ? 1 : 0;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) process.exitCode = main(process.argv.slice(2));
+if (isMain(import.meta.url)) process.exitCode = main(process.argv.slice(2));

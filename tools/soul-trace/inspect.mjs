@@ -6,11 +6,11 @@
 // pattern (tools/edge-skill/client-dashboard.mjs): loopback bind, exact Host check,
 // cross-site refusal, a per-run token exchanged for a SameSite=Strict cookie and a
 // nonce CSP. Every trace string reaches the page as JSON and is rendered as text.
+import { isMain } from '../lib/is-main.mjs';
 import {createServer} from 'node:http';
 import {randomBytes, timingSafeEqual} from 'node:crypto';
 import {openSync, fstatSync, readSync, closeSync} from 'node:fs';
 import {basename, resolve} from 'node:path';
-import {pathToFileURL} from 'node:url';
 import {reconstruct} from './readout.mjs';
 
 export const MAX_TRACE_BYTES = 16 * 1024 * 1024;
@@ -172,7 +172,7 @@ $('filter').oninput=draw;poll();
 </script>`;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (isMain(import.meta.url)) {
   const args = process.argv.slice(2), at = args.indexOf('--port');
   const port = at >= 0 ? Number(args[at + 1]) : 0, file = args.find((a, i) => !a.startsWith('--') && i !== at + 1);
   if (!file || !Number.isSafeInteger(port) || port < 0 || port > 65535) { process.stderr.write('usage: node tools/soul-trace/inspect.mjs <trace.jsonl> [--port N]\n'); process.exit(2); }

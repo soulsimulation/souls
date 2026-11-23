@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Agent-local example: original geometry/dance, with the published CC0 canonical contact rig and foot phase.
+import { isMain } from '../../lib/is-main.mjs';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {resolve,dirname,join} from 'node:path';
 import {fileURLToPath,pathToFileURL} from 'node:url';
@@ -102,4 +103,4 @@ gltf.buffers=[{byteLength:offset}];const jsonBytes=Buffer.from(JSON.stringify(gl
 const manifest={type:'humanoid',license:'owned',rightsConfirmed:true,rig:'quaternius/1',actionProfile:'rolling-gripper/1',name:'Pip the rolling robot',description:'A locally authored wheeled robot with visible canonical-contact grippers and a counter-rotating torso/head dance.'};if(out){writeFileSync(join(out,'pip.glb'),result);writeFileSync(join(out,'manifest.json'),JSON.stringify(manifest,null,2)+'\n');}
 return {bytes:result,manifest,stats:{body:'Pip',bytes:result.length,triangles:positions.length/9,drawCalls:1,images:0,joints:joints.length,clips:gltf.animations.map(c=>c.name)}};
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href)console.log(JSON.stringify(authorPip({source:process.argv[2],out:process.argv[3]??join(root,'.local/robot-authored')}).stats));
+if(isMain(import.meta.url))console.log(JSON.stringify(authorPip({source:process.argv[2],out:process.argv[3]??join(root,'.local/robot-authored')}).stats));

@@ -19,6 +19,7 @@
 // tokens are parked in credentials.json (`upgraded`), so a later upgrade restores them with no second approval. No
 // memory file is written either way. A token never reaches an argument, a log line, an error or any file but credentials.json.
 
+import { isMain } from '../../../../tools/lib/is-main.mjs';
 import { spawn } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { chmodSync, copyFileSync, existsSync, mkdirSync, openSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
@@ -281,7 +282,7 @@ export async function main(argv, { cwd = process.cwd(), env = process.env, runni
   throw new Refused('directory-not-answering', 'no answer from the directory');
 }
 
-if (process.argv[1] === SELF) {
+if (isMain(import.meta.url)) {
   const argv = process.argv.slice(2);
   try {
     process.stdout.write(JSON.stringify(await main(argv)) + '\n');
