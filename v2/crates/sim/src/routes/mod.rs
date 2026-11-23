@@ -146,6 +146,9 @@ struct PieceRec {
     portals: Vec<u32>,
     /// Per triangle (counter-clockwise), the triangle across each edge `k` (vertex `k` to `k + 1`), or `NONE`.
     adj: Option<Vec<[u32; 3]>>,
+    /// Per triangle, its box (x min, z min, x max, z max, mm, the piece's frame): [`Map::locate`] and [`Map::gap`] skip
+    /// a triangle whose box `p` is not in or near (S7, [`bounds_of`]).
+    bounds: Vec<[i64; 4]>,
     /// Portal to portal, the line's length inside this piece, mm: filled on first use.
     dist: HashMap<(u32, u32), u32>,
 }
@@ -642,6 +645,7 @@ impl Map {
                         ground: Ground::Dry,
                     };
                     rec.adj = None;
+                    rec.bounds = Vec::new();
                     rec.dist = HashMap::new();
                     for p in portals {
                         self.drop_portal(p);
@@ -740,6 +744,7 @@ impl Map {
                     triangles: Vec::new(),
                     ground: Ground::Dry,
                 };
+                rec.bounds = Vec::new();
                 rec.adj = None;
                 rec.dist = HashMap::new();
                 for p in portals {
@@ -945,6 +950,7 @@ impl Map {
             self.pieces.push(PieceRec {
                 at,
                 frame,
+                bounds: bounds_of(&pc),
                 piece: pc,
                 water: None,
                 portals: Vec::new(),
@@ -977,6 +983,7 @@ impl Map {
                 self.pieces.push(PieceRec {
                     at,
                     frame: 0,
+                    bounds: bounds_of(&pc),
                     piece: pc,
                     water: Some(w),
                     portals: Vec::new(),
@@ -1385,11 +1392,18 @@ impl Map {
 
     /// The triangle of piece `q` holding `p` (edges included), counter-clockwise.
     fn locate(&self, q: u32, p: [i64; 2], y: i64) -> Option<u32> {
-        let pc = &self.pieces[q as usize].piece;
+        let rec = &self.pieces[q as usize];
+        let pc = &rec.piece;
         if pc.vertices.first().is_none_or(|v| i64::from(v[1]) != y) {
             return None;
         }
         (0..pc.triangles.len() as u32).find(|&t| {
+            // A triangle holds only points in its box (its edges included): the others are not tried (S7).
+            if let Some(bx) = rec.bounds.get(t as usize)
+                && (p[0] < bx[0] || p[1] < bx[1] || p[0] > bx[2] || p[1] > bx[3])
+            {
+                return false;
+            }
             let [a, b, c] = self.tri(q, t);
             cross(a, b, p) >= 0 && cross(b, c, p) >= 0 && cross(c, a, p) >= 0
         })
@@ -1403,7 +1417,8 @@ impl Map {
     /// The triangle of piece `q` nearest `p`, the squared distance to it (0 inside), and its point nearest `p` (`p`
     /// itself inside).
     fn gap(&self, q: u32, p: [i64; 2]) -> (u32, i64, [i64; 2]) {
-        gap(&self.pieces[q as usize].piece, p)
+        let rec = &self.pieces[q as usize];
+        gap_in(&rec.piece, &rec.bounds, p)
     }
 
     /// Triangle `t` of piece `q`, its corners counter-clockwise.
@@ -1949,6 +1964,65 @@ fn gap(pc: &Piece, p: [i64; 2]) -> (u32, i64, [i64; 2]) {
         })
         .min()
         .map_or((0, i64::MAX, p), |(d, t, at)| (t, d, at))
+}
+
+/// Each triangle's box of `pc` (x min, z min, x max, z max, mm): what [`Map::locate`] and [`gap_in`] skip by.
+fn bounds_of(pc: &Piece) -> Vec<[i64; 4]> {
+    (0..pc.triangles.len() as u32)
+        .map(|t| {
+            let [a, b, c] = tri(pc, t);
+            [
+                a[0].min(b[0]).min(c[0]),
+                a[1].min(b[1]).min(c[1]),
+                a[0].max(b[0]).max(c[0]),
+                a[1].max(b[1]).max(c[1]),
+            ]
+        })
+        .collect()
+}
+
+/// [`gap`], skipping each triangle whose box `bounds` lies farther from `p` than the nearest triangle found so far
+/// (S7): the same answer. Its nearest point is rounded down to whole mm, less than a mm on each axis, so a triangle is
+/// skipped only when its box is more than 2 mm on each axis beyond that: no triangle that could be the nearest, or tie
+/// with it, is skipped. With no boxes (or not one a triangle), every triangle is tried.
+fn gap_in(pc: &Piece, bounds: &[[i64; 4]], p: [i64; 2]) -> (u32, i64, [i64; 2]) {
+    if bounds.len() != pc.triangles.len() {
+        return gap(pc, p);
+    }
+    let seg = |a: [i64; 2], b: [i64; 2]| {
+        let (ex, ez) = (b[0] - a[0], b[1] - a[1]);
+        let l2 = (ex * ex + ez * ez).max(1);
+        let t = ((p[0] - a[0]) * ex + (p[1] - a[1]) * ez).clamp(0, l2);
+        let at = [a[0] + ex * t / l2, a[1] + ez * t / l2];
+        (sq(at[0] - p[0]) + sq(at[1] - p[1]), at)
+    };
+    let mut best: Option<(i64, u32, [i64; 2])> = None;
+    for (t, bx) in (0..pc.triangles.len() as u32).zip(bounds) {
+        if let Some((d, _, _)) = best {
+            let dx = (bx[0] - p[0])
+                .max(p[0] - bx[2])
+                .max(0)
+                .saturating_sub(2)
+                .max(0);
+            let dz = (bx[1] - p[1])
+                .max(p[1] - bx[3])
+                .max(0)
+                .saturating_sub(2)
+                .max(0);
+            if sq(dx) + sq(dz) > d {
+                continue;
+            }
+        }
+        let [a, b, c] = tri(pc, t);
+        let one = if cross(a, b, p) >= 0 && cross(b, c, p) >= 0 && cross(c, a, p) >= 0 {
+            (0, t, p)
+        } else {
+            let (d, at) = seg(a, b).min(seg(b, c)).min(seg(c, a));
+            (d, t, at)
+        };
+        best = Some(best.map_or(one, |b| b.min(one)));
+    }
+    best.map_or((0, i64::MAX, p), |(d, t, at)| (t, d, at))
 }
 
 /// Whether `p` (mm, the ground's frame) lies on one of `pieces` (a square's), within the grid's rounding: as
