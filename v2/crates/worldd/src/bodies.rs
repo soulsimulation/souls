@@ -1193,6 +1193,27 @@ impl Bodies {
         while self.runner.now + self.runner.tick <= now {
             // The planner's answers to the last tick's wants (K18b): this tick reads them.
             self.take();
+            if self.runner.now % 10_000_000 < self.runner.tick && std::env::var_os("SOULS_S11_DIAG").is_some() {
+                static SEEN: std::sync::Mutex<BTreeMap<Id, (Id, Micros)>> = std::sync::Mutex::new(BTreeMap::new());
+                let mut seen = SEEN.lock().unwrap_or_else(|e| e.into_inner());
+                let now = self.runner.now;
+                let live: BTreeMap<Id, Id> = self.live.iter().filter(|(_, (_, l))| matches!(l, Live::Walk)).map(|(b, (id, _))| (*b, *id)).collect();
+                seen.retain(|b, (id, _)| live.get(b) == Some(id));
+                for (b, id) in &live {
+                    let first = seen.entry(*b).or_insert((*id, now)).1;
+                    let held = (now - first) / 1_000_000;
+                    if held >= 45 {
+                        let v = self.runner.controller.body(*b).map(|m| (m.linear.x.abs() + m.linear.z.abs()) / 1000);
+                        eprintln!(
+                            "s11-diag walk-held s={held} asks={} granted={} running={} out={} speed-mm-s={v:?}",
+                            self.runner.asks.contains_key(b),
+                            self.runner.granted.contains_key(b),
+                            self.runner.running(*b),
+                            self.planner.pending()
+                        );
+                    }
+                }
+            }
             // The tick's order (K18, #3160): due timers first, at the tick's start, then the skills through the
             // host and the controller.
             let at = self.runner.now;

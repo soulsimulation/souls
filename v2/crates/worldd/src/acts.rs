@@ -1498,6 +1498,9 @@ pub struct Args {
     pub values: skills::form_runner::Args,
 }
 
+/// S11 diagnostic only: when each run was first seen at its step.
+static DIAG_SEEN: std::sync::Mutex<BTreeMap<(sim::forms::RunId, usize), Micros>> = std::sync::Mutex::new(BTreeMap::new());
+
 /// The forms in progress, and what they reach that the bodies do not hold.
 pub struct Acts {
     pub forms: Forms,
@@ -2407,6 +2410,24 @@ impl Acts {
     /// every timer of theirs due by `now`.
     pub fn tick(&mut self, tree: &Tree, bodies: Option<&mut Bodies>, tick: u64, now: Micros) {
         let mut bodies = bodies;
+        if tick % 200 == 0 && std::env::var_os("SOULS_S11_DIAG").is_some() {
+            let mut seen = std::mem::take(&mut *DIAG_SEEN.lock().unwrap_or_else(|e| e.into_inner()));
+            let mut next = BTreeMap::new();
+            for (run, body, at, kind, planning, walking, moving, due) in self.forms.diag() {
+                let first = match seen.remove(&(run, at)) {
+                    Some(t) => t,
+                    None => now,
+                };
+                next.insert((run, at), first);
+                let held = (now - first) / 1_000_000;
+                if held >= 45 && (held - 45) % 30 < 10 {
+                    let v = bodies.as_deref().and_then(|b| b.runner.controller.body(body)).map(|m| (m.linear.x.abs() + m.linear.z.abs()) / 1000);
+                    let running = bodies.as_deref().is_some_and(|b| b.runner.running(body));
+                    eprintln!("s11-diag form-held s={held} step={at} kind={kind} planning={planning} walking={walking} moving={moving} runner={running} speed-mm-s={v:?} due-in-s={}", (due - now) / 1_000_000);
+                }
+            }
+            *DIAG_SEEN.lock().unwrap_or_else(|e| e.into_inner()) = next;
+        }
         let timers = self.timers.keys().copied().collect::<BTreeSet<Id>>();
         let mut watch = std::mem::take(&mut self.watch);
         let mut blocked = Vec::new();

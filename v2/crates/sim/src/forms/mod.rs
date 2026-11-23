@@ -687,6 +687,25 @@ impl Forms {
             .collect()
     }
 
+    /// S11 diagnostic only: each run's body, step number, step kind, whether it waits for a plan, whether its walk
+    /// runs, whether a move is in progress, and its due time.
+    pub fn diag(&self) -> Vec<(RunId, Id, usize, String, bool, bool, bool, Micros)> {
+        self.runs
+            .iter()
+            .map(|(id, fr)| {
+                let kind = match fr.runner.step() {
+                    Some(Step::WalkTo { approach, .. }) => format!("walk{}", if *approach { "-approach" } else { "" }),
+                    Some(Step::Move { name, .. }) => format!("move:{}", name.as_str()),
+                    Some(Step::Sit { lie, .. }) => (if *lie { "lie" } else { "sit" }).into(),
+                    Some(Step::Wait(us)) => format!("wait:{us}"),
+                    Some(other) => format!("{other:?}").chars().take(20).collect(),
+                    None => "none".into(),
+                };
+                (*id, fr.body, fr.runner.at().unwrap_or(usize::MAX), kind, self.planning.contains(id), fr.walk.is_some(), fr.mv.is_some(), fr.due)
+            })
+            .collect()
+    }
+
     /// The number of the step in progress of `body`'s run.
     pub fn at(&self, body: Id) -> Option<usize> {
         let run = self.by_body.get(&body)?;
