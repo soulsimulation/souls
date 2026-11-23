@@ -22,7 +22,7 @@
 // 4. A browser smoke: home, sign-in, sound, music, the camera.
 // Prints a pass/fail table and writes report.json (and the clip) to the out folder. Exit 0 when every line passes.
 import { spawn, execFileSync } from 'node:child_process';
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
@@ -83,10 +83,20 @@ const BASE = `http://127.0.0.1:${port.front}`;
 await start('worldd', join(BIN, 'worldd'), ['serve', '--dir', W, '--socket', `${W}.sock`], /./);
 for (let i = 0; i < 600 && !existsSync(join(W, 'views/world.json')); i++) await sleep(100);
 const stream = JSON.parse(readFileSync(join(W, 'views/world.json'), 'utf8')).stream;
+// The directory rewrites its gateway tokens file whole from its own store after each pairing, which would drop the seeded
+// test Souls' tokens: it writes its own file, and the gateway's is the seeded tokens and that file together.
+const seeded = readFileSync(join(W, 'tokens'), 'utf8'), paired = join(OUT, 'paired.tokens');
+let pairedSeen = '';
+const mergeTokens = setInterval(() => {
+  const now = existsSync(paired) ? readFileSync(paired, 'utf8') : '';
+  if (now === pairedSeen) return;
+  pairedSeen = now; writeFileSync(join(W, 'tokens.tmp'), seeded.replace(/\n?$/, '\n') + now); renameSync(join(W, 'tokens.tmp'), join(W, 'tokens'));
+}, 500);
+process.on('exit', () => clearInterval(mergeTokens));
 await start('directoryd', join(BIN, 'directoryd'), ['--listen', `127.0.0.1:${port.directory}`, '--public-url', BASE, '--store', join(OUT, 'accounts.sqlite'),
-  '--test-sign-in', '--pairing', join(OUT, 'pairing.sqlite'), '--gateway-tokens', join(W, 'tokens'), '--view-key', viewKey, '--mailbox-key', mailKey], /listening/);
+  '--test-sign-in', '--pairing', join(OUT, 'pairing.sqlite'), '--gateway-tokens', paired, '--view-key', viewKey, '--mailbox-key', mailKey], /listening/);
 await start('gatewayd', join(BIN, 'gatewayd'), ['--listen', `127.0.0.1:${port.gateway}`, '--world', `${W}.sock`, '--tokens', join(W, 'tokens'),
-  '--build', `1220${'0'.repeat(64)}`, '--entries', join(W, 'entries'), '--view-key', viewKey, '--mailbox', `127.0.0.1:${port.directory}`, '--mailbox-key', mailKey], /listening/);
+  '--build', `1220${'0'.repeat(64)}`, '--entries', join(W, 'entries')], /listening/); // as the ladder's rung: no view key, so the driver reads the entries
 await start('origin', process.execPath, [join(repo, 'v2/tools/origin/origin.mjs'), W, String(port.origin), '127.0.0.1'], /^origin/m, { env: { ...process.env, ORIGIN_PROCESSES: '1' } });
 
 // today's launcher (dev sign-in, fake minds) with old Eden 2026, bound for the switch
@@ -180,7 +190,11 @@ if (ONLY.has('2')) {
     const b = soul ? await probe(page, soul) : null, t0 = Date.now(), sent = send();
     let seenMs = null;
     while (Date.now() - t0 < 6000) {
-      soul ??= (await page.evaluate(() => [...(window.__soulsV2?.souls.keys() ?? [])])).find((s) => !before.has(s)) ?? null;
+      if (!soul) {
+        soul = (await page.evaluate(() => [...(window.__soulsV2?.souls.keys() ?? [])])).find((s) => !before.has(s)) ?? null;
+        // the clip follows it: its card by the page's own link, then Follow
+        if (soul) { await page.evaluate((id) => { location.hash = `soul/${id}`; }, soul); await page.getByRole('button', { name: /^Follow$/ }).first().click({ timeout: 3000 }).catch(() => {}); }
+      }
       const s = soul ? await probe(page, soul) : null;
       if (s && shown(s, b ?? s)) { seenMs = Date.now() - t0; break; }
       await sleep(100);
@@ -202,9 +216,13 @@ if (ONLY.has('2')) {
     if (r?.sequence) await ended(r.sequence);
     r = await step('sit', () => bench ? cli('act', `sit:${bench}`) : { ok: false, detail: 'no seat found' }, (s) => s.activity === 'sit' || s.acts.includes('sit') || s.doing === 'seated');
     if (r?.sequence) await ended(r.sequence, 15_000);
+    // seated, a Soul stands up before it goes anywhere (the skill: `act <ns>:rise`), in the world's namespace or the seat's
+    const rise = () => { const ns = [...new Set([bench, bed].filter(Boolean).map((id) => JSON.stringify(cli('inspect', id)).match(/"([a-z0-9_-]+):rise:/)?.[1]).filter(Boolean))]; const w = cli('act', ...(ns.length ? ns : ['eden', SLUG]).map((n) => `${n}:rise`)); return w.sequence ? ended(w.sequence, 15_000) : null; };
+    await rise();
     if (bed) { const w = cli('act', bed); if (w.sequence) await ended(w.sequence); }
     r = await step('lie', () => bed ? cli('act', `lie:${bed}`) : { ok: false, detail: 'no bed found' }, (s) => s.activity === 'lie' || s.acts.includes('lie'));
     if (r?.sequence) await ended(r.sequence, 15_000);
+    await rise();
     if (cup) { const w = cli('act', cup); if (w.sequence) await ended(w.sequence); }
     r = await step('take', () => cup ? cli('act', `take:${cup}`) : { ok: false, detail: 'no thing to take found' }, (s) => !!s.prop);
     if (r?.sequence) await ended(r.sequence, 15_000);
@@ -245,7 +263,7 @@ if (ONLY.has('4')) {
   const track2 = after.match(/Music (.*?) (?:Random track|Radio station)/)?.[1] ?? null;
   row(4, 'music', !!track && !/off/i.test(track) && !!(await next.count()), `music: ${track ?? 'none'}, after Next track: ${track2 ?? 'none'}`);
   await page.keyboard.press('Escape');
-  const label = () => page.getByRole('button').evaluateAll((bs) => bs.map((b) => b.getAttribute('aria-label') ?? '').find((l) => /: Switch to/.test(l)) ?? null).catch(() => null);
+  const label = () => page.getByRole('button').evaluateAll((bs) => bs.map((b) => b.getAttribute('aria-label') ?? '').find((l) => /Switch to .*camera|camera:/i.test(l) && !/modes and help/.test(l)) ?? null).catch(() => null);
   const camBefore = await label();
   if (camBefore) await page.getByRole('button', { name: camBefore, exact: true }).click().catch(() => {}); await page.waitForTimeout(1500);
   const camAfter = await label();
@@ -279,20 +297,23 @@ if (ONLY.has('3')) {
     for (const k of close.keys()) if (!now.has(k)) close.delete(k);
   }, 250);
   log(`driving ${AGENTS} Souls for ${SECONDS} s`);
-  await start('driver', join(BIN, 'driver'), ['--schedule', join(OUT, 'schedule.txt'), '--dir', D, '--remote', `ws://127.0.0.1:${port.gateway}/v2/ws`, '--tokens', join(W, 'souls.tokens'),
+  await start('driver', join(BIN, 'driver'), ['--schedule', join(OUT, 'schedule.txt'), '--dir', D, '--remote', `ws://127.0.0.1:${port.gateway}`, '--speech', '--tokens', join(W, 'souls.tokens'),
     '--stream', `http://127.0.0.1:${port.origin}/${stream.replace(/^\//, '')}`, '--trace', join(OUT, 'trace.txt')], null);
   const driver = procs.at(-1);
   await new Promise((r) => driver.on('exit', r));
   clearInterval(sampler); await ctx.close();
+  const driverLog = existsSync(join(OUT, 'logs/driver.log')) ? readFileSync(join(OUT, 'logs/driver.log'), 'utf8').trim().split('\n') : [];
+  const driverReport = existsSync(join(D, 'report.json')) ? JSON.parse(readFileSync(join(D, 'report.json'), 'utf8')) : null;
+  row(3, 'the driver ran', !!driverReport, driverReport ? `${AGENTS} Souls, ${SECONDS} s; its report in driver/report.json` : `no report: ${driverLog.at(-1)?.slice(0, 200) ?? 'no output'}`);
   // the trace: `first <agent> <seq> <sent ms> <answered ms> <kind>`, `open <agent> <seq> <sent ms>`
   const trace = existsSync(join(OUT, 'trace.txt')) ? readFileSync(join(OUT, 'trace.txt'), 'utf8').split('\n') : [];
   const firsts = new Map(), opens = [];
   for (const l of trace) { const f = l.split(' '); if (f[0] === 'first') firsts.set(`${f[1]} ${f[2]}`, Number(f[4]) - Number(f[3])); else if (f[0] === 'open') opens.push(`${f[1]} ${f[2]}`); }
   const ignored = opens.filter((k) => !firsts.has(k));
   const slow = [...firsts].filter(([, ms]) => ms > 10_000).sort((a, b) => b[1] - a[1]);
-  row(3, 'no two bodies overlap for more than a moment', overlapPairs === 0, `${overlapPairs} pairs closer than 0.3 m in two chunks running, over ${samples} chunks; worst ${worst.overlapChunks} chunks (${worst.pair ?? 'none'})`);
-  row(3, 'no body ignores a new intent', ignored.length === 0 && firsts.size > 0, `${ignored.length} of ${firsts.size + ignored.length} intents never answered${ignored.length ? `; first: agent ${ignored[0]}` : ''}`);
-  row(3, 'no Soul stuck over 10 s without a receipt saying why', slow.length === 0 && ignored.length === 0 && firsts.size > 0, `${slow.length} acts answered after more than 10 s (worst ${slow[0] ? `${Math.round(slow[0][1] / 1000)} s, agent ${slow[0][0]}` : 'none'}), ${ignored.length} never`);
+  row(3, 'no two bodies overlap for more than a moment', overlapPairs === 0 && samples > 0, `${overlapPairs} pairs closer than 0.3 m in two chunks running, over ${samples} chunks; worst ${worst.overlapChunks} chunks (${worst.pair ?? 'none'})`);
+  row(3, 'no body ignores a new intent', ignored.length === 0 && firsts.size > 0, `${ignored.length} of ${firsts.size + ignored.length} intents never answered${ignored.length ? `; first: agent ${ignored[0].split(' ')[0]}` : ''}`);
+  row(3, 'no Soul stuck over 10 s without a receipt saying why', slow.length === 0 && ignored.length === 0 && firsts.size > 0, `${slow.length} acts answered after more than 10 s (worst ${slow[0] ? `${(slow[0][1] / 1000).toFixed(1)} s, agent ${slow[0][0].split(' ')[0]}` : 'none'}), ${ignored.length} never`);
   report.lines[3] = { overlapPairs, samples, worstOverlap: worst, intents: firsts.size + ignored.length, ignored: ignored.length, answeredAfter10s: slow.length, worstAnswerMs: slow[0]?.[1] ?? null };
 }
 
