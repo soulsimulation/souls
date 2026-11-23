@@ -245,7 +245,8 @@ fn give() -> R<ActivityKind> {
 /// more roles (B5 refuses a kind of one), `<entry kind>_activity`, pinned by the hash of its entry's roles. A role
 /// is `<namespace>:<role>`, standing at its entry's first slot (`souls:here` when it has none) and claiming one hand,
 /// so a member walks, sits and talks while it plays; an offer lapses after a minute and a leave takes at most 0.4 s,
-/// as a conversation's. The `now` line (SA-G1b) is not a role.
+/// as a conversation's. A role's `move` (0.134 T1) names a content move, `souls:<move>`, its member aims at the other
+/// member when the activity starts. The `now` line (SA-G1b) is not a role.
 pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
     let mut by_kind = BTreeMap::new();
     for (kind, entry) in entries {
@@ -269,10 +270,18 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
                 .and_then(|s| s.first())
                 .and_then(Json::str);
             let place = slot.map_or("souls:here".to_owned(), |s| format!("{ns}:{s}"));
+            let mv = match v.get("move") {
+                None => None,
+                Some(m) => {
+                    let m = m.str().ok_or("a role's move is a name")?;
+                    Some(Name::new(&format!("souls:{m}")).ok_or("a role's move")?)
+                }
+            };
             out.push(Role {
                 name: Name::new(&format!("{ns}:{role}")).ok_or("a role's name")?,
                 place: Name::new(&place).ok_or("a role's place")?,
                 claims: vec![Want::One(Class::Manipulator)],
+                mv,
             });
         }
         let pin = to_hex(&sha256(

@@ -14,6 +14,9 @@
 //!   another's body only when both are members of the same started activity; anything else is refused
 //!   (`target-outside-activity`) and changes nothing. A move whose claims meet the activity's own claim on the actor
 //!   runs in its place, and the activity takes its role's claims back when it ends ([`Activities::settle`]).
+//! - **A role may name a move (0.134 T1).** When an activity of such a kind starts, each member whose role names
+//!   one aims it at the other member through [`Activities::aim`] ([`Activities::begin_moves`]), and the move's record
+//!   goes out for viewers as a form's does (`souls:form-move`): a handshake, a hug, a high-five.
 //! - **A leave completes within the time the kind states.** Membership ends at once, in the log. A body with no move
 //!   in progress is let go at once; a body in a move is let go at the move's next phase end, or at the kind's
 //!   `leave_within`, whichever is first, by a timer in K9's due list ([`Activities::fire`]).
@@ -55,6 +58,19 @@ fn refuse<T>(name: &'static str, detail: impl Into<String>) -> R<T> {
         name,
         detail: detail.into(),
     })
+}
+
+/// The event a move's record goes out in, a form's own (#3741), so the page draws a role's move as it draws a form's.
+const FORM_MOVE: &str = "souls:form-move";
+
+/// `v` with every text as bytes, as a form's move record goes out (`forms::as_bytes`): its names need no namespace.
+fn as_bytes(v: Value) -> Value {
+    match v {
+        Value::Text(t) => Value::Bytes(t.as_str().as_bytes().to_vec()),
+        Value::Array(a) => Value::Array(a.into_iter().map(as_bytes).collect()),
+        Value::Map(m) => Value::Map(m.into_iter().map(|(k, v)| (k, as_bytes(v))).collect()),
+        v => v,
+    }
 }
 
 fn name(s: &'static str) -> Name {
@@ -136,6 +152,8 @@ pub struct Activities {
     leaving: BTreeMap<Id, Leaving>,
     /// Offers still open or with pairs waiting (E8), and their bookkeeping.
     offers: offer::Offers,
+    /// Activities started since [`Activities::begin_moves`] last ran, whose roles' moves are still to be aimed.
+    begun: Vec<Id>,
 }
 
 impl Activities {
@@ -152,6 +170,7 @@ impl Activities {
             holding: BTreeMap::new(),
             leaving: BTreeMap::new(),
             offers: offer::Offers::default(),
+            begun: Vec::new(),
         }
     }
 
@@ -529,7 +548,83 @@ impl Activities {
             l.node.state = State::Started;
             l.drivers = drivers;
         }
+        self.begun.push(activity);
         Ok(())
+    }
+
+    /// The bodies of the activities started since [`Activities::begin_moves`] last ran: whom their moves reach.
+    pub fn beginning(&self) -> Vec<Id> {
+        self.begun
+            .iter()
+            .filter_map(|a| self.live.get(a))
+            .flat_map(|l| l.node.members.iter().map(|m| m.body))
+            .collect()
+    }
+
+    /// The roles' moves of the activities started since the last call (0.134 T1): each member whose role names a move
+    /// of `library` aims it at the other member through [`Activities::aim`], at `at`, and its record goes out for
+    /// viewers as a form's move does (`souls:form-move`: 1 the activity, 2 the body, 3 the record, its texts as
+    /// bytes). A move refused (unknown, out of reach, its claims held) is left out and the member plays its role
+    /// without it; the refusals come back, by body.
+    #[allow(clippy::too_many_arguments)]
+    pub fn begin_moves(
+        &mut self,
+        tree: &mut Tree,
+        c: &mut Controller,
+        moves: &mut Moves,
+        due: &mut DueList,
+        mint: &mut Minter,
+        library: &[Move],
+        geo: &impl Reach,
+        at: Micros,
+    ) -> Vec<(Id, Refusal)> {
+        let mut refused = Vec::new();
+        for activity in std::mem::take(&mut self.begun) {
+            let Some(l) = self.live.get(&activity) else {
+                continue;
+            };
+            let kind = &self.kinds[&l.kind];
+            let audience = l.audience;
+            let aims: Vec<(Member, Option<Id>, Name)> = l
+                .node
+                .members
+                .iter()
+                .filter_map(|m| {
+                    let mv = kind.role(&m.role)?.mv.clone()?;
+                    let other = l.node.members.iter().find(|o| o.body != m.body);
+                    Some((m.clone(), other.map(|o| o.body), mv))
+                })
+                .collect();
+            for (m, other, mv) in aims {
+                let Some(found) = library.iter().find(|x| x.name == mv) else {
+                    refused.push((m.body, Refusal { name: "move-unknown", detail: mv.as_str().to_owned() }));
+                    continue;
+                };
+                let Some(target) = other else {
+                    continue;
+                };
+                let n = match self.aim(c, moves, due, mint, geo, m.body, found, target, at) {
+                    Ok(n) => n,
+                    Err(r) => {
+                        refused.push((m.body, r));
+                        continue;
+                    }
+                };
+                let Some(r) = moves.record(n) else {
+                    continue;
+                };
+                let fields = BTreeMap::from([
+                    (1, activity.to_value()),
+                    (2, m.body.to_value()),
+                    (3, as_bytes(r.to_value())),
+                ]);
+                let by = (at, Actor::Soul(m.soul), Cause::Intent(m.intent));
+                if let Err(r) = self.emit(tree, activity, audience, by, FORM_MOVE, fields, Vec::new()) {
+                    refused.push((m.body, r));
+                }
+            }
+        }
+        refused
     }
 
     /// `ask.soul` takes `body` out of `activity`. Always accepted: membership ends now, in the log, and the activity

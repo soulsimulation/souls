@@ -36,7 +36,8 @@ use replica::world_model::show;
 use sim::activity::carry::Carry;
 use sim::activity::{Activities, Ask};
 use sim::controller::Controller;
-use sim::moves::Moves;
+use replica::moves::{Effector, Move};
+use sim::moves::{Moves, Reach};
 use sim::slots::Slots;
 use sim::timers::DueList;
 
@@ -113,6 +114,31 @@ pub struct Engine {
     out: Vec<Effect>,
     /// The boats steered off their own loops (#3603).
     steered: BTreeSet<Id>,
+    /// The moves an activity's roles may name (0.134 T1): content's, [`crate::moves::library`].
+    library: Vec<Move>,
+}
+
+/// Where bodies stand, read from the controller before a move needs them (0.134 T1): a move one member of an activity
+/// aims at another reaches across x and z from feet to feet, on one floor; on two floors it reaches nothing.
+struct Feet(BTreeMap<Id, (Id, [i64; 2])>);
+
+impl Feet {
+    fn of(c: &Controller, bodies: impl IntoIterator<Item = Id>) -> Feet {
+        Feet(
+            bodies
+                .into_iter()
+                .filter_map(|b| c.body(b).map(|m| (b, sim::index::place_of(m))))
+                .collect(),
+        )
+    }
+}
+
+impl Reach for Feet {
+    fn distance(&self, body: Id, _: &Effector, _: Option<&Name>, target: Id, _: &Name) -> Option<i64> {
+        let ((f, a), (g, b)) = (self.0.get(&body)?, self.0.get(&target)?);
+        let (dx, dz) = (i128::from(a[0] - b[0]), i128::from(a[1] - b[1]));
+        (f == g).then(|| i64::try_from((dx * dx + dz * dz).isqrt()).unwrap_or(i64::MAX))
+    }
 }
 
 fn param_id(p: &BTreeMap<u64, Value>, k: u64, what: &'static str) -> R<Id> {
@@ -179,6 +205,32 @@ impl Engine {
             mint: Minter::new(scope),
             out: Vec::new(),
             steered: BTreeSet::new(),
+            library: crate::moves::library().unwrap_or_else(|r| {
+                eprintln!("worldd: no moves for activities: {r}");
+                Vec::new()
+            }),
+        }
+    }
+
+    /// The roles' moves of the activities just started, aimed by each member at the other (0.134 T1). A refused one
+    /// is left out, and the member plays its role without it.
+    fn begin_moves(&mut self, tree: &mut Tree, c: &mut Controller, now: Micros) {
+        let bodies = self.activities.beginning();
+        if bodies.is_empty() {
+            return;
+        }
+        let feet = Feet::of(c, bodies);
+        for (body, r) in self.activities.begin_moves(
+            tree,
+            c,
+            &mut self.moves,
+            &mut self.due,
+            &mut self.mint,
+            &self.library,
+            &feet,
+            now,
+        ) {
+            eprintln!("worldd: {}'s move was not aimed: {r}", show(body));
         }
     }
 
@@ -372,6 +424,7 @@ impl Engine {
                 }
             }
         }
+        self.begin_moves(&mut tree, c, now);
         self.collect(Some((a.id, a.soul)));
         Ok(())
     }
@@ -411,6 +464,15 @@ impl Engine {
         while let Some(t) = self.due.fire(now) {
             let tr = tree.get_or_insert_with(|| live.frozen());
             self.activities.next = tr.next();
+            // A role's move (0.134 T1): its phases end here, and at contact its reach is asked again.
+            let aimed = self.moves.instance_of(&t).and_then(|n| self.moves.record(n));
+            if let Some((body, target)) = aimed.map(|r| (r.body, r.target)) {
+                let feet = Feet::of(c, [body, target]);
+                let _ = self
+                    .moves
+                    .fire(c, &mut self.due, &mut self.mint, &feet, &t);
+                continue;
+            }
             if self
                 .activities
                 .fire(c, &mut self.moves, &mut self.due, &t)
@@ -418,6 +480,9 @@ impl Engine {
             {
                 let _ = self.activities.lapse(tr, c, &mut self.due, &t);
             }
+        }
+        if let Some(tr) = tree.as_mut() {
+            self.begin_moves(tr, c, now);
         }
         let _ = self.activities.settle(c, &self.moves, &mut self.due);
         if !self.carries.is_empty() {
