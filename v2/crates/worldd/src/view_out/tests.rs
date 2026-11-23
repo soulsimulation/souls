@@ -2979,15 +2979,16 @@ fn a_still_world_is_not_projected_again_and_a_world_change_is_never_passed_by_qu
             .quiet_until
     };
     let projections = || tests::IDLE_PROJECTIONS.get();
-    // Still: the first idle projects once; the next ones only move the quiet time on.
+    // Still: the cut has just published the world's state, so no idle projects it again; they only move the quiet
+    // time on (C4).
     let before = projections();
     out.idle(real + 2_000_000).unwrap();
     out.idle(real + 3_000_000).unwrap();
     out.idle(real + 4_000_000).unwrap();
     assert_eq!(
         projections() - before,
-        1,
-        "one projection while nothing changes"
+        0,
+        "no projection while nothing changes"
     );
     assert_eq!(quiet(&out), Some(4_000_000 - SETTLE_US));
     // The world sets a field on the thing by itself at 5 s: no Soul, no intent.
@@ -3027,10 +3028,7 @@ fn a_still_world_is_not_projected_again_and_a_world_change_is_never_passed_by_qu
     let after = projections();
     out.idle(real + 8_000_000).unwrap();
     out.idle(real + 9_000_000).unwrap();
-    assert!(
-        projections() - after <= 1,
-        "still again: at most one projection"
-    );
+    assert_eq!(projections() - after, 0, "still again: no projection");
     assert_eq!(quiet(&out), Some(9_000_000 - SETTLE_US));
     let mut reader = PublicPlayer::start(h.stored(), &out.baseline).unwrap();
     for n in 0..2 {
@@ -4138,4 +4136,28 @@ fn c5_a_kind_defined_in_the_world_never_stops_the_public_stream() {
             .unwrap();
     }
     assert_eq!(reader.state(), out.player.state());
+}
+
+/// B1-5: a writer killed mid-write leaves its `.tmp`, never a short or zero-filled file under the final name, so the
+/// next start writes the name whole instead of refusing `stream-immutable` for ever (a world that could not restart).
+#[test]
+fn an_immutable_file_killed_mid_write_leaves_only_its_tmp_and_the_next_write_completes_it() {
+    let dir = scratch("immutable-tmp");
+    let path = dir.join("g").join("baseline");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    // What a kill between create and write left before: a torn temporary, and no final name.
+    fs::write(dir.join("g").join("baseline.tmp"), [0u8; 3]).unwrap();
+    immutable(&path, b"the whole baseline").unwrap();
+    assert_eq!(fs::read(&path).unwrap(), b"the whole baseline");
+    assert!(
+        !dir.join("g").join("baseline.tmp").exists(),
+        "no temporary is left"
+    );
+    // The same bytes again are fine; other bytes under a written name are still refused.
+    immutable(&path, b"the whole baseline").unwrap();
+    assert_eq!(
+        immutable(&path, b"other bytes").unwrap_err().name,
+        "stream-immutable"
+    );
+    fs::remove_dir_all(&dir).unwrap();
 }

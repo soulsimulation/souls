@@ -1290,32 +1290,38 @@ fn id_of(header: &Header) -> String {
         header.epoch
     )
 }
+/// Writes `bytes` under `path` once (rule 4): whole and synced under `<name>.tmp`, then linked to its name, which fails
+/// if the name exists. A writer killed mid-write leaves only its `.tmp`, which the next write of that name replaces; a
+/// file under a final name is always whole. A name already written must hold the same bytes.
 fn immutable(path: &Path, bytes: &[u8]) -> R<()> {
     if let Some(p) = path.parent() {
         fs::create_dir_all(p).map_err(io)?;
     }
-    match fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-    {
-        Ok(mut f) => {
-            if let Err(e) = f.write_all(bytes).and_then(|_| f.sync_all()) {
-                let _ = fs::remove_file(path);
-                return Err(io(e));
-            }
-            Ok(())
+    let same = |path: &Path| -> R<()> {
+        let meta = fs::symlink_metadata(path).map_err(io)?;
+        if !meta.is_file() || meta.file_type().is_symlink() || fs::read(path).map_err(io)? != bytes
+        {
+            return Err(fault("stream-immutable", "existing bytes differ"));
         }
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            let meta = fs::symlink_metadata(path).map_err(io)?;
-            if !meta.is_file()
-                || meta.file_type().is_symlink()
-                || fs::read(path).map_err(io)? != bytes
-            {
-                return Err(fault("stream-immutable", "existing bytes differ"));
-            }
-            Ok(())
-        }
+        Ok(())
+    };
+    if path.exists() {
+        return same(path);
+    }
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = PathBuf::from(tmp);
+    let written =
+        fs::File::create(&tmp).and_then(|mut f| f.write_all(bytes).and_then(|_| f.sync_all()));
+    if let Err(e) = written {
+        let _ = fs::remove_file(&tmp);
+        return Err(io(e));
+    }
+    let linked = fs::hard_link(&tmp, path);
+    let _ = fs::remove_file(&tmp);
+    match linked {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => same(path),
         Err(e) => Err(io(e)),
     }
 }
@@ -3367,6 +3373,15 @@ impl<S: ObjectStore> PublicWriter<S> {
         self.delete_some(DELETES_PER_PART);
         if self.rollover_due() {
             self.rollover()?;
+        }
+        // The cut has just published the source's public state: the next idle need not project it again to find the
+        // world still (C4; at 500 agents that projection was most of the writer's core).
+        if self.migration_cut.is_none() {
+            self.still_at = Some((
+                self.canonical.version(),
+                self.player.version(),
+                self.player.next(),
+            ));
         }
         lap.mark(9);
         self.pointer(None)?;
