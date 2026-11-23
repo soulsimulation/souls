@@ -11,6 +11,8 @@
 //   souls.mjs act <act> [<act>...]            a ranked list: the first is the act, the rest its fallbacks. An act is
 //                                             <verb>:<id> (sit:<seat id>), an id alone (walk there), or a verb; ids
 //                                             or <name>=<id> after an act are its thing arguments (C10)
+//   souls.mjs act <act> ... --wait            the same, then returns its receipt's final phase (done, refused with the
+//                                             reason, resolved) or, after 60 s, a still-running line saying how to check
 //   souls.mjs inspect <id>                    the thing as the copy holds it and its own offers, each with its parameters
 //                                             and the act that sends it; asks the world nothing (#3686)
 //   souls.mjs object <id> [<offer> [<name>=<value>... | '<params json>']]   no offer: inspect's offers; an offer:
@@ -226,6 +228,9 @@ export function requestOf(argv) {
     if (name === '--missed' && opts.missed === 'late') { opts.missed = `late ${args[k]}`; args.splice(k, 1); }
   }
   if (asking) [opts.of, opts.soul] = [opts.soul, opts.as];
+  // D1: `act ... --wait` sends the act, then waits for its receipt's final phase (actEnd).
+  const waits = args[0] === 'act' && args.includes('--wait');
+  if (waits) args.splice(args.indexOf('--wait'), 1);
   const [op = 'status', ...rest] = args;
   if (op === 'schedule') {
     const [sub = 'list', ...more] = rest;
@@ -317,7 +322,40 @@ export function requestOf(argv) {
   }
   // #3706: a write sent again with the same --key is one write; the daemon answers the repeat with the first answer.
   if (opts.key !== undefined) req.key = opts.key;
-  return { req, soul: opts.soul, ...(opts.now !== undefined && !LOCAL.includes(op) && op !== 'pending' ? { now: opts.now } : {}) };
+  return { req, soul: opts.soul, ...(waits ? { wait: true } : {}), ...(opts.now !== undefined && !LOCAL.includes(op) && op !== 'pending' ? { now: opts.now } : {}) };
+}
+
+/** D1: how long `act --wait` waits for a receipt's final phase before it says the act is still running. */
+export const ACT_WAIT_MS = 60_000;
+/** An answer that ends an intent: anything but `accepted` (in progress, intents.md rule 8). */
+const ENDED = (a) => a !== undefined && a.answer !== 'accepted';
+
+/**
+ * D1: the act's answer, once its receipt has its final phase: `done` (a receipt), `refused` with the reason, or a
+ * joint move's `resolved` with its outcome. Still going after `ms`, the answer says so and how to check. An act not
+ * sent (refused here) is returned as it is. `ask` is the daemon's; the receipt op reads the answers it already holds.
+ */
+export async function actEnd(ask, sent, { ms = ACT_WAIT_MS, every = 200, now = Date.now, sleep = (t) => new Promise((ok) => setTimeout(ok, t)) } = {}) {
+  if (!sent || sent.ok !== true || sent.sequence === undefined) return sent;
+  const until = now() + ms;
+  for (;;) {
+    const polled = await ask({ op: 'receipt', sequence: sent.sequence, quiet: true }, 5000);
+    const last = polled?.ok ? polled.receipt.answers.at(-1) : undefined;
+    const over = now() >= until;
+    if (ENDED(last) || over) {
+      // The last read closes the answer as any command does: the copy's version and what changed since the act.
+      const r = await ask({ op: 'receipt', sequence: sent.sequence }, 5000);
+      const end = r?.ok ? r.receipt.answers.at(-1) : last;
+      if (ENDED(end)) {
+        const phase = end.answer === 'receipt' ? 'done' : end.answer;
+        return { ...sent, ...r, ok: phase !== 'refused' && phase !== 'unread', phase, ...(end.reason ? { reason: end.reason } : {}),
+          ...(phase === 'refused' || phase === 'unread' ? { code: end.reason ?? phase } : {}) };
+      }
+      return { ...sent, ...(r?.ok ? r : {}), phase: end ? 'running' : 'sent', stillRunning: true,
+        detail: `still running after ${Math.round(ms / 1000)} s: check with \`receipt ${sent.sequence}\`, or \`stop ${sent.sequence}\` to end it` };
+    }
+    await sleep(every);
+  }
 }
 
 /** A local command: the Soul named, else the home's only Soul with a memory folder. */
@@ -451,7 +489,7 @@ if (isMain(import.meta.url)) {
       const ms = req.op === 'wait' ? (req.seconds ?? 30) * 1000 + 5000 : req.op === 'now' || req.op === 'calendar' ? 12_000 : 5000;
       const ask = (r, within) => (resident ? request(runtimeOf(home, soul).socket, r, within)
         : call(home, soul, r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: within }));
-      const answer = await ask(req, ms);
+      const answer = asked.wait ? await actEnd(ask, await ask(req, ms)) : await ask(req, ms);
       // C14: a --now line is set once the command has answered, and its outcome added to the answer.
       if (asked.now !== undefined && answer && typeof answer === 'object') answer.now = await ask({ op: 'now', text: asked.now }, 12_000);
       // R20: pending --check prints nothing: exit 0 when a turn has something to serve, 1 when not, 2 on a failure.
