@@ -3,7 +3,7 @@
 // (@souls/protocol TalkLine), and a take's events carry them as marks. Pure: the bridge keeps the lines, once each.
 
 /** One `souls:said` as the reader posts it (only the fields read here). A private turn carries no words. */
-export type Said = { speaker: string; at: number; length: number; ref: string; words: string | null; private?: unknown };
+export type Said = { speaker: string; at: number; length: number; reach?: number; ref: string; words: string | null; private?: unknown };
 /** @souls/protocol TalkLine, as the old socket sends it. */
 export type Talk = { id: number; tick: number; at: number; from: string; to: string; fromName: string; toName: string; act: string; text: string; place: string | null };
 
@@ -23,3 +23,11 @@ export function talkOf(s: Said, id: number, from: string, name: string, tickUs: 
 
 /** The take's event for a said in a chunk starting at tick `fromTick`: a mark at its tick, carrying the talk line. */
 export const markOf = (t: Talk, fromTick: number) => ({ t: t.tick - fromTick, type: 'mark' as const, name: 'said', data: { from: t.from, text: t.text } });
+
+/** The old page's edge viewer message for a public `say` (EDGE-CONTRACT-v1 §7 `speech`, as the dialogue dock and the
+ *  speech layer read it): said aloud, heard within its reach. Not a talk line, which the old page shows as a private
+ *  pairwise exchange. `reach` mm; `id` keeps it once. */
+export function speechOf(t: Talk, reach: number) {
+  return { type: 'edge' as const, kind: 'speech', id: `v2:${t.id}`, tick: t.tick, at: t.at, from: { soulId: t.from, name: t.fromName }, text: t.text,
+    channel: { kind: 'earshot', radius: reach > 0 ? reach / 1000 : 12 } };
+}

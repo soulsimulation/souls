@@ -4,7 +4,7 @@
 // last chunks of every Soul's body (takes.ts) and one PublicSoul a body. Nothing here draws or decides; LiveWorld does.
 import { chunkEnd, chunkOf, TICKS, TICK_US, type Body, type Frame, type RecordedChunk, type WorldSample } from './takes.ts';
 import { defaultLookOf, entityWithLook, legacyBodyOf, propOf, seatOf, type CatalogueBody, type Held, type Seat } from './take-bodies.ts';
-import { isPublic, saidKey, talkOf, type Said, type Talk } from './take-speech.ts';
+import { isPublic, saidKey, speechOf, talkOf, type Said, type Talk } from './take-speech.ts';
 
 /** What the reader's worker posts (v2/web/src/source/source.ts: NodeRec, PartRec, Pointer; only the fields read here). */
 type NodeRec = { id: string; kind: string; parent: string | null; slot: number | null; pos: [number, number, number]; rot: [number, number, number, number];
@@ -28,8 +28,9 @@ export type V2View = {
   newestTo: number | null;
   error: string | null;
   parts: number;
-  /** What the Souls said, as the old socket's talk lines, once each, in order, as their chunks come in (take-speech.ts). */
-  talk: Talk[];
+  /** What the Souls said aloud, as the old socket's edge `speech` messages (the dock and the speech layer read them as
+   *  public, with the speaker's name), once each, in order, as their chunks come in (take-speech.ts). */
+  speech: ReturnType<typeof speechOf>[];
 };
 
 const Q = 2 ** 30;
@@ -52,7 +53,7 @@ const KEEP = 12;
 const KEEP_US = (KEEP * TICKS * TICK_US) + 60_000_000;
 
 export class V2Bridge {
-  readonly view: V2View = { unplaced: 0, takes: { serverTick: 0, chunks: [], receivedAt: 0 }, souls: new Map(), newestTo: null, error: null, parts: 0, talk: [] };
+  readonly view: V2View = { unplaced: 0, takes: { serverTick: 0, chunks: [], receivedAt: 0 }, souls: new Map(), newestTo: null, error: null, parts: 0, speech: [] };
   private readonly nodes = new Map<string, NodeRec>();
   /** Each body's samples, its last record and, while the public copy cannot draw it (a frame that is not public, or it
    *  left), since when: it is not drawn from then until it is back. */
@@ -183,7 +184,7 @@ export class V2Bridge {
       const heading = w ? -2 * Math.atan2(w.q[2], w.q[0]) : 0;
       // The look the v2 page gives it: its body kind's, else the default person its id picks (on both pages alike).
       const look = legacyBodyOf(n.body, this.catalogue), entity = n.body ? entityOf(id) : entityWithLook(entityOf(id), defaultLookOf(id));
-      out.push({ entity, soul: soulIdOf(n.soul ?? id), name: n.name ?? `Soul ${id.split('.').pop()}`, samples: t.samples, heading, held: t.held, said: t.said,
+      out.push({ entity, soul: soulIdOf(n.soul ?? id), name: nameOf(id, n), samples: t.samples, heading, held: t.held, said: t.said,
         ...(look ? { look } : {}), ...(t.gone !== null ? { until: t.gone } : {}) });
     }
     return out;
@@ -229,9 +230,9 @@ export class V2Bridge {
     for (const s of due) {
       const t = this.tracks.get(s.speaker), n = this.nodes.get(s.speaker) ?? t?.node;
       if (!t || !n) continue;
-      const tick = Math.floor(s.at / TICK_US), line = talkOf(s, this.talkId++, soulIdOf(n.soul ?? s.speaker), n.name ?? 'someone', TICK_US, now + (tick - end) * TICK_US / 1000);
+      const tick = Math.floor(s.at / TICK_US), line = talkOf(s, this.talkId++, soulIdOf(n.soul ?? s.speaker), nameOf(s.speaker, n), TICK_US, now + (tick - end) * TICK_US / 1000);
       t.said.push(line);
-      this.view.talk = [...this.view.talk, line].slice(-300);
+      this.view.speech = [...this.view.speech, speechOf(line, s.reach ?? 0)].slice(-300);
     }
   }
 
@@ -247,6 +248,9 @@ export class V2Bridge {
     return null;
   }
 }
+
+/** A body's name as the page lists it: its public name, else `Soul <n>` until the name is known. */
+const nameOf = (id: string, n: NodeRec) => n.name ?? `Soul ${id.split('.').pop()}`;
 
 /** The take entity id of a v2 body node (`<scope>.<counter>`). */
 export const entityOf = (id: string) => `v2_${id.replace(/[^0-9a-z]/gi, '_')}`;

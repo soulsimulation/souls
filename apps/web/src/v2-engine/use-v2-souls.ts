@@ -65,7 +65,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
       if (bridge) {
         const v = bridge.view;
         st.takes = v.takes;
-        st.talk = v.talk as Souls['talk']; // what the Souls said (take-speech.ts): the speech layer and dialogue dock read it
+        st.edge = v.speech; // what the Souls said aloud (take-speech.ts): the speech layer and dialogue dock read it as public
         conn.replica.tick = v.takes.serverTick;
         // the replica's entities as the old socket keeps them: who is in the world now (search and follow read them)
         const newest = v.takes.chunks.at(-1)?.take as { finalState?: { entities?: Record<string, unknown> } } | undefined;
