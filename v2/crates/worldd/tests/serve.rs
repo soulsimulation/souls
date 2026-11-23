@@ -836,6 +836,69 @@ fn o3c_a2_a3_ships_history_to_an_s3_bucket_across_three_kills() {
 /// #1960: a restart whose first reads of an S3 bucket go unanswered past the client's timeout tries them again and
 /// starts; with the bucket out of reach for good it still ends, with the store's refusal, in bounded time.
 // A real process on the real clock: the stalls and the bound are real time.
+/// 0.132.1 (production, 23 Nov): a fresh Eden's first start on an S3 store writes a stream-recovery object of 11.8 MB;
+/// its restart must read it back. Over ureq's 10 MiB cap the restart's public stream stopped before its first flush
+/// and the world refused to serve (`public-stream: stopped before its first flush`), again and again. With the world's
+/// read cap (`S3::for_world`) it serves. Needs Eden's exported facts (`v2/tools/import-eden/export`): the test world
+/// tops out at 4.3 MB, under the cap.
+#[test]
+#[ignore = "needs .local/import-eden/eden-2026.facts.json"]
+fn eden_restarts_on_an_s3_store_whose_stream_recovery_object_passes_10_mib() {
+    use directoryd::directory::stand_in::{KEY_ID, StandIn};
+    use std::ffi::OsStr;
+    let facts = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../.local/import-eden/eden-2026.facts.json");
+    assert!(
+        facts.is_file(),
+        "run v2/tools/import-eden/export/export.ts first"
+    );
+    let d = scratch("rn-eden-s3");
+    let dir = d.join("w");
+    let entries = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
+    let out = worldd()
+        .args(["seed", "--facts"])
+        .arg(&facts)
+        .arg("--dir")
+        .arg(&dir)
+        .arg("--entries")
+        .arg(&entries)
+        .args(["--souls", "0"])
+        .output()
+        .expect("seed runs");
+    assert!(
+        out.status.success(),
+        "seed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let s = StandIn::start(1000).expect("a stand-in");
+    let spec = format!("{}/rn", s.url("souls"));
+    let env = [
+        ("AWS_ACCESS_KEY_ID", KEY_ID),
+        ("AWS_SECRET_ACCESS_KEY", "stand-in-secret"),
+    ];
+    let args = [
+        OsStr::new("--store"),
+        OsStr::new(&spec),
+        OsStr::new("--machine"),
+        OsStr::new("test-machine"),
+    ];
+    let socket = d.join("s");
+    // The first start: a stream with nothing to recover writes its recovery objects.
+    let w = serve_env(&dir, &socket, &args, &env);
+    w.line("listening");
+    w.kill();
+    assert!(
+        s.paths().iter().any(|p| p.contains("/stream-recovery/")),
+        "the first start wrote its stream's recovery objects"
+    );
+    // The restart reads them back, one of them past 10 MiB.
+    let w = serve_env(&dir, &socket, &args, &env);
+    w.line("listening");
+    let said = w.all.lock().map(|a| a.join("\n")).unwrap_or_default();
+    assert!(!said.contains("the public stream stopped"), "{said}");
+    w.kill();
+}
+
 #[allow(clippy::disallowed_methods)]
 #[test]
 fn i1960_a_world_starts_through_slow_store_reads_and_ends_on_an_unreachable_store() {
