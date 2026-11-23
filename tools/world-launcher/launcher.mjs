@@ -1385,6 +1385,17 @@ export async function openLauncher(cfg = {}) {
     }
     dash.noteWatch(req);   // lane DASH: sim-watch's last check (and what it saw down)
     try {
+      // B3-2c: the site's public sign-in fields, in the shape the new system's pages read them (v2/web/src/source/signin.ts
+      // SignInConfig, as v2/tools/origin/site.mjs answers): the pairing card (`/pair`, the directory's) then signs in with
+      // this site's own provider session, the one the old page holds, and approves with it as a bearer. No secret here.
+      if (path === '/v1/auth/config' && (req.method === 'GET' || req.method === 'HEAD')) {
+        const p = auth?.public, host = String(req.headers.host ?? '');
+        const loopback = /^(?:localhost|127\.(?:\d{1,3}\.){2}\d{1,3})(?::\d+)?$/.test(host) || host.startsWith('[::1]');
+        if (!p || (p.clerkPublishableKey.startsWith('pk_test_') && !loopback)) json(res, 503, { code: 'auth-unconfigured', message: 'Sign-in is not configured. Ask the operator to configure the public provider.' });
+        else json(res, 200, { authProvider: 'clerk', clerkPublishableKey: p.clerkPublishableKey, clerkIssuer: p.clerkIssuer,
+          ...(p.clerkSatellite ? { clerkSatellite: { domain: p.clerkSatellite.domain, signInUrl: p.clerkSatellite.signInUrl } } : {}) }, { 'x-content-type-options': 'nosniff' });
+        return;
+      }
       if (path === '/__sim/op/cutover' && req.method === 'GET') {
         if (!direct(req)) { json(res, 403, { ok: false, code: 'operator-only' }); return; }
         try { json(res, 200, { ok: true, ...(cutover?.inspect(registry) ?? { configured: false }) }); }
