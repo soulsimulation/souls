@@ -61,8 +61,8 @@ use replica::bodies::Family;
 use replica::effects::{Change, Event, Refusal, read_id};
 use replica::encode::{Name, Value};
 use replica::host::{
-    Answer, Ask, F_CROSSING, F_HELD, F_ROUTE, F_SETTLED, F_SHOULDER, F_WAITING, Host, Near,
-    Progress, Seen, Skill, WalkPlan,
+    Answer, Ask, F_CROSSING, F_HELD, F_ROUTE, F_SETTLED, F_SHORT, F_SHOULDER, F_WAITING, Host,
+    Near, Progress, Seen, Skill, WalkPlan,
 };
 use replica::ids::{Id, Minter, Scope};
 use replica::pose::{ControllerInput, Vec3};
@@ -940,13 +940,15 @@ impl Runner {
 
     /// Runs `skill` on `body`, under a new driver claiming what the skill's shape claims. The marks a run before it
     /// left on the body go (#3168): a route the world gave it (`F_ROUTE`; a new walk would take it for its own and
-    /// walk the old route's legs from wherever it stands now), its waiting mark and the shoulder turn.
+    /// walk the old route's legs from wherever it stands now), its waiting mark, the shoulder turn and a last walk's
+    /// end short of its goal (`F_SHORT`, A2-4).
     pub fn start(&mut self, body: Id, skill: Box<dyn Skill>) -> Result<(), Refusal> {
         let driver = self.controller.claim(body, &skill.shape())?;
         if let Some(f) = self.fields.get_mut(&body) {
             f.remove(&F_ROUTE);
             f.remove(&F_WAITING);
             f.remove(&F_SHOULDER);
+            f.remove(&F_SHORT);
         }
         self.ended.remove(&body);
         self.asks.remove(&body);
@@ -1288,6 +1290,17 @@ impl Runner {
                 let _ = self.controller.release(*who, d);
             }
             self.route_metrics.remove(who);
+            // A walk that ended short of its granted spot, as near as the crowd allows, never stood on it: the spot is
+            // released (its ask goes), and the body is not settled (A2-4).
+            if matches!(p, Progress::Done)
+                && self
+                    .fields
+                    .get(who)
+                    .is_some_and(|f| f.contains_key(&F_SHORT))
+            {
+                self.asks.remove(who);
+                self.granted.remove(who);
+            }
             self.ended.insert(*who, (self.now, p.clone()));
         }
         let surfaces = replica::kinds::sizes::Size::ALL.map(|size| town.surfaces_for(size));

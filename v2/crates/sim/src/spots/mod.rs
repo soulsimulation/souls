@@ -19,7 +19,8 @@
 //! - **Recorded as the engine's.** Each grant is an [`Entry::Grant`] with the actor the world and the cause the
 //!   asker's order; the same marks give the same grants every run (integers, id order, no hashing).
 //! - **Released** when its holder no longer asks for it: it left (its mark asks for another target or none,
-//!   `spot-left`) or its order ended (no mark, `order-ended`).
+//!   `spot-left`) or its order ended (no mark, `order-ended`), and when its walk there ended short of it, as near as
+//!   the crowd allows (0.133 A2-4: no mark, `order-ended`; the body is not settled).
 //!
 //! - **A place to act from** (C15, #3447, [`within`]). A form's walk to a point a body cannot stand on goes to the
 //!   nearest place within the body's reach of it, by the same rule on finer rings ([`REACH_PITCH`]), held by no one:
