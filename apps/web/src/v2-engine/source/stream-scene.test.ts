@@ -89,6 +89,11 @@ test('the scene is offered once the stream has shown the open ground', () => {
   assert.equal((globalThis as { __soulsStreamScene?: unknown }).__soulsStreamScene, undefined);
   scene.receive({ t: 'part', p: { nodes: WORLD.slice(1), removed: [] } });
   assert.equal((globalThis as { __soulsStreamScene?: { entities: number } }).__soulsStreamScene?.entities, 5);
+  // K1: flat ground with no terrain tiles (N2's test world) is the open ground too
+  delete (globalThis as { __soulsStreamScene?: unknown }).__soulsStreamScene;
+  const flat = new SceneFromStream('flat');
+  flat.receive({ t: 'snapshot', s: { nodes: [WORLD[0], { ...WORLD[1], tiles: undefined, tileSize: undefined }], removed: [] } });
+  assert.deepEqual((globalThis as { __soulsStreamScene?: { tiles: number } }).__soulsStreamScene?.tiles, 0);
 });
 
 test('a placed kind with no library def draws its entry\'s bounds; one with a library def is left to the library', () => {

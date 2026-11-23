@@ -6,6 +6,12 @@
 // place there, its record's turn turned by as much as its way has turned since that record. A part whose kind the layer has no
 // def for is drawn from its own shape: its entry (content/kinds/construction, bundled) as a definition CreatorKinds
 // reads (kindDef: its geometry's box). Nothing here draws.
+//
+// K1, seated half: a part seated in a bay is a child of the bay in one of its slots, and CreatorKinds places it through
+// the bay's slot point (world-state.ts `placedOf`). A part of a world imported with ids the old page never had (N2's
+// test world: `yard-frame-1`, not `e_…`) has an origin the entity layer holds no entity for, so neither the layer nor
+// CreatorKinds drew it: it is handed to CreatorKinds without its origin, as a placed part is. A part is a kind whose
+// entry names its joining points (a beam, an upright); a holder (a bay, a stand, a crew's carry) is not one.
 
 /** A node record, the fields read here (the reader's NodeRec). */
 export type PartNode = { id: string; kind: string; parent: string | null; slot?: number | null; pos?: [number, number, number];
@@ -20,6 +26,13 @@ const Q = 2 ** 30;
 const KEEP_US = 30_000_000;
 const plain = (k: string) => k.split('@')[0];
 const isBody = (n: PartNode) => !!n.soul || /:(humanoid|body)$/.test(plain(n.kind));
+/** An old entity's id (world-state.ts, stream-scene.ts): a node whose origin is one is the layer's to draw. */
+const OLD_ENTITY = /^[eh]_[a-z0-9]{4,12}$/;
+/** Whether an entry is a part's: it names the points it joins by. */
+const isPart = (entry: Uint8Array | undefined) => {
+  if (!entry) return false;
+  try { return !!(JSON.parse(new TextDecoder().decode(entry)) as { points?: unknown }).points; } catch { return false; }
+};
 
 /** The place at world time `at` along `s` (sorted by time): between the two around it, else the nearest end. */
 export function sampleAt(s: readonly Sample[], at: number): Sample | null {
@@ -55,6 +68,11 @@ export class CarriedParts {
   private readonly nodes = new Map<string, PartNode>();
   private readonly tracks = new Map<string, Sample[]>();
   private readonly defined = new Set<string>();
+  /** Parts with an origin the layer has no entity for (an import's own ids), by id. */
+  private readonly unheld = new Set<string>();
+  /** The parts' entries, by plain name (read over every entry: the map answers `get` only for kinds the library does
+   *  not draw, stream-scene.ts UnlessLibrary, and the library has rack defs). */
+  private readonly partKinds = new Map<string, Uint8Array>();
   /** Each moving frame's heading when its record last changed (its record's turn is the turn at that heading). */
   private readonly base = new Map<string, number>();
   private readonly kinds: { apply(nodes: PartNode[], removed: string[]): void };
@@ -62,20 +80,26 @@ export class CarriedParts {
   /** `kinds`: the page's CreatorKinds; `entries`: kind entries by plain name (a part drawn from its own shape). */
   constructor(kinds: { apply(nodes: PartNode[], removed: string[]): void }, entries: ReadonlyMap<string, Uint8Array> = new Map()) {
     this.kinds = kinds; this.entries = entries;
+    for (const [k, v] of entries) if (isPart(v)) this.partKinds.set(k, v);
   }
 
   receive(m: Msg): void {
     const nodes = m.t === 'part' && 'p' in m ? m.p.nodes : m.t === 'snapshot' && 's' in m ? m.s.nodes : [];
     const removed = m.t === 'part' && 'p' in m ? m.p.removed : m.t === 'snapshot' && 's' in m ? m.s.removed : [];
-    for (const id of removed) { this.nodes.delete(id); this.tracks.delete(id); }
+    for (const id of removed) { this.nodes.delete(id); this.tracks.delete(id); this.unheld.delete(id); }
     for (const n of nodes) {
       this.nodes.set(n.id, n);
       this.base.delete(n.id);
-      // a part of a kind the layer has no def for: its own entry, as the definition CreatorKinds reads
-      const entry = n.origin ? undefined : this.entries.get(plain(n.kind));
+      const k = plain(n.kind);
+      if (n.origin && !OLD_ENTITY.test(n.origin) && this.partKinds.has(k)) this.unheld.add(n.id); else this.unheld.delete(n.id);
+      // a part of a kind the layer has no def for: its own entry, as the definition CreatorKinds reads. A part's entry
+      // is its look before the library's (`part:`, kept with the kinds' own defs): the library's rack defs are another
+      // frame (core-rack-upright lies flat along x, 3.66 m; the kind's upright stands 2.44 m along y).
+      if (n.origin && !this.unheld.has(n.id)) continue;
+      const own = this.partKinds.get(k), entry = own ?? this.entries.get(k);
       if (entry && !this.defined.has(n.kind)) {
         this.defined.add(n.kind);
-        this.kinds.apply([{ id: `entry:${n.kind}`, kind: 'souls:kind', parent: null, defines: n.kind, entry }], []);
+        this.kinds.apply([{ id: `${own ? 'part' : 'entry'}:${n.kind}`, kind: 'souls:kind', parent: null, defines: n.kind, entry }], []);
       }
     }
     if (m.t !== 'part' || !('p' in m)) return;
@@ -96,9 +120,11 @@ export class CarriedParts {
   }
 
   /** The records of the moving frames that carry something, as they stand at world time `at` (µs): each its samples'
-   *  place there and its record's turn, turned as its way has turned since that record. */
+   *  place there and its record's turn, turned as its way has turned since that record. Then the parts the layer holds
+   *  no entity for, without their origin, wherever the stream has them (on a stand, in a crew's slot, in a bay's). */
   frames(at: number): PartNode[] {
     const out: PartNode[] = [], carrying = new Set<string>();
+    for (const id of this.unheld) { const n = this.nodes.get(id); if (n) out.push({ ...n, origin: undefined }); }
     for (const n of this.nodes.values()) if (n.parent && this.tracks.has(n.parent)) carrying.add(n.parent);
     for (const id of carrying) {
       const n = this.nodes.get(id), s = this.tracks.get(id)!, here = sampleAt(s, at);
