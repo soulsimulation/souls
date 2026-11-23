@@ -1697,3 +1697,74 @@ fn n2_a_run_open_at_a_restart_ends_by_name_and_its_intent_starts_again() {
     );
     run.stop();
 }
+
+/// 0.133 A2-4: a place already full. Nine bodies stand at the walk's goal, 0.35 m apart, staying by their own orders;
+/// the walker gets as near as they allow and its walk ends `done`, saying so: its `souls:move-ended` names
+/// `done.as-near-as-the-crowd-allows`.
+fn full_place() -> Result<Bodies, replica::effects::Refusal> {
+    let (town, ground) = town();
+    let frame = Frame {
+        node: ground,
+        slot: None,
+    };
+    let p1 = town.surfaces[&ground].place(w1(), frame, at1(), Quat::IDENTITY)?;
+    let p2 = town.surfaces[&ground].place(w2(), frame, at2(), Quat::IDENTITY)?;
+    let mut places = Vec::new();
+    for k in 0..9i64 {
+        let who = id(60 + k as u64);
+        let at = Vec3::new(
+            east().x + (k % 3 - 1) * 350_000,
+            0,
+            east().z + (k / 3 - 1) * 350_000,
+        );
+        places.push((
+            who,
+            town.surfaces[&ground].place(who, frame, at, Quat::IDENTITY)?,
+        ));
+    }
+    let mut b = Bodies::new(town, 50_000)?;
+    b.add_body(humanoid(), p1)?;
+    b.add_body(humanoid(), p2)?;
+    for (who, placed) in places {
+        b.add_body(humanoid(), placed)?;
+        b.runner.staying.insert(who);
+    }
+    Ok(b)
+}
+
+#[test]
+fn a2_4_a_walk_to_a_full_place_ends_done_as_near_as_the_crowd_allows() {
+    let run = lockstep_with(full_place);
+    let (answer, _) = walk_in(&run, east(), 400);
+    let r = run.replay();
+    let p = at(&r, w1());
+    let off = (i128::from(p.x - east().x).pow(2) + i128::from(p.z - east().z).pow(2)).isqrt();
+    let log = run.store.0.lock().unwrap().bytes.clone();
+    let mut how = Vec::new();
+    for rec in recover(&log).unwrap().records {
+        if sim::recorder::is_input(&rec) {
+            continue;
+        }
+        for e in Part::read(&rec).unwrap().effects {
+            for v in e.events.iter().flatten() {
+                if v.name.as_str() == answers::MOVE_ENDED
+                    && let Some(Value::Bytes(b)) = v.fields.get(&2)
+                {
+                    how.push(String::from_utf8_lossy(b).into_owned());
+                }
+            }
+        }
+    }
+    println!("A2-4 full place: {answer:?}; ended {off} µm from the goal; move-ended {how:?}");
+    assert!(matches!(answer, (1, Ok(_))), "a done: {answer:?}");
+    assert!(
+        off > 300_000 && off <= 3_000_000,
+        "short of the goal, near it: {off} µm"
+    );
+    assert_eq!(
+        how,
+        vec![answers::DONE_SHORT.to_owned()],
+        "it names that it stopped short"
+    );
+    run.world.stop();
+}

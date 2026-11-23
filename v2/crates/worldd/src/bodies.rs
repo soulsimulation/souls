@@ -195,6 +195,8 @@ pub struct Bodies {
     live: BTreeMap<Id, (Id, Live)>,
     /// Intents ended between steps (a walk replaced): the intent and how.
     ended: Vec<(Id, Result<(), String>)>,
+    /// The walks that ended `done` as near their goal as a crowd there allows (A2-4), until the answer is written.
+    pub short: BTreeSet<Id>,
     /// The candidate each started intent took: its rank in the ranked list and its target (C14).
     took: BTreeMap<Id, (usize, Option<Id>)>,
     /// Each body's pose as last written to the log ([`Bodies::moved`]).
@@ -387,6 +389,7 @@ impl Bodies {
             rise: load(RISE)?,
             live: BTreeMap::new(),
             ended: Vec::new(),
+            short: BTreeSet::new(),
             took: BTreeMap::new(),
             logged: BTreeMap::new(),
             shown: BTreeMap::new(),
@@ -1262,7 +1265,19 @@ impl Bodies {
                 .collect();
             for (body, id) in walks {
                 let how = match self.runner.ended.get(&body) {
-                    Some((_, Progress::Done)) => Ok(()),
+                    Some((_, Progress::Done)) => {
+                        // As near as the crowd allows (A2-4): named in the walk's `done`, then taken off the body.
+                        if self
+                            .runner
+                            .fields
+                            .get_mut(&body)
+                            .and_then(|f| f.remove(&replica::host::F_SHORT))
+                            .is_some()
+                        {
+                            self.short.insert(id);
+                        }
+                        Ok(())
+                    }
                     Some((_, Progress::Failed(n))) => Err(n.as_str().to_owned()),
                     Some((_, Progress::Going)) => continue,
                     None if self.runner.running(body) => continue,

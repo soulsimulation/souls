@@ -23,7 +23,11 @@
 //!   behind a body waiting for the same link within [`BEHIND`] and nearer. Those waiting push only each other. A
 //!   standing waiter steps aside, square to the line between them, for a walker let into a narrow place near it (for
 //!   its own link, one farther from the end) and for a walker not waiting that touches it, so a queue never stands in
-//!   a mouth or walls a walker in. A walker without leave inside [`KEEP`] of the near end steps back out of it.
+//!   a mouth or walls a walker in. A walker without leave inside [`KEEP`] of the near end steps back out of it. A wide
+//!   link whose mouth is crowded ([`CROWD`] within [`CROWD_AT`]) is marked waiting for too, and taken in turns while
+//!   anyone waits for it (0.133 A2-4).
+//! - **As near as the crowd allows.** Held near its goal (within [`CROWDED`]) by a body at rest nearer it, the walk is
+//!   done short of it and says so: [`F_SHORT`] on its body, which the world names in the walk's `done` (A2-4).
 //! - **Along an edge.** The mover slides the part of a step past the ground's edge along it. A step that left the body
 //!   where it was is tried next tick turned by 45 and then 70 degrees, either way (N7 tried them in the same tick on a
 //!   copy; through the host the skill sees each result a tick later, T1). For [`SLID`] ticks after the mover slid it,
@@ -43,8 +47,8 @@ use replica::bodies::{Class, SkillShape, Want};
 use replica::effects::{Change, read_id};
 use replica::encode::{Name, Value};
 use replica::host::{
-    Answer, Ask, F_CROSSING, F_GRANTED, F_HELD, F_ROUTE, F_SETTLED, F_SHOULDER, F_TURNS, F_WAITING,
-    Host, Near, Progress, Skill,
+    Answer, Ask, F_CROSSING, F_GRANTED, F_HELD, F_ROUTE, F_SETTLED, F_SHORT, F_SHOULDER, F_TURNS,
+    F_WAITING, Host, Near, Progress, Skill,
 };
 use replica::ids::Id;
 use replica::pose::{ControllerInput, Mode, Vec3};
@@ -69,6 +73,10 @@ pub const QUEUE: i64 = 1_200_000;
 pub const NEAR_LINK: i64 = 200_000;
 /// A walker this near where it landed from a link, µm, is in the doorway's mouth: it does not stop there.
 pub const MOUTH: i64 = 1_200_000;
+/// A wide link's mouth is crowded with this many bodies within [`CROWD_AT`] of its near end (A2-4).
+pub const CROWD: usize = 3;
+/// How near a wide link's near end the bodies crowding its mouth stand, µm.
+pub const CROWD_AT: i64 = 1_500_000;
 /// A walker without leave keeps this far from a narrow link's near end, µm: its mouth is for the walker let in.
 pub const KEEP: i64 = 400_000;
 /// A walker without leave stands behind a waiting body for the same link this near and nearer the end, µm.
@@ -522,10 +530,6 @@ impl Skill for Route {
             _ => (false, false),
         };
         let wait = narrow && !granted;
-        let mark = match leg.link {
-            Some(l) if narrow && gap <= MARK => Some((l, gap)),
-            _ => None,
-        };
         // A body a level above or below (on a stair over it) is not in its way (#4215).
         let near: Vec<Near> = match host.ask(&Ask::Near { radius: RANGE }) {
             Some(Answer::Near(n)) => n
@@ -533,6 +537,20 @@ impl Skill for Route {
                 .filter(|n| (n.position.y - p.y).abs() < LEVEL)
                 .collect(),
             _ => Vec::new(),
+        };
+        // A wide link whose mouth is crowded is taken in turns too (A2-4): the walker marks itself waiting for it, and
+        // from the next tick its owner keeps its turns.
+        let crowded = leg.link.is_some()
+            && !narrow
+            && gap <= MARK
+            && near
+                .iter()
+                .filter(|n| len([n.position.x - leg.to.x, n.position.z - leg.to.z]) <= CROWD_AT)
+                .count()
+                >= CROWD;
+        let mark = match leg.link {
+            Some(l) if (narrow || crowded) && gap <= MARK => Some((l, gap)),
+            _ => None,
         };
         let dist = |n: &Near| len([p.x - n.position.x, p.z - n.position.z]);
         if wait {
@@ -765,8 +783,9 @@ impl Skill for Route {
             }
             (self.held, self.window) = (0, None);
         }
-        // Held near its goal by a body at rest nearer it: as near as the crowd allows, it has arrived.
-        let last = leg.link.is_none() && self.leg + 1 == self.legs.len() && !self.spot;
+        // Held near its goal by a body at rest nearer it: as near as the crowd allows, it has arrived, short of the goal
+        // ([`F_SHORT`] on its body).
+        let last = leg.link.is_none() && self.leg + 1 == self.legs.len();
         // Never as near as the crowd allows in a doorway's mouth: one standing there would shut it (A2-2).
         let in_mouth = self
             .landed
@@ -774,14 +793,26 @@ impl Skill for Route {
         if last && !in_mouth && gap <= CROWDED && len(step) * 4 < len(want) {
             let reach = room + self.speed * self.tick / 1_000_000;
             let to_goal = |q: Vec3| len([leg.to.x - q.x, leg.to.z - q.z]);
+            // A walk to its own granted spot is not held by others on theirs: it passes between them (N9).
             let held = near.iter().any(|n| {
                 n.velocity.x == 0
                     && n.velocity.z == 0
                     && dist(n) <= reach
                     && to_goal(n.position) < gap
                     && mark_of(host, n.id).is_none()
+                    && !(self.spot && host.field(n.id, F_SETTLED).is_some())
             });
             if held {
+                // It says so on its body: the world names it in the walk's `done` (A2-4).
+                let _ = host.emit(
+                    vec![Change::Set {
+                        node: body,
+                        field: F_SHORT,
+                        to: Value::Uint(1),
+                        by: None,
+                    }],
+                    None,
+                );
                 walk(host, [0, 0]);
                 return Progress::Done;
             }

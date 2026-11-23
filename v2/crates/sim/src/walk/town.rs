@@ -2326,8 +2326,18 @@ impl World for Town {
             let Some(l) = find_link(link_at, buildings, id) else {
                 continue;
             };
+            // A wide link is taken in turns while anyone waits for it or is inside it on its turn (A2-4).
             if !narrow(l) {
-                continue;
+                let busy = marks.iter().any(|m| m.waiting.map(|w| w.0) == Some(id))
+                    || (turns.crowded.contains(&id)
+                        && marks.iter().any(|m| m.crossing == Some(id)));
+                if !busy {
+                    if turns.crowded.remove(&id) {
+                        turns.forget(l);
+                    }
+                    continue;
+                }
+                turns.crowded.insert(id);
             }
             let mut f = Facts::default();
             for m in marks {
@@ -3100,7 +3110,7 @@ fn link_seen(
     link: Id,
 ) -> Option<Seen> {
     let l = find_link(link_at, buildings, link)?;
-    if !narrow(l) {
+    if !narrow(l) && !turns.is_some_and(|t| t.crowded.contains(&link)) {
         return None;
     }
     let mut fields = BTreeMap::from([(F_TURNS, Value::Uint(1))]);

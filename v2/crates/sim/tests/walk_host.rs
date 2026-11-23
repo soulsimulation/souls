@@ -550,3 +550,86 @@ fn a_walker_goes_round_a_body_standing_beside_a_doorway() {
     assert_eq!(node_of(&me), f0, "in the building");
     assert!(at <= 15_000_000, "within 15 s: {at} µs");
 }
+
+/// 0.133 A2-4: a crowded wide doorway is taken in turns. Six walkers go in through the front doorway (2.4 m, not
+/// narrow) while six come out: its mouth crowds, so each walker marks itself waiting for it and its owner lets them
+/// through a direction at a time. All twelve arrive, none ever in another's space.
+#[test]
+fn a_crowded_wide_doorway_is_taken_in_turns() {
+    let (t, nodes) = town();
+    let (ground, f0) = (nodes["ground"], nodes["building/floor-0"]);
+    let h = t.tree.handle(nodes["door-building-front"]).unwrap();
+    let door = replica::effects::read_id(
+        t.tree
+            .node(h)
+            .unwrap()
+            .fields()
+            .get(&import_eden::F_DOORWAY)
+            .unwrap(),
+    )
+    .unwrap();
+    let b = t.buildings.iter().find(|b| b.link(door).is_some()).unwrap();
+    let l = b.link(door).unwrap();
+    assert!(!sim::links::turns::narrow(l), "a wide doorway");
+    let (out, inn, lo, li) = match (l.ends[0], l.ends[1]) {
+        (Some(e0), Some(e1)) if e0.floor == t.ground => (e0, e1, l.line[0], l.line[1]),
+        (Some(e0), Some(e1)) => (e1, e0, l.line[1], l.line[0]),
+        _ => panic!("two ends"),
+    };
+    let (wo, wi) = (b.place.point(lo).unwrap(), b.place.point(li).unwrap());
+    let unit = |a: Vec3, b: Vec3| {
+        let l = common::dist(Vec3::new(a.x, 0, a.z), Vec3::new(b.x, 0, b.z));
+        [(b.x - a.x) * 1000 / l, (b.z - a.z) * 1000 / l]
+    };
+    let (o, i) = (unit(wi, wo), unit(lo, li));
+    // Two rows of three, 0.7 m apart, 1.5 m and 2.2 m out from each mouth.
+    let spot = |m: Vec3, d: [i64; 2], k: i64| {
+        let (along, across) = (1_500 + (k / 3) * 700, (k % 3 - 1) * 700);
+        Vec3::new(
+            m.x + d[0] * along - d[1] * across,
+            m.y,
+            m.z + d[1] * along + d[0] * across,
+        )
+    };
+    let (mo, mi) = (out.middle(), inn.middle());
+    let mut w = Walk::new(t);
+    for k in 0..6i64 {
+        w.add(
+            id(30 + k as u64),
+            ground,
+            spot(mo, o, k),
+            f0,
+            spot(mi, i, (k + 3) % 6),
+        );
+        w.add(
+            id(40 + k as u64),
+            f0,
+            spot(mi, i, k),
+            ground,
+            spot(mo, o, (k + 3) % 6),
+        );
+    }
+    w.run(1_200);
+    let ended = w.ended();
+    let done = ended.values().filter(|(_, h)| h == "Done").count();
+    let marked = w.marked.iter().any(|(_, v)| match v {
+        Value::Array(a) => a.first().and_then(|x| replica::effects::read_id(x).ok()) == Some(door),
+        _ => false,
+    });
+    let last = ended.values().map(|(at, _)| *at).max().unwrap_or(0);
+    println!(
+        "A2-4 doorway: {done} of 12 done by {} ms; marked waiting for it {marked}; nearest {} mm",
+        last / 1000,
+        w.nearest / 1000
+    );
+    assert!(
+        marked,
+        "a walker marked itself waiting for the crowded wide doorway"
+    );
+    assert_eq!(done, 12, "all twelve arrive");
+    assert!(
+        w.nearest >= 300_000,
+        "never into a body's space: nearest {} µm",
+        w.nearest
+    );
+}

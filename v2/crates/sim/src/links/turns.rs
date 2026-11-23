@@ -13,6 +13,9 @@
 //!   link is empty).
 //! - **Still bodies.** A body staying in the link by its own order is no walker in its facts: it is never inside, and
 //!   walkers pass it as they pass any still body (N7: other bodies are a preference, not a wall).
+//! - **Crowded wide links** (0.133 A2-4). A wide link is taken in turns too while crowded ([`Turns::crowded`]): from
+//!   the tick a walker marks itself waiting for it (the walk does so when bodies crowd its mouth) to the tick none
+//!   waits for it and none is inside on its turn; then its state is dropped. Its grants wait for [`WIDE_SPACING`].
 //!
 //! Integers only: µm and µs. Not here: crowds in the open, rides (N12), the order to stay (E3), a walker that waits
 //! too long (N10).
@@ -22,12 +25,14 @@ use replica::effects::Refusal;
 use replica::ids::Id;
 use replica::time::Micros;
 use replica::world_model::show;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// A link under this width (µm) is taken in turns.
 pub const NARROW: i64 = 1_200_000;
 /// A grant waits until every body inside going the same way is this far along, µm.
 pub const SPACING: i64 = 900_000;
+/// A grant to a wide link taken in turns waits until every body inside going the same way is this far along, µm.
+pub const WIDE_SPACING: i64 = 350_000;
 /// The far end has room when no body that is not waiting for the link stands within this of its middle, µm.
 pub const ROOM: i64 = 600_000;
 /// Walkers let in one direction before the other side, waiting, gets its turn.
@@ -81,6 +86,9 @@ pub struct State {
 #[derive(Default)]
 pub struct Turns {
     pub owners: BTreeMap<Id, BTreeMap<Id, State>>,
+    /// The wide links taken in turns while crowded (0.133 A2-4): from the tick a walker marks itself waiting for one
+    /// (it does so when bodies crowd its mouth) to the tick none waits for it and none is inside.
+    pub crowded: BTreeSet<Id>,
 }
 
 impl Turns {
@@ -91,6 +99,13 @@ impl Turns {
     /// The state of link `link`, if its owner has written one.
     pub fn state(&self, link: &Link) -> Option<&State> {
         self.owners.get(&link.owner)?.get(&link.id)
+    }
+
+    /// Drops link `link`'s state: a wide link no longer crowded is free again (A2-4).
+    pub fn forget(&mut self, link: &Link) {
+        if let Some(m) = self.owners.get_mut(&link.owner) {
+            m.remove(&link.id);
+        }
     }
 
     /// Whether `who` may enter `link` now: granted by its owner.
@@ -148,10 +163,12 @@ impl Turns {
             }
         }
         let Some(d) = s.dir else { return Ok(()) };
+        // A wide link taken in turns while crowded (A2-4) lets the next one in sooner: two pass abreast in it.
+        let spacing = if narrow(link) { SPACING } else { WIDE_SPACING };
         let clear = f
             .inside
             .iter()
-            .all(|&(from, along, _)| from == d && along >= SPACING);
+            .all(|&(from, along, _)| from == d && along >= spacing);
         if s.granted.is_none()
             && !spent(s, d)
             && clear
