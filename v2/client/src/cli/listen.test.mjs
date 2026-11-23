@@ -6,7 +6,7 @@
 import { strict as assert } from 'node:assert';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
-import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
+import { chmodSync, mkdirSync, mkdtempSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { dirname, join, resolve } from 'node:path';
 import { after, before, test } from 'node:test';
@@ -192,4 +192,65 @@ test('R5: an act of my own ending, a quiet spell, and a Soul arriving each wake 
   await sleep(1500);
   assert.equal(f.lines.filter((l) => l.rule === arrives).length, before, 'no wake from a removed rule');
   f.stop();
+});
+
+test('I3: another Soul walking up and stopping wakes listen --follow\'s soul-arrives, from the world, 5 runs of 5', { timeout: 300_000 }, async () => {
+  // A served test world with two Souls born near each other (`worldd seed --souls 2`), each its own home and daemon.
+  const d = mkdtempSync(join(tmpdir(), 'souls-i3-')), world = join(d, 'w'), wsock = join(d, 'w.sock');
+  const made = spawnSync(bin('testworld'), ['--seed', '1', '--things', '0', '--out', join(d, 'tw')], { encoding: 'utf8' });
+  assert.equal(made.status, 0, made.stderr);
+  const seeded = spawnSync(bin('worldd'), ['seed', '--facts', join(d, 'tw/testworld-s1-t0.facts.json'), '--dir', world, '--souls', '2', '--at', '38,-20'], { encoding: 'utf8' });
+  assert.equal(seeded.status, 0, seeded.stderr);
+  await run(bin('worldd'), ['serve', '--dir', world, '--socket', wsock], /listening /);
+  const [, gw] = await run(bin('gatewayd'), ['--listen', '127.0.0.1:0', '--world', wsock, '--tokens', join(world, 'tokens'),
+    '--build', `1220${'ab'.repeat(32)}`], /listening (\S+)\n/);
+  const tokens = readFileSync(join(world, 'souls.tokens'), 'utf8').trim().split('\n');
+  const homes = ['a', 'b'].map((label, k) => {
+    const h = join(d, label, '.souls');
+    mkdirSync(h, { recursive: true });
+    writeFileSync(join(h, 'config.json'), JSON.stringify({ worlds: { local: { url: 'http://127.0.0.1/', gateway: `ws://${gw}/v2/ws` } } }));
+    writeFileSync(join(h, 'credentials.json'), JSON.stringify({ souls: { [`s_i3${label}`]: { local: { token: tokens[k] } } } }), { mode: 0o600 });
+    chmodSync(join(h, 'credentials.json'), 0o600);
+    return { h, soul: `s_i3${label}`, cwd: join(d, label) };
+  });
+  const as = (who, ...args) => JSON.parse(spawnSync(process.execPath, [CLI, ...args], { cwd: who.cwd, env: { PATH: process.env.PATH, SOULS_HOME: who.h, SOULS_REPLICA_PKG: PKG }, encoding: 'utf8' }).stdout.trim().split('\n').at(-1));
+  const [a, b] = homes;
+  try {
+    for (const who of homes) {
+      await call(who.h, who.soul, { op: 'status' }, { pkg: PKG });
+      await waitFor(() => as(who, 'status').connected, 30_000);
+    }
+    // Each is born where the world was seeded, by the yard, by its first intent (a word).
+    for (const who of homes) assert.equal(as(who, 'say', 'hello').ok, true);
+    const bodyOf = (who) => waitFor(() => as(who, 'status').body ?? null, 30_000);
+    const [bodyA, bodyB] = [await bodyOf(a), await bodyOf(b)];
+    assert.notEqual(bodyA, bodyB);
+    assert.ok(as(a, 'wake', 'add', 'soul-arrives').added, 'the rule added');
+    as(a, 'wake', 'budget', 'unlimited');
+    const p = spawn(process.execPath, [CLI, 'listen', '--follow'], { cwd: a.cwd, env: { PATH: process.env.PATH, SOULS_HOME: a.h, SOULS_REPLICA_PKG: PKG }, stdio: ['ignore', 'pipe', 'pipe'] });
+    procs.push(p);
+    const lines = [];
+    let buf = '';
+    p.stdout.on('data', (x) => { buf += x; const k = buf.lastIndexOf('\n'); if (k >= 0) { lines.push(...buf.slice(0, k).split('\n').map((l) => ({ at: Date.now(), ...JSON.parse(l) }))); buf = buf.slice(k + 1); } });
+    // A stands by the yard's last rack beam; B walks off to the frame stand, 3 m away, and back up to A, five times.
+    const id = (who, words) => { const f = as(who, 'find', words).found?.[0]?.id; assert.ok(f, words); return f; };
+    const [beam, stand] = [id(a, 'rack beam 4'), id(b, "the yard's frame stand")];
+    assert.equal(as(a, 'act', `walk:${beam}`, '--wait').phase, 'done', 'A at the beam');
+    const runs = [];
+    for (let i = 0; i < 5; i++) {
+      assert.equal(as(b, 'act', `walk:${stand}`, '--wait').phase, 'done', 'B walked off');
+      await sleep(2500); // the walk off's own wake, if any, is printed before the count is taken
+      const seen = lines.length;
+      const walked = as(b, 'act', `walk:${beam}`, '--wait');
+      assert.equal(walked.phase, 'done', `B walked up to A: ${JSON.stringify(walked).slice(0, 300)}`);
+      const ended = Date.now();
+      const wake = await waitFor(() => lines.slice(seen).find((l) => l.kind === 'wake' && /arrived/.test(l.why ?? '')), 5000).catch(() => null);
+      runs.push(wake ? Math.max(0, wake.at - ended) : null);
+    }
+    console.log(`I3: soul-arrives printed on A, ms after B's walk up answered done (0: before it): ${JSON.stringify(runs)}`);
+    assert.ok(runs.every((ms) => ms !== null && ms <= 2000), `within 2 s in 5 of 5: ${JSON.stringify(runs)}`);
+  } finally {
+    for (const who of homes) await call(who.h, who.soul, { op: 'stop' }, { pkg: PKG }).catch(() => {});
+    rmSync(d, { recursive: true, force: true });
+  }
 });
