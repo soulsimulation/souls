@@ -144,7 +144,8 @@ async function sessionOf(place: MailboxPlace): Promise<string> {
 /** The session exchange (`POST /v2/creator-token` beside the gateway's socket): the creator's token and grant, or the
  *  refusal by name (`not-the-creator`, `session-refused`). */
 export async function creatorToken(place: MailboxPlace, post: typeof fetch = fetch, session = sessionOf): Promise<{ token: string; grant: string }> {
-  const url = new URL('/v2/creator-token', place.gateway.replace(/^ws/, 'http'));
+  // beside the socket: `/w/<world>/v2/ws` → `/w/<world>/v2/creator-token` (the front door's route), `/v2/ws` → `/v2/creator-token`
+  const url = new URL('creator-token', place.gateway.replace(/^ws/, 'http'));
   const res = await post(url.href, { method: 'POST', headers: { authorization: `Bearer ${await session(place)}` }, cache: 'no-store', credentials: 'omit', referrerPolicy: 'no-referrer' });
   const body = await res.json().catch(() => ({})) as { token?: string; grant?: string; refused?: string };
   if (!res.ok || !body.token || !body.grant) throw new Error(body.refused ?? `the gateway said ${res.status}`);
