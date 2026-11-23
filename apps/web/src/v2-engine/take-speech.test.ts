@@ -19,9 +19,9 @@ test('a said is a talk line from its Soul, in world-time order, once, and not be
   const b = new V2Bridge({ rulesVersion: 'test/1' });
   b.receive({ t: 'snapshot', s: { nodes: [world, body('b.1', 'soul-abc-1', 'Ada'), body('b.2', 'soul-abc-2', 'Bo')], removed: [] } as never });
   b.receive(part(0, [said('b.2', 0.4, 'second'), said('b.1', 0.1, 'first')]));
+  assert.equal(b.view.speech.length, 0, 'nothing shown before its chunk is drawn');
   b.receive(part(1, [said('b.1', 0.1, 'first')])); // the same said again (a replayed part): kept once
   b.receive(part(2, [said('b.1', 1.2, 'private', { private: { conversation: 'c', members: [] } }), said('b.2', 1.3, null)]));
-  assert.equal(b.view.speech.length, 0, 'nothing shown before its chunk is drawn');
   for (let n = 3; n < 10; n++) b.receive(part(n));
   assert.deepEqual(b.view.speech.map((l) => [l.kind, l.from, l.text]), [['speech', { soulId: 's_abc-1', name: 'Ada' }, 'first'], ['speech', { soulId: 's_abc-2', name: 'Bo' }, 'second']]);
   assert.ok(b.view.speech[0].id !== b.view.speech[1].id && b.view.speech[0].at <= b.view.speech[1].at);
