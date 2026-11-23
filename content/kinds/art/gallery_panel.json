@@ -1,0 +1,32 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:gallery_panel",
+  "owner": "thing",
+  "geometry": {
+    "bounds_mm": [
+      6000,
+      5000,
+      400
+    ]
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "text": {
+    "card": "A large picture on a basalt gallery panel.",
+    "art": "art",
+    "picture": "picture",
+    "panel": "panel"
+  },
+  "card": {
+    "text": "card",
+    "category": "art",
+    "synonyms": [
+      "picture",
+      "panel"
+    ]
+  }
+}
