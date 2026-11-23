@@ -253,19 +253,27 @@ if (ONLY.has('4')) {
   const signedIn = !(await page.getByRole('button', { name: 'Sign in' }).count());
   row(4, 'sign-in', signedIn, signedIn ? 'the page\'s own sign-in (dev name on loopback)' : 'still signed out');
   for (let i = 0; i < 3; i++) { await page.keyboard.press('Escape'); await page.waitForTimeout(300); } // the god panel opens for the world's creator
-  await page.getByRole('button', { name: 'Audio', exact: true }).click().catch(() => {}); await page.waitForTimeout(4000);
-  const menu = await page.locator('[aria-label="Audio"]').evaluateAll((els) => els.map((e) => e.innerText).join(' ').replace(/\s+/g, ' ')).catch(() => '');
+  const audioText = () => page.locator('[aria-label="Audio"]').evaluateAll((els) => els.map((e) => e.innerText).join(' ').replace(/\s+/g, ' ')).catch(() => '');
+  let menu = '';
+  for (let i = 0; i < 3 && !/Sound effects/.test(menu); i++) { // a panel opening late can take the first click
+    await page.keyboard.press('Escape');
+    await page.getByRole('button', { name: 'Audio', exact: true }).click().catch(() => {}); await page.waitForTimeout(3000);
+    menu = await audioText();
+  }
   row(4, 'sound', /Sound effects On/i.test(menu), `the audio menu: ${menu.slice(0, 60) || 'not opened'}`);
   const track = menu.match(/Music (.*?) (?:Random track|Radio station)/)?.[1] ?? null;
   const next = page.getByRole('button', { name: 'Next track' });
   if (await next.count()) { await next.click().catch(() => {}); await page.waitForTimeout(3000); }
-  const after = await page.locator('[aria-label="Audio"]').evaluateAll((els) => els.map((e) => e.innerText).join(' ').replace(/\s+/g, ' ')).catch(() => '');
+  const after = await audioText();
   const track2 = after.match(/Music (.*?) (?:Random track|Radio station)/)?.[1] ?? null;
   row(4, 'music', !!track && !/off/i.test(track) && !!(await next.count()), `music: ${track ?? 'none'}, after Next track: ${track2 ?? 'none'}`);
   await page.keyboard.press('Escape');
-  const label = () => page.getByRole('button').evaluateAll((bs) => bs.map((b) => b.getAttribute('aria-label') ?? '').find((l) => /Switch to .*camera|camera:/i.test(l) && !/modes and help/.test(l)) ?? null).catch(() => null);
+  // the camera button's own words name the mode now and the one a click gives ("Broadcast: Switch to Free camera")
+  // ("Broadcast: Switch to Free camera", then "Free: Return to Broadcast"); the button never settles while the view
+  // moves, so it is clicked without waiting for it to
+  const label = () => page.locator('button[aria-label]').evaluateAll((bs) => bs.map((b) => b.getAttribute('aria-label')).find((l) => /^(Broadcast|Free|Follow|Following|Explore)[^:]*: /.test(l)) ?? null).catch(() => null);
   const camBefore = await label();
-  if (camBefore) await page.getByRole('button', { name: camBefore, exact: true }).click().catch(() => {}); await page.waitForTimeout(1500);
+  if (camBefore) await page.locator(`button[aria-label="${camBefore}"]`).first().click({ force: true, timeout: 5000 }).catch(() => {}); await page.waitForTimeout(2000);
   const camAfter = await label();
   await page.getByRole('button', { name: /^Explore/ }).click().catch(() => {}); await page.waitForTimeout(1500);
   const someone = page.locator('text=/^Soul \\d+$/').filter({ visible: true }).first();
