@@ -388,7 +388,9 @@ export async function actEnd(ask, sent, { ms = ACT_WAIT_MS, every = 200, now = D
         return { ...sent, ...r, ok: phase !== 'refused' && phase !== 'unread', phase, ...(end.reason ? { reason: end.reason } : {}),
           ...(phase === 'refused' || phase === 'unread' ? { code: end.reason ?? phase } : {}),
           // D7: which of the ranked targets holds the body now (a seat a fallback took), when one does.
-          ...(r?.receipt?.held ? { held: r.receipt.held } : {}) };
+          ...(r?.receipt?.held ? { held: r.receipt.held } : {}),
+          // R1b: refused, one offer of the same thing that would work instead.
+          ...(phase === 'refused' && r?.receipt?.try ? { try: r.receipt.try } : {}) };
       }
       return { ...sent, ...(r?.ok ? r : {}), phase: end ? 'running' : 'sent', stillRunning: true,
         detail: `still running after ${Math.round(ms / 1000)} s: check with \`receipt ${sent.sequence}\`, or \`stop ${sent.sequence}\` to end it` };

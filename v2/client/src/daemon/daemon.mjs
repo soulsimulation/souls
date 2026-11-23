@@ -1499,6 +1499,9 @@ async function answer(req) {
       // D7: an act that ended with its receipt names which of its ranked targets now holds this Soul's body (a seat a
       // fallback took), read from the copy brought current.
       const done = r.answers.at(-1)?.answer === 'receipt';
+      // R1b: an act the world refused names one offer of the same thing that would work, from this client's own offers.
+      const instead = r.answers.at(-1)?.answer === 'refused' ? suggestionFor(r) : null;
+      if (instead) got.receipt.try = instead;
       return closing(got, done ? (rows) => { const h = heldBy(rows, ME, r); return h ? { receipt: { ...got.receipt, held: h } } : {}; } : null, { now: !done });
     }
     case 'events': {
@@ -1510,6 +1513,33 @@ async function answer(req) {
     }
     default: return { ok: false, code: 'unknown-op' };
   }
+}
+
+/**
+ * R1b: for an act the world refused, one other offer of the thing or place it named first (`thingOf`'s offers, from
+ * this machine's kind entries) that would work: the first the form rules pass on the copy (`yes`), else the first they
+ * cannot judge here (`unknown`, a move such as a sit); never one they refuse, one needing arguments it has no default
+ * or choice for, nor the verb that was refused. Walking there comes last. Null when there is none.
+ */
+function suggestionFor(r) {
+  const target = String(r.target ?? '').split(' ')[0];
+  if (!ID.test(target)) return null;
+  const t = thingOf(target);
+  if (!t.ok) return null;
+  const refused = new Set(r.verbs.map((v) => String(v).replace(/^.*:/, '')));
+  const free = (o) => !Object.values(o.params ?? {}).some((p) => !p.optional && p.default === undefined);
+  const offers = t.offers.filter((o) => !refused.has(o.name) && !o.act.startsWith('carrier:') && free(o));
+  offers.sort((a, b) => (a.name === 'walk') - (b.name === 'walk'));
+  let unknown = null;
+  for (const o of offers) {
+    let c;
+    try { [c] = actsOf([o.act]); } catch { continue; }
+    if (!c) continue;
+    const v = c.form ? verdicts([c])[0] : { verdict: 'unknown' };
+    if (v.verdict === 'yes') return { act: o.act, name: o.name, checked: 'yes' };
+    if (v.verdict !== 'no' && !unknown) unknown = { act: o.act, name: o.name, checked: 'unknown' };
+  }
+  return unknown;
 }
 
 /**
