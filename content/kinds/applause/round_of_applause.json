@@ -1,0 +1,73 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:round_of_applause",
+  "owner": "thing",
+  "links": {
+    "one": {
+      "n": 1,
+      "from": "body",
+      "most": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "other": {
+      "n": 2,
+      "from": "body",
+      "most": 7,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      3000,
+      100,
+      3000
+    ]
+  },
+  "forms": {},
+  "roles": {
+    "one": {
+      "need": "required",
+      "places": {
+        "in": "here",
+        "within_mm": 3000
+      },
+      "move": "clap",
+      "on_beat": true
+    },
+    "other": {
+      "need": "required",
+      "places": {
+        "in": "here",
+        "within_mm": 3000
+      },
+      "move": "clap",
+      "on_beat": true
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "text": {
+    "card": "Applaud together: offer a round, accept, and leave any time.",
+    "applause": "applause",
+    "round_of_applause": "round of applause",
+    "applaud": "applaud",
+    "rules": "Two to eight people clap on the world\u2019s beat. Offer the round to others; it starts when one accepts. Later acceptors join the same round. Each may leave at any time; no object is required."
+  },
+  "card": {
+    "text": "card",
+    "category": "activity",
+    "synonyms": [
+      "applause",
+      "round_of_applause",
+      "applaud"
+    ]
+  }
+}
