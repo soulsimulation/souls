@@ -183,7 +183,7 @@ fn a1_a2_stopped_in_stage_three_each_of_three_ways_keeps_two_stages_holds_nobody
         match way {
             Way::Leaves => {
                 let (mut w, forms) = b.world();
-                forms.leave(&mut w, body, now).expect("left");
+                forms.leave(&mut w, body, None, now).expect("left");
             }
             Way::Removed => {
                 let mut removal = log.last().expect("an entry").clone();

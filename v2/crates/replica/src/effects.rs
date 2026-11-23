@@ -1308,6 +1308,10 @@ impl NodeState {
 }
 
 impl LinkState {
+    /// A link in the state layout (`State::to_value`), as [`LinkState::read`] reads it.
+    pub fn to_value(&self) -> Value {
+        link_value(self)
+    }
     /// A link in the state layout (`State::to_value`).
     pub fn read(v: &Value) -> R<LinkState> {
         let mut r = Rec::of(v.clone(), "a link")?;
@@ -1649,7 +1653,16 @@ impl State {
                 own.check(pose.frame.node)?;
                 own.audience(*audience, *node)?;
                 self.fresh(*node)?;
-                if !header.kinds.contains(kind) {
+                // As the tree: a creator's kind is pinned by its `souls:kind` node at the root (#3697).
+                let defined = |n: &NodeState| {
+                    n.parent == Some(self.root)
+                        && crate::kinds::defined::is_definition(n.kind.as_str())
+                        && crate::kinds::defined::named(&n.fields) == Some(kind.as_str())
+                };
+                if !header.kinds.contains(kind)
+                    && !crate::kinds::defined::is_definition(kind.as_str())
+                    && !self.nodes.values().any(defined)
+                {
                     return refuse("kind-not-in-header", kind.as_str());
                 }
                 self.node(pose.frame.node)
