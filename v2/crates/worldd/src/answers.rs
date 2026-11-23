@@ -4221,6 +4221,8 @@ impl Clock {
                 ]));
                 encode(&v).unwrap_or_default()
             });
+        // The next tick's writes start with a whole record's room.
+        sim::commit::open_room(sim::commit::TICK_PARTS_MOST);
         if record.is_some() {
             self.unsealed = true;
         }
@@ -5222,6 +5224,9 @@ pub fn start<S: Storage + 'static>(
         .name("clock".into())
         .spawn(move || {
             mark_clock_thread();
+            // A tick's parts fit its one log record: a write over the room left is refused `part.too-large` before
+            // it reaches the live world (`sim::commit`), so the log never meets a record it refuses.
+            sim::commit::open_room(sim::commit::TICK_PARTS_MOST);
             let beat = thread_beat;
             let mut c = build();
             // With joins (C3), a body the log placed is stood again only while its node is in the tree: a retired

@@ -13,6 +13,10 @@
 //                         | --circle cx,cz,r [--in <id>] [--field n=v ...]   a road or an area laid on the open ground
 //                                                (metres), as today's place by a shape
 //   souls-god.mjs move <id> --at x,y,z [--slot n]                                     to another spot, same parent
+//   souls-god.mjs move <id> [<id> ...] --by dx,dz [--yaw r]   each that far over (metres), what is in it riding along;
+//                                                on the open ground it keeps its height over the ground
+//   souls-god.mjs clone <id> [--at x,z] [--count n] [--step dx,dz] [--yaw r]   copies of it and all in it (doorways
+//                                                and stairs too), the first one step away unless --at (metres)
 //   souls-god.mjs set <id> <field> <value>       one numbered field: an integer, true, false or a name
 //   souls-god.mjs remove <id>                    it and everything in it
 //   souls-god.mjs hours <id> --open 07:00-15:00 [--open 09:00-13:00@sat,sun ...] | --closed
@@ -139,6 +143,7 @@ export const VERBS = [
   'catalog',
   'check',
   'clear',
+  'clone',
   'define',
   'define-kit',
   'describe',
@@ -181,11 +186,11 @@ export const VERBS = [
   'zone-suggest',
 ];
 /** The world's verbs (#3695): the daemon makes their sets on the world node from its copy (`world.mjs`). */
-export const WORLD_VERBS = ['weather', 'sky', 'strike', 'land', 'time', 'expand'];
-/** A world verb by its words: a place by its shape (#3728, a road or an area) is made on the daemon's copy, which
- *  knows the open ground. */
+export const WORLD_VERBS = ['weather', 'sky', 'strike', 'land', 'time', 'expand', 'clone'];
+/** A world verb by its words, made on the daemon's copy (#3728): a place by its shape (a road or an area, on the
+ *  open ground it knows) and `move --by`; `move --at` is G1's move. */
 const SHAPES = ['--path', '--area', '--rect', '--circle'];
-const isWorld = (verb, words) => WORLD_VERBS.includes(verb) || (verb === 'place' && words.some((w) => SHAPES.includes(w)));
+const isWorld = (verb, words) => WORLD_VERBS.includes(verb) || (verb === 'place' && words.some((w) => SHAPES.includes(w))) || (verb === 'move' && words.includes('--by'));
 /** The verbs answered from the home's library of kinds, on this machine (#3696). */
 export const LIBRARY = new Set(['catalog', 'find', 'recommend', 'taxonomy']);
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
@@ -260,6 +265,13 @@ export const FIX = {
   'import.unplaced': 'some nodes name a parent or support that was not placed: export the source again and import that',
   'shape.flag': 'place <kind> --path \'[[x,z],[x,z]]\' [--width m] | --area \'[[x,z],...]\' | --rect cx,cz,w,d | --circle cx,cz,r, in metres',
   'shape.no-ground': 'name the parent with --in <id>',
+  'move.by': 'move <id> --by dx,dz in metres [--yaw r in radians]',
+  'move.where': 'use ids describe lists',
+  'move.off-the-ground': 'move it less far: the world\'s ground ends there',
+  'clone.where': 'clone <a thing\'s id from describe>',
+  'clone.count': '--count is 1 to 100',
+  'clone.flag': 'clone <id> [--at x,z] [--count n] [--step dx,dz] in metres [--yaw r in radians]',
+  'clone.off-the-ground': 'start nearer, or with fewer copies or a smaller step: the world\'s ground ends there',
   'export.file': 'export [file]: a file path to write',
   'edit.off-ground': 'put it somewhere on the world\'s ground: describe shows where things stand',
   'not-a-creator': 'pair with --creator <the world\'s creator grant>',
@@ -418,6 +430,8 @@ export function worldVerbOf(verb, words) {
     land: ['at', 'radius', 'amount', 'level', 'height', 'peak', 'path', 'area', 'rect', 'circle', 'edge', 'step', 'depth', 'width', 'side', 'face', 'steps', 'by', 'toward', 'metres', 'bounds'],
     expand: [],
     place: ['path', 'width', 'area', 'rect', 'circle', 'in'],
+    move: ['by', 'yaw'],
+    clone: ['at', 'count', 'step', 'yaw'],
   }[verb];
   for (const f of flags) { const v = takeOpt(args, `--${f}`); if (v !== undefined) out[f] = v; }
   if (verb === 'strike' && out.at === undefined && args[0] !== undefined) out.at = args.shift();
@@ -434,6 +448,14 @@ export function worldVerbOf(verb, words) {
     if (Object.keys(fields).length) out.fields = fields;
     if (args.length !== 1) throw usage('place <kind> --path \'[[x,z],...]\' [--width m] | --area \'[[x,z],...]\' | --rect cx,cz,w,d | --circle cx,cz,r [--in <id>] [--field n=v]');
     out.kind = args.shift();
+  }
+  if (verb === 'move') {
+    if (!args.length) throw usage('move <id> [<id> ...] --by dx,dz [--yaw r]');
+    out.refs = args.splice(0);
+  }
+  if (verb === 'clone') {
+    if (args[0] === undefined) throw usage('clone <id> [--at x,z] [--count n] [--step dx,dz] [--yaw r]');
+    out.ref = args.shift();
   }
   if (verb === 'land') {
     if (!args[0]) throw usage('land <raise|lower|flatten|knoll|hill|mountain|plateau|terrace|valley|ditch|cliff|pond|lake|water> [flags]');
@@ -930,7 +952,7 @@ if (isMain(import.meta.url)) {
       if (!asked.req) { out(withFix(when)); process.exit(1); }
     }
     const pkg = process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG;
-    const ask = (req, ms = 60_000) => call(home, creator, req, { pkg, ms: req.op === 'import' ? 3_600_000 : req.op === 'export' ? 120_000 : ['land', 'expand'].includes(req.world?.verb) ? 130_000 : ms });
+    const ask = (req, ms = 60_000) => call(home, creator, req, { pkg, ms: req.op === 'import' || req.world?.verb === 'clone' ? 3_600_000 : req.op === 'export' ? 120_000 : ['land', 'expand'].includes(req.world?.verb) ? 130_000 : ms });
     // A relation is resolved on the daemon's copy: describe first, then the batch with its places filled in.
     let req = asked.relation ? resolve(asked.req, asked.relation, await ask({ op: 'describe' }, 15_000)) : asked.req;
     // A helper's home sends every edit under its claim (#3727).

@@ -182,6 +182,11 @@ test('the verbs make G1 batches, and a refusal names its usage', () => {
   assert.deepEqual(requestOf(['place', 'eden:footpath', '--path', '[[0,0],[9,0]]', '--width', '2']).req, { op: 'edit', world: { verb: 'place', path: '[[0,0],[9,0]]', width: '2', kind: 'eden:footpath' } });
   assert.deepEqual(requestOf(['check', 'place', 'eden:place', '--rect', '1,2,3,4', '--field', '15=eden:plaza']).req, { op: 'check', world: { verb: 'place', rect: '1,2,3,4', fields: { 15: 'eden:plaza' }, kind: 'eden:place' } });
   assert.equal(requestOf(['place', 'eden:bench', '--in', 'aa-1']).req.ops[0].op, 'place');
+  // #3728: move --by and clone are made on the daemon's copy; move --at stays G1's move.
+  assert.deepEqual(requestOf(['move', 'aa-3', 'aa-4', '--by', '-2,3', '--yaw', '1.5']).req, { op: 'edit', world: { verb: 'move', by: '-2,3', yaw: '1.5', refs: ['aa-3', 'aa-4'] } });
+  assert.deepEqual(requestOf(['move', 'aa-3', '--at', '1,2,3']).req.ops[0].op, 'move');
+  assert.deepEqual(requestOf(['check', 'clone', 'aa-3', '--count', '3', '--step', '4,0']).req, { op: 'check', world: { verb: 'clone', count: '3', step: '4,0', ref: 'aa-3' } });
+  assert.throws(() => requestOf(['clone']), /clone <id>/);
 });
 
 test('#3695: a creator sets the weather and the sky palette and strikes lightning; each has a dry run and a refusal', async () => {
@@ -489,6 +494,27 @@ test('#3728: a place by its shape goes to the claims judge as any edit: refused 
   assert.deepEqual([into.ok, into.code], [false, 'edit.claimed'], JSON.stringify(into));
   const under = await god('place', 'souls:item', '--rect', '0,0,2,2', '--in', room, '--claim', c);
   assert.equal(under.ok, true, JSON.stringify(under));
+  assert.equal((await god('build', 'release', c)).ok, true);
+});
+
+test('#3728: move --by and clone go to the claims judge as any edit: refused by name in a claim they are not under', async () => {
+  await connected();
+  const place = (await god('describe')).nodes.find((n) => n.kind === 'souls:place');
+  const made = await god('place', 'room', '--in', place.id, '--at', '61000,0,61000');
+  assert.equal(made.ok, true, JSON.stringify(made));
+  const room = made.names['1'];
+  const claimed = await god('build', 'claim', 'yard', '--area', '60000,60000,64000,64000');
+  assert.equal(claimed.ok, true, JSON.stringify(claimed));
+  const c = claimed.claim.id;
+  const moved = await god('move', room, '--by', '1,0');
+  assert.deepEqual([moved.ok, moved.code], [false, 'edit.claimed'], JSON.stringify(moved));
+  const cloned = await god('clone', room, '--at', '63,63');
+  assert.deepEqual([cloned.ok, cloned.code], [false, 'edit.claimed'], JSON.stringify(cloned));
+  // Under the claim, each of the clone's edits carries it.
+  const movedUnder = await god('move', room, '--by', '1,0', '--claim', c);
+  assert.equal(movedUnder.ok, true, JSON.stringify(movedUnder));
+  const clonedUnder = await god('clone', room, '--at', '63,63', '--claim', c);
+  assert.equal(clonedUnder.ok, true, JSON.stringify(clonedUnder));
   assert.equal((await god('build', 'release', c)).ok, true);
 });
 
