@@ -13,7 +13,8 @@
 //!    content hash; not here).
 //! 3. **A reference is returned only once its record is on the disk.** Writers queue records; one writer thread
 //!    appends what has queued and syncs once (K4's group commit), then releases every writer whose record that sync
-//!    covered. A failed sync is final: nothing more is written or returned (K4 rule 6).
+//!    covered. A failed sync is final: nothing more is written or returned (K4 rule 6). [`Store::write_queued`]
+//!    returns at once with the record's number; its caller waits ([`Store::wait`]) before it hands the reference on.
 //! 4. **Reading is one function, [`Store::read`]:** a reference and the ids the reader is in (its own principal and
 //!    each audience node it is a member of, a line's included: T8 rules 1 and 7) give the words, or a refusal by
 //!    name: `text-unknown`, `not-entitled`, `removed`. No view opens the files; a view is built with
@@ -544,6 +545,19 @@ impl Store {
         author: Id,
         payload: &[u8],
     ) -> R<Id> {
+        let n = self.queue(reference, kind, audience, author, payload)?;
+        self.wait(n).map(|_| reference)
+    }
+
+    /// Queues one record under `reference` and returns its number, without waiting for the disk.
+    fn queue(
+        &self,
+        reference: Id,
+        kind: u8,
+        audience: Audience,
+        author: Id,
+        payload: &[u8],
+    ) -> R<u64> {
         if payload.len() > MAX_TEXT {
             return refuse(
                 "text-size",
@@ -577,6 +591,11 @@ impl Store {
             n
         };
         self.shared.work.notify_one();
+        Ok(n)
+    }
+
+    /// Waits until records `..=n` are on the disk, or the writer has failed (`text-failed`).
+    pub fn wait(&self, n: u64) -> R<()> {
         let mut q = lock(&self.shared.q);
         while q.durable < n {
             if let Some(f) = &q.failed {
@@ -584,7 +603,21 @@ impl Store {
             }
             q = self.shared.done.wait(q).unwrap_or_else(|p| p.into_inner());
         }
-        Ok(reference)
+        Ok(())
+    }
+
+    /// How many records were queued, and how many of them are on the disk: [`Store::wait`] on the first waits for all.
+    pub fn marks(&self) -> (u64, u64) {
+        let q = lock(&self.shared.q);
+        (q.queued, q.durable)
+    }
+
+    /// As [`Store::write`], without waiting for the disk (rule 3 then binds its caller): the reference, and the record's
+    /// number to [`Store::wait`] on before the reference is handed on. The words read as `text-unknown` until then.
+    pub fn write_queued(&self, words: &[u8], audience: Audience, author: Id) -> R<(Id, u64)> {
+        let r = self.mint()?;
+        self.queue(r, KIND_TEXT, audience, author, words)
+            .map(|n| (r, n))
     }
 
     /// Keeps `words` for `audience` (as resolved when written, T8 rule 1), by `author` (a principal id). Returns

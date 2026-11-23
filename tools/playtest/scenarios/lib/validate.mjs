@@ -1,6 +1,7 @@
 // Scenario validation (DESIGN §2 shape, as playtest.mjs run reads it) plus the round-2 truth checks: every expect block
 // is well formed and its target refs and positions match the genesis template; a round list names files that load.
 // node tools/playtest/scenarios/lib/validate.mjs [file…]   (no args: every scenarios/*.json and casts/*.json) — no world.
+import { isMain } from '../../../lib/is-main.mjs';
 import { existsSync, readdirSync, readFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -136,7 +137,7 @@ export function validateFile(file) {
   return obj.kind === 'cast' ? validateCast(obj) : obj.kind === 'round' ? validateRound(obj, dirname(file)) : validateScenario(obj);
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const files = process.argv.length > 2 ? process.argv.slice(2).map((f) => resolve(f))
     : [...readdirSync(SCENARIOS).filter((f) => f.endsWith('.json')).map((f) => join(SCENARIOS, f)), ...readdirSync(join(SCENARIOS, 'casts')).filter((f) => f.endsWith('.json')).map((f) => join(SCENARIOS, 'casts', f))];
   let bad = 0;

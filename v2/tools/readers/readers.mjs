@@ -6,6 +6,7 @@
 // (the pointer's anchor); a part counts as late past the page's two-second playback delay.
 // Usage: node readers.mjs <base URL[,base URL…]> <stream path> <readers> <seconds> [processes]
 // Reader i uses base i mod the number of bases. Prints one `readers {json}` line.
+import { isMain } from '../../../tools/lib/is-main.mjs';
 import { fork } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { Agent as HttpAgent, request as httpRequest } from 'node:http';
@@ -204,7 +205,7 @@ if (process.env.READERS_CHILD === '1') {
   process.once('message', async ({ bases, stream, ids, total, seconds }) => {
     process.send(await run(bases, stream, ids, total, seconds), () => process.exit(0));
   });
-} else if (process.argv[1] === fileURLToPath(import.meta.url)) {
+} else if (isMain(import.meta.url)) {
   const [bases, stream, count, seconds, procs = '1'] = process.argv.slice(2);
   if (!seconds) throw new Error('usage: node readers.mjs <base URL[,base URL…]> <stream path> <readers> <seconds> [processes]');
   const s = await readers(bases.split(','), stream, Number(count), Number(seconds), Number(procs));

@@ -17,9 +17,10 @@
 //
 // The look gate draws `looks.shape`. A kind with no shape (look.mjs's `defOf` finds nothing to draw) waits for one
 // rather than failing; every other look error fails. Sheets go to --out (default .local/look/<time>); look at them, never commit them.
+import { isMain } from '../lib/is-main.mjs';
 import {existsSync, readFileSync} from 'node:fs';
 import {join, relative, resolve} from 'node:path';
-import {fileURLToPath, pathToFileURL} from 'node:url';
+import { fileURLToPath } from 'node:url';
 import {checkFiles, KINDS_DIR} from './check.mjs';
 import {loadDir} from './format.mjs';
 import {defOf, look} from './look.mjs';
@@ -148,4 +149,4 @@ export function main(argv) {
   return v.error ? 2 : v.ok ? 0 : 1;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) process.exitCode = main(process.argv.slice(2));
+if (isMain(import.meta.url)) process.exitCode = main(process.argv.slice(2));

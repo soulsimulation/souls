@@ -13,9 +13,9 @@
 // bounded async queue in sink.mjs); a failing or refused sink disables the recorder and never throws into the host.
 import {performance} from 'node:perf_hooks';
 import {randomBytes} from 'node:crypto';
-import {appendFile, appendFileSync, lstatSync} from 'node:fs';
-import {pathToFileURL} from 'node:url';
-import {basename, resolve} from 'node:path';
+import {appendFile, appendFileSync, lstatSync, realpathSync} from 'node:fs';
+import {fileURLToPath} from 'node:url';
+import {basename} from 'node:path';
 import {createSink} from './sink.mjs';
 // Not imported from tap.mjs: importing the tap installs it when SOUL_TRACE_FILE is set (host.test.mjs checks they agree).
 export const SCHEMA = 'soul-trace/1';
@@ -63,7 +63,9 @@ export function hostRecorder({file, now = Date.now, mono = () => performance.now
 }
 
 // The name as well as the url: bundled into the managed runtime, import.meta.url is the bundle's, so the url alone would run this there.
-if (process.argv[1] && basename(process.argv[1]) === 'host.mjs' && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+// tools/lib/is-main.mjs, inlined: this file is bundled or copied alone. A start through a symlink still runs main.
+const startedAsScript = () => { try { return !!process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url)); } catch { return false; } };
+if (process.argv[1] && basename(process.argv[1]) === 'host.mjs' && startedAsScript()) {
   const a = process.argv.slice(2), opt = k => { const i = a.indexOf(k); return i >= 0 ? a[i + 1] : undefined; };
   const [what, p] = a, h = hostRecorder({file: process.env.SOUL_TRACE_FILE});
   const ids = {turn: opt('--turn'), tool: opt('--tool'), for: opt('--for'), exitCode: opt('--exit') === undefined ? undefined : Number(opt('--exit'))};

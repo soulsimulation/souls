@@ -1,9 +1,10 @@
 // Fixed native-v2 account proof recipe. Private artifact receipts are pinned by the attempt wrapper.
+import { isMain } from '../lib/is-main.mjs';
 import { createHash } from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync, openSync, closeSync, lstatSync } from 'node:fs';
 import { basename, isAbsolute, join, relative, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { pathToFileURL } from 'node:url';
 import { createConnection } from 'node:net';
 import { checkPort, portFree } from '../../e2e/local-smoke.mjs';
 
@@ -133,7 +134,7 @@ async function waitDisconnected(config) {
 }
 
 // Fixed entry modes only: the owned static origin, or a finite private readiness observation.
-if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)){
+if(isMain(import.meta.url)){
   if(process.argv.length!==4)fail('entry-mode');
   if(process.argv[2]==='--wait-disconnected'){
     try{const file=inside(process.cwd(),process.argv[3]);const config=read(file);console.log(JSON.stringify(await waitDisconnected(config)));}

@@ -11,6 +11,7 @@
 //   doors    placed things of the core door def (any version)
 //   slot     placed things whose def has at least one slot (a seat, bed, shelf or surface a body can use or fill)
 //   usable   placed things with an action or a slot; usable share = usable / placed
+import { isMain } from '../lib/is-main.mjs';
 import { readFileSync, existsSync } from 'node:fs';
 import { basename } from 'node:path';
 import { CORE_KIT } from '../../packages/world-compiler/src/core-kit.ts';
@@ -76,7 +77,7 @@ export function mapCensus(map, tpl) {
 
 const pct = (t) => `${Math.trunc(t / 10)}.${t % 10}%`;
 
-if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('census.mjs')) {
+if (isMain(import.meta.url) || process.argv[1]?.endsWith('census.mjs')) {
   const args = process.argv.slice(2), json = args.includes('--json');
   const mi = args.indexOf('--map');
   if (mi >= 0) {

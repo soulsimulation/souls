@@ -207,6 +207,7 @@ pub fn run(args: &[String]) -> i32 {
         }
     };
     cfg.text = Some(Arc::clone(&text));
+    cfg.halted = Some(answers::exit_on_halt());
     let mut built = toggles::World::build(rooms, bodies, items);
     // #3603: a punt on a course with a body in it, for the page's proof of a moving node.
     if args.iter().any(|a| a == "--punt") {

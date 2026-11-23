@@ -1,8 +1,8 @@
 #!/usr/bin/env node
 // Offline registry-only URL migration. Never opens a world or account database.
+import { isMain } from '../lib/is-main.mjs';
 import { readFileSync, writeFileSync, renameSync, existsSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { SLUG_RE, dataSlugOf, worldIdOf } from './registry.mjs';
 
 export function reslugRegistry(registry, mappings, legacyBase = '/worlds') {
@@ -52,7 +52,7 @@ export function migrateRegistry(dataDir, mappings, { apply = false, offline = fa
   return { applied: apply, worlds: after.worlds.length, renamed: mappings.length };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   try {
     const args = process.argv.slice(2), dataDir = args.shift(), mappings = []; let apply = false, offline = false, legacyBase = '/worlds';
     if (!dataDir || dataDir.startsWith('--')) throw Error('usage: reslug.mjs DATA_DIR old=new ... [--legacy-base /worlds] [--apply --offline]');
