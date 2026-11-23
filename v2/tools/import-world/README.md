@@ -26,6 +26,10 @@ node v2/tools/import-world/import-world.ts <backup.db>… [--world <id>] [--map 
   The differences are against the backup itself: a thing row with no node, a count unlike today's bake, a loader note,
   or an upload no thing names (kept by hash). A backup that does not export is a row that is not clean, with the reason.
 
+A world whose own backup is not at hand (W2, 0.133): `node v2/tools/import-world/template-world.ts <dir> <slug> <template>`
+builds it from its repository template with today's server code and backs it up with today's tool, and prints the
+backup's path. It carries none of the creator's edits, so its row is the template's, not the world's.
+
 Steps, if run apart: `node v2/tools/import-eden/export/export.ts --backup <file> --out <facts.json> [--map …]`, then
 `cargo run -p import-world --release -- <facts.json>… [--json]` from `v2/`.
 
