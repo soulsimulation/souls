@@ -95,6 +95,7 @@
 // and takes them over one at a time (handover below), so the port never closes and no world has two writers.
 //
 // Local only: binds 127.0.0.1, edge minds (owners' agents think; the world pays for none), no credentials, no tunnels.
+import { isMain } from '../lib/is-main.mjs';
 import { authorizedPartiesOverride, publicAuthEnvironment } from './clerk-public-env.mjs';
 import { satelliteSettings, primarySignInPage } from './clerk-satellite.mjs';
 import { execFileSync } from 'node:child_process';
@@ -116,7 +117,7 @@ import { createReadStream, existsSync, mkdirSync, readFileSync, renameSync, rmSy
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { brotliCompressSync, brotliDecompressSync, gunzipSync, gzipSync, constants as zlibConstants } from 'node:zlib';
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { FORK_SLUGS, RESERVED, Registry, SLUG_RE, cachedTemplates, isTimeZone, readWorkersOf, slugFor, worldHeapMb, worldIdOf } from './registry.mjs';
 import { ChildPool, PSS_EVERY_MS, UNLOADED, compileCacheDir, defaultCommand, forkCommand, worldState } from './children.mjs';
@@ -1384,6 +1385,17 @@ export async function openLauncher(cfg = {}) {
     }
     dash.noteWatch(req);   // lane DASH: sim-watch's last check (and what it saw down)
     try {
+      // B3-2c: the site's public sign-in fields, in the shape the new system's pages read them (v2/web/src/source/signin.ts
+      // SignInConfig, as v2/tools/origin/site.mjs answers): the pairing card (`/pair`, the directory's) then signs in with
+      // this site's own provider session, the one the old page holds, and approves with it as a bearer. No secret here.
+      if (path === '/v1/auth/config' && (req.method === 'GET' || req.method === 'HEAD')) {
+        const p = auth?.public, host = String(req.headers.host ?? '');
+        const loopback = /^(?:localhost|127\.(?:\d{1,3}\.){2}\d{1,3})(?::\d+)?$/.test(host) || host.startsWith('[::1]');
+        if (!p || (p.clerkPublishableKey.startsWith('pk_test_') && !loopback)) json(res, 503, { code: 'auth-unconfigured', message: 'Sign-in is not configured. Ask the operator to configure the public provider.' });
+        else json(res, 200, { authProvider: 'clerk', clerkPublishableKey: p.clerkPublishableKey, clerkIssuer: p.clerkIssuer,
+          ...(p.clerkSatellite ? { clerkSatellite: { domain: p.clerkSatellite.domain, signInUrl: p.clerkSatellite.signInUrl } } : {}) }, { 'x-content-type-options': 'nosniff' });
+        return;
+      }
       if (path === '/__sim/op/cutover' && req.method === 'GET') {
         if (!direct(req)) { json(res, 403, { ok: false, code: 'operator-only' }); return; }
         try { json(res, 200, { ok: true, ...(cutover?.inspect(registry) ?? { configured: false }) }); }
@@ -1965,7 +1977,7 @@ function serveKeeper(l, stop) {
   process.send({ t: 'ready', build: l.build, pid: process.pid });
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (isMain(import.meta.url)) {
   const argv = process.argv.slice(2);
   const flag = (k) => { const i = argv.indexOf(`--${k}`); return i >= 0 ? argv[i + 1] : undefined; };
   const range = flag('range')?.split('-').map(Number);

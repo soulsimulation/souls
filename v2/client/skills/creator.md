@@ -33,9 +33,9 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
   building stands on the ground, and its rooms stand on a floor of that building. Things and bodies stand in rooms.
 - A thing can only go in something whose kind admits it. `describe` shows each kind's `admits`: a kind name, or a
   category (`thing`, `body`) that admits every kind of that sort.
-- Use the kinds the world already pins. Pick the kind that already offers what Souls should do with it; you cannot
-  invent kinds here. `describe` lists their full names, including hashes: copy a full name when several revisions
-  share a name. A short name works only when it identifies one pinned kind.
+- Use a kind the world already has when one offers what Souls should do with it; when none does, define your own
+  (below). `describe` lists every kind's full name, including its hash: copy a full name when several revisions share
+  a name. A short name works only when it identifies one kind.
 - Positions are millimetres, `x,y,z`, in the parent's frame: `y` is up. A room's floor is `y` 0.
 - Ids look like `<32 hex>-<number>`. Copy them exactly from `describe` or from an answer.
 
@@ -50,6 +50,8 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 | `about <id> --title '<t>' [--alias '<a>' ...]` | a place's title and aliases, kept as words for everyone; Souls' `find` matches either. `--set '{"title":"..","aliases":[".."]}'` sets both, `--clear` clears both |
 | `batch '<json list>'` | several operations at once: all happen, or none |
 | `check <verb> ...` | the same, checked on your copy only: nothing is sent and nothing changes |
+| `define <record.json>` | a kind of your own, from a `souls-entry/1` record; the answer's `defines` is its full name |
+| `define-kit <kit.json> [--ns <namespace>]` | a kind of your own from a kit: a name and primitive shapes, in metres |
 | `find <words> [--category c] [--has slot:sit]` | kinds that match, best first, each with why |
 | `recommend <what you want to make>` | kinds for each need it names, the words no kind answers, and an example batch |
 | `catalog [--category c] [--has ...]` / `taxonomy` | every kind, one each / categories and what kinds offer (`--has` names) |
@@ -103,6 +105,33 @@ Example: a room with two things in it, in one step.
 node souls-god.mjs batch '[{"op":"place","name":1,"kind":"room","in":"<place id>"},{"op":"place","name":2,"kind":"<kind>","in":1,"at":[1000,0,1000]},{"op":"place","name":3,"kind":"<kind>","in":1,"at":[-1000,0,1000]}]'
 ```
 
+## Kinds of your own
+
+When the world has no kind for what you need, define one. It is kept in the world as data (a `souls:kind` node at
+the root, which `describe` shows), and from then on you place it like any other kind.
+
+- **A kit** is the quickest: a name and its shapes, in metres, with `y` = 0 the ground, `+y` up and the front `+z`.
+  ```json
+  {"name": "birdbath", "box": [1, 1.2, 1],
+   "shapes": [{"kind": "cyl", "at": [0, 0.4, 0], "r": 0.18, "h": 0.8, "material": "stone"},
+              {"kind": "lathe", "at": [0, 0.8, 0], "profile": [[0, 0], [0.45, 0.05], [0.5, 0.15]], "material": "stone"}]}
+  ```
+  `define-kit birdbath.kit.json --ns garden` makes the kind `garden:birdbath`; then
+  `place garden:birdbath --in <room id> --at 1000,0,1000`. Shapes: `box`, `wedge`, `rbox`, `cyl`, `cone`, `capsule`,
+  `sphere`, `ring`, `torus`, `arch`, `lathe`, `extrude`, `loft`, `sweep`; each needs `at`. Angles (`yaw`, `pitch`,
+  `roll`, `arc`) are radians. Write each shape out: `repeat`, `radial`, `mirror` and `$params` are refused
+  (`kit.program`). A kit's `actions`, `components` or `state` are not carried, and the answer lists them in
+  `not_carried`.
+- **A record** says what a thing is and does: the `souls-entry/1` format of the world's own kinds (`kind`, `owner`,
+  `state`, `points`, `slots`, `geometry` with `bounds_mm` and `parts`, `forms`, `text`). Whole numbers only: mm,
+  millidegrees and permille. Its `forms` must pass the same checks the world's own kinds pass, and a `create` names
+  the made kind's full name (`namespace:name@hash`, from `describe`).
+- **Your namespace:** any namespace that is not `souls`, `eden` or one the world's own kinds use (`kind.namespace`).
+- **Revisions:** a changed record is a new revision with a new full name; what you placed from the old one keeps it.
+  `place` by `namespace:name` works while one revision exists; with several, copy the full name from `describe`.
+- **Removing a kind:** `remove <its souls:kind id>`, once nothing of that kind is left and no other kind's form
+  creates it, or in the same batch as the last of them (`kind.in-use`).
+
 ## Export and import
 
 - `node souls-god.mjs export [file]` writes every node of the world (not its Souls) to a file, `world.souls.json` by
@@ -137,6 +166,14 @@ node souls-god.mjs batch '[{"op":"place","name":1,"kind":"room","in":"<place id>
 | `edit.name-unknown` | the batch uses a name no earlier place gave |
 | `edit.stale` | someone changed that thing after your copy saw it: `describe`, then send again |
 | `edit.not-the-creator` | this token is not the creator's |
+| `kind.invalid` | the record is not one the world can keep: its `detail` names the part |
+| `kind.too-large` | the record is over 64 KiB, or a `bounds_mm` is over 1 km |
+| `kind.effects` | a form would fail every time it ran: it creates a kind the world has not got (use its full name), into a slot that does not admit it, or its timers start each other sooner than 50 ms in a ring |
+| `kind.audience` | a kind is defined for everyone |
+| `kind.namespace` | that namespace is not yours |
+| `kind.collision` | that kind is defined already: place it by the name `describe` lists |
+| `kind.in-use` | things of that kind are still placed, or another kind's form still creates it |
+| `kit.invalid`, `kit.program` | the kit is not one `define-kit` reads, or it uses a program |
 | `edit.would-bury`, `edit.would-cut-off`, `edit.in-use` | a Soul is there, would be shut in, or is using it: an edit or an undo is refused, never forced |
 | `undo.nothing`, `undo.nothing-to-redo` | nothing left to undo, or nothing undone to redo |
 | `undo.conflict` | something the undo would change has changed since: put it back by hand |

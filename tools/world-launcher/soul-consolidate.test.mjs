@@ -255,6 +255,8 @@ test('A2: the ledger counts what came back too', async (t) => {
   assert.ok(JSON.parse(readFileSync(join(dir, 'memory/consolidation.json'), 'utf8')).tokens >= 1000);
 });
 
+const until = async (ok, ms = 60_000) => { for (const end = Date.now() + ms; Date.now() < end; await new Promise((r) => setTimeout(r, 50))) if (await ok()) return true; return false; };
+
 async function cliSite(t) {
   const souls = new Map(), server = createServer((req, res) => { let raw = ''; req.on('data', (c) => { raw += c; }); req.on('end', () => {
     const path = req.url.replace(/^\/w\/a/, '').split('?')[0], body = raw ? JSON.parse(raw) : {}, me = /^Bearer sim_(s_[a-z0-9]+)_/.exec(req.headers.authorization ?? '')?.[1], json = (b) => { res.writeHead(200, { 'content-type': 'application/json' }); res.end(JSON.stringify(b)); };
@@ -271,12 +273,22 @@ async function cliSite(t) {
   }); });
   await new Promise((r) => server.listen(0, '127.0.0.1', r)); t.after(() => { server.closeAllConnections(); server.close(); });
   const dir = tmp(t), base = `http://127.0.0.1:${server.address().port}/w`, cli = fileURLToPath(new URL('./soul/eden.mjs', import.meta.url));
-  const run = (...args) => new Promise((resolve) => { const c = spawn(process.execPath, [cli, ...args], { cwd: dir, env: { ...process.env, HOME: dir, SOULS_HOME: '', SOULS_PRINCIPAL: '', BRAIN_MODE: 'fake', EDEN_TIME_SCALE: '0.001' }, stdio: ['ignore', 'pipe', 'ignore'] }); let out = ''; c.stdout.on('data', (b) => { out += b; }); c.on('exit', () => resolve(out)); });
+  const env = { ...process.env, HOME: dir, SOULS_HOME: '', SOULS_PRINCIPAL: '', BRAIN_MODE: 'fake', EDEN_TIME_SCALE: '0.001' };
+  const run = (...args) => new Promise((resolve) => { const c = spawn(process.execPath, [cli, ...args], { cwd: dir, env, stdio: ['ignore', 'pipe', 'ignore'] }); let out = ''; c.stdout.on('data', (b) => { out += b; }); c.on('exit', () => resolve(out)); });
+  // #4076: the time scale shrinks `serve`'s own start wait to 60 ms, which a loaded machine misses, so a test that needs a serve
+  // up starts it in the foreground itself and waits for it to answer. Its log is the serve's stderr.
+  const serve = async () => {
+    const c = spawn(process.execPath, [cli, 'serve', '--foreground'], { cwd: dir, env, stdio: ['ignore', 'ignore', 'pipe'] }), exited = new Promise((r) => c.once('exit', r));
+    let log = ''; c.stderr.on('data', (b) => { log += b; }); t.after(() => c.kill('SIGKILL'));
+    const status = async () => { try { return JSON.parse(await run('serve', '--status')); } catch { return {}; } };
+    assert.ok(await until(async () => (await status()).pid === c.pid), 'the serve answers');
+    return { log: () => log, stop: async () => { await run('serve', '--stop'); await exited; } };
+  };
   await run('register', `${base}/a`); await run('create', 'Mira'); await run('here');
   const soul = join(dir, '.souls/souls/s_a1'), cfg = join(dir, '.souls/config.json');
   for (let d = 1; d <= 5; d++) writeFileSync(join(soul, `memory/journal/2026-10-0${d}.md`), `# 2026-10-0${d}\n\n${'- A day.\n'.repeat(5000)}`);
   writeFileSync(join(soul, 'memory/consolidation.json'), JSON.stringify({ lastLook: new Date(Date.now() - 2 * 3600_000).toISOString() }));   // clocks in this test run fast, wall time doesn't
-  return { run, soul, cfg };
+  return { run, serve, soul, cfg };
 }
 
 test('#1256: off until the owner says yes; the offer says what it costs and what leaves; an answer ends it', async (t) => {
@@ -323,28 +335,29 @@ test('#1256: under budget there is no question, and `status` reads as it did', a
 });
 
 test('A2 A5: an idle serve runs the pass on its schedule, through the real CLI; a Soul with none set off doesn\'t', async (t) => {
-  const { run, soul, cfg } = await cliSite(t);
-  writeFileSync(cfg, JSON.stringify({ ...JSON.parse(readFileSync(cfg, 'utf8')), consolidation: { enabled: true, everyHours: 0 } }));
-  await run('serve');
+  const { run, serve, soul, cfg } = await cliSite(t), memory = join(soul, 'memory'), ledger = join(memory, 'consolidation.json'), summary = join(soul, 'MEMORY.md');
+  const asks = (consolidation) => writeFileSync(cfg, JSON.stringify({ ...JSON.parse(readFileSync(cfg, 'utf8')), consolidation }));
+  asks({ enabled: true, everyHours: 0 });
+  let up = await serve();
   await new Promise((r) => setTimeout(r, 400));
-  assert.ok(!existsSync(join(soul, 'MEMORY.md')), 'everyHours 0: never'); await run('serve', '--stop');
-  await new Promise((r) => setTimeout(r, 300));
-  writeFileSync(cfg, JSON.stringify({ ...JSON.parse(readFileSync(cfg, 'utf8')), consolidation: { enabled: true, everyHours: 1 } }));
-  writeFileSync(join(soul, 'memory/consolidation.json'), 'null');
-  chmodSync(join(soul, 'memory'), 0o500);
-  assert.equal(JSON.parse(await run('serve')).serving, true, 'a ledger it can\'t read or write never stops a serve'); await run('serve', '--stop');
-  chmodSync(join(soul, 'memory'), 0o700);
-  await new Promise((r) => setTimeout(r, 300));
-  writeFileSync(join(soul, 'memory/consolidation.json'), JSON.stringify({ lastLook: new Date(Date.now() - 2 * 3600_000).toISOString() }));
-  const good = readFileSync(cfg, 'utf8');
-  await run('serve');
-  writeFileSync(cfg, '{ not json');
-  await new Promise((r) => setTimeout(r, 300));
-  writeFileSync(cfg, good);   // a typo while it looks costs that look, not the schedule
+  assert.ok(!existsSync(summary), 'everyHours 0: never'); await up.stop();
+  asks({ enabled: true, everyHours: 1 });
+  writeFileSync(ledger, 'null');
+  chmodSync(memory, 0o500);
+  try { up = await serve(); assert.ok(await run('serve', '--status').then((o) => JSON.parse(o).serving), 'a ledger it can\'t read or write never stops a serve'); await up.stop(); }
+  finally { chmodSync(memory, 0o700); }
+  writeFileSync(ledger, JSON.stringify({ lastLook: new Date(Date.now() - 2 * 3600_000).toISOString() }));
+  // A typo while it looks costs that look, not the schedule. Until the owner's yes there is nothing to look for, so the typo is
+  // in place before any look could pass, and stays until the serve has met it.
+  const yes = readFileSync(cfg, 'utf8');
+  asks({ enabled: false, everyHours: 1 });
+  up = await serve();
   try {
-    for (let i = 0; i < 400 && !existsSync(join(soul, 'MEMORY.md')); i++) await new Promise((r) => setTimeout(r, 50));
-    assert.ok(existsSync(join(soul, 'MEMORY.md')), 'it looked, and the journal was over budget');
-  } finally { await run('serve', '--stop'); }
+    writeFileSync(cfg, '{ not json');
+    assert.ok(await until(() => /consolidate: config\.json cannot be read/.test(up.log())), 'a look met the typo');
+    writeFileSync(cfg, yes);
+    assert.ok(await until(() => existsSync(summary)), 'it looked again, and the journal was over budget');
+  } finally { await up.stop(); }
 });
 
 test('A2: a pass that dies has still spent its call', async (t) => {

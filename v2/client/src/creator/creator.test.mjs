@@ -683,3 +683,56 @@ test('no output, log or trace holds the token', () => {
   for (const text of [...printed, ...files]) assert.ok(!text.includes(secret), 'the token was printed or logged');
   console.log(`token: absent from ${printed.length} outputs and ${files.length} runtime files`);
 });
+
+test('#3697: a creator defines a kind and a kit of its own, places one and is refused by name', async () => {
+  await connected();
+  const d = await god('describe');
+  const place = d.nodes.find((n) => n.kind === 'souls:place');
+  const room = await god('place', 'room', '--in', place.id);
+  assert.equal(room.ok, true, JSON.stringify(room));
+  const roomId = room.names['1'];
+  // define-kit: today's kit (metres, radians) is a record with geometry.parts (mm, mdeg), defined in the world.
+  const kit = join(dir, 'birdbath.kit.json');
+  writeFileSync(kit, JSON.stringify({ name: 'birdbath', version: 1, tags: ['garden'], box: [1, 1.2, 1], layer: 'solid', actions: {},
+    shapes: [{ kind: 'cyl', at: [0, 0.4, 0], r: 0.18, h: 0.8, material: 'stone' },
+      { kind: 'lathe', at: [0, 0.8, 0], profile: [[0, 0], [0.45, 0.05], [0.5, 0.15]], yaw: Math.PI / 2, material: 'stone' }] }));
+  const defined = await god('define-kit', kit, '--ns', 'garden');
+  assert.equal(defined.ok, true, JSON.stringify(defined));
+  assert.equal(defined.defines.length, 1);
+  const full = defined.defines[0];
+  assert.match(full, /^garden:birdbath@1220[0-9a-f]{64}$/);
+  assert.deepEqual(defined.not_carried, ['actions'], 'what a kit does is reported, never dropped silently');
+  // The copy holds it: describe lists it, and a thing of it is placed by its plain name.
+  const d2 = await god('describe');
+  assert.ok(d2.kinds[full], JSON.stringify(Object.keys(d2.kinds)));
+  const kindNode = d2.nodes.find((n) => n.kind === 'souls:kind');
+  assert.equal(kindNode?.parent, place.id, 'the definition is a node at the root');
+  const bath = await god('place', 'garden:birdbath', '--in', roomId, '--at', '1000,0,1000');
+  assert.equal(bath.ok, true, JSON.stringify(bath));
+  const bathId = bath.names['1'];
+  assert.equal((await god('describe')).nodes.find((n) => n.id === bathId)?.kind, 'garden:birdbath');
+  // define: a record of the content format, over the agents' frame limit, goes by the creator route; its forms pass.
+  const record = join(dir, 'bell.json');
+  writeFileSync(record, JSON.stringify({ format: 'souls-entry/1', kind: 'garden:bell', owner: 'thing',
+    geometry: { bounds_mm: [300, 400, 300] }, text: { name: 'bell', description: 'a garden bell. '.repeat(400) } }));
+  const bell = await god('define', record);
+  assert.equal(bell.ok, true, JSON.stringify(bell));
+  assert.match(bell.defines[0], /^garden:bell@/);
+  // Each refusal by name: the copy refuses what it can see, before anything is sent.
+  const again = await god('define-kit', kit, '--ns', 'garden');
+  assert.equal(again.code, 'kind.collision');
+  assert.equal(again.sent, false);
+  assert.match(again.fix, /defined already/);
+  const theirs = await god('define-kit', kit, '--ns', 'eden');
+  assert.equal(theirs.code, 'kind.namespace');
+  const inUse = await god('remove', kindNode.id);
+  assert.equal(inUse.code, 'kind.in-use');
+  const program = join(dir, 'row.kit.json');
+  writeFileSync(program, JSON.stringify({ name: 'row', shapes: [{ kind: 'box', at: [0, 0.5, 0], size: [1, 1, 1], repeat: { n: 3, step: [2, 0, 0] } }] }));
+  assert.equal((await god('define-kit', program)).code, 'kit.program');
+  // Removing the thing and its kind together is fine.
+  const both = await god('batch', JSON.stringify([{ op: 'remove', node: bathId }, { op: 'remove', node: kindNode.id }]));
+  assert.equal(both.ok, true, JSON.stringify(both));
+  const d3 = await god('describe');
+  assert.equal(d3.kinds[full], undefined, 'a removed definition is no longer a kind here');
+});

@@ -5,8 +5,8 @@
 //   node checks.mjs walks <expected entries> <walk.json>...   every page arrived, 0 errors, 0 resync, every Explore pick ok
 //   node checks.mjs poster <poster.log> <poster-count.txt>    every run reached a world frame and never went blank after it, 0 page errors
 //   node checks.mjs stall <stall.log> [runs]                  every run reported, no frame gap over 1 s, 0 page errors
+import { isMain } from '../../../lib/is-main.mjs';
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 
 /** qc.txt lines are "<result> <path>" (quick-check.mjs). */
 export function checkQuickCheck(text) {
@@ -73,7 +73,7 @@ export function checkStall(logText, runs) {
   return { ok: !problems.length, lines, problems };
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const [kind, ...a] = process.argv.slice(2), read = (f) => readFileSync(f, 'utf8');
   let r;
   if (kind === 'quick-check') r = checkQuickCheck(read(a[0]));

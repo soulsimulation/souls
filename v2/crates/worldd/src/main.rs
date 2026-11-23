@@ -5,6 +5,7 @@ mod compactor;
 mod fork;
 mod gateway_link;
 mod serve;
+mod stopped;
 mod watchdog;
 
 fn main() {
@@ -51,8 +52,31 @@ fn notify(state: &str) {
     }
 }
 
+/// How much longer each progress notice gives the start: worldd@.service's `TimeoutStartSec`, which stays the bound on
+/// a load that makes no progress (#4013).
+const PROGRESS_US: u64 = 30_000_000;
+/// Whether the world said "ready", and when it last said progress. One lock, so no progress notice follows READY=1.
+static LOADING: std::sync::Mutex<(bool, Option<std::time::Instant>)> =
+    std::sync::Mutex::new((false, None));
+
+/// "Still loading": the start made progress, so the service manager waits `TimeoutStartSec` again from now
+/// (`EXTEND_TIMEOUT_USEC`). At most ten a second, so a loop may call it for each record; none once ready.
+// Paces notices to the service manager, off the clock: the wall-clock rule (K7) binds the engine, not this.
+#[allow(clippy::disallowed_methods)]
+pub fn progress() {
+    use std::time::{Duration, Instant};
+    let mut loading = LOADING.lock().unwrap_or_else(|e| e.into_inner());
+    let (ready, last) = &mut *loading;
+    if *ready || last.is_some_and(|t| t.elapsed() < Duration::from_millis(100)) {
+        return;
+    }
+    *last = Some(Instant::now());
+    notify(&format!("EXTEND_TIMEOUT_USEC={PROGRESS_US}"));
+}
+
 /// "Ready": the world started and ticks. Names the build it runs, the hash its launcher checked (`$WORLDD_BUILD`).
 pub fn ready() {
+    LOADING.lock().unwrap_or_else(|e| e.into_inner()).0 = true;
     let build = std::env::var("WORLDD_BUILD").unwrap_or_else(|_| "unpinned".to_owned());
     println!("build: {build}");
     notify(&format!("READY=1\nSTATUS=build {build}"));

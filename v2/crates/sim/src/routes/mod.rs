@@ -269,6 +269,9 @@ pub struct Map {
     pub meets_elsewhere: usize,
     /// The map's own scratch, for its `&mut self` searches ([`Map::route`]).
     scratch: Scratch,
+    /// Each piece's part for a body with hands ([`Map::parts`]), found on first need and dropped when the map changes
+    /// ([`Map::replace`], [`Map::replace_squares`]): [`Map::may_reach`] (#4072).
+    hands_parts: std::sync::OnceLock<Vec<u32>>,
 }
 
 /// What a search writes as it goes (N17b, #3255): its working state, and the lines it measured that the map had not
@@ -465,6 +468,7 @@ impl Map {
             unread: Vec::new(),
             meets_elsewhere: 0,
             scratch: Scratch::default(),
+            hands_parts: std::sync::OnceLock::new(),
         };
         let mut ground_meets = Vec::new();
         // The open ground, square by square, and each piece's stretches along its square's edges.
@@ -577,6 +581,7 @@ impl Map {
     /// their other portals), and its floors and links as read now are put on, `version` giving each floor's version.
     /// Nothing else is read or cut again. A building first read here is put on the same way.
     pub fn replace(&mut self, b: &Building, version: &dyn Fn(Id) -> u64) {
+        self.hands_parts = std::sync::OnceLock::new();
         if let Some(old) = self.owned.remove(&b.thing) {
             for f in &old.floors {
                 for q in self.by_patch.remove(&(*f, None)).unwrap_or_default() {
@@ -669,6 +674,7 @@ impl Map {
         squares: Vec<((i32, i32), Vec<Piece>)>,
         link_of: &dyn Fn(Id) -> Option<Link>,
     ) -> Result<(), String> {
+        self.hands_parts = std::sync::OnceLock::new();
         let set: BTreeSet<(i32, i32)> = squares.iter().map(|(sq, _)| *sq).collect();
         let keys: Vec<(i32, i32)> = set.iter().copied().collect();
         let again = self.check_squares(ground, &keys, link_of)?;
@@ -1161,6 +1167,14 @@ impl Map {
         (0..self.pieces.len() as u32)
             .map(|k| top(&mut up, k))
             .collect()
+    }
+
+    /// Whether a body with hands may walk from piece `a` to piece `b`: false only when no portal or link it may use
+    /// joins them, so no route search can find a way (#4072). One lookup once the map's parts are found (once after
+    /// each change); a failed route search instead searches the whole part the walk starts in, twice.
+    pub fn may_reach(&self, a: u32, b: u32) -> bool {
+        let parts = self.hands_parts.get_or_init(|| self.parts(HANDS));
+        parts.get(a as usize) == parts.get(b as usize)
     }
 
     /// Each link: its id, kind, whether a door stands in it, why it cannot be crossed if it cannot, and how many

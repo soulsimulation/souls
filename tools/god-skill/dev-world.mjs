@@ -6,6 +6,7 @@
 //   node tools/god-skill/dev-world.mjs <slug> <port> [--data <dir>] [--genesis <file>] [--fresh]
 //
 // Returns when /healthz answers; prints the URL. Lanes use ports from their range (33 §8).
+import { isMain } from '../lib/is-main.mjs';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, rmSync, openSync, closeSync } from 'node:fs';
 import { resolve, dirname } from 'node:path';
@@ -43,7 +44,7 @@ export async function startWorld({ slug, port, data, genesis, fresh = false, log
   child.kill(); throw new Error(`world ${slug} did not come up on :${port}`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const [slug, port, ...rest] = process.argv.slice(2);
   const flag = (k) => { const i = rest.indexOf(`--${k}`); return i >= 0 ? rest[i + 1] : undefined; };
   const { child, base } = await startWorld({ slug, port: Number(port), data: flag('data'), genesis: flag('genesis'), fresh: rest.includes('--fresh'), log: `${root}/.lane/${slug}.log` });

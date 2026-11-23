@@ -5,13 +5,14 @@
 // This proves the driver and the recovery path. It qualifies nothing about agent behaviour.
 //   node tools/playtest/continuity/run-family.mjs [--out .local/continuity-1] [--port <n>] [--seconds 60] [--force-failure]
 // Exit 0 is a pass, 1 a failed run, 2 a checkout that isn't set up. report.json stays local; export.json is what may leave.
+import { isMain } from '../../lib/is-main.mjs';
 import { copyFileSync, existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { execFile } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { createServer, connect } from 'node:net';
 import { join, resolve } from 'node:path';
 import { DatabaseSync } from 'node:sqlite';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { parseArgs } from 'node:util';
 import { startWorld, stopWorld } from '../arena/provision.mjs';
 import { superviseProcess } from '../../soul-runtime/launch.mjs';
@@ -119,7 +120,7 @@ export async function runFamily({ out, port, seconds = 60, forceFailure = false 
   return report;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (isMain(import.meta.url)) {
   const { values } = parseArgs({ options: { out: { type: 'string' }, port: { type: 'string' }, seconds: { type: 'string' }, 'force-failure': { type: 'boolean' } } });
   const missing = ['node_modules', 'apps/web/dist'].filter((p) => !existsSync(join(root, p)));
   if (missing.length) { console.error(`Not set up: ${missing.join(', ')} missing. Run: pnpm install --frozen-lockfile && pnpm assets:pull && pnpm --dir apps/web build`); process.exit(2); }

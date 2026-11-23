@@ -1,9 +1,8 @@
 #!/usr/bin/env node
 // Read-only deterministic scoring of the declared continuity evidence contract.
 // Unknown never passes; narration and receipt start never establish body duration.
+import { isMain } from '../../../lib/is-main.mjs';
 import {readFileSync} from 'node:fs';
-import {pathToFileURL} from 'node:url';
-import {resolve} from 'node:path';
 import {auditPublicEffects} from './effect-audit.mjs';
 import {seatIdentity,insidePolygon} from '../../review/journey-oracles.mjs';
 import {gardenPoolOf,poolGardenAt,poolGardenRegion} from './garden-pool.mjs';
@@ -514,7 +513,7 @@ export function scoreContinuity({fixtures,oracles,evidence}){
  const status=evidence.fixtureVerified!==true?'unknown':rows.some(r=>r.status==='fail')?'fail':rows.every(r=>r.status==='pass')?'pass':'unknown';
  return {schema:'continuity-score/1',readingMatchVersion:READING_MATCH_VERSION,proposalRevision:fixtures.proposalRevision??null,scenarioId:scenario.id,...(garden?{fixtureVersion:scenario.fixtureVersion,gardenRule:scenario.gardenRule,garden:{ref:garden.ref,basis:garden.basis}}:{}),status,readiness:scenario.fixtureStatus,rows,limits:'Proposal scorer. Missing group integration/coverage remains unknown; this output does not certify baseline, holdout or soak acceptance.'};
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
  const evidence=JSON.parse(readFileSync(process.argv[2],'utf8'));
  const fixtures=JSON.parse(readFileSync(new URL('./fixtures.json',import.meta.url),'utf8'));
  const oracles=JSON.parse(readFileSync(new URL('./oracles.json',import.meta.url),'utf8'));
