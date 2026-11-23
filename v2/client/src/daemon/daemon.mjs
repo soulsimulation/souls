@@ -384,6 +384,9 @@ function granted() {
  */
 let followWanted = false;
 let owed = 0, again = 0, againTimer = null;
+// A refresh's waiters (an answer bringing the copy current) when it ended behind `owed`: handed to the follow again,
+// so an answer after this Soul's own write or edit shows it, not the seal before it.
+let carried = [];
 const owe = (sequence) => { if (sequence > owed) { owed = sequence; again = 0; } };
 function follow() {
   if (!followWanted || syncing || !ws || !signedIn || ws.granting) return;
@@ -475,7 +478,7 @@ function closeMail(id, state, outcome) {
 
 /** Compare and descend through the gateway (R5b): the scope's hashes, then the records not held, level by level. */
 function startSync(sock, kind) {
-  syncing = { n: ++asked, step: 'hashes', kind, t0: performance.now(), version: null, waiters: [] };
+  syncing = { n: ++asked, step: 'hashes', kind, t0: performance.now(), version: null, waiters: carried.splice(0) };
   if (cutAt !== null) cutWhy = 'syncing';
   awaitAnswer(sock);
   sock.send(wire.wireSyncScope(BigInt(syncing.n)));
@@ -506,12 +509,14 @@ function syncAnswer(sock, n, refused, bytes) {
   const { waiters } = syncing;
   syncing = null;
   hearing();
-  for (const w of waiters) w(true);
+  const behind = (done.kind === 'refresh' || done.kind === 'follow') && followsAgain({ at: sequenceOf(copyVersion), owed, again });
+  if (behind) carried.push(...waiters);
+  else for (const w of waiters) w(true);
   // A refresh (R7) brings the copy current for an answer, and a follow for an entry (R9b); the stream's cursor stays
   // the last frame it was given.
   if (done.kind === 'refresh' || done.kind === 'follow') {
     scheduleWorld();
-    if (followsAgain({ at: sequenceOf(copyVersion), owed, again })) {
+    if (behind) {
       again++;
       followWanted = true;
       clearTimeout(againTimer);
@@ -628,6 +633,7 @@ function connect() {
       cutAt ??= performance.now();
       cutWhy = 'not-connected';
       if (syncing) { clearTimeout(syncing.timer); for (const w of syncing.waiters) w(false); syncing = null; }
+      for (const w of carried.splice(0)) w(false);
     }
     if (stopping) return;
     counts.drops++;
