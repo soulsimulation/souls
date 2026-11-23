@@ -23,6 +23,7 @@ pub mod setdown;
 pub mod shipping;
 pub mod start;
 mod syncs;
+pub use syncs::SEAL_EVERY;
 pub mod testbodies;
 pub mod undo;
 pub mod view_out;

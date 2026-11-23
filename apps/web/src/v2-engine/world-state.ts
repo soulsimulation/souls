@@ -17,11 +17,13 @@ type Msg = { t: 'part'; p: { nodes: NodeLike[]; removed: string[] } } | { t: 'sn
 
 /** Doors and lamps: a kind's state fields (`content/kinds`, by `n`) and the entity state key the old page draws them by
  *  (the entry's own name: `open`, `on`, `lit`, `level`). */
-const STATE: Record<string, [n: number, key: string, type: 'bool' | 'int'][]> = {
+const STATE: Record<string, [n: number, key: string, type: 'bool' | 'int' | 'name'][]> = {
   door: [[6, 'open', 'bool']],
   bollard_light: [[28, 'on', 'bool']], desk_lamp: [[28, 'on', 'bool']], pendant: [[28, 'on', 'bool']], lamp_post: [[28, 'on', 'bool']],
   string_lights: [[28, 'on', 'bool']], twinkle_lights: [[28, 'on', 'bool']], floor_lamp: [[28, 'level', 'int']], crank_lamp: [[29, 'on', 'bool']],
   oil_lantern: [[29, 'lit', 'bool']], candle: [[28, 'lit', 'bool']], candle_stand: [[28, 'lit', 'bool']],
+  // R3: a radio, on and its station (`content/kinds/music/radio.json`), which the old page's sound and dial read.
+  radio: [[28, 'on', 'bool'], [29, 'station', 'name']],
 };
 /** import-eden's field 27: the entry a thing borrows (a Mars chair is an `eden:chair`). */
 const F_ENTRY = 27;
@@ -34,13 +36,14 @@ const plainName = (k: string) => k.split('@')[0].split(':').pop() ?? '';
 
 /** A door's or lamp's state as the old page's entity holds it, from its v2 fields; null for any other thing, or one
  *  that holds none of its fields yet (it is drawn as the layer has it). */
-export function thingState(n: NodeLike): Record<string, boolean | number> | null {
+export function thingState(n: NodeLike): Record<string, boolean | number | string> | null {
   const entry = typeof n.fields?.[F_ENTRY] === 'string' ? (n.fields[F_ENTRY] as string) : n.kind;
   // a door by its kind or entry (`eden:door`, or a `…_door` kind); field 6 alone is not one: another kind may use it
   const name = plainName(entry), defs = STATE[name] ?? (name.endsWith('_door') ? STATE.door : undefined);
   if (!defs || !n.fields) return null;
-  let out: Record<string, boolean | number> | null = null;
+  let out: Record<string, boolean | number | string> | null = null;
   for (const [f, key, type] of defs) {
+    if (type === 'name') { const w = n.fields[f]; if (typeof w === 'string') (out ??= {})[key] = plainName(w); continue; }
     const v = whole(n.fields[f]);
     if (v !== null) (out ??= {})[key] = type === 'bool' ? v !== 0 : v;
   }
@@ -120,7 +123,7 @@ const sameWeather = (a: unknown, b: OldWeather) => {
  *  model yet). A thing whose entity the layer does not hold is left out. `ticks`: the take tick each thing's state (and,
  *  under '', the weather) was read at; the diff carries the latest, so the layer draws a door's or lamp's change when the
  *  page's picture reaches it (light-diff-clock.ts), not seconds before the bodies around it. */
-export function worldDiff(layer: LayerLike | null | undefined, things: ReadonlyMap<string, Record<string, boolean | number>>, weather: OldWeather | null, at: number,
+export function worldDiff(layer: LayerLike | null | undefined, things: ReadonlyMap<string, Record<string, boolean | number | string>>, weather: OldWeather | null, at: number,
   ticks: ReadonlyMap<string, number> = new Map(), moved: ReadonlyMap<string, Placed> = new Map()): WorldDiff | null {
   const m = layer?.model, seq = layer?.seq;
   if (!m || typeof seq !== 'number') return null;
@@ -149,7 +152,7 @@ export function worldDiff(layer: LayerLike | null | undefined, things: ReadonlyM
 /** What the v2 stream says of things' state and the weather, kept from the reader worker's messages. */
 export class WorldState {
   /** Old entity id (a node's `origin`) → its door or lamp state. */
-  readonly things = new Map<string, Record<string, boolean | number>>();
+  readonly things = new Map<string, Record<string, boolean | number | string>>();
   private readonly origins = new Map<string, string>();
   /** Every node the stream holds (the frames a moved thing's world pose is composed through). */
   private readonly nodes = new Map<string, NodeLike>();

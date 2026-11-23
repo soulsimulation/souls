@@ -9,6 +9,12 @@
 //! answered a repeat) is dropped, so each intent is answered once. Keeping intents across a restart of the gateway
 //! itself, and the world's repeats across its own restart, are I4's durable half.
 //!
+//! A sleeping world (O2, #2731): with a wake set ([`Link::set_wake`], the gateway's `--wake`), an intent that
+//! arrives while the world is away is held instead, and the gateway asks once for the world to be woken; the held
+//! intents go when it is reachable, as on any reconnect, and one whose deadline passes first is answered as below.
+//! Only an intent asks: a sync request is a read, and a reader (a viewer) wakes no world, so it is answered
+//! [`RESTARTING`] as before.
+//!
 //! A sync request (R5b, #3164; `replica::sync::wire`) goes to the world under the gateway's own number, with the
 //! asking actor; its answer goes back to that actor's socket under the client's number. One asked while the world is
 //! away, or not yet answered when the link drops, is answered at once with [`RESTARTING`]: the client asks again.
@@ -158,6 +164,9 @@ pub const EXPIRED: &str = "intent.expired";
 /// The gateway's answer to an intent whose deadline passed unanswered before its expiry.
 pub const TIMED_OUT: &str = "act.timed-out";
 
+/// Asks for the sleeping world to be woken; it must not block.
+pub type Wake = Arc<dyn Fn() + Send + Sync>;
+
 /// What became of an intent handed to the link.
 #[derive(Debug, PartialEq, Eq)]
 pub enum Sent {
@@ -198,6 +207,9 @@ struct State {
     now: Option<Value>,
     /// Sync requests sent and not yet answered, by the gateway's number: the actor's bytes and the client's number.
     syncs: BTreeMap<u64, (Vec<u8>, Value)>,
+    /// How to wake a sleeping world, and whether it was asked since the world was last reachable.
+    wake: Option<Wake>,
+    asked: bool,
     /// S2: each agent's intents in the world's line now, and those waiting their turn, by number, oldest first.
     flying: BTreeMap<Vec<u8>, usize>,
     waiting: BTreeMap<Vec<u8>, VecDeque<u64>>,
@@ -266,9 +278,16 @@ impl Link {
         left: i64,
     ) -> Sent {
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        let Some(out) = s.out.clone() else {
-            return Sent::Restarting;
-        };
+        let out = s.out.clone();
+        if out.is_none() {
+            let Some(wake) = s.wake.clone() else {
+                return Sent::Restarting;
+            };
+            // The world may be asleep: hold the intent and ask, once, for the world to be woken.
+            if !std::mem::replace(&mut s.asked, true) {
+                wake();
+            }
+        }
         if s.index.contains_key(&(key.clone(), sequence)) {
             // Sent again while still unanswered: it is answered once.
             return Sent::Sent;
@@ -317,6 +336,11 @@ impl Link {
         s.syncs.insert(ours, (key, n));
         let _ = out.send(bytes);
         Sent::Sent
+    }
+
+    /// Sets how to wake a sleeping world: from now, an intent while the world is away is held and a wake asked.
+    pub fn set_wake(&self, wake: Wake) {
+        self.state.lock().unwrap_or_else(|e| e.into_inner()).wake = Some(wake);
     }
 
     /// Whether the world is reachable now.
@@ -422,6 +446,7 @@ impl Link {
         let (tx, rx) = mpsc::unbounded_channel();
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
         s.out = Some(tx);
+        s.asked = false;
         s.flying.clear();
         s.waiting.clear();
         let kept: Vec<u64> = s.pending.keys().copied().collect();
@@ -440,6 +465,14 @@ impl Link {
     fn disconnected(&self) -> Vec<(Vec<u8>, Value)> {
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
         s.out = None;
+        // A world that went to sleep with intents still unanswered here (one arrived as it went): asked awake at
+        // once, as a new intent would ask (O2, 0.133 S3b), so they are not left to their deadlines.
+        if !s.pending.is_empty()
+            && let Some(wake) = s.wake.clone()
+            && !std::mem::replace(&mut s.asked, true)
+        {
+            wake();
+        }
         std::mem::take(&mut s.syncs).into_values().collect()
     }
 }
