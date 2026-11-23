@@ -2979,15 +2979,16 @@ fn a_still_world_is_not_projected_again_and_a_world_change_is_never_passed_by_qu
             .quiet_until
     };
     let projections = || tests::IDLE_PROJECTIONS.get();
-    // Still: the first idle projects once; the next ones only move the quiet time on.
+    // Still: the cut has just published the world's state, so no idle projects it again; they only move the quiet
+    // time on (C4).
     let before = projections();
     out.idle(real + 2_000_000).unwrap();
     out.idle(real + 3_000_000).unwrap();
     out.idle(real + 4_000_000).unwrap();
     assert_eq!(
         projections() - before,
-        1,
-        "one projection while nothing changes"
+        0,
+        "no projection while nothing changes"
     );
     assert_eq!(quiet(&out), Some(4_000_000 - SETTLE_US));
     // The world sets a field on the thing by itself at 5 s: no Soul, no intent.
@@ -3027,10 +3028,7 @@ fn a_still_world_is_not_projected_again_and_a_world_change_is_never_passed_by_qu
     let after = projections();
     out.idle(real + 8_000_000).unwrap();
     out.idle(real + 9_000_000).unwrap();
-    assert!(
-        projections() - after <= 1,
-        "still again: at most one projection"
-    );
+    assert_eq!(projections() - after, 0, "still again: no projection");
     assert_eq!(quiet(&out), Some(9_000_000 - SETTLE_US));
     let mut reader = PublicPlayer::start(h.stored(), &out.baseline).unwrap();
     for n in 0..2 {
@@ -3938,4 +3936,120 @@ fn i4192_run(incremental: bool) -> (Vec<u8>, u64) {
     }
     all.extend(wire(out.public_player().state().clone()).unwrap());
     (all, out.whole_cuts - whole)
+}
+
+/// #2731 (0.133 S4): before a still world exits to sleep, its writer writes what is open and leaves a pointer that
+/// says the world is quiet up to now and still until its next due change (field 11: `[t]`, or `[]` when nothing is
+/// due); once it is awake again its pointer has no field 11.
+#[test]
+fn s4_a_sleeping_worlds_pointer_says_it_is_still_until_its_next_due_change() {
+    let h = header();
+    let d = scratch("s4-asleep");
+    let real = 1_000_000_000_000;
+    let mapping = Mapping::new(0, real, 1, 1).unwrap();
+    let mut actual = Replica::start(h.stored()).unwrap();
+    let cp = w3e_checkpoint(&d.join("cp"), &h, &mut actual, 0);
+    let store = directoryd::directory::store::Memory::default();
+    let mut out = PublicWriter::open(
+        PublicStart {
+            root: &d.join("views"),
+            header: &h,
+            key: key(&h),
+            initial: actual.frozen(),
+            record: 0,
+            checkpoint: Some(cp),
+            text: None,
+            names: None,
+            clock_seed: Some(mapping),
+            history: None,
+        },
+        &store,
+    )
+    .unwrap();
+    let thing = Id::new(Scope([59; 16]), 1).unwrap();
+    let first = w3e_packet(
+        &h,
+        vec![
+            w3e_effect(
+                0,
+                h.zone,
+                Audience::Everyone,
+                Body::Time(vec![TimeEffect::Mapping(mapping)]),
+            ),
+            w3e_create(&h, 1, thing, h.zone, Audience::Everyone),
+        ],
+    );
+    actual.apply_bytes(&first).unwrap();
+    out.push(0, &first).unwrap();
+    out.flush().unwrap();
+    // A change at 5 s, not yet cut when the world goes to sleep at 5.1 s.
+    let mut changed = w3e_effect(
+        2,
+        thing,
+        Audience::Everyone,
+        Body::Changes(vec![ChangeRec {
+            change: set(thing, 40, Value::Uint(7)),
+            rest: Rest::new(),
+        }]),
+    );
+    changed.envelope.at = 5_000_000;
+    let p = w3e_packet(&h, vec![changed]);
+    actual.apply_bytes(&p).unwrap();
+    out.push(1, &p).unwrap();
+    let pointer = |out: &PublicWriter<_>| {
+        let bytes = fs::read(out.dir.join(POINTER)).unwrap();
+        (
+            Pointer::read(&bytes).unwrap(),
+            object_map(&bytes).unwrap().get(&11).cloned(),
+        )
+    };
+    out.sleep(real + 5_100_000, Some(60_000_000)).unwrap();
+    let (p, asleep) = pointer(&out);
+    assert_eq!(
+        p.newest,
+        Some(1),
+        "what was open is written before it sleeps"
+    );
+    assert_eq!(
+        p.quiet_until,
+        Some(5_100_000 - SETTLE_US),
+        "quiet up to now"
+    );
+    assert_eq!(
+        asleep,
+        Some(Value::Array(vec![Value::Uint(60_000_000)])),
+        "still until the next due change"
+    );
+    // Nothing due: still with no end.
+    out.sleep(real + 6_000_000, None).unwrap();
+    assert_eq!(pointer(&out).1, Some(Value::Array(Vec::new())));
+    // Awake again: the pointer it writes has no field 11.
+    out.idle(real + 7_000_000).unwrap();
+    let (p, asleep) = pointer(&out);
+    assert_eq!(p.quiet_until, Some(7_000_000 - SETTLE_US));
+    assert_eq!(asleep, None);
+}
+
+/// B1-5: a writer killed mid-write leaves its `.tmp`, never a short or zero-filled file under the final name, so the
+/// next start writes the name whole instead of refusing `stream-immutable` for ever (a world that could not restart).
+#[test]
+fn an_immutable_file_killed_mid_write_leaves_only_its_tmp_and_the_next_write_completes_it() {
+    let dir = scratch("immutable-tmp");
+    let path = dir.join("g").join("baseline");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    // What a kill between create and write left before: a torn temporary, and no final name.
+    fs::write(dir.join("g").join("baseline.tmp"), [0u8; 3]).unwrap();
+    immutable(&path, b"the whole baseline").unwrap();
+    assert_eq!(fs::read(&path).unwrap(), b"the whole baseline");
+    assert!(
+        !dir.join("g").join("baseline.tmp").exists(),
+        "no temporary is left"
+    );
+    // The same bytes again are fine; other bytes under a written name are still refused.
+    immutable(&path, b"the whole baseline").unwrap();
+    assert_eq!(
+        immutable(&path, b"other bytes").unwrap_err().name,
+        "stream-immutable"
+    );
+    fs::remove_dir_all(&dir).unwrap();
 }

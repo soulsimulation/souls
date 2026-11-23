@@ -13,12 +13,14 @@
 //! entry stops it at start. Without the flag it says so on stderr and clients get no kinds. With `--uploads <dir>` a
 //! creator uploads a model or a picture through the check and hold point, and allowed ones are served by hash
 //! (#3697, `uploads.rs`; the checker is `assets-check` beside this program unless `--assets-check <path>`;
-//! `--uploads-hold` holds every upload for review).
+//! `--uploads-hold` holds every upload for review). With `--wake <alarm daemon's socket> --world-name <world>` (O2,
+//! #2731), an intent for the world while it sleeps is held and the alarm daemon asked to wake it.
 //!
 //! On SIGTERM or SIGINT it stops accepting, closes every signed-in socket with 1012 and exits within [`DRAIN`]
 //! (O16, #2809; `v2/docs/runbook/gateway-upgrade.md`).
 
 use std::path::PathBuf;
+use std::sync::Arc;
 use std::time::Duration;
 
 use gatewayd::receipts::Receipts;
@@ -61,7 +63,7 @@ async fn main() {
         arg("--build"),
     ) else {
         eprintln!(
-            "usage: gatewayd --listen <addr:port> --world <local socket> --tokens <file> --build <hex> [--receipts <dir>] [--views <path>] [--view-key <file>] [--mailbox <addr:port> --mailbox-key <file>] [--creator <32 hex>-<n> --directory <addr:port>] [--entries <dir>]"
+            "usage: gatewayd --listen <addr:port> --world <local socket> --tokens <file> --build <hex> [--receipts <dir>] [--views <path>] [--view-key <file>] [--mailbox <addr:port> --mailbox-key <file>] [--creator <32 hex>-<n> --directory <addr:port>] [--entries <dir>] [--wake <socket> --world-name <world>]"
         );
         std::process::exit(2);
     };
@@ -178,6 +180,22 @@ async fn main() {
         PathBuf::from,
     );
     tokio::spawn(gatewayd::views::run(gw.clone(), views));
+    if let (Some(socket), Some(name)) = (arg("--wake"), arg("--world-name")) {
+        gw.link.set_wake(Arc::new(move || {
+            let (socket, name) = (socket.clone(), name.clone());
+            // Off the socket's task: one line to the local daemon, its answer read and dropped.
+            std::thread::spawn(move || {
+                use std::io::{Read, Write};
+                match std::os::unix::net::UnixStream::connect(&socket) {
+                    Ok(mut s) => {
+                        let _ = s.write_all(format!("wake {name}\n").as_bytes());
+                        let _ = s.read(&mut [0u8; 64]);
+                    }
+                    Err(e) => eprintln!("gatewayd: wake {name}: {e}"),
+                }
+            });
+        }));
+    }
     tokio::spawn(world_link::run(gw.clone(), PathBuf::from(world)));
     // The tokens file is looked at every 2 s, so a pairing or a revoke (W9, #2827) holds within seconds. It is read
     // through the source, which reads it only when it changed and keeps the tokens minted in memory (a helper's,

@@ -1,0 +1,32 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:scan_exhibit",
+  "owner": "thing",
+  "geometry": {
+    "bounds_mm": [
+      4000,
+      4000,
+      4000
+    ]
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "text": {
+    "card": "A 3D scan from the Little Martians archive, set out to look at.",
+    "art": "art",
+    "scan": "scan",
+    "exhibit": "exhibit"
+  },
+  "card": {
+    "text": "card",
+    "category": "art",
+    "synonyms": [
+      "scan",
+      "exhibit"
+    ]
+  }
+}

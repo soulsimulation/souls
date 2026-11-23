@@ -1,0 +1,32 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:ceramic_plant",
+  "owner": "thing",
+  "geometry": {
+    "bounds_mm": [
+      1800,
+      3900,
+      1800
+    ]
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "text": {
+    "card": "A glazed ceramic plant: a tall moss-glazed spire under a petal crown.",
+    "art": "art",
+    "sculpture": "sculpture",
+    "ceramic": "ceramic"
+  },
+  "card": {
+    "text": "card",
+    "category": "art",
+    "synonyms": [
+      "sculpture",
+      "ceramic"
+    ]
+  }
+}

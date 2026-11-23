@@ -62,6 +62,11 @@
 //!     ([`PublicWriter::open_hiding`]) leaves what a closed container holds out of its state and baselines
 //!     ([`crate::closed::Closed::hides`]) and its entries ([`crate::closed::Inside`], the hub's rule), until it is
 //!     taken out. A generation's recovery seed says so (field 17); one begun before keeps them until the next.
+//! 13. **A sleeping world is still until its next due change** (#2731, 0.133 S4). Before a still world exits to sleep,
+//!     [`PublicWriter::sleep`] writes its pointer once more, as `idle` would (field 7 quiet up to world-now less
+//!     [`SETTLE_US`]), with field 11: `[]` when nothing is due, or `[t]`, the world time (µs) of its next due change.
+//!     Nothing changes in the world before `t`, so a page may play it as still, its time moving on, up to `t`; the
+//!     world is woken before then and writes its pointer again, without field 11. A viewer's read wakes nothing.
 //!
 //! Not here: serving (V2), history (V3), snapshot chunks for a reader that joins late, and drawing the words (W4).
 
@@ -1126,6 +1131,8 @@ pub struct PublicWriter<S> {
     /// the published version and part count then (#3603). While all three stand nothing new can be public, so the
     /// whole tree is not projected again: on full Eden one projection is about 170 ms, and idle runs every 20 ms.
     still_at: Option<(u64, u64, u64)>,
+    /// While [`PublicWriter::sleep`] writes its pointer: the next due change's world time, or none (#2731).
+    asleep: Option<Option<Micros>>,
     /// The world's closed kinds (#3948) and the containers and things it follows them by, for the entries.
     closed_kinds: Closed,
     inside: Inside,
@@ -1250,32 +1257,38 @@ fn id_of(header: &Header) -> String {
         header.epoch
     )
 }
+/// Writes `bytes` under `path` once (rule 4): whole and synced under `<name>.tmp`, then linked to its name, which fails
+/// if the name exists. A writer killed mid-write leaves only its `.tmp`, which the next write of that name replaces; a
+/// file under a final name is always whole. A name already written must hold the same bytes.
 fn immutable(path: &Path, bytes: &[u8]) -> R<()> {
     if let Some(p) = path.parent() {
         fs::create_dir_all(p).map_err(io)?;
     }
-    match fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-    {
-        Ok(mut f) => {
-            if let Err(e) = f.write_all(bytes).and_then(|_| f.sync_all()) {
-                let _ = fs::remove_file(path);
-                return Err(io(e));
-            }
-            Ok(())
+    let same = |path: &Path| -> R<()> {
+        let meta = fs::symlink_metadata(path).map_err(io)?;
+        if !meta.is_file() || meta.file_type().is_symlink() || fs::read(path).map_err(io)? != bytes
+        {
+            return Err(fault("stream-immutable", "existing bytes differ"));
         }
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            let meta = fs::symlink_metadata(path).map_err(io)?;
-            if !meta.is_file()
-                || meta.file_type().is_symlink()
-                || fs::read(path).map_err(io)? != bytes
-            {
-                return Err(fault("stream-immutable", "existing bytes differ"));
-            }
-            Ok(())
-        }
+        Ok(())
+    };
+    if path.exists() {
+        return same(path);
+    }
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = PathBuf::from(tmp);
+    let written =
+        fs::File::create(&tmp).and_then(|mut f| f.write_all(bytes).and_then(|_| f.sync_all()));
+    if let Err(e) = written {
+        let _ = fs::remove_file(&tmp);
+        return Err(io(e));
+    }
+    let linked = fs::hard_link(&tmp, path);
+    let _ = fs::remove_file(&tmp);
+    match linked {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => same(path),
         Err(e) => Err(io(e)),
     }
 }
@@ -1534,6 +1547,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             whole_cuts: 0,
             refs: None,
             still_at: None,
+            asleep: None,
             closed_kinds: closed,
             inside,
             hides: true,
@@ -3302,6 +3316,15 @@ impl<S: ObjectStore> PublicWriter<S> {
         if self.rollover_due() {
             self.rollover()?;
         }
+        // The cut has just published the source's public state: the next idle need not project it again to find the
+        // world still (C4; at 500 agents that projection was most of the writer's core).
+        if self.migration_cut.is_none() {
+            self.still_at = Some((
+                self.canonical.version(),
+                self.player.version(),
+                self.player.next(),
+            ));
+        }
         lap.mark(9);
         self.pointer(None)?;
         lap.mark(10);
@@ -3353,11 +3376,33 @@ impl<S: ObjectStore> PublicWriter<S> {
                 ]),
             );
         }
+        // Asleep (#2731, rule 13): still until the next due change, `[]` when none is due.
+        if let Some(due) = self.asleep {
+            value.insert(11, Value::Array(due.map(int).into_iter().collect()));
+        }
         write_whole(&self.dir.join(POINTER), &wire(Value::Map(value))?)
     }
+    /// Before the world exits to sleep (#2731, rule 13): what is open is written, and the pointer says the world is
+    /// still up to now and until `next_due`, the world time of its next due change (none: nothing is due). Refused
+    /// (`stream-sleep`) when the published state is not the world's, as then it is not still.
+    pub fn sleep(&mut self, real: i64, next_due: Option<Micros>) -> R<()> {
+        self.flush()?;
+        self.asleep = Some(next_due);
+        let wrote = self.quiet_now(real);
+        self.asleep = None;
+        if wrote? {
+            Ok(())
+        } else {
+            Err(fault("stream-sleep", "the public stream is not still"))
+        }
+    }
     pub fn idle(&mut self, real: i64) -> R<()> {
+        self.quiet_now(real).map(|_| ())
+    }
+    /// [`PublicWriter::idle`]: whether it wrote the pointer quiet.
+    fn quiet_now(&mut self, real: i64) -> R<bool> {
         if self.canonical.tree().time().is_empty() && self.clock_seed.is_none() {
-            return Ok(());
+            return Ok(false);
         }
         let world = mapped_now(self.canonical.tree().time(), self.clock_seed, real)?;
         if self
@@ -3367,7 +3412,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             self.flush()?;
         }
         if !self.records.is_empty() {
-            return Ok(());
+            return Ok(false);
         }
         let mut lap = prof::Lap::start();
         let at = (
@@ -3385,13 +3430,13 @@ impl<S: ObjectStore> PublicWriter<S> {
             }
             if published != current {
                 lap.mark(11);
-                return Ok(());
+                return Ok(false);
             }
             self.still_at = Some(at);
         }
         lap.mark(11);
         self.pointer(Some(world.saturating_sub(SETTLE_US)))?;
         lap.mark(12);
-        Ok(())
+        Ok(true)
     }
 }
