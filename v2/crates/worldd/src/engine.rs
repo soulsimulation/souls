@@ -14,7 +14,8 @@
 //! - **Written once, as the Soul's.** Each system writes through its own writer onto a copy of the tree; its entries,
 //!   caused by the intent and acted by its Soul, are applied to the world with the tick's other entries
 //!   ([`Engine::out`]), so the intent's receipt names them. An act is answered at once: a receipt, or its refusal by
-//!   name. A carry in progress is sampled each tick between its carriers ([`Engine::tick`]).
+//!   name. A carry in progress is sampled each tick between its carriers ([`Engine::tick`]). A carry that breaks off (a
+//!   carrier's leave, carriers drifted apart, a restart) sets its load down where it is and says why (0.135 C3).
 //! - **A restart keeps its activities** (E26, #3329): once the bodies are back, [`Engine::restore`] reads them from
 //!   their nodes and membership links, so a member speaks in one and leaves it as before. Open offers and carries in
 //!   progress are not restored.
@@ -122,6 +123,42 @@ pub struct Engine {
     line: Timeline,
     /// The loads the world's entries state, by plain kind (0.135 C2, [`Engine::with_loads`]).
     loads: BTreeMap<String, Load>,
+    /// Loads found riding a carry at a restart, set down at the first tick (0.135 C3): (activity, load).
+    riding: Vec<(Id, Id)>,
+}
+
+/// Sets `carry`'s load down where the carry last had it, at rest on `ground`, and has the world say `why`
+/// (`souls:carry-set-down`, 0.135 C3); its entries are stamped with `by`'s intent and Soul, or the world's, and go in
+/// the activities' stream, so every entry leaves the engine in the order it was written.
+#[allow(clippy::too_many_arguments)]
+fn break_off(
+    carry: &mut Carry,
+    activities: &mut Activities,
+    mint: &mut Minter,
+    tree: &mut Tree,
+    now: Micros,
+    here: Option<(Vec3, replica::pose::Quat)>,
+    why: &'static str,
+    by: Option<(Id, Id)>,
+) -> R<()> {
+    let transfer = mint
+        .mint()
+        .map_err(|e| refusal("id-counter-exhausted", e.to_string()))?;
+    carry.set_down_here(tree, now, carry.ground, here, transfer)?;
+    let mut effects: Vec<Effect> = carry.log.parts.drain(..).flatten().collect();
+    for e in &mut effects {
+        if let Some((intent, soul)) = by {
+            e.envelope.cause = Cause::Intent(intent);
+            e.envelope.actor = Actor::Soul(soul);
+        }
+    }
+    activities.stream.extend(effects);
+    activities.next = tree.next();
+    let (actor, cause) = match by {
+        Some((intent, soul)) => (Actor::Soul(soul), Cause::Intent(intent)),
+        None => (Actor::World, Cause::World),
+    };
+    activities.carry_set_down(tree, carry.activity, carry.board, why, (now, actor, cause))
 }
 
 /// Where bodies stand, read from the controller before a move needs them (0.134 T1): a move one member of an activity
@@ -259,6 +296,7 @@ impl Engine {
             )
             .expect("a line from zero"),
             loads: BTreeMap::new(),
+            riding: Vec::new(),
         }
     }
 
@@ -299,6 +337,17 @@ impl Engine {
         self.activities =
             Activities::restore(self.header.clone(), self.rules.clone(), kinds, live, c)?;
         self.steered = crate::carrier::restore(live, slots)?;
+        // 0.135 C3: a carry is not stored, so a load still riding its carry is set down at the first tick.
+        for a in self.activities.ids() {
+            let Some(h) = live.handle(a) else { continue };
+            for &k in live.children(h).into_iter().flatten() {
+                if let Some(n) = live.node(k)
+                    && n.slot() == Some(sim::activity::carry::SLOT)
+                {
+                    self.riding.push((a, n.id()));
+                }
+            }
+        }
         Ok(())
     }
 
@@ -435,6 +484,20 @@ impl Engine {
             Verb::Start => e.start(&mut tree, c, ask, target("start-needs-an-activity")?)?,
             Verb::Leave => {
                 let activity = target("leave-needs-an-activity")?;
+                // 0.135 C3: a carrier's leave breaks the carry off; its load is set down where it is.
+                if let Some(mut carry) = self.carries.remove(&activity) {
+                    break_off(
+                        &mut carry,
+                        e,
+                        &mut self.mint,
+                        &mut tree,
+                        now,
+                        None,
+                        "souls:partner-left",
+                        Some((a.id, a.soul)),
+                    )?;
+                }
+                e.next = tree.next();
                 e.leave(
                     &mut tree,
                     c,
@@ -615,10 +678,50 @@ impl Engine {
                 eprintln!("worldd: {} did not leave its touch: {r}", show(body));
             }
         }
+        // 0.135 C3: loads found riding at a restart are set down where their carry last had them.
+        for (activity, load) in std::mem::take(&mut self.riding) {
+            let tr = tree.get_or_insert_with(|| live.frozen());
+            let found = tr.handle(activity).and_then(|h| tr.node(h)).and_then(|n| {
+                Some((
+                    n.parent()?,
+                    n.audience(),
+                    n.place().map(|p| (p.position, p.orientation))?,
+                ))
+            });
+            let Some((ground, audience, here)) = found else {
+                continue;
+            };
+            let mut carry = Carry::new(
+                activity,
+                load,
+                ground,
+                audience,
+                self.header.clone(),
+                self.rules.clone(),
+            );
+            match break_off(
+                &mut carry,
+                &mut self.activities,
+                &mut self.mint,
+                tr,
+                now,
+                Some(here),
+                "souls:world-restarted",
+                None,
+            ) {
+                Ok(()) => {}
+                Err(r) => eprintln!(
+                    "worldd: {} was not set down after the restart: {r}",
+                    show(load)
+                ),
+            }
+        }
         if !self.carries.is_empty() {
             let tr = tree.get_or_insert_with(|| live.frozen());
             let mut gone = Vec::new();
-            for (activity, carry) in &mut self.carries {
+            let mut apart = Vec::new();
+            let mut step = Vec::new();
+            for (activity, carry) in &self.carries {
                 let carriers = self
                     .activities
                     .members(*activity)
@@ -630,14 +733,45 @@ impl Engine {
                         continue;
                     }
                 };
-                if let (Ok((_, f)), Ok((_, k))) = (stands(c, f), stands(c, k))
+                let (Ok((_, f)), Ok((_, k))) = (stands(c, f), stands(c, k)) else {
+                    continue;
+                };
+                // 0.135 C3: one stopped (or its connection is gone) while the other walked on.
+                if carry.stretched(f, k) {
+                    apart.push(*activity);
+                } else {
+                    step.push((*activity, f, k));
+                }
+            }
+            for (list, why) in [
+                (gone, "souls:partner-left"),
+                (apart, "souls:carriers-apart"),
+            ] {
+                for a in list {
+                    let Some(mut carry) = self.carries.remove(&a) else {
+                        continue;
+                    };
+                    match break_off(
+                        &mut carry,
+                        &mut self.activities,
+                        &mut self.mint,
+                        tr,
+                        now,
+                        None,
+                        why,
+                        None,
+                    ) {
+                        Ok(()) => {}
+                        Err(r) => eprintln!("worldd: a carry was not set down: {r}"),
+                    }
+                }
+            }
+            for (activity, f, k) in step {
+                if let Some(carry) = self.carries.get_mut(&activity)
                     && let Err(r) = carry.step(tr, now, f, k)
                 {
                     eprintln!("worldd: a carry's sample was not written: {r}");
                 }
-            }
-            for a in gone {
-                self.carries.remove(&a);
             }
         }
         self.collect(None);
