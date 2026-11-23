@@ -1,4 +1,0 @@
----
-type: fix
----
-Engine v2's gateway replays, on resume, a refusal that shares its cursor's version, the world's or its own (`world.restarting`, `intent-not-granted`), so an agent that drops before its refusal arrives still gets it once.
