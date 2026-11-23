@@ -912,12 +912,12 @@ fn leave_one(crew: u64) -> Result<(), (String, String, Id)> {
     acts.start(&mut tree, &mut c, ask(0, 3_000), act)
         .expect("started");
     acts.structure = rack.structure;
-    let (moves, mut due) = (Moves::new(), DueList::new());
+    let (mut moves, mut due) = (Moves::new(), DueList::new());
     let before = tree.to_state();
     let r = acts.leave(
         &mut tree,
         &mut c,
-        &moves,
+        &mut moves,
         &mut due,
         &mut mint,
         ask(1, 4_000),

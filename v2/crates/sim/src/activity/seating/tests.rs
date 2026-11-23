@@ -553,12 +553,12 @@ impl W {
     fn leave(&mut self, act: Id, k: usize) -> Res<()> {
         self.sync();
         let a = self.ask(k);
-        let (moves, mut due) = (Moves::new(), DueList::new());
+        let (mut moves, mut due) = (Moves::new(), DueList::new());
         let before = self.tree.to_state();
         let r = self.acts.leave(
             &mut self.tree,
             &mut self.c,
-            &moves,
+            &mut moves,
             &mut due,
             &mut self.mint,
             a,
