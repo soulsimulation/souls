@@ -77,8 +77,9 @@
 //! **Activities** (C30, #3556): the engine's acts (C2) run with the conversation's kind (E26,
 //! `replica/fixtures/activities/conversation.diag`) and an activity kind for each entry whose `roles` name two or
 //! more roles, `<entry kind>_activity`; each is pinned in the header and the open ground takes it as a child, so an
-//! offer or a proposal on the ground (where bodies are born) makes its node there. A start prints `activities: <plain
-//! names>`.
+//! offer or a proposal on the ground (where bodies are born) makes its node there. Its entry's slots that admit a
+//! thing are its slots, numbered as the entry numbers them, so a carry's load rides its first (0.135 C4,
+//! `content/kinds/construction/carry.json`). A start prints `activities: <plain names>`.
 //! **Its creator** (G1e, #3532): with a store, the world's one creator is the one its record in the directory names
 //! (the list's row for its lineage and zone, then that name's record, `directoryd::worlds::list::creator_of`), read
 //! at the start and again every 30 s. Only that creator's edits are taken, each judged by G2's rule on the town before
@@ -728,6 +729,23 @@ fn courses_cached(
     Ok((out, false))
 }
 
+/// The slots of activity `name`'s entry that admit a thing, numbered as the entry numbers its slots (1, 2, ... in its
+/// order): a carry's load rides its first (0.135 C4, `sim::activity::carry::SLOT`).
+fn thing_slots(
+    entries: &[(String, Json)],
+    name: &str,
+) -> BTreeMap<u64, std::collections::BTreeSet<String>> {
+    let entry = entries
+        .iter()
+        .find(|(k, _)| format!("{k}_activity") == plain(name));
+    let slots = entry.and_then(|(_, e)| e.get("slots")).and_then(Json::obj);
+    (1..)
+        .zip(slots.unwrap_or(&[]))
+        .filter(|(_, (_, s))| s.get("admits").and_then(Json::str) == Some("thing"))
+        .map(|(n, _)| (n, ["thing".to_owned()].into()))
+        .collect()
+}
+
 fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
     build_with(COURSES_CACHE.get().map(PathBuf::as_path), facts, entries)
 }
@@ -766,7 +784,7 @@ fn build_with(cache: Option<&Path>, facts: &str, entries: &[(String, Json)]) -> 
             Kind {
                 owner: "activity".into(),
                 children: Default::default(),
-                slots: Default::default(),
+                slots: thing_slots(entries, a.name.as_str()),
                 hands: None,
             },
         );
