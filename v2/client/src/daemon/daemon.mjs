@@ -149,6 +149,7 @@ import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check
 import { risesFromSeat } from '../check/stand.mjs';
 import { ORDER_ENDED, STUCK, stuckOf, whyOf } from './stuck.mjs';
 import { kindsHeld, kindsIn, stateOf } from '../check/state.mjs';
+import { folderStamp, keptOne } from '../check/kept.mjs';
 import { actWords, nearestIds, nearestOffers, offerNamed, offersOf } from '../check/offers.mjs';
 import { Table } from '../reflex/reflex.mjs';
 import { Wakes } from '../wake/wake.mjs';
@@ -163,6 +164,7 @@ import { cloneFile, moveByOps, removeOps, selectOf } from '../creator/things.mjs
 import { TRACE_MOST, openCreatorTrace, rowOf } from '../creator/trace.mjs';
 import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
+import { giveIntents } from '../give/give.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
 import { blankAt, CALENDAR_NOTE, calendarItems, calendarList, calendarOf, nextWorldTime, whatsOn, worldDue, worldTimeOf, heldBlank, noticeBoards } from '../schedule/world.mjs';
 import { refreshEntries } from '../pair/pair.mjs';
@@ -811,14 +813,31 @@ async function ageAfter({ now = false } = {}) {
 /** The kind entries held in `<home>/kinds/` and the creator's own from the copy (#3697), the Soul's own body kind given
  *  its family's forms (E21, #2791). */
 function heldKinds() {
-  const me = [...rowsOf(copy).values()].find((r) => r.id === ME || r.soul === ME);
-  return kindsHeld(join(home, 'kinds'), copy, me?.kind);
+  // Kept while the copy's roots and the folder's files are the same (G-late): a form act read them all each time.
+  const dir = join(home, 'kinds'), stamp = folderStamp(dir);
+  return kindsKept.get([copy.roots(), stamp], () => {
+    const me = [...rowsOf(copy).values()].find((r) => r.id === ME || r.soul === ME);
+    const kinds = kindsHeld(dir, copy, me?.kind);
+    // The same entries (the folder's files, the body's kind, and the creator kinds by their full names, which name their
+    // bytes) give the same object back, so the state's memo of records holds across a changed copy.
+    const sig = `${stamp}\n${me?.kind}\n${Object.keys(kinds).sort().join(' ')}`;
+    if (sig !== kindsSame.sig) Object.assign(kindsSame, { sig, kinds });
+    return kindsSame.kinds;
+  });
 }
+const kindsSame = { sig: null, kinds: null };
+const kindsKept = keptOne(), stateKept = keptOne(), stateMemo = {};
+/** The rules' state of the copy for this Soul (`stateOf`), kept while the copy's roots and the kinds are the same; when
+ *  a sync changed the copy, only the records it changed are read again (`stateMemo`). */
+const heldState = (kinds) => stateKept.get([copy.roots(), kinds], () => stateOf(copy, kinds, ME, stateMemo));
 
+let verdictsTook = null; // G-late: the last verdicts' parts, ms, for the act check's log line
 /** R2's verdict on each candidate, on the copy as it is now (R8). */
 function verdicts(candidates) {
-  const kinds = heldKinds(), state = stateOf(copy, kinds, ME);
-  return candidates.map((c) => judge(wire.rules_decide, c, { kinds, state, asker: { sees: [] } }));
+  const t0 = performance.now(), kinds = heldKinds(), t1 = performance.now(), state = heldState(kinds), t2 = performance.now();
+  const out = candidates.map((c) => judge(wire.rules_decide, c, { kinds, state, asker: { sees: [] } }));
+  verdictsTook = { kinds: Math.round(t1 - t0), state: Math.round(t2 - t1), nodes: Object.keys(state.nodes).length, decide: Math.round(performance.now() - t2) };
+  return out;
 }
 
 /** The age fields of an answer that does not ask the gateway first (status, read, stats, stop, a refusal). */
@@ -839,6 +858,7 @@ const OPS = new Set([
   'context',
   'converse',
   'describe',
+  'give',
   'edit',
   'event',
   'events',
@@ -1160,7 +1180,7 @@ const summary = (plan, edits, started) => ({
 // A write's key is kept with its first answer and the world's answer to its intent, on disk with the sequence, so a
 // retry (a harness that timed out, the same command run twice, a daemon restarted between) sends nothing and gets the
 // first answer back, `repeat: true`, with the receipt as it stands. Two at once with one key wait for the same write.
-const KEYED = new Set(['act', 'object', 'say', 'whisper', 'lie', 'set-down', 'converse', 'wear']);
+const KEYED = new Set(['act', 'object', 'say', 'whisper', 'lie', 'set-down', 'converse', 'wear', 'give']);
 const KEYS_KEPT = 500, keying = new Map();
 /** Today's limits for a key (eden.mjs `keyArg`): 1 to 100 printable characters, no spaces. */
 const keyOk = (k) => typeof k === 'string' && /^[\x21-\x7e]{1,100}$/.test(k);
@@ -1439,7 +1459,7 @@ async function answer(req, conn = null) {
       if (moveForm(intent?.verb)) {
         // C14: a move is checked as the world checks it, on the copy and the body's last known posture.
         const age = await ageAfter();
-        const nodes = stateOf(copy, heldKinds(), ME).nodes;
+        const nodes = heldState(heldKinds()).nodes;
         const v = moveVerdict(wire.move_check, intent, { nodes, seated: state.seated ?? null });
         return closing({ ok: true, ...canOf(v, isCurrent(age, CURRENT_MS)) }, null, { age });
       }
@@ -1458,9 +1478,12 @@ async function answer(req, conn = null) {
       const basis = shownVersion ?? state.cursor;
       let age = null, keep = candidates, dropped = [];
       if (candidates.some((c) => c.form)) {
+        const t0 = performance.now();
         age = await ageAfter();
-        const current = isCurrent(age, CURRENT_MS);
+        const t1 = performance.now(), current = isCurrent(age, CURRENT_MS);
         ({ keep, dropped } = sift(candidates, current ? verdicts(candidates) : [], current));
+        // G-late (0.132): where a form act's own check spends its time before the act goes, for the release check.
+        log(`act check: copy ${Math.round(t1 - t0)} ms (${current ? 'current' : 'stale'}), ${current ? candidates.length : 0} verdicts ${Math.round(performance.now() - t1)} ms ${current ? JSON.stringify(verdictsTook) : ''}`);
       }
       if (keep.length === 0) {
         trace.write({ k: 'send', seq: `local-${++stopped}`, ranked: candidates.length, cause: 'stopped-locally' });
@@ -1480,6 +1503,9 @@ async function answer(req, conn = null) {
         if (req.for !== undefined) serving.set(sequence, req.for);
         return closing({ ok: true, sequence, sent, basis: sequenceOf(basis) }, null, { now: true });
       }
+      // 0.135 G1: a walk's `gait=walk|jog|run` goes as parameter 2, `gait:<name>`; the world refuses any other by name.
+      const { gait, ...walkArgs } = /:walk$/.test(keep[0].verb) ? keep[0].args ?? {} : {};
+      if (gait !== undefined) { keep[0].args = walkArgs; req.params = { ...(req.params ?? {}), 2: `gait:${gait}` }; }
       // A number or words go as they are, so a form's arguments then go as parameter 1's pairs (#3686, #3712).
       const pairs = Object.entries(keep[0].args ?? {}), counted = pairs.some(([, v]) => typeof v !== 'string');
       const args = counted ? undefined : pairs.map(([n, id]) => `${n}=${id}`).join(' ') || undefined;
@@ -1667,6 +1693,7 @@ async function answer(req, conn = null) {
 
     }
     case 'converse': return converse(req);
+    case 'give': return give(req);
     case 'look-set': {
       // G3: the Soul's own look on its default body (`life:look`, G2): its params' bytes as T8's words shape.
       const params = String(req.params ?? '');
@@ -1776,7 +1803,7 @@ function thingOf(id) {
   }
   // A Soul's body has the family's forms (E21, #2791), as `can` and `act` read them.
   const kinds = heldKinds(), entry = kinds[row.entry ?? row.kind];
-  return { ok: true, row, entry, offers: offersOf(row.id, entry, { moving: Boolean(row.moving) }), fields: stateOf(copy, kinds, ME).nodes[row.id]?.fields };
+  return { ok: true, row, entry, offers: offersOf(row.id, entry, { moving: Boolean(row.moving) }), fields: heldState(kinds).nodes[row.id]?.fields };
 }
 
 /** A field the copy holds as bytes (hex), shown as its text when that is plain printable text. */
@@ -1917,6 +1944,19 @@ function converse(req) {
   if (req.do === 'leave') delete state.conversations[req.conversation];
   const basis = shownVersion ?? state.cursor;
   const sent = intents.map((i) => ({ verb: i.verb, ...sendIntent([i.verb], { target: i.target, words: i.words, params: i.params, basis }) }));
+  return closing({ ok: true, sent, basis: sequenceOf(basis) }, null, { now: true });
+}
+
+/** 0.133 R4: a give's intents (`../give/give.mjs`), sent once as `act`'s are; the answers arrive as events. The offer's
+ *  node goes on the open ground, which admits activities (a floor or a room does not): where the two stand is the
+ *  world's check at the accept. */
+function give(req) {
+  const rows = [...rowsOf(copy).values()];
+  const place = rows.find((r) => r.kind?.split('@')[0] === 'eden:ground')?.id ?? rows.find((r) => r.id === ME || r.soul === ME)?.parent ?? null;
+  const intents = giveIntents(req, { place });
+  if (intents.code) return { ok: false, code: intents.code, detail: intents.detail };
+  const basis = shownVersion ?? state.cursor;
+  const sent = intents.map((i) => ({ verb: i.verb, ...sendIntent([i.verb], { target: i.target, params: i.params, basis }) }));
   return closing({ ok: true, sent, basis: sequenceOf(basis) }, null, { now: true });
 }
 

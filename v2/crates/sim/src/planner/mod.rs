@@ -192,6 +192,7 @@ impl Planner {
             if let Err(r) = result {
                 eprintln!("planner: the spot tables were not written: {}", r.name);
             }
+            out.revoked = self.town.revoked();
         }
         for (body, target, order) in &w.places {
             let r = match self.town.spot(body.id, target) {
@@ -205,7 +206,7 @@ impl Planner {
                     });
                     let result = self
                         .town
-                        .plan_with_metrics(body, target.node, p)
+                        .plan_with_metrics(body, p.node, p.at)
                         .map(|(legs, metrics)| (p, legs, metrics))
                         .map_err(|e| e.name);
                     trace.line("route-end", || {

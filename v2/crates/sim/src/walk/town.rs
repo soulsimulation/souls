@@ -59,7 +59,7 @@ use crate::links::{
 };
 use crate::mover::{Body, Surface};
 use crate::routes::{HANDS, Hop, Map, Mask, Route, Scratch, Spot, on_pieces};
-use crate::spots::{Ask, CLEAR, ClassGround, Ground, Spots, Target, flat, to_segment};
+use crate::spots::{Ask, CLEAR, ClassGround, Granted, Ground, Spots, Target, flat, to_segment};
 use replica::effects::{Actor, Cause, Header, Part, Refusal};
 use replica::encode::{Value, encode};
 use replica::host::{F_GRANTED, F_TURNS, Seen};
@@ -2165,6 +2165,12 @@ impl ClassGround for ClassGrounds<'_> {
     fn may_reach(&self, size: Size, an: Id, a: Vec3, bn: Id, b: Vec3) -> bool {
         self.0.get(&size).is_none_or(|g| g.may_reach(an, a, bn, b))
     }
+    fn overflow_at(&self, size: Size, node: Id, p: Vec3) -> Vec<(Id, Vec3)> {
+        self.0
+            .get(&size)
+            .map(|g| g.overflow_at(node, p))
+            .unwrap_or_default()
+    }
 }
 
 impl Ground for Grounds<'_> {
@@ -2223,7 +2229,28 @@ impl Ground for Grounds<'_> {
             _ => true,
         }
     }
+
+    /// A crowded target overflows onto the open ground round its point, never into a room: on the open ground as it
+    /// is, and from a floor (a bandstand's, a room's) its point taken into the ground's frame by its node's own pieces
+    /// (A2-5). The routes carry no rule for who may enter a room, so a floor's own ground is not used.
+    fn overflow_at(&self, node: Id, p: Vec3) -> Vec<(Id, Vec3)> {
+        if node == self.ground {
+            return vec![(node, p)];
+        }
+        let m = self.map.get();
+        let Some(s) = m.spot_near(node, p, OVERFLOW_FIND) else {
+            return Vec::new();
+        };
+        let w = m.world(s.piece, [p.x / 1000, p.y / 1000, p.z / 1000]);
+        vec![(
+            self.ground,
+            Vec3::new(w[0] * 1000, w[1] * 1000, w[2] * 1000),
+        )]
+    }
 }
+
+/// How far from a thing's target its own walkable ground may lie, mm, for its overflow onto the open ground (A2-5).
+const OVERFLOW_FIND: i64 = 20_000;
 
 impl World for Town {
     fn spots(&mut self, marks: &[Mark], at: Micros) -> Result<(), Refusal> {
@@ -2292,8 +2319,12 @@ impl World for Town {
         spots.write_sized(&mut ClassGrounds(gs), &asks, at)
     }
 
-    fn spot(&self, who: Id, target: &Target) -> Option<Result<Vec3, &'static str>> {
-        self.spots.of(who, target)
+    fn spot(&self, who: Id, target: &Target) -> Option<Result<Granted, &'static str>> {
+        self.spots.granted(who, target)
+    }
+
+    fn revoked(&mut self) -> Vec<Id> {
+        self.spots.revoked()
     }
 
     fn turns(&mut self, marks: &[Mark], at: Micros) -> Result<(), Refusal> {
@@ -2326,8 +2357,18 @@ impl World for Town {
             let Some(l) = find_link(link_at, buildings, id) else {
                 continue;
             };
+            // A wide link is taken in turns while anyone waits for it or is inside it on its turn (A2-4).
             if !narrow(l) {
-                continue;
+                let busy = marks.iter().any(|m| m.waiting.map(|w| w.0) == Some(id))
+                    || (turns.crowded.contains(&id)
+                        && marks.iter().any(|m| m.crossing == Some(id)));
+                if !busy {
+                    if turns.crowded.remove(&id) {
+                        turns.forget(l);
+                    }
+                    continue;
+                }
+                turns.crowded.insert(id);
             }
             let mut f = Facts::default();
             for m in marks {
@@ -3100,7 +3141,7 @@ fn link_seen(
     link: Id,
 ) -> Option<Seen> {
     let l = find_link(link_at, buildings, link)?;
-    if !narrow(l) {
+    if !narrow(l) && !turns.is_some_and(|t| t.crowded.contains(&link)) {
         return None;
     }
     let mut fields = BTreeMap::from([(F_TURNS, Value::Uint(1))]);

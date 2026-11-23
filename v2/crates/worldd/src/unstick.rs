@@ -57,15 +57,16 @@ impl Unstuck {
                 self.ladder.routed(runner, *who, legs.clone());
                 continue;
             }
-            let Some((target, _)) = runner.asks.get(who) else {
+            if !runner.asks.contains_key(who) {
                 continue;
-            };
+            }
+            // The node it stands on there: the target's, or an overflow's round a crowded target (A2-5).
             self.ladder.add(
                 *who,
                 *order,
                 crate::bodies::WALK,
-                target.node,
-                *place,
+                place.node,
+                place.at,
                 legs.clone(),
             );
         }

@@ -5,7 +5,7 @@
 import { lookBody } from '../humanoid/look.ts';
 
 /** A body's seat while it is in a slot: the slot's height above its thing's base (mm), and whether it lies there. */
-export type Seat = { height: number; lie: boolean };
+export type Seat = { height: number; lie: boolean; ride?: true };
 
 /** Things a body lies on rather than sits on, by kind name (`<pack>:<name>@<rev>`). */
 const LIE_ON = /(^|[:_-])(bed|bunk|cot|hammock|mattress|sleeping[_-]?(?:bag|mat)|futon)([_-]|@|$)/i;
@@ -15,8 +15,9 @@ export function seatOf(kind: string, slot: readonly number[] | undefined): Seat 
   return { height: Math.max(0, slot?.[2] ?? 0), lie: LIE_ON.test(kind) };
 }
 
-/** The old take's posture for a still body at `seat` (null: standing). */
-export const postureOf = (seat: Seat | null | undefined) => (seat ? (seat.lie ? 'lie' : 'sit') : null);
+/** The old take's posture for a still body at `seat` (null: standing). K4 (0.135): in a ride's slot (a thing on a course,
+ *  a balloon's basket) it stands at the slot and rides (activity-poses.ts `ride`: hands on the rim). */
+export const postureOf = (seat: Seat | null | undefined) => (seat ? (seat.ride ? 'ride' : seat.lie ? 'lie' : 'sit') : null);
 
 /** The old renderer's hand props (mars/viewer/app/engine-view/activity-poses.ts PROPS), by words in a thing's kind. */
 const PROP_WORDS: [RegExp, string][] = [

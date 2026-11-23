@@ -4,7 +4,7 @@ import {WorldContextViews} from './WorldContextViews.ts';
 import { whenAssetsSettled } from './gen-mesh/gltf-assets.ts';
 import {ALL_OPTIONAL_APPEARANCE_PROFILES,type OptionalAppearanceProfiles} from './optional-appearance-profiles-all.ts';
 import {historyTakePath,historyTakePage} from './WorldTakeTransport.ts';
-import { v2History } from './v2-engine/history.ts';
+import { playSpeed, v2History } from './v2-engine/history.ts';
 import { seekTick } from './v2-engine/moment-link.ts';
 import {WorldAuthoredBoundaries} from './WorldAuthoredBoundaries.ts';
 import {WorldTouchFree} from './touch/WorldTouchFree.ts';
@@ -91,6 +91,7 @@ import { WorldSceneHistory } from './WorldSceneHistory.ts';
 import { apiPath, worldKey } from './world-path.ts';
 import { BASE } from './base-path.ts';
 import { newWorld } from './world-kind.ts';
+import { streamBound } from './v2-engine/source/scene-offer.ts';
 import { sceneOwner, type SceneOwnerMemory } from './scene-owner.ts';
 import { marsFork } from './mars-fork.ts';
 import type { ForkLand } from './WorldMarsForkLand.ts';
@@ -383,6 +384,9 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
     const followView=new WorldFollow();
     // #1317: ?camtrace loads the camera trace (its own chunk); without it this is one null check a frame.
     let camTrace:import('./camera-trace.ts').CameraTrace|null=null;
+    // #1963, 0.135 P3: ?track=<same-origin file> gives the camera a planned track (a recorded range, or a live take's); nothing loads without it.
+    let shotTrack:import('./WorldShotTrack.ts').ShotTrack|null=null,shotPoseNow:typeof import('./WorldShotTrack.ts').poseNow|null=null;
+    if(new URLSearchParams(location.search).has('track'))void import('./WorldShotTrack.ts').then(async m=>{const url=m.shotTrackUrl(location.search);if(!url||abort.signal.aborted)return;shotTrack=await m.loadShotTrack(url,abort.signal,{seek:tick=>playbackCommands.current?.seek(tick)??Promise.resolve(),setPlaying:playing=>playbackCommands.current?.setPlaying(playing)??false,tick:()=>past.current?.tick??null});shotPoseNow=m.poseNow;}).catch(()=>{});
     if(new URLSearchParams(location.search).has('camtrace'))void import('./camera-trace.ts').then(m=>{if(abort.signal.aborted)return;const t=m.startCameraTrace(renderer.domElement);camTrace=t.trace;abort.signal.addEventListener('abort',()=>t.stop());});
     let down: { x: number; y: number } | null = null;
     const newControls = (target?: THREE.Vector3) => createWorldOrbitControls(camera,renderer.domElement,target,{
@@ -689,7 +693,8 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       for(const [index,building] of info.buildings.entries())gate.require('Building '+(index+1)+': '+building.file,async()=>{const assetRoot=await buildingRoot();if(assetRoot)owner.setAssetRoot(assetRoot);const failed=await owner.addBuildings([building],loader,assetBytes);if(failed.length)throw Error('Required building could not be loaded.');});}
     };
     let currentScene:Promise<ReturnType<typeof parseSceneInfo>>|null=null;
-    const currentLayout=()=>currentScene??=(async()=>{const response=await fetch(apiPath('/v1/scene'),{signal:abort.signal});if(!response.ok)throw Error('Layout unavailable');return parseSceneInfo(await response.json());})();
+    const currentLayout=()=>currentScene??=(async()=>{const response=await fetch(apiPath('/v1/scene'),{signal:abort.signal});if(response.status===404&&streamBound())return parseSceneInfo({scene:null,ground:'grass'});if(!response.ok)throw Error('Layout unavailable');  // W2: a world made on the new engine has no old layout: its ground and things come from its stream (stream-scene.ts)
+    return parseSceneInfo(await response.json());})();
     const failLayout=(reason:string)=>{initialGate?.cancel();sceneSettled=false;sceneRetryAt=Infinity;renderer.domElement.dataset.sceneBinding='unavailable';sceneryStatus(reason);setInitialProgress({generation:initialGeneration,stage:'failed',required:1,completed:0,failed:['World layout'],bytesLoaded:0,bytesTotal:null});retryInitial.current=()=>{sceneRequest++;sceneKey=null;currentScene=null;sceneRetryAt=0;setInitialProgress({generation:initialGeneration,stage:'waiting',required:0,completed:0,failed:[],bytesLoaded:0,bytesTotal:null});};};
     const ensureScene=(chunk:Chunk,history:boolean,now:number)=>{
       const reference=(chunk.take as Take&{renderSceneRef?:unknown}).renderSceneRef;
@@ -808,7 +813,9 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       const p = past.current;
       if (p) {
         const end = p.chunks.at(-1)!;
-        if (p.playing) p.tick = Math.min(end.toTick, p.tick + step / dt); // replays run at the world's normal speed
+        // replays run at the world's normal speed, or as many times it as the viewer chose (K3, a moved world); a gap in
+        // what was recorded (a world stopped for a while) is crossed to the next chunk
+        if (p.playing) { p.tick = Math.min(end.toTick, p.tick + step / dt * playSpeed()); const n = p.chunks.find((c) => c.toTick > p.tick); if (n && n.fromTick > p.tick) p.tick = n.fromTick; }
         // A paused recent seek remains history. Playing history catches the actual
         // delayed live moment, not merely the oldest buffered chunk boundary.
         const liveHead = serverNow(s);
@@ -816,7 +823,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
           p.tick >= Math.max(liveList[0].fromTick, liveHead - liveDelayOf(s))) { goLive(); return; }
         if (p.playing && !p.extending && !p.ended && now > p.retryAt && p.tick > end.toTick - 20 / dt) {
           p.extending = true;
-          void fetchChunks(end.toTick, end.toTick + 60 / dt, 60, abort.signal).then((got) => {
+          void fetchChunks(end.toTick, end.toTick + 60 * playSpeed() / dt, 60 * playSpeed(), abort.signal).then((got) => {
             if (past.current !== p) return;
             const before = p.chunks.at(-1)!.toTick;
             p.chunks = mergeWindow(p.chunks, got, p.tick);
@@ -978,7 +985,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       if (entityLayer.active && !expansion) entityLayer.transportPoses(at.entities, souls.map(soul => soul.entityId));
       // E-life B7: a god's balloon flies with its native ride (the recorded carrier entity of the same name)
       rideCarriers=expansion?[{p:balloonRide.basket.p,yaw:balloonRide.basket.yaw}]:[];  // V1: Broadcast frames a rider with its carrier
-      if(entityLayer.active&&!expansion){if(refresh||!rideNames||(!rideNames.length&&performance.now()-rideNamesAt>2000)){rideNames=entityLayer.rideNames();rideNamesAt=performance.now();}/* BALLOON-BODY: an empty list (asked before the world's things arrived) is asked again */for(const n of rideNames){const e=at.entities[n] as {p?:readonly[number,number,number];yaw?:number}|undefined;entityLayer.poseOverride(n,e?.p??null,e?.yaw);if(e?.p)rideCarriers.push({p:e.p,yaw:e.yaw??0});}}
+      if(entityLayer.active&&!expansion){if(refresh||!rideNames||(!rideNames.length&&performance.now()-rideNamesAt>2000)){rideNames=entityLayer.rideNames();rideNamesAt=performance.now();}/* BALLOON-BODY: an empty list (asked before the world's things arrived) is asked again */for(const n of rideNames){const e=(at.entities[n]??at.entities[entityLayer.idNamed(n)??''])/* K4: a new-engine world's balloon is recorded under its thing's id */ as {p?:readonly[number,number,number];yaw?:number}|undefined;entityLayer.poseOverride(n,e?.p??null,e?.yaw);if(e?.p)rideCarriers.push({p:e.p,yaw:e.yaw??0});}}
       // D1: every native carrier is a ride (a god's ferris wheel or carousel, Eden's punt), not only balloons: framed with its
       // rider, and a god attraction's carrier gets a car drawn at its twin, unless the thing has its own cars (#2198, below)
       if(refresh){if(records!==carrierRecords){carrierRecords=records;carrierIds=recordedCarriers(records);}/* #1574: records is a fresh object per take, never edited in place */rideCars=entityLayer.active&&!expansion?entityLayer.rideCars():[];rideCarWheels=entityLayer.active&&!expansion?entityLayer.rideCarWheels():new Map();rideWheels=entityLayer.active&&!expansion?entityLayer.rideWheels():new Map();}
@@ -1135,6 +1142,7 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
           renderer.domElement.dataset.cameraShot = shot.shot ?? '';
         }
       }
+      if(shotTrack&&shotPoseNow){const pose=shotPoseNow(shotTrack,past.current?.tick??null,now);if(pose){camera.position.fromArray(pose.position);controls.target.fromArray(pose.target);logicalFov=pose.fov;camera.up.set(0,1,0);camera.lookAt(controls.target);renderer.domElement.dataset.cameraShot='track:'+shotTrack.move;}}  // #1963: a planned camera
       refreshCameraGround();
       if(cameraGround.apply(camera,scene)>0&&!(viewing==='manual'&&context.current.manualNavigation==='free'))camera.lookAt(controls.target);  // never underground (Gene)
       if(context.current.cameraMode==='manual'&&expansion?.group.visible)constrainOfficeGuardCamera(camera,controls.target,officeGuardFrom,expansion.officeGuards);

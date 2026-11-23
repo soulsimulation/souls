@@ -15,7 +15,8 @@
 //                                             owner, and returns; the pairing finishes in the background (W2)
 //   souls.mjs act <act> [<act>...]            a ranked list: the first is the act, the rest its fallbacks. An act is
 //                                             <verb>:<id> (sit:<seat id>), an id alone (walk there), or a verb; ids
-//                                             or <name>=<id> after an act are its thing arguments (C10)
+//                                             or <name>=<id> after an act are its thing arguments (C10); a walk's
+//                                             gait=walk|jog|run sets its pace (0.135 G1)
 //   souls.mjs act <act> ... --wait            the same, then returns its receipt's final phase (done, refused with the
 //                                             reason, resolved) or, after 60 s, a still-running line saying how to check
 //   souls.mjs inspect <id>                    the thing as the copy holds it and its own offers, each with its parameters
@@ -34,6 +35,13 @@
 //   souls.mjs converse say <conversation id> "<text>" [--private]   a turn: out loud by default, members only with
 //                                             --private (remembered for that conversation)
 //   souls.mjs converse list                   the conversations in the copy
+//   souls.mjs give <thing id> --to <body id>   offers that body a thing this Soul holds; it is handed over if accepted
+//   souls.mjs give accept|decline <offer id>   takes an offered thing into a free hand, or declines it
+//   souls.mjs together offer <handshake|hug|high-five|hold-hands|fist-bump|harvest> <body id>   offers that body a touch; when it accepts, each
+//                                             one's move is aimed at the other (0.134 T1); hands stay held until either leaves or walks (T2)
+//   souls.mjs together offer dance <body id> [<body id> ...]   up to seven; all who accept dance on one beat (T3)
+//   souls.mjs together offer follow <body id>   once it accepts, this Soul follows its trail (0.135 G2)
+//   souls.mjs together accept|decline <offer id>   accepts the touch, or declines it and nobody moves
 //   souls.mjs lie <id>                        lies down on that bed (stand again with act <ns>:rise)
 //   souls.mjs pray "<words>"                  a prayer to the world's creator (G11); the answer comes to `wait`
 //   souls.mjs prayers                         this Soul's prayers, each waiting or answered, with the answer
@@ -141,6 +149,8 @@ export const OPS = [
   'conversations',
   'converse',
   'events',
+  'give',
+  'together',
   'find',
   'history',
   'inspect',
@@ -170,7 +180,8 @@ export const OPS = [
   'whisper',
 ];
 /** #3705: today's names, kept: `stop` ends your act (the daemon's op `halt`), `quit` ends the daemon (its op `stop`). */
-const RENAMED = { stop: 'halt', quit: 'stop', conversations: 'converse', here: 'look' };
+// 0.134 T1: a touch is offered as a give is, to one body on the open ground; the daemon's give handler sends it.
+const RENAMED = { stop: 'halt', quit: 'stop', conversations: 'converse', here: 'look', together: 'give' };
 const CALENDAR_USAGE = 'calendar | calendar add "<title>" --place <placeId> --in <minutes> --for <minutes> ["description"] | calendar interest|not-coming <id>';
 /** Commands that read the Soul's own memory in the home and never reach the daemon or a world. */
 export const LOCAL = [
@@ -335,6 +346,16 @@ export function requestOf(argv) {
     if (does === 'start') req.with = who;
     else if (who !== undefined) req.conversation = who;
     if (said.length) req.words = said.join(' ');
+  }
+  if (op === 'give') {
+    // 0.133 R4: give <thing id> --to <body id>, or give accept|decline <offer id>.
+    if (rest[0] === 'accept' || rest[0] === 'decline') Object.assign(req, { do: rest[0], offer: rest[1] });
+    else Object.assign(req, { do: 'offer', thing: rest[0], to: opts.to });
+  }
+  if (op === 'together') {
+    // 0.134 T1: together offer <touch> <body id>, or together accept|decline <offer id>.
+    if (rest[0] === 'offer') Object.assign(req, { do: 'offer', touch: rest[1], to: rest.length > 3 ? rest.slice(2) : rest[2] });
+    else Object.assign(req, { do: rest[0], offer: rest[1] });
   }
   if (op === 'wait' && rest[0] !== undefined) req.seconds = Number(rest[0]);
   if (op === 'listen' && rest.includes('--follow')) req.follow = true;

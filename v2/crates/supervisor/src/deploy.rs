@@ -17,6 +17,9 @@
 //! #3365), and `worldd schemas` prints `reads <hash>` and `writes <hash>` lines. The served log is `<state>/log`; the
 //! world's socket is the placed world's `<root>/../run/<world>.sock` (`place-world.sh`), else `<state>/gateway.sock`.
 //! A rehearsal runs with `WORLDD_REHEARSAL=1` in its environment and serves `<scratch>/gateway.sock` (O18b, #3498).
+//! Its environment is otherwise cleared to a few process basics ([`REHEARSAL_ENV`]), so whatever build it runs never
+//! sees the shared store or the backup bucket, claims nothing and ships nothing: the live world's claim, epoch and
+//! archive stay as they were.
 // Deploying is operations, not the engine: its windows and timelines are wall-clock time (the wall-clock rule, K7).
 #![allow(clippy::disallowed_methods)]
 
@@ -63,6 +66,24 @@ pub fn served_socket(root: &Path, world: &World) -> PathBuf {
         socket_path(&state_path(root, world))
     }
 }
+
+/// The only settings of the deploy's environment a rehearsal's build is given (with `WORLDD_REHEARSAL=1`): the
+/// process basics `worldd serve` needs on any machine. Everything else is cleared, so the build never sees the shared
+/// store a served world claims and ships its history to (`$WORLDD_STORE`, the directory's `$DIRECTORY_STORE_URL` and
+/// their keys), the backup bucket, the live socket, the live pin (`$WORLDD_BUILD`) or the service manager
+/// (`$NOTIFY_SOCKET`). With the store, a build serving the scratch copy would take the live world's claim at a new
+/// epoch (`worldd::shipping::take_over`) and write the live archive. Cleared by the deploy, not left to the build, so a
+/// build that predates this rule (a rollback's) and a setting added later are kept out too.
+pub const REHEARSAL_ENV: [&str; 8] = [
+    "PATH",
+    "HOME",
+    "TMPDIR",
+    "LANG",
+    "LC_ALL",
+    "TZ",
+    "RUST_LOG",
+    "RUST_BACKTRACE",
+];
 
 /// What `worldd serve` reads from a world's folder besides its log: copied into a rehearsal's scratch folder.
 const FOLDER: [&str; 4] = ["world.json", "facts.json", "moves.json", "entries"];
@@ -758,14 +779,21 @@ pub fn rehearse(
 
     let err = std::fs::File::create(scratch.join("worldd.err"))
         .map_err(|e| format!("rehearsal.scratch: {e}"))?;
-    let child = Command::new(build)
+    let mut serve = Command::new(build);
+    // Only the settings in [`REHEARSAL_ENV`]: never the live store, backup, socket, pin or service manager.
+    serve.env_clear();
+    for k in REHEARSAL_ENV {
+        if let Some(v) = std::env::var_os(k) {
+            serve.env(k, v);
+        }
+    }
+    let child = serve
         .arg("serve")
         .arg("--dir")
         .arg(scratch)
         .arg("--socket")
         .arg(socket_path(scratch))
         .env("WORLDD_REHEARSAL", "1")
-        .env_remove("WORLDD_SOCKET")
         .stdout(Stdio::null())
         // What the build says goes beside its scratch copy, out of the deploy's timeline.
         .stderr(err)

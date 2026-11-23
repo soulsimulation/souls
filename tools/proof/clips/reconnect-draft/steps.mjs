@@ -1,8 +1,8 @@
-// Clip kit (#2280): signed in as admin (the world's owner, its god agent listening), type into the god box (Ctrl+G),
+// Clip kit (#2280; 0.135 P6 on the new engine): signed in as admin (the world's owner, its god agent listening), type into the god box (Ctrl+G),
 // reload the page, open the god box again: the typed draft is still there.
 import { cast } from '../_shared/cast.mjs';
 
-cast({ god: 'admin' });
+await cast({ god: 'admin' });
 const DRAFT = 'a ring of lanterns around the well';
 
 export default async function steps(page, { mark }) {

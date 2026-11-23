@@ -833,6 +833,114 @@ fn o3c_a2_a3_ships_history_to_an_s3_bucket_across_three_kills() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
+/// 0.132.1: a fresh seed whose entries have a stand point C13 moves (Eden's chess table's, inside its own solids)
+/// serves. The seed built its header before the move and `serve` after it, so since G3 put an activity's stands in
+/// its kind every start of a fresh Eden was refused `header-mismatch`. C13 moves a stand point only for a kind the world
+/// places, and the test world places none of them, so this needs Eden's exported facts (`v2/tools/import-eden/export`).
+#[test]
+#[ignore = "needs .local/import-eden/eden-2026.facts.json"]
+fn a_seed_whose_stand_point_is_moved_serves() {
+    let facts = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../.local/import-eden/eden-2026.facts.json");
+    assert!(
+        facts.is_file(),
+        "run v2/tools/import-eden/export/export.ts first"
+    );
+    let d = scratch("rn-stand");
+    let dir = d.join("w");
+    let entries = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
+    let out = worldd()
+        .args(["seed", "--facts"])
+        .arg(&facts)
+        .arg("--dir")
+        .arg(&dir)
+        .arg("--entries")
+        .arg(&entries)
+        .args(["--souls", "0"])
+        .output()
+        .expect("seed runs");
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "seed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        said.contains("stand point: eden:chess_table"),
+        "the chess table's stand point is moved"
+    );
+    let w = serve_env(&dir, &d.join("s"), &[], &[]);
+    w.line("listening");
+    w.kill();
+}
+
+/// 0.132.1 (production, 23 Nov): a fresh Eden's first start on an S3 store writes a stream-recovery object of 11.8 MB.
+/// Production's rehearsal did that on a scratch copy, and the world then started from its own folder and had to read
+/// the object back. Past ureq's 10 MiB cap its public stream stopped before its first flush and the world refused to
+/// serve (`public-stream: stopped before its first flush`), again and again. With the world's read cap
+/// (`S3::for_world`) it serves. Two seeds of the same facts stand for the scratch copy and the world's own folder.
+/// Needs Eden's exported facts (`v2/tools/import-eden/export`): the test world tops out at 4.3 MB, under the cap.
+#[test]
+#[ignore = "needs .local/import-eden/eden-2026.facts.json"]
+fn eden_restarts_on_an_s3_store_whose_stream_recovery_object_passes_10_mib() {
+    use directoryd::directory::stand_in::{KEY_ID, StandIn};
+    use std::ffi::OsStr;
+    let facts = Path::new(env!("CARGO_MANIFEST_DIR"))
+        .join("../../../.local/import-eden/eden-2026.facts.json");
+    assert!(
+        facts.is_file(),
+        "run v2/tools/import-eden/export/export.ts first"
+    );
+    let d = scratch("rn-eden-s3");
+    let entries = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
+    let seed = |dir: &Path| {
+        let out = worldd()
+            .args(["seed", "--facts"])
+            .arg(&facts)
+            .arg("--dir")
+            .arg(dir)
+            .arg("--entries")
+            .arg(&entries)
+            .args(["--souls", "0"])
+            .output()
+            .expect("seed runs");
+        assert!(
+            out.status.success(),
+            "seed: {}",
+            String::from_utf8_lossy(&out.stderr)
+        );
+    };
+    let (scratch_copy, own) = (d.join("rehearsal"), d.join("w"));
+    seed(&scratch_copy);
+    seed(&own);
+    let s = StandIn::start(1000).expect("a stand-in");
+    let spec = format!("{}/rn", s.url("souls"));
+    let env = [
+        ("AWS_ACCESS_KEY_ID", KEY_ID),
+        ("AWS_SECRET_ACCESS_KEY", "stand-in-secret"),
+    ];
+    let args = [
+        OsStr::new("--store"),
+        OsStr::new(&spec),
+        OsStr::new("--machine"),
+        OsStr::new("test-machine"),
+    ];
+    // The first start, on the scratch copy: a stream with nothing to recover writes its recovery objects.
+    let w = serve_env(&scratch_copy, &d.join("s1"), &args, &env);
+    w.line("listening");
+    w.kill();
+    assert!(
+        s.paths().iter().any(|p| p.contains("/stream-recovery/")),
+        "the first start wrote its stream's recovery objects"
+    );
+    // The world's own folder starts and reads them back from the store, one of them past 10 MiB.
+    let w = serve_env(&own, &d.join("s2"), &args, &env);
+    w.line("listening");
+    let said = w.all.lock().map(|a| a.join("\n")).unwrap_or_default();
+    assert!(!said.contains("the public stream stopped"), "{said}");
+    w.kill();
+}
+
 /// #1960: a restart whose first reads of an S3 bucket go unanswered past the client's timeout tries them again and
 /// starts; with the bucket out of reach for good it still ends, with the store's refusal, in bounded time.
 // A real process on the real clock: the stalls and the bound are real time.
@@ -1378,5 +1486,121 @@ fn c30_served_subscription_socket_replays_ownership_and_private_words() {
         }
     }
     w.kill();
+    let _ = std::fs::remove_dir_all(&d);
+}
+
+/// Every file under `dir`, by its path there, with its bytes.
+fn files(dir: &Path) -> BTreeMap<PathBuf, Vec<u8>> {
+    let mut all = BTreeMap::new();
+    let mut todo = vec![dir.to_path_buf()];
+    while let Some(d) = todo.pop() {
+        for e in std::fs::read_dir(&d).expect("reads the folder").flatten() {
+            let p = e.path();
+            if p.is_dir() {
+                todo.push(p);
+            } else {
+                let rel = p.strip_prefix(dir).expect("under the folder").to_path_buf();
+                all.insert(rel, std::fs::read(&p).expect("reads the file"));
+            }
+        }
+    }
+    all
+}
+
+/// 0.132.1 RH: a deploy's rehearsal serves its scratch copy of the world and never the shared store, even when the
+/// deploy runs with the live store's settings in its environment: the store stays byte for byte as the live world left
+/// it (its claim, its epoch, its history), and the restart of the real deploy after it takes the world over at the
+/// next epoch, as it would with no rehearsal.
+#[test]
+fn rh_a_rehearsal_leaves_the_live_store_and_the_deploy_after_it_takes_over() {
+    use std::ffi::OsStr;
+    const CHILD: &str = "SOULS_RH_REHEARSAL_CHILD";
+    // The rehearsal as the deploy runs it, in a process whose environment names the live store and machine.
+    if let Some(d) = std::env::var_os(CHILD).map(PathBuf::from) {
+        let canary = supervisor::deploy::Canary {
+            window: Duration::from_millis(100),
+            start_within: Duration::from_secs(60),
+            answer_within: Duration::from_secs(5),
+            every: Duration::from_millis(50),
+        };
+        let r = supervisor::deploy::rehearse(
+            Path::new(env!("CARGO_BIN_EXE_worldd")),
+            &d.join("w"),
+            &d.join("r"),
+            0,
+            &canary,
+            &mut supervisor::deploy::Probe::Ask(0),
+        )
+        .expect("the rehearsal passes");
+        assert!(r.served_kept && r.copied > 0, "{r:?}");
+        return;
+    }
+    let d = scratch("rh");
+    let (dir, ..) = seeded(&d);
+    let spec = format!("folder:{}", d.join("store").display());
+    let more = [
+        OsStr::new("--store"),
+        OsStr::new(&spec),
+        OsStr::new("--machine"),
+        OsStr::new("live"),
+    ];
+    let socket = d.join("s");
+    // The live world claims its history at epoch 1 and ships; then it is stopped, its claim left in the store.
+    let live = serve_with(&dir, &socket, &more);
+    let shipping = live.line("shipping: ");
+    assert!(shipping.starts_with("shipping: epoch 1 "), "{shipping}");
+    live.line("listening");
+    live.kill();
+    let before = files(&d.join("store"));
+    assert!(!before.is_empty(), "the live claim is in the store");
+    // The live backup bucket, set as production sets it, shipping every second.
+    let (backup, pass) = (d.join("backup"), d.join("backup.key"));
+    std::fs::create_dir_all(&backup).expect("the backup folder");
+    std::fs::write(&pass, "a recovery passphrase for the test\n").expect("the key");
+    let backup_url = format!("folder:{}", backup.display());
+    // The store named either way worldd reads it: `$WORLDD_STORE`, and the directory's `$DIRECTORY_STORE_URL`
+    // (production's).
+    for store_env in ["WORLDD_STORE", "DIRECTORY_STORE_URL"] {
+        let out = Command::new(std::env::current_exe().expect("this test"))
+            .args([
+                "--exact",
+                "rh_a_rehearsal_leaves_the_live_store_and_the_deploy_after_it_takes_over",
+                "--nocapture",
+            ])
+            .env(CHILD, &d)
+            .env_remove("WORLDD_STORE")
+            .env_remove("DIRECTORY_STORE_URL")
+            .env(store_env, &spec)
+            .env("WORLDD_MACHINE", "rehearsal")
+            .env("SOULS_BACKUP_URL", &backup_url)
+            .env("SOULS_BACKUP_KEY_FILE", &pass)
+            .env("SOULS_BACKUP_SHIP_S", "1")
+            .output()
+            .expect("the rehearsal runs");
+        let said = || std::fs::read_to_string(d.join("r/worldd.err")).unwrap_or_default();
+        assert!(
+            out.status.success(),
+            "the rehearsal with {store_env}: {}{}\nthe build said: {}",
+            String::from_utf8_lossy(&out.stdout),
+            String::from_utf8_lossy(&out.stderr),
+            said()
+        );
+        assert!(
+            files(&d.join("store")) == before,
+            "the rehearsal with {store_env} changed the live store; the build said: {}",
+            said()
+        );
+        assert!(
+            files(&backup).is_empty(),
+            "the rehearsal with {store_env} wrote the live backup; the build said: {}",
+            said()
+        );
+    }
+    // The real deploy's restart after it takes the world over, at the next epoch.
+    let deployed = serve_with(&dir, &socket, &more);
+    let shipping = deployed.line("shipping: ");
+    assert!(shipping.starts_with("shipping: epoch 2 "), "{shipping}");
+    deployed.line("listening");
+    drop(deployed);
     let _ = std::fs::remove_dir_all(&d);
 }
