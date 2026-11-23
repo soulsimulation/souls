@@ -74,6 +74,8 @@ const SET_IN_MOST: Micros = 4_000_000;
 pub enum Step {
     Taken,
     Seated,
+    /// A lone holder's frame laid down beside its bay (0.135 A2's third review).
+    Laid,
 }
 
 /// A take or a seating, to be committed through the walkers' maps: its intent and Soul, its crew, its entries.
@@ -154,6 +156,8 @@ pub struct Assembly {
     pub refused: Vec<(Id, Id, Refusal)>,
     /// Seatings refused at their track's end or at their commit, by crew: to be stopped ([`Assembly::stop`]).
     pub stopped: Vec<(Id, Setting)>,
+    /// Entries written at a track's end (the node at rest at the slot), by intent and Soul, for the engine to send.
+    pub moved: Vec<((Id, Id), Vec<Effect>)>,
     /// Crews' nodes going back along a track to where their set-in started, and when each gets there.
     returning: BTreeMap<Id, (Setting, Micros, Owner)>,
 }
@@ -199,8 +203,14 @@ impl Assembly {
             ready: Vec::new(),
             refused: Vec::new(),
             stopped: Vec::new(),
+            moved: Vec::new(),
             returning: BTreeMap::new(),
         }
+    }
+
+    /// Whether `kind` is a bay (B18's reading).
+    pub fn is_bay(&self, kind: &str) -> bool {
+        self.seating.structure.is_bay(kind)
     }
 
     /// Whether the world's kinds join parts at all.
@@ -294,7 +304,12 @@ impl Assembly {
             .iter()
             .filter_map(|h| tree.node(*h))
             .map(|n| n.id())
-            .find(|c| *c != activity && owner(*c).as_deref() == Some("activity"))
+            // A hold of fewer than two may be taken over: its holder cannot carry the part out alone.
+            .find(|c| {
+                *c != activity
+                    && owner(*c).as_deref() == Some("activity")
+                    && acts.members(*c).map_or(0, <[_]>::len) >= 2
+            })
         {
             return Err(refusal("part.held-by-another", show(other)));
         }
@@ -515,9 +530,26 @@ impl Assembly {
             .map(|(a, _)| *a)
             .collect();
         for activity in ended {
-            let Some(s) = self.setting.remove(&activity) else {
+            let Some(mut s) = self.setting.remove(&activity) else {
                 continue;
             };
+            // The node stops at the slot as its track ends, whatever its seating's fate: no track runs on past it.
+            let rest = Owner::Track(Track::Rest);
+            match self.hand_off(
+                tree,
+                s.due,
+                activity,
+                s.ground,
+                (s.track, rest),
+                s.end,
+                Vec3::ZERO,
+            ) {
+                Ok(effects) => {
+                    self.moved.push((s.by, effects));
+                    s.track = rest;
+                }
+                Err(r) => eprintln!("worldd: a set-in track was not ended: {r}"),
+            }
             // Checked again as the world is now: another crew may have filled the slot, or a Soul stepped in.
             let done = self.aim(tree, activity, s.ground).and_then(|()| {
                 self.seating.check(
@@ -562,7 +594,7 @@ impl Assembly {
                     self.stopped.push((activity, s));
                 }
             }
-            (Step::Taken, true) => {}
+            (Step::Taken, true) | (Step::Laid, _) => {}
         }
     }
 
