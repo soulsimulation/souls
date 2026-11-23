@@ -1,0 +1,185 @@
+# F5-run: 0.132's "Done when" lines 2 to 4 (tools/release/check-0132.mjs) on a shared build machine runner, with its GPU.
+# Manual only. Everything the check needs is built or fetched into this run's own directory under the runner's temp (no
+# sudo, nothing in the shared home): node 22, pnpm and the install, media, the old page and the people's character set,
+# Playwright's Chromium, the Rust toolchain v2/rust-toolchain.toml pins with the release builds of worldd, gatewayd,
+# directoryd and driver and replica's WASM package, the new page (v2/web), and caddy. The check picks the first Chromium
+# flag set whose WEBGL_debug_renderer_info names a hardware renderer and does not report line 2 without one. Its world
+# folders live in the run directory, which is removed at the end, with the checkout. The artifact is report.json, the
+# table and the page's clip, each text checked by tools/proof/publication.mjs. See docs/testing.md ("The 0.132 check").
+name: check-0132
+on:
+  workflow_dispatch:
+    inputs:
+      ref:
+        description: main or an agent/<name> branch of this repository
+        required: true
+        default: main
+      runner:
+        description: souls-timed or souls-wide
+        type: choice
+        options: [souls-timed, souls-wide]
+        default: souls-timed
+      agents:
+        description: Seeded Souls the driver drives for line 3
+        default: '100'
+      seconds:
+        description: How long line 3 drives them
+        default: '600'
+      only:
+        description: Lines to check, a comma list of 2, 3, 4
+        default: '2,3,4'
+permissions:
+  contents: read
+jobs:
+  check:
+    if: github.repository == 'soulsimulation/souls'
+    runs-on: ${{ inputs.runner == 'souls-wide' && fromJSON('["self-hosted","souls-wide"]') || fromJSON('["self-hosted","souls-timed"]') }}
+    timeout-minutes: 150
+    env:
+      INPUT_REF: ${{ inputs.ref }}
+      INPUT_AGENTS: ${{ inputs.agents }}
+      INPUT_SECONDS: ${{ inputs.seconds }}
+      INPUT_ONLY: ${{ inputs.only }}
+      CADDY_VERSION: 2.10.0
+      # as timed-run.yml: the runner service's own pipes and other jobs' Node compile cache are not this job's
+      STRAY_EXCLUDE: /tmp/clr-debug-pipe-*,/tmp/dotnet-diagnostic-*,/tmp/cerr-*,/tmp/node-compile-cache
+    steps:
+      - name: Mask host-identifying values
+        run: |
+          for v in "$HOME" "$GITHUB_WORKSPACE" "$RUNNER_WORKSPACE" "$RUNNER_TEMP" "$RUNNER_TOOL_CACHE" "$(hostname)" "$(id -un)"; do
+            if [ "${#v}" -ge 4 ]; then echo "::add-mask::$v"; fi
+          done
+      - name: Inputs
+        run: |
+          printf '%s' "$INPUT_REF" | grep -Eq '^(main|agent/[A-Za-z0-9._/-]{1,80})$' || { echo "::error::ref must be main or agent/<name>"; exit 1; }
+          printf '%s' "$INPUT_AGENTS" | grep -Eq '^([1-9][0-9]{0,2}|500)$' || { echo "::error::agents: 1 to 500"; exit 1; }
+          printf '%s' "$INPUT_SECONDS" | grep -Eq '^[1-9][0-9]{1,3}$' || { echo "::error::seconds: 10 to 9999"; exit 1; }
+          printf '%s' "$INPUT_ONLY" | grep -Eq '^[234](,[234]){0,2}$' || { echo "::error::only: a comma list of 2, 3, 4"; exit 1; }
+      - name: Per-run directories
+        run: |
+          d="$RUNNER_TEMP/check-0132-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$d/tmp" "$d/bin" "$d/artifact"
+          {
+            echo "PER_RUN=$d"
+            echo "SNAPSHOT=$RUNNER_TEMP/check-0132-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT.snapshot.json"
+            echo "OUT=$d/out"
+            echo "ARTIFACT=$d/artifact"
+            echo "TMPDIR=$d/tmp"
+            echo "npm_config_store_dir=$d/pnpm-store"
+            echo "npm_config_cache_dir=$d/pnpm-cache"
+            echo "npm_config_state_dir=$d/pnpm-state"
+            echo "npm_config_cache=$d/npm-cache"
+            echo "npm_config_logs_dir=$d/npm-logs"
+            echo "SIM_ASSETS_CACHE=$d/sim-assets"
+            echo "RUSTUP_HOME=$d/rustup"
+            echo "CARGO_HOME=$d/cargo"
+            echo "PLAYWRIGHT_BROWSERS_PATH=$d/pw-browsers"
+            echo "XDG_CACHE_HOME=$d/cache"
+            echo "XDG_CONFIG_HOME=$d/config"
+            echo "XDG_DATA_HOME=$d/data"
+          } >> "$GITHUB_ENV"
+          { echo "$d/bin"; echo "$d/cargo/bin"; } >> "$GITHUB_PATH"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          path: ctl
+          persist-credentials: false
+          sparse-checkout: .github/scripts
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: 22 }
+      - name: Snapshot the shared home and /tmp
+        working-directory: ctl
+        run: node .github/scripts/timed-run.mjs snapshot --snapshot "$SNAPSHOT" --exclude "$STRAY_EXCLUDE"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { path: src, ref: '${{ inputs.ref }}', persist-credentials: false }
+      - uses: pnpm/action-setup@ea17c68df8912ef543352723c149a84f56e3d413 # v6.1.0
+        with: { package_json_file: src/package.json, dest: '${{ env.PER_RUN }}/setup-pnpm' }
+      - name: Install
+        working-directory: src
+        run: pnpm install --frozen-lockfile --store-dir "$npm_config_store_dir"
+      - name: Pull media
+        working-directory: src
+        timeout-minutes: 15
+        run: timeout 840 pnpm assets:pull --quiet --set web,runtime
+      - name: Build the old page and the people's character set
+        working-directory: src
+        run: pnpm --filter @souls/web build && pnpm build:viewer
+      # The runners are Ubuntu 20.04, which this Playwright no longer names; its Ubuntu 22.04 build runs there (timed-run.yml).
+      - name: Browsers
+        working-directory: src
+        run: |
+          if grep -q 'VERSION_ID="20.04"' /etc/os-release; then export PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=ubuntu22.04-x64; echo "PLAYWRIGHT_HOST_PLATFORM_OVERRIDE=$PLAYWRIGHT_HOST_PLATFORM_OVERRIDE" >> "$GITHUB_ENV"; fi
+          mars/viewer/node_modules/.bin/playwright install chromium 2>&1 | grep -v "%" | tail -20
+      - name: Release builds and replica's WASM
+        working-directory: src/v2
+        run: |
+          channel=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' rust-toolchain.toml)
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o "$PER_RUN/rustup-init.sh"
+          sh "$PER_RUN/rustup-init.sh" -y --quiet --no-modify-path --profile minimal --default-toolchain "$channel" --target wasm32-unknown-unknown > /dev/null
+          cargo build --release --locked -p worldd -p gatewayd -p directoryd -p driver
+          bindgen_version=$(sed -n '/^name = "wasm-bindgen"$/{n;s/^version = "\(.*\)"$/\1/p;}' Cargo.lock)
+          cargo install wasm-bindgen-cli --version "$bindgen_version" --locked --root target/tools --quiet
+          cargo build -p replica --release --target wasm32-unknown-unknown --locked
+          target/tools/bin/wasm-bindgen --target web --out-dir target/wasm-load/pkg target/wasm32-unknown-unknown/release/replica.wasm
+      - name: Build the new page
+        working-directory: src
+        run: npm --prefix v2/web ci --no-audit --no-fund && npm --prefix v2/web run build
+      - name: Caddy
+        run: |
+          case "$(uname -m)" in x86_64) arch=amd64;; aarch64) arch=arm64;; *) echo "::error::no caddy build for $(uname -m)"; exit 1;; esac
+          base="https://github.com/caddyserver/caddy/releases/download/v$CADDY_VERSION"
+          tgz="caddy_${CADDY_VERSION}_linux_$arch.tar.gz"
+          curl -sSfL "$base/$tgz" -o "$PER_RUN/$tgz"
+          curl -sSfL "$base/caddy_${CADDY_VERSION}_checksums.txt" -o "$PER_RUN/caddy-checksums.txt"
+          (cd "$PER_RUN" && grep " $tgz\$" caddy-checksums.txt | sha512sum -c -)
+          tar -xzf "$PER_RUN/$tgz" -C "$PER_RUN/bin" caddy
+          caddy version
+      # In its own process group, so the clean-up stops exactly this run's world, servers and browser.
+      - name: Run the check
+        working-directory: src
+        run: |
+          set +e
+          setsid node tools/release/check-0132.mjs --bin v2/target/release --pkg v2/target/wasm-load/pkg --card v2/web/dist \
+            --out "$OUT" --agents "$INPUT_AGENTS" --seconds "$INPUT_SECONDS" --only "$INPUT_ONLY" > "$PER_RUN/check.log" 2>&1 &
+          pid=$!; echo "$pid" > "$PER_RUN/check.pgid"
+          wait "$pid"; code=$?
+          sed "s|$PER_RUN|<run>|g" "$PER_RUN/check.log"
+          if [ -f "$OUT/table.md" ]; then { echo "## 0.132 check, lines $INPUT_ONLY"; echo; cat "$OUT/table.md"; } >> "$GITHUB_STEP_SUMMARY"; fi
+          exit "$code"
+      - name: Stage the artifact
+        if: always()
+        working-directory: src
+        run: |
+          [ -d "$OUT" ] || exit 0
+          for f in report.json table.md; do [ -f "$OUT/$f" ] && cp "$OUT/$f" "$ARTIFACT/"; done
+          [ -f "$PER_RUN/check.log" ] && sed "s|$PER_RUN|<run>|g" "$PER_RUN/check.log" > "$ARTIFACT/check.log"
+          if [ -d "$OUT/clip" ]; then mkdir -p "$ARTIFACT/clip" && cp "$OUT"/clip/*.webm "$ARTIFACT/clip/" 2>/dev/null; fi
+          # each text file is checked for device details; one that fails is left out, not published
+          for f in "$ARTIFACT"/*.json "$ARTIFACT"/*.md "$ARTIFACT"/*.log; do
+            [ -f "$f" ] || continue
+            node tools/proof/publication.mjs "$f" > /dev/null 2>&1 || { echo "::warning::$(basename "$f") left out: it names a device detail"; rm -f "$f"; }
+          done
+          ls -la "$ARTIFACT" "$ARTIFACT/clip" 2>/dev/null | sed "s|$PER_RUN|<run>|g" || true
+      - name: Upload
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: check-0132-${{ github.run_id }}
+          path: ${{ env.ARTIFACT }}/
+          if-no-files-found: warn
+          retention-days: 30
+      # The worlds, tokens, builds and the checkout never outlive the job (the machine's disk is shared).
+      - name: Clean up
+        if: always()
+        run: |
+          if [ -n "${PER_RUN:-}" ]; then
+            if [ -f "$PER_RUN/check.pgid" ]; then kill -TERM -- "-$(cat "$PER_RUN/check.pgid")" 2>/dev/null && sleep 5; fi
+            rm -rf "$PER_RUN"
+          fi
+          rm -rf src
+      - name: Nothing written outside the per-run directory
+        if: always()
+        working-directory: ctl
+        run: |
+          if [ -z "${SNAPSHOT:-}" ] || [ ! -f "$SNAPSHOT" ]; then echo "::error::no start snapshot"; exit 1; fi
+          trap 'rm -f "$SNAPSHOT"' EXIT
+          node .github/scripts/timed-run.mjs strays --snapshot "$SNAPSHOT" --exclude "$STRAY_EXCLUDE"

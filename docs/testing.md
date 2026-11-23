@@ -394,8 +394,21 @@ node tools/release/check-0132.mjs --bin <release worldd, gatewayd, directoryd, d
   - pairs of bodies closer than 0.3 m in two chunks running, sampled on the page.
 - **4.** A browser smoke of home, sign-in, sound, music and the camera.
 
-It prints a pass/fail table and writes `report.json`. Exit 0 when every line passes. Run the 100-agent line on the
-shared build machine when the laptop is busy.
+It prints a pass/fail table and writes `report.json` and `table.md`. Exit 0 when every line passes. The browser uses
+the first of the proof recorder's GPU flag sets (ANGLE Metal on macOS; ANGLE Vulkan, ANGLE GL-EGL, EGL on Linux) whose
+`WEBGL_debug_renderer_info` names a hardware renderer; with none, or `--gl soft`, lines 3 and 4 run on SwiftShader and
+line 2 is not reported.
+
+On the shared build machine, with its GPU, one command provisions everything in the run's own directory (node 22,
+pnpm install, media, the old page and the character set, Playwright's Chromium, the release builds and replica's WASM,
+the new page, caddy), runs the check and removes the run's world folders and checkout after:
+
+```sh
+gh workflow run check-0132.yml --ref main -f ref=main          # -f runner=souls-wide -f agents=100 -f seconds=600 -f only=2,3,4
+gh run download <run-id> -D .local/check-0132-<run-id>          # report.json, table.md, check.log, clip/*.webm
+```
+
+The table is also in the run's summary.
 
 ## Playtests and the swarm director
 
