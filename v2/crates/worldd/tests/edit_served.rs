@@ -2349,7 +2349,7 @@ fn a2_parts_rest_at_the_grounds_height() {
     hands[1].send_to(answers::LEAVE, None, BTreeMap::new());
     let got = socket_end(&mut hands[1].s);
     assert_eq!(got.kind, 1, "Soul 2 leaves the world: {got:?}");
-    let why = whys(&w, &got.entries, "souls:carry-set-down");
+    let why = whys_caused(&w, &got.entries, "souls:carry-set-down");
     assert!(
         why.contains(&(fa, "souls:holder-left-flat".into())),
         "{why:?}"
@@ -2375,7 +2375,14 @@ fn a2_parts_rest_at_the_grounds_height() {
     hands[2].send_to(answers::LEAVE, None, BTreeMap::new());
     let got = socket_end(&mut hands[2].s);
     assert_eq!(got.kind, 1, "Soul 3 leaves the world: {got:?}");
-    let why = whys(&w, &got.entries, "souls:carry-set-down");
+    // Its set-down goes through the walkers' maps, which a Soul beside it moving holds back: Soul 4 walks off.
+    one(
+        &mut hands,
+        3,
+        v3(ua.x + 4_000_000, 0, ua.z),
+        "Soul 4 walks off",
+    );
+    let why = whys_caused(&w, &got.entries, "souls:carry-set-down");
     assert!(
         why.contains(&(fa, "souls:holder-left-standing".into())),
         "{why:?}"
@@ -2812,6 +2819,30 @@ fn crews_on(w: &Seeded, id: Id) -> (usize, usize) {
     (crews.len(), kept)
 }
 
+/// As [`whys`], for every entry caused by the intent that wrote the entries numbered `entries` (a retire's set-down is
+/// written after its answer, through the walkers' maps): waits up to 10 s for one.
+fn whys_caused(w: &Seeded, entries: &[u64], event: &str) -> Vec<(Id, String)> {
+    let cause = logged(w)
+        .iter()
+        .flat_map(|p| p.effects.iter())
+        .find(|e| entries.contains(&e.envelope.sequence))
+        .map(|e| e.envelope.cause);
+    for _ in 0..50 {
+        let all: Vec<u64> = logged(w)
+            .iter()
+            .flat_map(|p| p.effects.iter())
+            .filter(|e| Some(e.envelope.cause) == cause)
+            .map(|e| e.envelope.sequence)
+            .collect();
+        let found = whys(w, &all, event);
+        if !found.is_empty() {
+            return found;
+        }
+        std::thread::sleep(Duration::from_millis(200));
+    }
+    Vec::new()
+}
+
 /// The links of B18's joint type at `id`, as the served world holds them.
 fn joints_at(w: &Seeded, id: Id) -> usize {
     let (copy, _) = served_copy(w);
@@ -3173,17 +3204,11 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     let got = socket_end(&mut hands[3].s);
     println!("Soul 4, frame B's last holder, leaves the world: {got:?}");
     assert_eq!(got.kind, 1, "Soul 4 leaves the world");
+    let why = whys_caused(&w, &got.entries, "souls:carry-set-down")
+        .into_iter()
+        .find(|(l, _)| *l == fb)
+        .map(|(_, why)| why);
     let (parent, _, down) = where_is(&w, fb);
-    let why = logged(&w)
-        .iter()
-        .flat_map(|p| p.effects.iter())
-        .filter(|e| got.entries.contains(&e.envelope.sequence))
-        .flat_map(|e| e.events.iter().flatten())
-        .filter(|ev| ev.name.as_str() == "souls:carry-set-down")
-        .find_map(|ev| match ev.fields.get(&3) {
-            Some(Value::Text(t)) => Some(t.as_str().to_owned()),
-            _ => None,
-        });
     let (up, middle) = {
         let (copy, _) = served_copy(&w);
         let t = copy.tree();
@@ -3531,7 +3556,7 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     let got = socket_end(&mut hands[5].s);
     println!("Soul 6, frame B's last holder, leaves with beam 1 joined to frame B: {got:?}");
     assert_eq!(got.kind, 1, "Soul 6 leaves the world");
-    let set_down = whys(&w, &got.entries, "souls:carry-set-down");
+    let set_down = whys_caused(&w, &got.entries, "souls:carry-set-down");
     println!("its set-downs: {set_down:?}");
     assert!(
         whys(&w, &got.entries, "souls:hold-kept").is_empty(),
@@ -3559,5 +3584,21 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     assert!(
         (0..=120_000).contains(&beam_y),
         "beam 1 rests on the ground: {beam_y} µm"
+    );
+    // The retire's set-down went through the walkers' maps: Soul 7 walks to beam 1's slot, which it held, and gets
+    // there (a stale map would still have the beam across it, and the walk would end a body's radius off).
+    one(
+        &mut hands,
+        6,
+        v3(bl.x, 0, bl.z),
+        "Soul 7 to beam 1's empty slot",
+    );
+    let at = body_at(&w, body_of(&w, w.souls[6]));
+    let off = (i128::from(at.x - bl.x).pow(2) + i128::from(at.z - bl.z).pow(2)).isqrt();
+    println!("Soul 7 ends {} mm from beam 1's empty slot", off / 1000);
+    // Beam 1 still in its slot would keep the body's middle a body's radius and half the beam's width off.
+    assert!(
+        off < i128::from(sim::ground::HUMAN_RADIUS * 1000),
+        "the walkers' map has beam 1 out of its slot"
     );
 }

@@ -153,6 +153,8 @@ pub struct Engine {
     joining: Option<Json>,
     /// Loads found riding a carry at a restart, set down at the first tick (0.135 C3): (activity, load).
     riding: Vec<(Id, Id)>,
+    /// How often each retiring holder's set-down has been checked again (0.135 A2): its maps go stale as its body goes.
+    retried: BTreeMap<Id, u8>,
 }
 
 /// Sets `carry`'s load down where the carry last had it, at rest on `ground`, and has the world say `why`
@@ -280,6 +282,9 @@ fn param_kind(p: &BTreeMap<u64, Value>, k: u64, what: &'static str) -> R<Name> {
 const BACK_SLACK: i64 = 300_000;
 /// How far out from a seated part, along the side it is laid on, its middle rests, µm.
 const LAY_OUT: i64 = 2_200_000;
+/// How often a retiring holder's set-down is checked again when its walkers' maps went stale (a body beside it moving,
+/// or its own body leaving): about one a tick, so some 5 s; then its hold stays kept.
+const RETRIES: u8 = 100;
 
 /// How far apart two carriers stand along the ground, µm.
 fn apart(f: Vec3, k: Vec3) -> i64 {
@@ -339,6 +344,7 @@ impl Engine {
             .expect("a line from zero"),
             loads: BTreeMap::new(),
             riding: Vec::new(),
+            retried: BTreeMap::new(),
         }
     }
 
@@ -1178,7 +1184,7 @@ impl Engine {
                 }
             }
             self.activities.next = tree.next();
-            let mut left = self.activities.leave(
+            let left = self.activities.leave(
                 &mut tree,
                 c,
                 &mut self.moves,
@@ -1199,23 +1205,8 @@ impl Engine {
                     .and_then(|n| n.parent())
             {
                 match self.holder_left(&mut tree, c, body, activity, part, now, (intent, soul)) {
-                    Ok(true) => {
-                        self.activities.next = tree.next();
-                        left = self.activities.leave(
-                            &mut tree,
-                            c,
-                            &mut self.moves,
-                            &mut self.due,
-                            &mut self.mint,
-                            ask,
-                            body,
-                            activity,
-                        );
-                    }
-                    Ok(false) => continue,
-                    Err(r) => {
-                        eprintln!("worldd: a retiring holder's part was not set down: {r}")
-                    }
+                    Ok(()) => continue,
+                    Err(r) => eprintln!("worldd: a retiring holder's hold was not kept: {r}"),
                 }
             }
             if let Err(r) = left {
@@ -1243,11 +1234,12 @@ impl Engine {
     }
 
     /// The last holder `body` of crew `activity` leaves the world while it holds `part` in its bay (0.135 A2), for
-    /// `by` (intent, Soul) at `now`. Each part joined to `part` in the bay (it would hang by it) is laid down first as a
-    /// lone holder's lay-down lays a part ([`Engine::lay_place`], with no reach), then `part` itself
-    /// ([`Engine::holder_rest`]); B18 judges all of it together against the tree as it was. Written to `tree` and the
-    /// activities' entries when it holds: `true`. When a part has no room, or B18 refuses, nothing moves: the
-    /// structure is kept as it stands with its hold (`souls:holder-left-structure-kept`), `false`.
+    /// `by` (intent, Soul) at `now`. Its hold is kept at once: it keeps counting, for B18, the holders it has now
+    /// ([`sim::structure::F_KEPT`]), so the bay stays as B18 had it once the body (and its membership link) is gone.
+    /// When the structure can be set down ([`Engine::retire_plan`]), that set-down waits in `Assembly::ready` to be
+    /// written as an unseat is, through the walkers' maps and G2 (`crate::answers`), the kept hold's node removed in
+    /// the same part; refused there, or with no plan, the hold stays kept (`souls:holder-left-structure-kept`) until
+    /// another crew holds, takes or unseats the part ([`Engine::unkeep`]).
     #[allow(clippy::too_many_arguments)]
     fn holder_left(
         &mut self,
@@ -1258,12 +1250,80 @@ impl Engine {
         part: Id,
         now: Micros,
         by: (Id, Id),
-    ) -> R<bool> {
+    ) -> R<()> {
+        let crew_audience = tree
+            .handle(activity)
+            .and_then(|h| tree.node(h))
+            .map(|n| n.audience())
+            .ok_or_else(|| refusal("activity-missing", show(activity)))?;
+        let plan = self
+            .retire_plan(tree, c, body, activity, part, crew_audience, now, by)
+            .unwrap_or_else(|r| {
+                eprintln!("worldd: a retiring holder's part has no set-down: {r}");
+                None
+            });
+        let holding = tree
+            .handle(activity)
+            .and_then(|h| tree.links_of(h))
+            .unwrap_or(&[])
+            .iter()
+            .filter(|e| tree.ty(e).as_str() == replica::activity::MEMBER)
+            .count()
+            .max(1) as u64;
+        self.mark(tree, now, activity, crew_audience, holding)?;
+        match (plan, self.asm.as_mut()) {
+            (Some(effects), Some(asm)) => asm.ready.push(crate::assembly::Ready {
+                intent: by.0,
+                soul: by.1,
+                activity,
+                step: crate::assembly::Step::Retired,
+                effects,
+            }),
+            _ => self.kept_word(tree, activity, part, now, by)?,
+        }
+        Ok(())
+    }
+
+    /// The world's word that kept hold `activity` on `part` stays (`souls:hold-kept`,
+    /// `souls:holder-left-structure-kept`), for `by` at `now`.
+    fn kept_word(
+        &mut self,
+        tree: &mut Tree,
+        activity: Id,
+        part: Id,
+        now: Micros,
+        by: (Id, Id),
+    ) -> R<()> {
+        self.activities.next = tree.next();
+        self.activities.hold_kept(
+            tree,
+            activity,
+            part,
+            "souls:holder-left-structure-kept",
+            (now, Actor::Soul(by.1), Cause::Intent(by.0)),
+        )
+    }
+
+    /// How a retiring last holder's structure is set down (0.135 A2): each part joined to `part` in the bay (it would
+    /// hang by it) laid down first as a lone holder's lay-down lays a part ([`Engine::lay_place`], with no reach), then
+    /// `part` itself ([`Engine::holder_rest`]), the set-down named (`souls:carry-set-down`), and the crew's node
+    /// removed: one part's entries, caused by `by`. B18 judges all of it together against the tree as it was. `None`
+    /// when a part has no room or B18 refuses.
+    #[allow(clippy::too_many_arguments)]
+    fn retire_plan(
+        &mut self,
+        tree: &Tree,
+        c: &Controller,
+        body: Id,
+        activity: Id,
+        part: Id,
+        crew_audience: replica::world_model::Audience,
+        now: Micros,
+        by: (Id, Id),
+    ) -> R<Option<Vec<Effect>>> {
         let audience =
             |t: &Tree, id: Id| t.handle(id).and_then(|h| t.node(h)).map(|n| n.audience());
         let ground = stands(c, body)?.0;
-        let crew_audience =
-            audience(tree, activity).ok_or_else(|| refusal("activity-missing", show(activity)))?;
         let mut scratch = tree.frozen();
         let mut laid: Vec<Effect> = Vec::new();
         let mut room = true;
@@ -1337,43 +1397,53 @@ impl Engine {
                 asm.structure().check(tree, &all).is_ok()
             }
         };
-        let act = (now, Actor::Soul(by.1), Cause::Intent(by.0));
         let Some((load, place, yaw, why)) = rest.filter(|_| whole) else {
-            // The hold keeps counting, for B18, the holders it has now, once its holder's body (and so its membership
-            // link) is gone: the bay stays as B18 had it until another crew holds the part ([`Engine::unkeep`]).
-            let holding = tree
-                .handle(activity)
-                .and_then(|h| tree.links_of(h))
-                .unwrap_or(&[])
-                .iter()
-                .filter(|e| tree.ty(e).as_str() == replica::activity::MEMBER)
-                .count()
-                .max(1) as u64;
-            self.mark(tree, now, activity, crew_audience, holding)?;
-            self.activities.next = tree.next();
-            self.activities.hold_kept(
-                tree,
-                activity,
-                part,
-                "souls:holder-left-structure-kept",
-                act,
-            )?;
-            return Ok(false);
+            return Ok(None);
         };
-        self.activities.stream.extend(laid);
-        *tree = scratch;
+        let mut effects = laid;
         let mut carry = held(load, place, yaw);
-        break_off(
-            &mut carry,
-            &mut self.activities,
-            &mut self.mint,
-            tree,
-            now,
-            None,
+        let transfer = self
+            .mint
+            .mint()
+            .map_err(|e| refusal("id-counter-exhausted", e.to_string()))?;
+        carry.set_down_here(&mut scratch, now, ground, None, transfer)?;
+        effects.extend(carry.log.parts.drain(..).flatten());
+        self.activities.next = scratch.next();
+        let n = self.activities.stream.len();
+        self.activities.carry_set_down(
+            &mut scratch,
+            activity,
+            part,
             why,
-            Some(by),
+            (now, Actor::Soul(by.1), Cause::Intent(by.0)),
         )?;
-        Ok(true)
+        effects.extend(self.activities.stream.drain(n..));
+        {
+            use replica::effects::{Body, Change, ChangeRec, Rest};
+            let mut log = sim::slots::hands::Log::new(
+                self.header.clone(),
+                self.rules.clone(),
+                scratch.next(),
+            );
+            log.write(
+                &mut scratch,
+                now,
+                vec![(
+                    activity,
+                    crew_audience,
+                    Body::Changes(vec![ChangeRec {
+                        change: Change::Remove { node: activity },
+                        rest: Rest::new(),
+                    }]),
+                )],
+            )?;
+            effects.extend(log.parts.drain(..).flatten());
+        }
+        for e in &mut effects {
+            e.envelope.cause = Cause::Intent(by.0);
+            e.envelope.actor = Actor::Soul(by.1);
+        }
+        Ok(Some(effects))
     }
 
     /// Sets crew `activity`'s kept holders ([`sim::structure::F_KEPT`]) to `holding` on `tree`, its entry added to the
@@ -1935,6 +2005,24 @@ impl Engine {
         Ok(())
     }
 
+    /// A retiring holder's set-down `r` whose walkers' maps went stale before its commit (its own body left meanwhile,
+    /// 0.135 A2): checked again, at most [`RETRIES`] times; `false` when it has been, and it is refused.
+    pub fn retry(&mut self, r: crate::assembly::Ready) -> bool {
+        let n = self.retried.entry(r.activity).or_insert(0);
+        *n += 1;
+        if *n > RETRIES {
+            self.retried.remove(&r.activity);
+            return false;
+        }
+        match self.asm.as_mut() {
+            Some(asm) => {
+                asm.ready.push(r);
+                true
+            }
+            None => false,
+        }
+    }
+
     /// The load `part` is as its kind's entry states it, turned as it is held in its crew's slot (0.135 C4's
     /// `Load`), so a carry that breaks off sets it down the way it is held.
     fn held_load(&self, tree: &Tree, part: Id) -> Option<Load> {
@@ -1967,6 +2055,30 @@ impl Engine {
         let taking = self.taking.remove(&r.activity);
         if let Some(asm) = self.asm.as_mut() {
             asm.written(r.activity, r.step, written);
+        }
+        if r.step == crate::assembly::Step::Retired {
+            self.retried.remove(&r.activity);
+            // A retiring holder's structure set down (its kept hold's node gone with it) is forgotten here; refused
+            // (by the walkers' maps, G2 or B18), the hold stays kept.
+            if written {
+                self.activities.forgotten(r.activity);
+                if let Some(asm) = self.asm.as_mut() {
+                    asm.ended(r.activity);
+                }
+                return;
+            }
+            let mut tree = live.frozen();
+            let part = tree
+                .handle(r.activity)
+                .and_then(|h| tree.node(h))
+                .and_then(|n| n.parent());
+            if let Some(part) = part {
+                match self.kept_word(&mut tree, r.activity, part, now, (r.intent, r.soul)) {
+                    Ok(()) => self.collect(Some((r.intent, r.soul))),
+                    Err(e) => eprintln!("worldd: a kept hold was not named: {e}"),
+                }
+            }
+            return;
         }
         if r.step != crate::assembly::Step::Taken {
             // A seating refused at its commit is stopped where its track ended.

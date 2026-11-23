@@ -76,6 +76,8 @@ pub enum Step {
     Seated,
     /// A lone holder's frame laid down beside its bay (0.135 A2's third review).
     Laid,
+    /// A retiring last holder's structure set down, its kept hold's node removed (0.135 A2, after review nine).
+    Retired,
 }
 
 /// A take or a seating, to be committed through the walkers' maps: its intent and Soul, its crew, its entries.
@@ -604,7 +606,7 @@ impl Assembly {
                     self.stopped.push((activity, s));
                 }
             }
-            (Step::Taken, true) | (Step::Laid, _) => {}
+            (Step::Taken, true) | (Step::Laid, _) | (Step::Retired, _) => {}
         }
     }
 

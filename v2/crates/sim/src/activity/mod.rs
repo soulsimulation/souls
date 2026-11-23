@@ -674,6 +674,12 @@ impl Activities {
             "souls:hold-ended",
             vec![Change::Remove { node: activity }],
         )?;
+        self.forgotten(activity);
+        Ok(())
+    }
+
+    /// Forgets `activity`, whose node is gone (0.135 A2: a kept hold removed with its part's set-down).
+    pub fn forgotten(&mut self, activity: Id) {
         self.live.remove(&activity);
         self.beats.remove(&activity);
         self.ending.remove(&activity);
@@ -683,7 +689,6 @@ impl Activities {
         self.placing.remove(&activity);
         self.frames.remove(&activity);
         self.stands.remove(&activity);
-        Ok(())
     }
 
     fn load_word(
