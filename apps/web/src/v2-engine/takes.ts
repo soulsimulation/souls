@@ -54,6 +54,8 @@ export function positionAt(s: readonly WorldSample[], t: number): [number, numbe
   let i = 0;
   while (s[i + 1].at <= t) i++;
   const a = s[i], b = s[i + 1], f = (t - a.at) / (b.at - a.at);
+  // Into or out of a seat the body changes frame: it is never slid between the two (as the v2 page keeps a track a frame).
+  if (a.seat || b.seat) return a.p;
   return [a.p[0] + (b.p[0] - a.p[0]) * f, a.p[1] + (b.p[1] - a.p[1]) * f, a.p[2] + (b.p[2] - a.p[2]) * f];
 }
 
@@ -63,6 +65,7 @@ export function motionAt(s: readonly WorldSample[], t: number, heading: number):
   let i = 0;
   while (s[i + 1].at <= t) i++;
   const a = s[i], b = s[i + 1];
+  if (a.seat || b.seat) return { speed: 0, heading: lastHeading(s, i, t, heading) };
   const d = Math.hypot(b.p[0] - a.p[0], b.p[2] - a.p[2]) / POS_Q, secs = (b.at - a.at) / 1e6;
   const speed = secs > 0 ? d / secs : 0;
   return { speed, heading: lastHeading(s, i + 1, t, heading) };
@@ -70,7 +73,7 @@ export function motionAt(s: readonly WorldSample[], t: number, heading: number):
 
 function lastHeading(s: readonly WorldSample[], upTo: number, t: number, fallback: number): number {
   for (let k = Math.min(upTo, s.length - 1); k > 0; k--) {
-    if (s[k - 1].at > t) continue;
+    if (s[k - 1].at > t || s[k - 1].seat || s[k].seat) continue;
     const dx = s[k].p[0] - s[k - 1].p[0], dz = s[k].p[2] - s[k - 1].p[2];
     if (Math.hypot(dx, dz) >= 1) return Math.atan2(dz, dx);
   }
