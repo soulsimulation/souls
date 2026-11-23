@@ -422,6 +422,11 @@ fn stuck_report(agents: &[Sent], places: &[Places]) -> serde_like::Obj {
         )
         .n("stuck", stuck.len() as f64)
         .n("onTheirWay", on_way.len() as f64)
+        .n("placeReads", places.len() as f64)
+        .n(
+            "placesKnown",
+            places.last().map_or(0, |(_, p)| p.iter().flatten().count()) as f64,
+        )
         .n("refusedOnly", refused.len() as f64)
         .n("stallMaxMs", stalls.last().copied().unwrap_or(0) as f64)
         .n("lastAnswerAgeP50Ms", at_share(&ages, 0.5) as f64)
