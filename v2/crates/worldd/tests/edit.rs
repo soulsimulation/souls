@@ -1173,6 +1173,173 @@ fn a3962_a_shape_is_judged_by_its_outline_and_line_not_its_origin() {
 }
 
 #[test]
+fn a3728_a_link_is_judged_at_both_ends_and_its_door() {
+    use replica::edit::claims::{F_CLAIMS, judge_effects};
+    use replica::world_model::End;
+    let mut w = W::new();
+    let room = kind(&w.header, "souls:room");
+    let helper = Id::new(Scope([0xc0; 16]), (1 << 44) + 9).expect("an id");
+    let link = |name: u64, ends: [Id; 2], owner: End, door: Option<Id>| Op::Link {
+        name,
+        ty: Name::new("eden:stairs").expect("a name"),
+        ends: ends.map(Ref::Node),
+        owner,
+        field: 21,
+        row: vec![Value::Uint(1)],
+        door: door.map(Ref::Node),
+    };
+    // Two rooms at x 3 and 7 mm (inside the claim to come), two at x 30 and 40 mm (outside it), and a link the lead
+    // makes from the first, before any claim: what an undo of it, or a redo, would write.
+    let v = w.live.version();
+    let built = w
+        .edit(
+            w.creator(),
+            v,
+            vec![
+                place(1, &room, Ref::Node(w.root), spot(3_000, None)),
+                place(2, &room, Ref::Node(w.root), spot(7_000, None)),
+                place(3, &room, Ref::Node(w.root), spot(30_000, None)),
+                place(4, &room, Ref::Node(w.root), spot(40_000, None)),
+                place(5, &room, Ref::Node(w.root), spot(50_000, None)),
+            ],
+        )
+        .expect("built");
+    let [a, b, c, d, e] = [1, 2, 3, 4, 5].map(|n| built.names[&n]);
+    let v = w.live.version();
+    let lead = w
+        .edit(w.creator(), v, vec![link(1, [a, c], End::First, None)])
+        .expect("the lead's link, before the claim");
+    let v = w.live.version();
+    let far = w
+        .edit(w.creator(), v, vec![link(1, [d, b], End::First, None)])
+        .expect("the lead's link owned outside the claim to come, before it");
+    let mut row = match claim_row("c:house", "part:house", [0, -10, 10, 10]) {
+        Value::Array(r) => r,
+        _ => unreachable!(),
+    };
+    row.push(text(&format!(
+        "helper:h{}-{}",
+        replica::encode::to_hex(&helper.scope().0),
+        helper.counter()
+    )));
+    let v = w.live.version();
+    w.edit(
+        w.creator(),
+        v,
+        vec![set_root(
+            w.root,
+            F_CLAIMS,
+            Value::Array(vec![Value::Array(row)]),
+        )],
+    )
+    .expect("claimed with a helper");
+    let v = w.live.version();
+    let log = w.log_hash();
+    // Under no claim: a link owned inside the claim, whose far end is inside it, or whose door is inside it, is
+    // refused; one outside it is not.
+    let r = w
+        .edit(w.creator(), v, vec![link(1, [a, c], End::First, None)])
+        .expect_err("owned inside the claim");
+    assert_eq!((r.op, r.name), (Some(0), "edit.claimed"), "{r:?}");
+    let r = w
+        .edit(w.creator(), v, vec![link(1, [c, a], End::Second, None)])
+        .expect_err("owned by its second end, inside the claim");
+    assert_eq!(r.name, "edit.claimed", "{r:?}");
+    let r = w
+        .edit(w.creator(), v, vec![link(1, [c, a], End::First, None)])
+        .expect_err("owned outside the claim, its far end inside it");
+    assert_eq!((r.op, r.name), (Some(0), "edit.claimed"), "{r:?}");
+    let r = w
+        .edit(w.creator(), v, vec![link(1, [c, d], End::First, Some(b))])
+        .expect_err("its door inside the claim");
+    assert_eq!(r.name, "edit.claimed", "{r:?}");
+    // Under the claim, by its helper: a link owned outside it, or with its door outside it, is refused.
+    let as_helper = Actor::Creator(helper);
+    let r = w
+        .edit_under(
+            as_helper,
+            v,
+            vec![link(1, [c, a], End::First, None)],
+            Some("c:house"),
+        )
+        .expect_err("owned outside the claim");
+    assert_eq!((r.op, r.name), (Some(0), "edit.outside-claim"), "{r:?}");
+    let r = w
+        .edit_under(
+            as_helper,
+            v,
+            vec![link(1, [a, c], End::First, None)],
+            Some("c:house"),
+        )
+        .expect_err("owned inside the claim, its far end outside it");
+    assert_eq!((r.op, r.name), (Some(0), "edit.outside-claim"), "{r:?}");
+    let r = w
+        .edit_under(
+            as_helper,
+            v,
+            vec![link(1, [a, b], End::First, Some(e))],
+            Some("c:house"),
+        )
+        .expect_err("its door outside the claim");
+    assert_eq!(r.name, "edit.outside-claim", "{r:?}");
+    // A doorway link, or a link with a door, owned by its second end is refused: its row is read at its first end.
+    let doorway = Op::Link {
+        name: 1,
+        ty: Name::new("eden:doorway").expect("a name"),
+        ends: [c, d].map(Ref::Node),
+        owner: End::Second,
+        field: 22,
+        row: vec![Value::Uint(1)],
+        door: None,
+    };
+    let r = w
+        .edit(w.creator(), v, vec![doorway])
+        .expect_err("a doorway owned by its second end");
+    assert_eq!((r.op, r.name), (Some(0), "edit.link"), "{r:?}");
+    let r = w
+        .edit(w.creator(), v, vec![link(1, [c, d], End::Second, Some(e))])
+        .expect_err("a link with a door, owned by its second end");
+    assert_eq!((r.op, r.name), (Some(0), "edit.link"), "{r:?}");
+    // A doorway link owned by its first end still writes a row of at least 5 values to field 22, where it is read.
+    let first = |field: u64, row: Vec<Value>| Op::Link {
+        name: 1,
+        ty: Name::new("eden:doorway").expect("a name"),
+        ends: [c, d].map(Ref::Node),
+        owner: End::First,
+        field,
+        row,
+        door: None,
+    };
+    let r = w
+        .edit(w.creator(), v, vec![first(21, vec![Value::Uint(1); 6])])
+        .expect_err("a doorway's row in another field");
+    assert_eq!((r.op, r.name), (Some(0), "edit.link"), "{r:?}");
+    let r = w
+        .edit(w.creator(), v, vec![first(22, vec![Value::Uint(1)])])
+        .expect_err("a doorway's row too short to read");
+    assert_eq!((r.op, r.name), (Some(0), "edit.link"), "{r:?}");
+    assert_eq!(w.log_hash(), log, "refusals write nothing");
+    // The lead links outside every claim, and the helper inside its own.
+    w.edit(w.creator(), v, vec![link(1, [c, d], End::First, Some(e))])
+        .expect("outside every claim");
+    let v = w.live.version();
+    w.edit_under(
+        as_helper,
+        v,
+        vec![link(1, [a, b], End::First, None)],
+        Some("c:house"),
+    )
+    .expect("the helper links inside its claim");
+    // The lead's link written again (a redo) now lands inside the claim: refused, as an undo's would be.
+    let r = judge_effects(&w.live, &lead.part.effects).expect_err("inside a claim");
+    assert_eq!(r.name, "edit.claimed", "{r:?}");
+    // So is one owned outside it whose far end is inside it.
+    let r = judge_effects(&w.live, &far.part.effects).expect_err("its far end inside a claim");
+    assert_eq!(r.name, "edit.claimed", "{r:?}");
+    w.close();
+}
+
+#[test]
 fn a1_a2_plans_and_claims_are_checked_before_they_are_recorded() {
     use replica::edit::claims::{F_CLAIMS, F_DISTRICTS};
     let mut w = W::new();

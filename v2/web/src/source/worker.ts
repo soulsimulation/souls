@@ -70,6 +70,7 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   // only in the shape the importer writes it.
   const o = f.get(1);
   if (o instanceof Uint8Array) rec.origin = new TextDecoder().decode(o);
+  else if (typeof o === 'string' && f.get(2) instanceof Uint8Array) (rec.defines = o), (rec.entry = f.get(2) as Uint8Array); // #3697: a creator's kind
   if (Array.isArray(f.get(11))) rec.outline = rows(f.get(11));
   if (Array.isArray(f.get(12))) rec.solids = rows(f.get(12));
   if (Array.isArray(f.get(13))) rec.slots = rows(f.get(13));

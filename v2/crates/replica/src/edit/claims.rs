@@ -476,7 +476,9 @@ pub fn judge_effects(copy: &Replica, effects: &[crate::effects::Effect]) -> Resu
                     }
                 }
                 Change::Remove { node } => points.extend(below(*node).into_iter().flat_map(at)),
-                // An unlink is written with its owning end's rows, a set judged above (#3934 review).
+                // A link is judged at both its ends, since the walkers' map changes at each (#3728, #3934 review); an
+                // unlink is written with its owning end's rows, a set judged above.
+                Change::Link { ends, .. } => points.extend(ends.iter().flat_map(|e| at(*e))),
                 _ => {}
             }
         }
@@ -784,6 +786,16 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
                 );
                 for r in [*door, *wall, *from, *to] {
                     add(&mut t, vec![origin(tree, &placed, r)]);
+                }
+            }
+            Op::Link { ends, door, .. } => {
+                // A link writes its row to the owning end and names itself on its door (#3728), and changes the
+                // walkers' map at both ends, as a doorway does (#3934 review): judged as an edit of all of them.
+                for end in ends {
+                    add(&mut t, vec![origin(tree, &placed, *end)]);
+                }
+                if let Some(d) = door {
+                    add(&mut t, vec![origin(tree, &placed, *d)]);
                 }
             }
         }

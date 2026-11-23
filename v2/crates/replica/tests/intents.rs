@@ -265,6 +265,7 @@ fn g1b_an_edit_reads_to_its_batch_and_other_answers_keep_their_bytes() {
             Op::Set { .. } => "set",
             Op::Remove { .. } => "remove",
             Op::Doorway { .. } => "doorway",
+            Op::Link { .. } => "link",
         })
         .collect();
     println!(
@@ -340,6 +341,36 @@ fn g1f_doorway_wire_roundtrip_keeps_owned_geometry_under_strict_i2() {
     };
     op.insert(11, Value::Uint(0));
     assert!(replica::intent_decode::decode(&encode(&i.to_value()).unwrap()).is_err());
+}
+
+#[test]
+fn link_wire_roundtrip_keeps_its_row_owner_and_door_under_strict_i2() {
+    use replica::edit::wire::{parameters, read};
+    use replica::edit::{Op, Ref};
+    use replica::ids::{Id, Scope};
+    use replica::world_model::End;
+    let node = |n| Ref::Node(Id::new(Scope([0xdd; 16]), n).unwrap());
+    // A stair's row: its kind, then numbers, then its line's points (3 deep inside the operation).
+    let row = vec![
+        Value::Text(replica::encode::Name::new("eden:stairs").unwrap()),
+        Value::Uint(1),
+        Value::Array(vec![Value::Array(vec![Value::Uint(5), Value::Nint(4)])]),
+    ];
+    for (owner, door) in [(End::First, Some(Ref::New(3))), (End::Second, None)] {
+        let ops = vec![Op::Link {
+            name: 7,
+            ty: replica::encode::Name::new("eden:stairs").unwrap(),
+            ends: [node(1), node(2)],
+            owner,
+            field: 21,
+            row: row.clone(),
+            door,
+        }];
+        let (_, mut i) = intent("edit");
+        i.parameters = parameters(&ops);
+        let decoded = replica::intent_decode::decode(&encode(&i.to_value()).unwrap()).unwrap();
+        assert_eq!(read(&decoded.parameters).unwrap(), ops);
+    }
 }
 
 /// The checker artifact itself (rule 13): when CI has built it (`CHECKER_WASM`, the `checker-artifact` step of
