@@ -21,7 +21,8 @@ test('configured binding damage refuses startup; an absent binding is disabled u
   assert.equal(none.v2Stream({ slug: 'eden' }), null); assert.equal(none.handle(), false); assert.equal(none.inspect(), undefined);
   assert.throws(() => cutoverFence({ binding: {} }), /cutover.binding-invalid/);
   const valid = { oldWorldId: 'w', canonicalSlug: 'eden', routesFile: '/synthetic/routes.json', clientDir: '/synthetic/client' };
-  for (const bad of [{ staticDir: 'relative' }, { v2Bodies: '//elsewhere/' }, { v2Bodies: '/a/../b/' }, { v2Bodies: 'https://cdn.example/b/' }]) assert.throws(() => cutoverFence({ binding: { ...valid, ...bad } }), /cutover.binding-invalid/, JSON.stringify(bad));
+  for (const bad of [{ staticDir: 'relative' }, { v2Bodies: '//elsewhere/' }, { v2Bodies: '/a/../b/' }, { v2Bodies: 'https://cdn.example/b/' },
+    { v2Gateway: 'wss://elsewhere.example/ws' }, { v2Gateway: '//elsewhere/ws' }, { v2Directory: 'https://elsewhere.example' }]) assert.throws(() => cutoverFence({ binding: { ...valid, ...bad } }), /cutover.binding-invalid/, JSON.stringify(bad));
   // B3-1: the binding file is read again when it changes (once a second), so the switch command needs no restart
   const file = new URL(`b3-binding-${process.pid}.json`, scratch).pathname, logged = [];
   let clock = 0;
@@ -80,6 +81,7 @@ test('actual launcher fences stable identity and aliases, preserves reads/other 
     const eden = await pageConfig('/w/eden/');
     assert.equal(eden.v2Stream, '/s/eden/', 'routed: the route\'s stream'); assert.equal(eden.worldKey, 'eden', 'the rest of the config kept');
     assert.equal(eden.v2Bodies, '/v2/bodies/', 'routed: the body catalogue\'s directory');
+    assert.deepEqual([eden.v2Gateway, eden.v2Directory], ['/w/eden/v2/ws', '/'], 'routed (B3-2b): where the owner\'s box finds the gateway and the directory');
     assert.equal(Object.hasOwn(await pageConfig('/w/other/'), 'v2Stream'), false, 'another world is never given it');
   }
   // #4177: the page's arrival published the old world's static views beside the stream; the page's reads get those files

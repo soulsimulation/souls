@@ -1209,7 +1209,7 @@ export async function openLauncher(cfg = {}) {
     let keep, pageStream = null, pageBodies = null;
     if (req.method === 'GET' && /\btext\/html\b/.test(String(req.headers.accept ?? '')) && !/^\/(?:v1|mcp|__)(?:\/|$)/.test(edgeRest) && !extname(edgeRest)) {
       const st = pool.status(slug), pageKey = `page ${slug} ${edgeRest} ${st.pid ?? ''}:${st.upSince ?? ''} ${req.headers['x-forwarded-host'] ?? ''} ${req.headers['x-forwarded-proto'] ?? ''} ${req.headers.host ?? ''}`;
-      pageStream = cutover?.v2Stream(w) ?? null; pageBodies = pageStream ? cutover.v2Bodies(w) : null;
+      pageStream = cutover?.v2Stream(w) ?? null; pageBodies = pageStream ? cutover.v2Fields(w) : null;   // B3-2b: v2Bodies, v2Gateway, v2Directory
       // #4177: at route time the old world's static views are published beside the stream (once; cutover.mjs publish)
       if (pageStream && p) void cutover.publish(w, async (path) => { const r = await fetch(`http://127.0.0.1:${p}${path}`, { signal: AbortSignal.timeout(10_000) }); return { status: r.status, body: Buffer.from(await r.arrayBuffer()) }; }).catch((e) => log(`cutover: ${slug}'s static views not published (${e?.message ?? e})`));
       let kept = c3.peek(pageKey, PAGE_TTL_MS), tag = 'hit';
