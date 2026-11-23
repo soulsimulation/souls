@@ -71,5 +71,7 @@ export function offerNote(ev, me) {
   if (!what) return null;
   const f = ev.fields ?? {}, opener = f[what === 'invited' ? 5 : 2], mine = opener === me;
   if (what === 'invited' ? mine : !mine) return null;
+  // 0.133 R4: an offer that names a thing (field 6) is a give, not a conversation.
+  if (what === 'invited' && f[6] !== undefined) return { kind: 'give', what: 'offered', offer: f[1], thing: f[6], from: opener };
   return { kind: 'conversation', what, conversation: f[1], ...(what === 'invited' ? { from: opener } : {}) };
 }

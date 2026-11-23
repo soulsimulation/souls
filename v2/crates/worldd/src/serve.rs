@@ -236,6 +236,14 @@ fn conversation() -> R<ActivityKind> {
     ActivityKind::from_value(&v.value).map_err(refusal)
 }
 
+/// The give's kind (0.133 R4), as its fixture writes it: an offer that hands a held thing over when accepted.
+fn give() -> R<ActivityKind> {
+    let bytes = fixture_bytes(include_str!("../../replica/fixtures/activities/give.diag"))
+        .map_err(refusal)?;
+    let v = decode(&bytes).map_err(|e| format!("the give's kind: {e:?}"))?;
+    ActivityKind::from_value(&v.value).map_err(refusal)
+}
+
 /// The activity kinds a world's entries declare (C30, #3556): one for each entry whose `roles` (SA-G1a) name two or
 /// more roles (B5 refuses a kind of one), `<entry kind>_activity`, pinned by the hash of its entry's roles. A role
 /// is `<namespace>:<role>`, standing at its entry's first slot (`souls:here` when it has none) and claiming one hand,
@@ -668,7 +676,7 @@ fn build_with(cache: Option<&Path>, facts: &str, entries: &[(String, Json)]) -> 
             replica::world_model::show(id)
         );
     }
-    let mut activities = vec![conversation()?];
+    let mut activities = vec![conversation()?, give()?];
     activities.extend(activity_kinds(entries)?);
     stamp("activities");
     for a in &activities {
@@ -3827,8 +3835,8 @@ mod tests {
         let built = build(&facts, &entries).expect("builds");
         assert_eq!(
             built.activities.len(),
-            2,
-            "conversation and entry runtime pins"
+            3,
+            "conversation, give and entry runtime pins"
         );
         let prefix = imported.kind_lines.join("\n") + "\n";
         assert!(

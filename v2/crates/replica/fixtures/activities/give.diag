@@ -1,0 +1,13 @@
+# A give (0.133 R4, the smallest part of Engine v2 E24 #2793): one Soul offers a thing it holds to another, and
+# accepting hands it over (`sim::activity::offer`, the give). Read by `replica::activity::ActivityKind::from_value`.
+# Two roles, since an offer (E8) is a pair: the giver, who offers, and the taker, who accepts. The activity never
+# starts: the accept moves the thing and ends the offer. Each role claims one voice only. An offer nobody answers
+# lapses after 30 s; a leave takes at most 0.4 s. Pinned as souls:give@1220 + sha256("souls/give/1").
+{
+  1: "souls:give@1220ffaec2e627417fcf692041788f4295876214a2afb85bda4cf6ff29fb68f3137f",
+  2: 1,
+  3: [{1: "souls:giver", 2: "souls:here", 3: [{1: 2, 2: 4}]},     # one voice
+      {1: "souls:taker", 2: "souls:here", 3: [{1: 2, 2: 4}]}],
+  4: 30000000,                                                    # an unanswered give lapses after 30 s
+  5: 400000                                                       # a leave takes at most 0.4 s
+}
