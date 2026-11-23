@@ -149,6 +149,7 @@ import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check
 import { risesFromSeat } from '../check/stand.mjs';
 import { ORDER_ENDED, STUCK, stuckOf, whyOf } from './stuck.mjs';
 import { kindsHeld, kindsIn, stateOf } from '../check/state.mjs';
+import { folderStamp, keptOne } from '../check/kept.mjs';
 import { actWords, nearestIds, nearestOffers, offerNamed, offersOf } from '../check/offers.mjs';
 import { Table } from '../reflex/reflex.mjs';
 import { Wakes } from '../wake/wake.mjs';
@@ -812,14 +813,28 @@ async function ageAfter({ now = false } = {}) {
 /** The kind entries held in `<home>/kinds/` and the creator's own from the copy (#3697), the Soul's own body kind given
  *  its family's forms (E21, #2791). */
 function heldKinds() {
-  const me = [...rowsOf(copy).values()].find((r) => r.id === ME || r.soul === ME);
-  return kindsHeld(join(home, 'kinds'), copy, me?.kind);
+  // Kept while the copy's roots and the folder's files are the same (G-late): a form act read them all each time.
+  const dir = join(home, 'kinds'), stamp = folderStamp(dir);
+  return kindsKept.get([copy.roots(), stamp], () => {
+    const me = [...rowsOf(copy).values()].find((r) => r.id === ME || r.soul === ME);
+    const kinds = kindsHeld(dir, copy, me?.kind);
+    // The same entries (the folder's files, the body's kind, and the creator kinds by their full names, which name their
+    // bytes) give the same object back, so the state's memo of records holds across a changed copy.
+    const sig = `${stamp}\n${me?.kind}\n${Object.keys(kinds).sort().join(' ')}`;
+    if (sig !== kindsSame.sig) Object.assign(kindsSame, { sig, kinds });
+    return kindsSame.kinds;
+  });
 }
+const kindsSame = { sig: null, kinds: null };
+const kindsKept = keptOne(), stateKept = keptOne(), stateMemo = {};
+/** The rules' state of the copy for this Soul (`stateOf`), kept while the copy's roots and the kinds are the same; when
+ *  a sync changed the copy, only the records it changed are read again (`stateMemo`). */
+const heldState = (kinds) => stateKept.get([copy.roots(), kinds], () => stateOf(copy, kinds, ME, stateMemo));
 
 let verdictsTook = null; // G-late: the last verdicts' parts, ms, for the act check's log line
 /** R2's verdict on each candidate, on the copy as it is now (R8). */
 function verdicts(candidates) {
-  const t0 = performance.now(), kinds = heldKinds(), t1 = performance.now(), state = stateOf(copy, kinds, ME), t2 = performance.now();
+  const t0 = performance.now(), kinds = heldKinds(), t1 = performance.now(), state = heldState(kinds), t2 = performance.now();
   const out = candidates.map((c) => judge(wire.rules_decide, c, { kinds, state, asker: { sees: [] } }));
   verdictsTook = { kinds: Math.round(t1 - t0), state: Math.round(t2 - t1), nodes: Object.keys(state.nodes).length, decide: Math.round(performance.now() - t2) };
   return out;
@@ -1444,7 +1459,7 @@ async function answer(req, conn = null) {
       if (moveForm(intent?.verb)) {
         // C14: a move is checked as the world checks it, on the copy and the body's last known posture.
         const age = await ageAfter();
-        const nodes = stateOf(copy, heldKinds(), ME).nodes;
+        const nodes = heldState(heldKinds()).nodes;
         const v = moveVerdict(wire.move_check, intent, { nodes, seated: state.seated ?? null });
         return closing({ ok: true, ...canOf(v, isCurrent(age, CURRENT_MS)) }, null, { age });
       }
@@ -1788,7 +1803,7 @@ function thingOf(id) {
   }
   // A Soul's body has the family's forms (E21, #2791), as `can` and `act` read them.
   const kinds = heldKinds(), entry = kinds[row.entry ?? row.kind];
-  return { ok: true, row, entry, offers: offersOf(row.id, entry, { moving: Boolean(row.moving) }), fields: stateOf(copy, kinds, ME).nodes[row.id]?.fields };
+  return { ok: true, row, entry, offers: offersOf(row.id, entry, { moving: Boolean(row.moving) }), fields: heldState(kinds).nodes[row.id]?.fields };
 }
 
 /** A field the copy holds as bytes (hex), shown as its text when that is plain printable text. */

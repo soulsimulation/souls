@@ -61,6 +61,7 @@ pub const F_PLACE_KIND: u64 = 15; // a place's kind (water, shore, pier, zone �
 pub const F_LINE: u64 = 16; // [[x, z] …] mm: a path thing's, a line place's, a river's
 pub const F_LINE_WIDTH: u64 = 17; // mm
 pub const F_WATER_LEVEL: u64 = 18; // mm
+pub const F_PARAMS: u64 = 19; // W3 (0.135): its def's params, today's JSON text as bytes, when it has any
 pub const F_PLACE_OF: u64 = 20; // what a place is derived from: area, water, shore, line, outline, landform, landmark
 pub const F_STAIRS: u64 = 21; // a floor: [[link, kind, to, width, y0, y1, [[x, z] …]] …] for each stair from it
 pub const F_DOORWAYS: u64 = 22; // a doorway's owning end: [[link, kind, x, z, yaw mdeg, width, height] …]
@@ -630,6 +631,9 @@ pub fn load_with(text: &str, entries: &[(String, String)]) -> R<Import> {
         }
         if let Some(e) = t.get("entry").and_then(Json::str) {
             fields.insert(F_ENTRY, Value::Text(name(e)?));
+        }
+        if let Some(p) = t.get("params").and_then(Json::str) {
+            fields.insert(F_PARAMS, Value::Bytes(p.as_bytes().to_vec()));
         }
         if let Some(d) = t.get("door") {
             fields.insert(

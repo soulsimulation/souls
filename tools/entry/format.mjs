@@ -679,7 +679,8 @@ function bounds(f, path, err) {
 }
 
 /** An activity's roles (SA-G1a): each role is one of the kind's link types to a body or a Soul, with how much it is needed
- *  and where its members may be: the activity's own body slots (`this`), or body slots near it (`here`, within_mm). */
+ *  and where its members may be: the activity's own body slots (`this`), or body slots near it (`here`, within_mm; with
+ *  `slots`, 0.135 G3, the activity's own slots its members are walked to when it starts). */
 function roles(entry, err) {
   const table = section(entry, 'roles', err), links = isObj(entry.links) ? entry.links : {}, slots = isObj(entry.slots) ? entry.slots : {};
   for (const [name, r] of Object.entries(table)) {
@@ -703,8 +704,9 @@ function roles(entry, err) {
       if (!(Array.isArray(pl.slots) && pl.slots.length)) err(`${pp}.slots`, 'a list of this kind\'s own slots, never empty');
       else pl.slots.forEach((n, i) => { if (slots[n]?.admits !== 'body') err(`${pp}.slots.${i}`, 'names a slot of this kind that admits a body'); });
     } else {
-      only(pl, ['in', 'within_mm', 'posture'], pp, err);
+      only(pl, ['in', 'within_mm', 'posture', 'slots'], pp, err);
       if (!(isInt(pl.within_mm) && pl.within_mm > 0)) err(`${pp}.within_mm`, 'how near the activity, whole millimetres above zero');
+      if (pl.slots !== undefined && !(Array.isArray(pl.slots) && pl.slots.length && pl.slots.every((n) => slots[n]?.admits === 'body'))) err(`${pp}.slots`, 'a list of this kind\'s own slots that admit a body, or left out');
     }
     if (pl.posture !== undefined && !POSTURES.includes(pl.posture)) err(`${pp}.posture`, `one of ${POSTURES.join(', ')}`);
   }

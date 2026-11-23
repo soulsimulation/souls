@@ -18,6 +18,9 @@ const TIMEOUT: Duration = Duration::from_secs(5);
 /// One bucket of an S3-compatible store, and the prefix every key is put under.
 pub struct S3 {
     agent: ureq::Agent,
+    /// The largest object a read takes, in bytes: `None` is ureq's own cap (10 MiB), which every program but an
+    /// operator's copy keeps ([`S3::for_operator`]).
+    read_limit: Option<u64>,
     /// `scheme://host[:port]`, with no path.
     endpoint: String,
     host: String,
@@ -75,6 +78,7 @@ impl S3 {
             .into();
         Ok(S3 {
             agent,
+            read_limit: None,
             endpoint: endpoint.to_owned(),
             host: host.to_owned(),
             bucket: bucket.to_owned(),
@@ -83,6 +87,19 @@ impl S3 {
             secret_access_key: secret_access_key.to_owned(),
             prefix: prefix.to_owned(),
         })
+    }
+
+    /// This store for an operator's tool that copies whole objects (`world-aside`): reads of any size up to
+    /// `read_limit` bytes and `timeout` per request, where every other program keeps ureq's 10 MiB cap and
+    /// [`TIMEOUT`]. A world's stream-recovery objects pass 10 MiB.
+    pub fn for_operator(mut self, read_limit: u64, timeout: Duration) -> S3 {
+        self.agent = ureq::Agent::config_builder()
+            .timeout_global(Some(timeout))
+            .http_status_as_error(false)
+            .build()
+            .into();
+        self.read_limit = Some(read_limit);
+        self
     }
 
     /// The store the environment names: [`URL_ENV`] in the offsite form ([`S3::from_url`], O3c #3529), else [`ENV`]
@@ -324,10 +341,12 @@ impl Store for S3 {
         }
         status(code, key)?;
         let etag = etag(&res, key)?;
-        let bytes = res
-            .body_mut()
-            .read_to_vec()
-            .or_else(|e| refuse("store-unreachable", format!("{key}: {e}")))?;
+        let body = res.body_mut();
+        let bytes = match self.read_limit {
+            Some(n) => body.with_config().limit(n).read_to_vec(),
+            None => body.read_to_vec(),
+        }
+        .or_else(|e| refuse("store-unreachable", format!("{key}: {e}")))?;
         Ok(Some(Object { etag, bytes }))
     }
 

@@ -6,6 +6,7 @@
 // ...]`, the public audience's, written by V1's writer beside the part), kept by reference across parts. A named
 // place's name (import-eden's field 4, a SHA-256 of its words) is a `[hash, words]` row of the same files (#3574).
 import init, { StreamPlayer, readPointer } from 'replica';
+import * as replica from 'replica';
 import { decode, encode } from 'cborg';
 import { publicSoul, type MoveRec, type RunEndRec, type NodeRec, type PartRec, type Pointer, type SaidRec, type SnapshotRec } from './source.ts';
 import { happenedInPart } from './sound-record.ts';
@@ -13,6 +14,7 @@ import { readChanged } from './changed.ts';
 import { skyFields } from './sky-record.ts';
 import { BEHIND_US, CUT_US } from './clock.ts';
 import { fieldsOf } from './kinds-state.ts';
+import { coursePlaces } from '../course-samples.ts';
 
 /** Parts fetched at once from the one played (#3822): a joiner far behind is not one round trip a part. */
 const AHEAD = 16;
@@ -70,12 +72,21 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
   // The importer's fields share numbers with a kind's own state fields (a fridge's `open` is field 1): each is read
   // only in the shape the importer writes it.
   const o = f.get(1);
-  if (o instanceof Uint8Array) rec.origin = new TextDecoder().decode(o);
-  else if (typeof o === 'string' && f.get(2) instanceof Uint8Array) (rec.defines = o), (rec.entry = f.get(2) as Uint8Array); // #3697: a creator's kind
+  if (o instanceof Uint8Array) {
+    rec.origin = new TextDecoder().decode(o);
+    // W2 (0.135): the def it was imported from (import-eden's field 2), which the old page draws it by
+    const d = f.get(2);
+    if (d instanceof Uint8Array || typeof d === 'string') rec.def = typeof d === 'string' ? d : new TextDecoder().decode(d);
+    // W3: its def's params (import-eden's field 19, today's JSON text)
+    const p = f.get(19);
+    if (p instanceof Uint8Array) try { const v = JSON.parse(new TextDecoder().decode(p)); if (v && typeof v === 'object' && !Array.isArray(v)) rec.params = v; } catch { /* drawn with the def's defaults */ }
+  } else if (typeof o === 'string' && f.get(2) instanceof Uint8Array) (rec.defines = o), (rec.entry = f.get(2) as Uint8Array); // #3697: a creator's kind
   if (Array.isArray(f.get(11))) rec.outline = rows(f.get(11));
   if (Array.isArray(f.get(12))) rec.solids = rows(f.get(12));
   if (Array.isArray(f.get(13))) rec.slots = rows(f.get(13));
   if (f.has(14)) rec.surfaces = (f.get(14) as unknown[][]).map((r) => [num(r[0]), rows(r[1])!]);
+  if (Array.isArray(f.get(16))) rec.line = rows(f.get(16));
+  if (f.has(17)) rec.lineWidth = num(f.get(17));
   if (f.has(18)) rec.waterLevel = num(f.get(18));
   if (f.has(23)) rec.scale = num(f.get(23));
   if (f.has(24)) rec.tileSize = num(f.get(24));
@@ -171,7 +182,9 @@ async function run(stream: URL) {
     const transfer: Transferable[] = [];
     // A retained unresolved record may become drawable later; transfer fresh buffers, retaining its exact bytes.
     for (const n of visible) for (const t of n.tiles ?? []) transfer.push(t[2].buffer as ArrayBuffer, t[3].buffer as ArrayBuffer);
-    if (rest) post({ t: 'part', p: { ...rest, nodes: visible, removed: gone, samples: samples.filter(s => next.has(s[0])) } }, transfer);
+    // K4 (0.135): where each node on a course is over the part, so the page never loads the replica (course-samples.ts)
+    const courses = rest && replica.courseAt ? coursePlaces(replica.courseAt, [...next].map(id => known.get(id)!), rest.from, rest.to) : {};
+    if (rest) post({ t: 'part', p: { ...rest, nodes: visible, removed: gone, samples: samples.filter(s => next.has(s[0])), ...(Object.keys(courses).length ? { courses } : {}) } }, transfer);
     else post({ t: 'snapshot', s: { nodes: visible, removed: gone } }, transfer);
   };
   const install = async (p: StreamPointer) => {

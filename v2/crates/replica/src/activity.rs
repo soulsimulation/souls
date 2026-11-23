@@ -21,6 +21,7 @@ use crate::bodies::{Class, SkillShape, Want};
 use crate::effects::{Refusal, read_id};
 use crate::encode::{Name, Value};
 use crate::ids::Id;
+use crate::pose::Vec3;
 use crate::time::Micros;
 
 type R<T> = Result<T, Refusal>;
@@ -55,6 +56,12 @@ pub struct Role {
     pub claims: Vec<Want>,
     /// The move this role makes at the other member when the activity starts (0.134 T1: a handshake's), if any.
     pub mv: Option<Name>,
+    /// Where its members stand, in the activity's own frame, in order (0.135 G3): each a point (µm) and a facing
+    /// (millidegrees of yaw); its k-th member takes the k-th. None: its members stay where they are.
+    pub stands: Vec<(Vec3, i64)>,
+    /// How near the activity's middle a member stands to be walked to its stand, µm (0.135 G3, the entry's
+    /// `within_mm`): one farther keeps where it is. None: any distance.
+    pub within: Option<i64>,
 }
 
 /// An activity's kind, as data.
@@ -130,11 +137,11 @@ impl ActivityKind {
             let Value::Map(r) = r else {
                 return refuse(
                     "not-an-activity",
-                    "a role is {1: name, 2: place, 3: [want, ...], 4?: move}",
+                    "a role is {1: name, 2: place, 3: [want, ...], 4?: move, 5?: [[x, y, z, yaw], ...], 6?: within}",
                 );
             };
-            if r.keys().any(|k| *k == 0 || *k > 4) {
-                return refuse("not-an-activity", "a role has fields 1 to 4");
+            if r.keys().any(|k| *k == 0 || *k > 6) {
+                return refuse("not-an-activity", "a role has fields 1 to 6");
             }
             let rname = text(r.get(&1), "a role's name")?;
             let place = text(r.get(&2), "a role's place")?;
@@ -152,11 +159,41 @@ impl ActivityKind {
                 None => None,
                 v => Some(text(v, "a role's move")?),
             };
+            let int = |v: &Value| match v {
+                Value::Uint(n) => i64::try_from(*n).ok(),
+                Value::Nint(n) => i64::try_from(*n).ok().map(|n| -1 - n),
+                _ => None,
+            };
+            let stands = match r.get(&5) {
+                None => Vec::new(),
+                Some(Value::Array(ss)) => ss
+                    .iter()
+                    .map(|s| match s {
+                        Value::Array(p) => {
+                            match p.iter().map(int).collect::<Option<Vec<_>>>().as_deref() {
+                                Some([x, y, z, yaw]) => Ok((Vec3::new(*x, *y, *z), *yaw)),
+                                _ => refuse("not-an-activity", "a stand is [x, y, z, yaw]"),
+                            }
+                        }
+                        _ => refuse("not-an-activity", "a stand is [x, y, z, yaw]"),
+                    })
+                    .collect::<R<Vec<_>>>()?,
+                Some(_) => return refuse("not-an-activity", "a role's stands are a list"),
+            };
+            let within = match r.get(&6) {
+                None => None,
+                Some(v) => Some(int(v).filter(|n| *n >= 0).map_or_else(
+                    || refuse("not-an-activity", "a role's within is µm, zero or more"),
+                    Ok,
+                )?),
+            };
             roles.push(Role {
                 name: rname,
                 place,
                 claims,
                 mv,
+                stands,
+                within,
             });
         }
         if roles.len() < 2 {

@@ -35,8 +35,9 @@ removes both. With an optional absolute `staticDir` (the directory the v2 origin
 routed page publishes the old world's read-only views there (`scene.json`, `snapshot.json`, `items.json`,
 `platforms.json`, `config.json`, `kernel.json`, then `manifest.json`), and the page's reads of them are answered from those
 files. `/v1/config` keeps the served client's answer. The page loads the replica (`replica.js`, `replica_bg.wasm`) that
-the launcher serves from `clientDir` for the routed world. Known limit: god edits made on v2 after the switch are not in
-those files until a converter from v2 facts exists. The launcher's user must be able to write `staticDir`.
+the launcher serves from `clientDir` for the routed world. God edits made on v2 after the switch are not in those files;
+the page draws them from the stream (`apps/web/src/v2-engine/creator-kinds.ts`), and a world with none of those files (one
+made on the new engine) is drawn from its stream alone (`v2-engine/source/stream-scene.ts`, 0.135 W2). The launcher's user must be able to write `staticDir`.
 
 ### One world's old page, on and off (B3-1)
 
@@ -174,6 +175,18 @@ committed or attached): `scp <production host>:/var/lib/souls/saved/eden-owners-
 (`soul-game.caddy`, as `tools/release/check-0132.mjs` places it), with fake owners (two accounts and a paired Soul) and
 a real browser, and prints the table above. Its last run: every step passed, and the old page was back 7 s after
 the switch back.
+
+### A fresh Eden on a new build (0.132)
+
+A build whose header differs from the one Eden's log was written under cannot read that log (`worldd serve:
+header-mismatch`), so release-v2's rehearsal refuses it. Pre-release, Eden starts fresh instead, under the same world
+name, so its name, routes, gateway and pairing stay as they are: `bash v2/tools/ops/cutover/reseed-eden.sh check`,
+then `run` (root on the host, before release-v2; `reseed-eden-undo.sh <label> check|run` undoes it). It sets the world's
+folder aside, sets its objects in the directory's bucket aside with `world-aside` (`v2/tools/ops/src/world_aside.rs`:
+each object copied to `aside/<label>/`, read back and compared before any original is deleted), seeds the same facts
+with the release's `worldd`, pins it, and leaves the world stopped for release-v2 to start. Without the bucket step
+the fresh log is refused `restart-gap`: the store's record still holds the old log's mark. Run `save-wipe.sh` before
+it and `switch-eden.sh` after release-v2.
 
 ## One writer
 
