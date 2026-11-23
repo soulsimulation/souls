@@ -8,13 +8,15 @@ import { isPublic, saidKey, speechOf, talkOf, type Said, type Talk } from './tak
 
 /** What the reader's worker posts (v2/web/src/source/source.ts: NodeRec, PartRec, Pointer; only the fields read here). */
 type NodeRec = { id: string; kind: string; parent: string | null; slot: number | null; pos: [number, number, number]; rot: [number, number, number, number];
-  at: number | null; origin?: string; soul?: string | null; name?: string | null; sky?: Record<number, unknown>;
+  at: number | null; origin?: string; soul?: string | null; name?: string | null; description?: string | null; sky?: Record<number, unknown>;
   /** Slots `[n, x, y, z, yaw mdeg, capacity]`, mm in its own frame. */
   slots?: number[][];
   /** Exact recorded body-kind hash (field 32); absent is the stated default. */
   body?: string };
 type SampleRec = [string, string, number | null, number, number, number, number];
-type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; said?: Said[] };
+/** A world record (sound/record.ts Happened); only the fields read here (B3-3). */
+type Happened = { at: number; node: string; name?: string };
+type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; said?: Said[]; happened?: Happened[] };
 type Pointer = { newest: number | null; newestTo: number | null; period: number; anchorWorld: number; anchorWallMs: number; quietUntil: number | null };
 type Msg = { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'snapshot'; s: { nodes: NodeRec[]; removed: string[] } } | { t: 'error'; message: string };
 
@@ -25,7 +27,7 @@ export type V2View = {
   /** The last frames (node ids) a sample could not be placed in, and the slot it named, newest last: for checks. */
   unplacedFrames: string[];
   takes: { serverTick: number; chunks: RecordedChunk[]; receivedAt: number };
-  souls: Map<string, { id: string; entityId: string; name: string }>;
+  souls: Map<string, V2Soul>;
   /** World time (µs) the parts reach. */
   newestTo: number | null;
   error: string | null;
@@ -34,6 +36,25 @@ export type V2View = {
    *  public, with the speaker's name), once each, in order, as their chunks come in (take-speech.ts). */
   speech: ReturnType<typeof speechOf>[];
 };
+
+/** One Soul as the old page's card shows it (B3-3): its public name and description, and what it is doing now. */
+export type V2Soul = { id: string; entityId: string; name: string; description: string; doing: Doing; state: 'awake' | Wound };
+/** What a Soul is doing, derived from the copy as the v2 page derives its status (v2/web/src/souls/souls.ts), never sent. */
+export type Doing = 'speaking' | 'seated' | 'walking' | 'standing' | Wound;
+type Wound = 'idle' | 'zombie' | 'asleep';
+const WOUND = new Map<string, Wound | 'awake'>([['souls:awake', 'awake'], ['souls:idle', 'idle'], ['souls:zombie', 'zombie'], ['souls:asleep', 'asleep']]);
+/** Walking while its track has a sample within this long of the time shown (souls.ts WALKING_US). */
+const WALKING_US = 1_000_000;
+
+/** Speaking while a sentence of its own is on at `t`; then the world's wind-down word (B16); seated while in a slot;
+ *  walking while it has a sample ahead of `t` or within the last second; else standing (souls.ts `status`). */
+export function doingOf(n: NodeRec | null, samples: readonly { at: number }[], t: number, speaking: boolean, wound: { at: number; word: Wound | 'awake' } | undefined): Doing {
+  if (speaking) return 'speaking';
+  if (wound && wound.at <= t && wound.word !== 'awake') return wound.word;
+  if (n && n.slot !== null) return 'seated';
+  const last = samples[samples.length - 1];
+  return samples.length > 1 && last && last.at > t - WALKING_US ? 'walking' : 'standing';
+}
 
 const Q = 2 ** 30;
 /** The v2 page's own lag behind the world (v2/web/src/clock/clock.ts BEHIND_US: four 0.5 s parts). */
@@ -70,6 +91,9 @@ export class V2Bridge {
   /** The v2 body catalogue by hash (`souls/bodies/1`), once given (`looks`): a body-kind hash's old-page look. */
   private catalogue: Map<string, CatalogueBody> | null = null;
   private readonly built = new Map<number, RecordedChunk>();
+  /** Public sentences still on (the last minute), and each body's newest wind-down record (B3-3). */
+  private said: Said[] = [];
+  private readonly wound = new Map<string, { at: number; word: Wound | 'awake' }>();
   private worker: Worker | null = null;
   /** World time of the first part played live: before it the reader caught up without samples, so no chunk is made. */
   private liveFrom: number | null = null;
@@ -99,6 +123,11 @@ export class V2Bridge {
     this.liveFrom ??= p.from;
     this.nodesChanged(p.nodes, p.removed, p.from);
     for (const [id, frame, slot, at, x, y, z] of p.samples) this.sample(id, frame, slot, at, [x, y, z]);
+    for (const h of p.happened ?? []) {
+      const word = h.name === undefined ? undefined : WOUND.get(h.name);
+      if (word && (this.wound.get(h.node)?.at ?? -Infinity) <= h.at) this.wound.set(h.node, { at: h.at, word });
+    }
+    this.said = [...this.said, ...(p.said ?? []).filter((x) => x.words !== null)].filter((x) => x.at + x.length > p.to - 60_000_000);
     for (const s of p.said ?? []) if (isPublic(s) && !this.saidSeen.has(saidKey(s))) { this.saidSeen.add(saidKey(s)); this.pendingSaid.push(s); }
     this.view.newestTo = Math.max(this.view.newestTo ?? p.to, p.to);
     this.view.parts++;
@@ -185,8 +214,8 @@ export class V2Bridge {
     t.samples.push(seat ? { at, p, seat } : { at, p });
   }
 
-  private bodies(): Body[] {
-    const out: Body[] = [];
+  private bodies(): (Body & { node: string; description: string })[] {
+    const out: (Body & { node: string; description: string })[] = [];
     for (const [id, t] of this.tracks) {
       const n = this.nodes.get(id) ?? t.node;
       if (!n || !isBody(n)) continue;
@@ -195,7 +224,7 @@ export class V2Bridge {
       const heading = w ? -2 * Math.atan2(w.q[2], w.q[0]) : 0;
       // The look the v2 page gives it: its body kind's, else the default person its id picks (on both pages alike).
       const look = legacyBodyOf(n.body, this.catalogue), entity = n.body ? entityOf(id) : entityWithLook(entityOf(id), defaultLookOf(id));
-      out.push({ entity, soul: soulIdOf(n.soul ?? id), name: nameOf(id, n), samples: t.samples, heading, held: t.held, said: t.said,
+      out.push({ node: id, entity, soul: soulIdOf(n.soul ?? id), name: nameOf(id, n), description: n.description ?? '', samples: t.samples, heading, held: t.held, said: t.said,
         ...(look ? { look } : {}), ...(t.gone !== null ? { until: t.gone } : {}) });
     }
     return out;
@@ -209,7 +238,13 @@ export class V2Bridge {
     // end (the v2 page's own lag), so the sample after it is in and a walking body is not held at its last one.
     const end = chunkEnd(to - BEHIND_US), bodies = this.bodies();
     const first = Math.max(end - KEEP * TICKS, Math.ceil((this.liveFrom ?? Infinity) / TICK_US / TICKS) * TICKS);
-    const souls = new Map(bodies.map((b) => [b.soul, { id: b.soul, entityId: b.entity, name: b.name }]));
+    // what each is doing at the time the page shows (the world's newest time less the page's lag)
+    const shown = to - BEHIND_US;
+    const souls = new Map(bodies.map((b) => {
+      const doing = doingOf(this.nodes.get(b.node) ?? null, b.samples, shown, this.said.some((x) => x.speaker === b.node && x.at <= shown && shown < x.at + x.length), this.wound.get(b.node));
+      const state = doing === 'idle' || doing === 'zombie' || doing === 'asleep' ? doing : 'awake';
+      return [b.soul, { id: b.soul, entityId: b.entity, name: b.name, description: b.description, doing, state } satisfies V2Soul];
+    }));
     if (JSON.stringify([...souls.values()]) !== JSON.stringify([...this.view.souls.values()])) this.view.souls = souls;
     // The page plays a little behind serverTick + the time since it came: it moves (and its time restarts) only when a
     // whole new chunk is in, so the page's estimate of the world's tick never steps back.
