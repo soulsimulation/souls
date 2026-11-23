@@ -98,7 +98,7 @@ mod prof {
         "push.apply", "flush.state", "flush.context", "flush.encode", "flush.put", "flush.words", "flush.play",
         "flush.commit", "flush.files", "flush.prune", "flush.pointer", "idle.check", "idle.pointer",
     ];
-    struct P { ns: [u128; 13], records: u64, parts: u64, whole: u64, since: Instant, cpu0: u64 }
+    struct P { ns: [u128; 13], records: u64, parts: u64, whole: u64, since: Instant, cpu0: u64, causes: std::collections::BTreeMap<&'static str, u64> }
     thread_local!(static P_: RefCell<Option<P>> = const { RefCell::new(None) });
     fn on() -> bool {
         static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
@@ -120,10 +120,17 @@ mod prof {
             self.0 = Some(now);
             P_.with(|p| {
                 let mut p = p.borrow_mut();
-                let p = p.get_or_insert_with(|| P { ns: [0; 13], records: 0, parts: 0, whole: 0, since: now, cpu0: cpu() });
+                let p = p.get_or_insert_with(|| P { ns: [0; 13], records: 0, parts: 0, whole: 0, since: now, cpu0: cpu(), causes: Default::default() });
                 p.ns[stage] += d;
             });
         }
+    }
+    /// What made a record's cut whole (`structural`), by change kind.
+    pub fn cause(name: &'static str) {
+        if !on() { return; }
+        P_.with(|p| {
+            if let Some(p) = p.borrow_mut().as_mut() { *p.causes.entry(name).or_default() += 1; }
+        });
     }
     pub fn count(records: u64, parts: u64, whole: u64) {
         if !on() { return; }
@@ -141,6 +148,7 @@ mod prof {
                 wall.as_secs_f64(), (c - p.cpu0) as f64 / 100.0, ms(busy), p.records, p.parts, p.whole
             );
             for (i, n) in NAMES.iter().enumerate() { line += &format!(" {n} {:.0}ms", ms(p.ns[i])); }
+            line += &format!(" structural-by {:?}", p.causes);
             eprintln!("{line}");
             *g = None;
         });
@@ -2570,7 +2578,17 @@ impl<S: ObjectStore> PublicWriter<S> {
                                 {
                                     self.touched.insert(*node);
                                 }
-                                _ => self.structural = true,
+                                c => {
+                                    prof::cause(match c {
+                                        replica::effects::Change::Create { .. } => "create",
+                                        replica::effects::Change::Remove { .. } => "remove",
+                                        replica::effects::Change::Reparent { .. } => "reparent-moved",
+                                        replica::effects::Change::Link { .. } => "link",
+                                        replica::effects::Change::Unlink { .. } => "unlink",
+                                        _ => "other-change",
+                                    });
+                                    self.structural = true
+                                }
                             }
                         }
                     }
@@ -2584,7 +2602,14 @@ impl<S: ObjectStore> PublicWriter<S> {
                             }
                         }
                     }
-                    _ => self.structural = true,
+                    b => {
+                        prof::cause(match b {
+                            Body::Transfer(_) => "transfer",
+                            Body::Time(_) => "time",
+                            _ => "other-body",
+                        });
+                        self.structural = true
+                    }
                 }
             }
             let at = part.effects.last().map(|e| e.envelope.at);
