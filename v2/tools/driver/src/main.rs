@@ -151,6 +151,9 @@ struct Sent {
     /// S11: the act outstanding at the longest stall: its verb, whether the world had accepted it (its end still to
     /// come) and how long since it was sent, ms.
     stall_act: String,
+    /// S11: the longest stall's window, Unix ms: from the later of its act's send and the last answer, to when it
+    /// was longest.
+    stall_window: (u64, u64),
     refused_only_ms: u64,
     last_answer_age_ms: u64,
     /// #4154's accuracy check: the sequences the world took (accepted or receipted) and those it said were done.
@@ -358,8 +361,31 @@ fn visible_report(agents: &[Sent], seen: &stream::Seen) -> serde_like::Obj {
 /// #4154's stuck measure, per agent from its own answers (not the gateway's receipts file, which logs few Souls):
 /// stuck is an act outstanding with no answer for 60 s or more; refused-only is 60 s or more of acting with nothing
 /// but refusals back. Also the agents' last answer's age at the end of the schedule.
-fn stuck_report(agents: &[Sent]) -> serde_like::Obj {
+/// S11: how often the first agent's copy is read for where each Soul is, and how far a Soul must have gone in a
+/// stall's window to be on its way, not stuck, µm.
+const PLACES_EVERY: Duration = Duration::from_secs(10);
+const MOVED_UM: i128 = 1_000_000;
+/// S11: one read of where each agent's Soul is: Unix ms, and each agent's body's x and z, µm.
+type Places = (u64, Vec<Option<(i64, i64)>>);
+
+fn stuck_report(agents: &[Sent], places: &[Places]) -> serde_like::Obj {
     const STUCK_MS: u64 = 60_000;
+    // S11: a Soul whose act is unanswered for 60 s but whose body moved a metre or more in that time (a long walk on
+    // its way) is not stuck. Where it was is read from the first agent's copy every [`PLACES_EVERY`]; with fewer
+    // than two reads in the window, it counts as stuck.
+    let moved = |k: usize, (from, to): (u64, u64)| -> bool {
+        let at: Vec<(i64, i64)> = places
+            .iter()
+            .filter(|(t, _)| *t >= from && *t <= to)
+            .filter_map(|(_, p)| p.get(k).copied().flatten())
+            .collect();
+        at.iter().any(|a| {
+            at.iter().any(|b| {
+                let (dx, dz) = ((a.0 - b.0) as i128, (a.1 - b.1) as i128);
+                dx * dx + dz * dz >= MOVED_UM * MOVED_UM
+            })
+        })
+    };
     let who = |f: &dyn Fn(&Sent) -> bool| -> Vec<String> {
         agents
             .iter()
@@ -368,14 +394,34 @@ fn stuck_report(agents: &[Sent]) -> serde_like::Obj {
             .map(|(k, _)| k.to_string())
             .collect()
     };
-    let stuck = who(&|a| a.stall_ms >= STUCK_MS);
+    let long: Vec<usize> = agents
+        .iter()
+        .enumerate()
+        .filter(|(_, a)| a.stall_ms >= STUCK_MS)
+        .map(|(k, _)| k)
+        .collect();
+    let on_way: Vec<usize> = long
+        .iter()
+        .copied()
+        .filter(|&k| moved(k, agents[k].stall_window))
+        .collect();
+    let stuck: Vec<String> = long
+        .iter()
+        .filter(|k| !on_way.contains(k))
+        .map(|k| k.to_string())
+        .collect();
     let refused = who(&|a| a.refused_only_ms >= STUCK_MS);
     let mut ages: Vec<u64> = agents.iter().map(|a| a.last_answer_age_ms).collect();
     ages.sort_unstable();
     let mut stalls: Vec<u64> = agents.iter().map(|a| a.stall_ms).collect();
     stalls.sort_unstable();
     serde_like::Obj::new()
+        .raw(
+            "rule",
+            "\"stuck: an act unanswered for 60 s while its Soul moved less than 1 m\"".into(),
+        )
         .n("stuck", stuck.len() as f64)
+        .n("onTheirWay", on_way.len() as f64)
         .n("refusedOnly", refused.len() as f64)
         .n("stallMaxMs", stalls.last().copied().unwrap_or(0) as f64)
         .n("lastAnswerAgeP50Ms", at_share(&ages, 0.5) as f64)
@@ -390,8 +436,16 @@ fn stuck_report(agents: &[Sent]) -> serde_like::Obj {
                 "[{}]",
                 agents
                     .iter()
-                    .filter(|a| a.stall_ms >= STUCK_MS)
-                    .map(|a| format!("\"{}\"", a.stall_act))
+                    .enumerate()
+                    .filter(|(_, a)| a.stall_ms >= STUCK_MS)
+                    .map(|(k, a)| {
+                        let how = if on_way.contains(&k) {
+                            "moving"
+                        } else {
+                            "still"
+                        };
+                        format!("\"{} {how}\"", a.stall_act)
+                    })
                     .collect::<Vec<_>>()
                     .join(", ")
             ),
@@ -820,6 +874,8 @@ async fn agent(
             let stall = now.duration_since(since).as_millis() as u64;
             if stall > out.stall_ms {
                 out.stall_ms = stall;
+                let end = unix_ms();
+                out.stall_window = (end.saturating_sub(stall), end);
                 out.stall_act = format!(
                     "{} {} {}ms",
                     verb_of.get(&seq).map_or("?", |v| v.as_str()),
@@ -1541,6 +1597,51 @@ async fn main() {
             )));
         }
     }
+    // S11: where each agent's Soul is, from the first agent's copy every PLACES_EVERY, so a Soul on a long walk is
+    // told from a stuck one.
+    let places: Arc<std::sync::Mutex<Vec<Places>>> = Arc::default();
+    let sampler = match (&aimed, chans.first()) {
+        (Some(t), Some(first)) => {
+            let bodies: Vec<Option<Id>> = actors
+                .iter()
+                .map(|a| match a {
+                    Actor::Soul(id) => t.bodies.get(id).copied(),
+                    _ => None,
+                })
+                .collect();
+            let (first, places, stop) = (
+                first.clone(),
+                places.clone(),
+                Arc::new(std::sync::atomic::AtomicBool::new(false)),
+            );
+            let halt = stop.clone();
+            let task = tokio::spawn(async move {
+                while !halt.load(Ordering::Relaxed) {
+                    let (back, seen) = tokio::sync::oneshot::channel();
+                    if first.send(Job::Read(back)).is_err() {
+                        break;
+                    }
+                    if let Ok(Ok(seen)) = seen.await {
+                        let at: Vec<Option<(i64, i64)>> = bodies
+                            .iter()
+                            .map(|b| b.as_ref().and_then(|b| targets::world_xz(&seen, b)))
+                            .collect();
+                        if let Ok(mut p) = places.lock() {
+                            p.push((unix_ms(), at));
+                        }
+                    }
+                    for _ in 0..PLACES_EVERY.as_millis() / 100 {
+                        if halt.load(Ordering::Relaxed) {
+                            break;
+                        }
+                        tokio::time::sleep(Duration::from_millis(100)).await;
+                    }
+                }
+            });
+            Some((stop, task))
+        }
+        _ => None,
+    };
     let think = |agent: u32| a.think_ms * ((u64::from(agent) * 7919) % 1000) / 1000;
     let mut sequence = vec![first; s.agents as usize];
     // #4154: each agent's last act that names a place: its sequence, verb and the place.
@@ -1622,6 +1723,11 @@ async fn main() {
     } else {
         None
     };
+    // The copy's reads end before the agents' channels close: an agent reads only while it may still act.
+    if let Some((stop, task)) = sampler {
+        stop.store(true, Ordering::Relaxed);
+        let _ = task.await;
+    }
     drop(chans);
     let mut sent = Vec::new();
     for (k, t) in tasks.into_iter().enumerate() {
@@ -1633,7 +1739,8 @@ async fn main() {
     stop_reading.store(true, Ordering::Relaxed);
     let seen = reader.map(|r| r.join().unwrap_or_default());
     let visible = seen.as_ref().map(|v| visible_report(&sent, v));
-    let stuck = stuck_report(&sent);
+    let places = places.lock().map(|p| p.clone()).unwrap_or_default();
+    let stuck = stuck_report(&sent, &places);
     let accuracy = after
         .as_ref()
         .map(|seen| accuracy_report(&sent, &last_place, &actors, seen));

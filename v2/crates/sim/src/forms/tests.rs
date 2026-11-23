@@ -1182,6 +1182,40 @@ fn pending_form_plan_holds_the_existing_walk_claim_and_cleans_up_when_replaced()
     b.clean();
 }
 
+/// S11: a run walking to its thing whose claim on the legs another walk takes (its Soul's own walk, intents rule 10)
+/// ends `claim-taken` in the next tick. Before, only a run waiting for its plan was ended: a walking one stood at its
+/// walk step for good, unwatched (it asks no way) and unanswered.
+#[test]
+fn s11_a_walking_run_whose_legs_another_walk_takes_ends_claim_taken() {
+    let (entry, form) = entries().remove(0);
+    let mut b = Bench::new();
+    let (body, node) = b.add(&entry, Vec3::ZERO, Vec3::new(20_000_000, 0, 0));
+    b.start(body, node, &entry, &form, Limits::default());
+    b.tick();
+    let run = b.forms.by_body[&body];
+    assert!(b.forms.runs[&run].walk.is_some(), "walking");
+    assert!(!b.forms.planning.contains(&run), "not waiting for a plan");
+    let other =
+        b.c.claim(body, &skills::route::Route::sent(0, 0).shape())
+            .unwrap();
+    b.tick();
+    assert!(
+        b.forms
+            .ended
+            .iter()
+            .any(|e| e.body == body && e.how.as_str() == "claim-taken"),
+        "ended: {:?}",
+        b.forms.ended
+    );
+    assert!(b.forms.is_empty());
+    assert!(
+        b.c.claims(body).unwrap().running().contains_key(&other),
+        "the other walk keeps its claim"
+    );
+    b.c.release(body, other).unwrap();
+    b.clean();
+}
+
 /// #4187: a Soul's new act sent while its run is taking a seat or leaving one waits for that step to end (as a
 /// cancel lets it), then the old run is left and the new one starts. The body is never left half seated: mid-sit it
 /// ends in the seat, mid-rise standing at the seat's stand point, with no step between ticks longer than the seat's
