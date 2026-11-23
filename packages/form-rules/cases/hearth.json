@@ -1,0 +1,35 @@
+{
+ "format": "souls-form-cases/1",
+ "about": "eden:hearth (0.135 E1): warm up by it; it needs nothing.",
+ "cases": [
+  {
+   "name": "warm_every_need_met",
+   "act": {
+    "this": "h1",
+    "form": "warm"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "h1": {
+      "kind": "eden:hearth"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  }
+ ]
+}

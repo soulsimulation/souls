@@ -220,7 +220,9 @@ function oneFence(binding) {
       if (!bound(w)) return false; // A damaged Eden activation never prevents another world from operating.
       const path = url.pathname.replace(/^.*\/(?:w|__sim\/worlds)\/[^/]+/, '') || '/';
       const read = req.method === 'GET' || req.method === 'HEAD';
-      const mutating = !read || (path === '/v1/edge/view' && url.searchParams.has('gaze'));
+      // V4 (0.133): Explore's place pictures are asked for by POST but change nothing: the old world renders its own
+      // architecture, which a moved world keeps (its ground and buildings are the old twin's), so they pass through.
+      const mutating = (!read && !(req.method === 'POST' && path === '/v1/world/context/views')) || (path === '/v1/edge/view' && url.searchParams.has('gaze'));
       const body = bodiesDir && !mutating && path.startsWith('/v2/bodies/') ? path.slice('/v2/bodies/'.length) : null;
       if (!mutating && !files.has(path) && !SERVED.has(path) && body === null) return false;
       let on;

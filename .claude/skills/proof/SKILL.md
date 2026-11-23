@@ -58,6 +58,24 @@ On this page the recorder needs two flags until its arrival check and world-time
 `--from-load` (the take starts at page creation) and `--time-of-day keep`. For daylight, add `hour=12:00` to the
 address: it sets the sky and its light for the picture only.
 
+### The old page (apps/web) on a local new-engine world
+
+Most changes a viewer sees are on the old page, which soul.game serves for every moved world. One command brings it up
+on a world of the new engine made from a committed template:
+
+```bash
+node tools/playtest/arena/new-engine/old-page.mjs --template worlds/templates/hello-hamlet.json --dir .local/proof-old > .local/proof-old.log 2>&1 &
+# wait for `ready http://127.0.0.1:<port>/w/hello-hamlet/` in .local/proof-old.log: that is the old page; the next line
+# names the new engine's own page, directory and gateway, where Souls pair (tools/playtest/arena/new-engine/seat.mjs)
+```
+
+It runs `v2/tools/dev/run.sh --facts` (the engine), the world launcher's copy of the same template (the page's scenery
+and web app, until the old page draws them from the stream), a second front door with soul.game's routes, and
+`tools/world-launcher/v2-switch.mjs`, as on soul.game. It needs `pnpm --filter web build` and `pnpm build:viewer`
+first. Joined Souls start at the world's entry (0,0: in hello-hamlet that is inside a cottage, so walk them out). The
+recorder's `--time-of-day` works here as usual: on a page on the new engine it goes on the address as `?hour=HH:MM`,
+and the arrival check is the old page's own. Stop it with `kill <pid>`: it stops everything it started.
+
 ## Quick proof the app works: the local smoke
 
 Before recording, or as the whole proof of a T1 change that touches the server or web app, run the local smoke. It

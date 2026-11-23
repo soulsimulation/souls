@@ -24,10 +24,23 @@ export function talkOf(s: Said, id: number, from: string, name: string, tickUs: 
 /** The take's event for a said in a chunk starting at tick `fromTick`: a mark at its tick, carrying the talk line. */
 export const markOf = (t: Talk, fromTick: number) => ({ t: t.tick - fromTick, type: 'mark' as const, name: 'said', data: { from: t.from, text: t.text } });
 
+/** Earshot (m) of a said: its reach (mm), else 12 m. */
+export const earshotOf = (reach: number) => (reach > 0 ? reach / 1000 : 12);
+
+/** Who heard a said: the other Souls (public Soul ids) within `earshot` of the speaker (positions and earshot in mm,
+ *  in the world frame, at the said's time), as the old server's `heardBy`. The dialogue dock groups lines by it, so two Souls answering one
+ *  another are one thread and broadcast cuts to their two-shot. A body the page cannot place hears nothing. */
+export function hearersOf(speaker: readonly number[] | null, earshot: number, others: Iterable<{ soul: string; p: readonly number[] | null }>): string[] {
+  if (!speaker) return [];
+  const out: string[] = [];
+  for (const o of others) if (o.p && Math.hypot(o.p[0] - speaker[0], o.p[1] - speaker[1], o.p[2] - speaker[2]) <= earshot && !out.includes(o.soul)) out.push(o.soul);
+  return out;
+}
+
 /** The old page's edge viewer message for a public `say` (EDGE-CONTRACT-v1 §7 `speech`, as the dialogue dock and the
- *  speech layer read it): said aloud, heard within its reach. Not a talk line, which the old page shows as a private
- *  pairwise exchange. `reach` mm; `id` keeps it once. */
-export function speechOf(t: Talk, reach: number) {
+ *  speech layer read it): said aloud, heard within its reach by `heardBy`. Not a talk line, which the old page shows as
+ *  a private pairwise exchange. `reach` mm; `id` keeps it once. */
+export function speechOf(t: Talk, reach: number, heardBy: string[] = []) {
   return { type: 'edge' as const, kind: 'speech', id: `v2:${t.id}`, tick: t.tick, at: t.at, from: { soulId: t.from, name: t.fromName }, text: t.text,
-    channel: { kind: 'earshot', radius: reach > 0 ? reach / 1000 : 12 } };
+    channel: { kind: 'earshot', radius: earshotOf(reach) }, heardBy };
 }

@@ -234,6 +234,80 @@
      "step": "put"
     }
    }
+  },
+  {
+   "name": "warm_every_need_met",
+   "act": {
+    "this": "c1",
+    "form": "warm"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "c1": {
+      "kind": "eden:campfire",
+      "fields": {
+       "lit": true
+      }
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "yes"
+   }
+  },
+  {
+   "name": "warm_when_out_names_light",
+   "act": {
+    "this": "c1",
+    "form": "warm"
+   },
+   "state": {
+    "actor": "b1",
+    "nodes": {
+     "c1": {
+      "kind": "eden:campfire"
+     },
+     "b1": {
+      "hands": {
+       "left": null,
+       "right": null
+      }
+     }
+    }
+   },
+   "asker": {
+    "sees": [
+     "public"
+    ]
+   },
+   "expect": {
+    "verdict": "no",
+    "reason": "field_differs",
+    "need": 0,
+    "detail": {
+     "field": "lit",
+     "found": false,
+     "wanted": {
+      "is": true
+     }
+    },
+    "fix": {
+     "form": "light"
+    },
+    "says": "not_lit"
+   }
   }
  ]
 }
