@@ -32,9 +32,19 @@ bursts and 0.26–0.31 at 1,000 `every4`.
 
 **Next limit: the clock.** Now that walks are answered and run, the clock (0.47–0.61 of a core) and the public
 stream (0.45–0.64) do more. Ticks on time fall to 96.9–98.7 % at 750 burst and 1,000 `every4`, under the 99 % bar.
-Before S8 they were above it only because Souls stood waiting for the planner. Stuck Souls on the uneven arm at
-1,000 (19–20) are the behaviour fault noted below. The 1,000 `every4` uneven rung gave no result before, because the
-gateway's control socket path was too long in the bench's folder; that is fixed in the workflow.
+Before S8 they were above it only because Souls stood waiting for the planner. The 1,000 `every4` uneven rung gave
+no result before, because the gateway's control socket path was too long in the bench's folder; that is fixed in
+the workflow.
+
+**Stuck Souls (S11).** The driver's rule is now: *stuck is an act unanswered for 60 s while its Soul, as the public
+stream shows it, was neither moving nor 1 m on* (`stuck.rule` in its report, with `onTheirWay` and `unseen`). Before,
+any act unanswered for 60 s counted. On the uneven arm that was 19–22 Souls at 1,000 `every4`, and 18–19 of them were
+long walks still going at walking speed, their agents otherwise silent (the uneven arm's heavy-tailed rates). S11 also
+fixed two real faults found on the way: a walking form run whose legs its Soul's own walk took stood at its walk
+step for good, and a jostled form walker's line question was asked anew at every pose, so its answer never matched.
+At 1,000 `every4` (two repeats) the even arm has 0 stuck, and the uneven arm has 18–19 on their way and 1 counted
+stuck: the same `take` each run, by a Soul whose body the driver does not know (outside the first agent's copy), so
+its motion cannot be read.
 
 ## 0.133, 23 Nov 2026: past 500 agents
 
