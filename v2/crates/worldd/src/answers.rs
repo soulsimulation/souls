@@ -1364,6 +1364,8 @@ pub const MOVE_ENDED: &str = "souls:move-ended";
 pub const TIMED_OUT: &str = "act.timed-out";
 /// How an act its own Soul stopped ends (#3705, a `souls:cancel` naming it), and the walk it drove with it.
 pub const STOPPED: &str = "act.stopped";
+/// How a walk ends `done` short of its goal, as near as the crowd there allows (0.133 A2-4): the receipt is a done.
+pub const DONE_SHORT: &str = "done.as-near-as-the-crowd-allows";
 
 /// The event a form or gateway walk writes when planned (C20/C29): field 1 the body, 5 the act's
 /// deadline, world time µs (its start plus its steps' span or planned route time). Its cause is the intent, so the
@@ -4125,6 +4127,9 @@ impl Clock {
     /// Ends open move `id` as it ended: its entry, then its answer. A move whose act's deadline passed while it
     /// went ends `act.timed-out`, however it ended.
     fn settle(&mut self, id: Id, how: Result<(), String>, now: Micros) {
+        // A walk that ended as near its goal as the crowd there allows says so (A2-4); taken off first, so a move no
+        // longer open leaves nothing behind.
+        let short = self.bodies.as_mut().is_some_and(|b| b.short.remove(&id));
         let Some(o) = self.open.get(&id) else { return };
         let how = match self.overdue.remove(&id) {
             true => Err(TIMED_OUT.to_owned()),
@@ -4133,7 +4138,8 @@ impl Clock {
         let (actor, sequence) = (o.actor, o.sequence);
         match how {
             Ok(()) => {
-                self.note(id, MOVE_ENDED, Some("done"), now);
+                let done = if short { DONE_SHORT } else { "done" };
+                self.note(id, MOVE_ENDED, Some(done), now);
                 self.end(id, |c| Answer::Receipt {
                     actor,
                     sequence,
