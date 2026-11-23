@@ -1582,6 +1582,10 @@ impl Forms {
                         fr.mv = Some(n);
                         // The move's record (B2) for viewers: the page draws a gesture from it (#3741).
                         if let Some(r) = w.moves.record(n) {
+                            let mut r = r.clone();
+                            if let Some(t) = w.reach.aimed(body, &r.contact) {
+                                r.target = t;
+                            }
                             let o = Open {
                                 run,
                                 body,

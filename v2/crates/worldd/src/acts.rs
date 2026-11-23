@@ -1292,6 +1292,15 @@ impl Reach for Sight<'_> {
         };
         Some(with_height(flat([a.x, a.z], [b.x, b.z]), v))
     }
+
+    /// The thing argument this body's run named, for a move at it ([`AT_ARG`]).
+    fn aimed(&self, body: Id, point: &Name) -> Option<Id> {
+        if point.as_str() == AT_ARG {
+            self.toward.get(&body).copied()
+        } else {
+            None
+        }
+    }
 }
 
 /// The point a move with no `at` and no `toward` reaches (C23, #3494): the body itself, always in reach (a wave, a
