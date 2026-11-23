@@ -171,7 +171,8 @@ export class SceneFromStream {
     if (!c || this.done) return;
     for (const id of c.removed) this.nodes.delete(id);
     for (const n of c.nodes) this.nodes.set(n.id, n);
-    if (![...this.nodes.values()].some((n) => n.tiles && plainKind(n.kind).endsWith(':ground'))) return;
+    // the open ground, with its terrain tiles or none (flat ground: N2's test world)
+    if (![...this.nodes.values()].some((n) => plainKind(n.kind).endsWith(':ground'))) return;
     this.done = true;
     const s = streamSnapshot([...this.nodes.values()], this.worldId);
     (globalThis as { __soulsStreamScene?: unknown }).__soulsStreamScene = { entities: s.entities.length, defs: s.defs.length, tiles: s.heights.size, waters: s.ground.waters.length, plain: s.plain };

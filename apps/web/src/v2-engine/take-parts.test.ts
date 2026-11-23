@@ -47,6 +47,30 @@ test('a part of a kind with an entry is handed to CreatorKinds as its definition
   assert.equal(JSON.parse(new TextDecoder().decode(applied[0][0].entry)).geometry.bounds_mm[2], 2743);
 });
 
+test('a seated part is drawn in its bay\'s slot; a part with an origin the layer has no entity for is handed on without it', () => {
+  const { kinds, applied } = fake();
+  // the map answers `get` only for kinds the library does not draw (stream-scene.ts UnlessLibrary): the part's entry is
+  // still its look
+  const entries = new (class extends Map<string, Uint8Array> { get() { return undefined; } })(bundledEntries({
+    u: { format: 'souls-entry/1', kind: 'mars:rack_upright', points: { foot: [0, 0, 0] }, geometry: { bounds_mm: [1219, 2438, 76] } },
+    b: { format: 'souls-entry/1', kind: 'mars:rack_bay', slots: { upright_a: { at_mm: [0, 0, -1448] } }, geometry: { bounds_mm: [1219, 2438, 2972] } },
+  }));
+  const parts = new CarriedParts(kinds, entries);
+  // the bay at x 65 m, z -24 m, its slot 1 at (0, 0, -1448) mm; frame A seated in it, imported as `yard-frame-1`
+  const bay = node('bay', 'mars:rack_bay@1220bf', 'g.1', [65_000_000, 0, -24_000_000], { origin: 'site-bay', slots: [[1, 0, 0, -1448, 0, 1]] });
+  const frame = node('fa', 'mars:rack_upright@1220eb', 'bay', [0, 0, 0], { slot: 1, origin: 'yard-frame-1' });
+  const old = node('fo', 'mars:rack_upright@1220eb', 'g.1', [1, 0, 0], { origin: 'e_frame1' });
+  parts.receive({ t: 'snapshot', s: { nodes: [place, ground, bay, frame, old], removed: [] } });
+  assert.deepEqual(applied.map((a) => a.map((n) => [n.id, n.defines])), [[['part:mars:rack_upright@1220eb', 'mars:rack_upright@1220eb']]], 'the part\'s own entry, before the library\'s');
+  const handed = parts.frames(0);
+  assert.deepEqual(handed.map((n) => [n.id, n.origin]), [['fa', undefined]], 'the bay (a holder) and a part the layer draws are left');
+  const m = new Map([place, ground, bay, frame].map((n) => [n.id, n]));
+  for (const n of handed) m.set(n.id, n);
+  assert.deepEqual(placedOf(m as never, 'fa')!.p.map((v) => +v.toFixed(3)), [65, 0, -25.448], 'in the slot');
+  parts.receive({ t: 'part', p: { nodes: [], removed: ['fa'], samples: [] } });
+  assert.deepEqual(parts.frames(0), []);
+});
+
 test('samples between two times are interpolated; the heading is the way of the last 5 cm or more', () => {
   const s = [{ at: 0, frame: 'g', slot: null, p: [0, 0, 0] as [number, number, number] }, { at: 10, frame: 'g', slot: null, p: [1000, 0, 0] as [number, number, number] }];
   assert.deepEqual(sampleAt(s, 5)?.p, [500, 0, 0]);
