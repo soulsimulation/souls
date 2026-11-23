@@ -1,0 +1,242 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:performer_acknowledgement",
+  "owner": "thing",
+  "links": {
+    "performer": {
+      "n": 1,
+      "from": "body",
+      "most": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "audience": {
+      "n": 2,
+      "from": "body",
+      "most": 7,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "by_performer": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        -1200
+      ],
+      "yaw_mdeg": 270000
+    },
+    "by_a1": {
+      "role": "stand",
+      "at_mm": [
+        -1200,
+        0,
+        900
+      ],
+      "yaw_mdeg": 60255
+    },
+    "by_a2": {
+      "role": "stand",
+      "at_mm": [
+        -400,
+        0,
+        900
+      ],
+      "yaw_mdeg": 79216
+    },
+    "by_a3": {
+      "role": "stand",
+      "at_mm": [
+        400,
+        0,
+        900
+      ],
+      "yaw_mdeg": 100784
+    },
+    "by_a4": {
+      "role": "stand",
+      "at_mm": [
+        1200,
+        0,
+        900
+      ],
+      "yaw_mdeg": 119745
+    },
+    "by_a5": {
+      "role": "stand",
+      "at_mm": [
+        -800,
+        0,
+        1700
+      ],
+      "yaw_mdeg": 74578
+    },
+    "by_a6": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        1700
+      ],
+      "yaw_mdeg": 90000
+    },
+    "by_a7": {
+      "role": "stand",
+      "at_mm": [
+        800,
+        0,
+        1700
+      ],
+      "yaw_mdeg": 105422
+    }
+  },
+  "slots": {
+    "performer": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        0,
+        0,
+        -1200
+      ],
+      "stand": "by_performer"
+    },
+    "a1": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        -1200,
+        0,
+        900
+      ],
+      "stand": "by_a1"
+    },
+    "a2": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        -400,
+        0,
+        900
+      ],
+      "stand": "by_a2"
+    },
+    "a3": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        400,
+        0,
+        900
+      ],
+      "stand": "by_a3"
+    },
+    "a4": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        1200,
+        0,
+        900
+      ],
+      "stand": "by_a4"
+    },
+    "a5": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        -800,
+        0,
+        1700
+      ],
+      "stand": "by_a5"
+    },
+    "a6": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        0,
+        0,
+        1700
+      ],
+      "stand": "by_a6"
+    },
+    "a7": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        800,
+        0,
+        1700
+      ],
+      "stand": "by_a7"
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      4000,
+      100,
+      4000
+    ]
+  },
+  "forms": {},
+  "roles": {
+    "performer": {
+      "need": "required",
+      "places": {
+        "in": "here",
+        "slots": [
+          "performer"
+        ],
+        "within_mm": 3000
+      },
+      "move": "bow",
+      "on_beat": true
+    },
+    "audience": {
+      "need": "required",
+      "places": {
+        "in": "here",
+        "slots": [
+          "a1",
+          "a2",
+          "a3",
+          "a4",
+          "a5",
+          "a6",
+          "a7"
+        ],
+        "within_mm": 3000
+      },
+      "move": "clap",
+      "on_beat": true
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "text": {
+    "card": "A performer bows while an accepted audience applauds; offer, accept or leave.",
+    "acknowledgement": "acknowledgement",
+    "performer_acknowledgement": "performer acknowledgement",
+    "bow_applause": "bow and applause",
+    "rules": "One performer and up to seven audience members repeat existing bow and clap gestures while participating. Nearby standing members on the same floor are asked to walk to separated places through ordinary movement admission. The performer faces the audience; audience places face the performer position in the activity frame. Each person may leave. This has no automatic finale, enforced sequence, floor ownership, speech, sound or shared animation phase.",
+    "activity": "activity"
+  },
+  "card": {
+    "text": "card",
+    "category": "activity",
+    "synonyms": [
+      "acknowledgement",
+      "performer_acknowledgement",
+      "bow_applause"
+    ]
+  }
+}
