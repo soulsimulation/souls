@@ -4,9 +4,10 @@
 //!
 //! - **Read** ([`read`]): a form's verb named `walk`, `sit`, `lie` or `rise` (T10 rule 4 keeps `souls:` verbs for the
 //!   engine's own), its target and a walk's point, parameter 1 `[x, y, z]` µm. Refused by name: `move.no-target`,
-//!   `move.bad-point`. A walk may name its gait, parameter 2 `gait:<name>`, one of [`GAITS`] (0.135 G1; the
-//!   speeds are `sim::gaits`'), else `move.unknown-gait`; with none it walks. Its ranked fallbacks (T10 rule 6) are
-//!   moves of the same form on other targets (`move.fallback-not-alike` otherwise), tried in order by the world.
+//!   `move.bad-point`. A walk may name its gait, parameter 2 a name `gait:<name>`, one of [`GAITS`] (0.135 G1;
+//!   the speeds are `sim::gaits`'), else `move.unknown-gait`; with none, or a parameter 2 that is not a name, it
+//!   walks. Its ranked fallbacks (T10 rule 6) are moves of the same form on other targets
+//!   (`move.fallback-not-alike` otherwise), tried in order by the world.
 //! - **Checked** ([`check`]) on [`Seen`]: whether the target is known, whether the body is in a seat, whether a seat is
 //!   free. The world fills it from its own tables; a client from its copy and its own moves' receipts, with `None`
 //!   for what it does not hold. A `no` is given only from what is known, and is the name the world refuses by:
@@ -135,11 +136,12 @@ fn one(
         },
         _ => Err(()),
     });
-    // A word in an intent is a name (`gait:jog`), as a set-down's `place:here`.
-    let gait = parameters.get(&2).map(|v| match v {
-        Value::Text(w) => w.as_str().strip_prefix("gait:").ok_or(()),
-        _ => Err(()),
-    });
+    // A word in an intent is a name (`gait:jog`), as a set-down's `place:here`. Only a name is read as a gait: a
+    // walk's other parameters (words a walk carries, V1b) are not its gait, and walk as before.
+    let gait = match parameters.get(&2) {
+        Some(Value::Text(w)) => Some(w.as_str().strip_prefix("gait:").ok_or(())),
+        _ => None,
+    };
     Some(ask(form, node, point, gait))
 }
 
