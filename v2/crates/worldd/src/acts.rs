@@ -1292,6 +1292,26 @@ impl Reach for Sight<'_> {
         };
         Some(with_height(flat([a.x, a.z], [b.x, b.z]), v))
     }
+
+    /// The thing argument this body's run named, for a move at it ([`AT_ARG`]). The record that names it is seen by
+    /// everyone, so a thing in a closed container is not named (#4339): the record keeps the form's own node.
+    fn aimed(&self, body: Id, point: &Name) -> Option<Id> {
+        if point.as_str() != AT_ARG {
+            return None;
+        }
+        let thing = *self.toward.get(&body)?;
+        let mut up = self.tree.node(self.tree.handle(thing)?)?.parent();
+        while let Some(p) = up {
+            let n = self.tree.node(self.tree.handle(p)?)?;
+            if entry_in(self.kinds, self.tree, &n)
+                .is_some_and(|e| crate::closed::Closed::closes(&e))
+            {
+                return None;
+            }
+            up = n.parent();
+        }
+        Some(thing)
+    }
 }
 
 /// The point a move with no `at` and no `toward` reaches (C23, #3494): the body itself, always in reach (a wave, a
