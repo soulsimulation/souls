@@ -3,14 +3,14 @@
 // It reads only the public stream through the front door: never a token, never a Soul's copy. The gateway's answers
 // to each seat's intents are the seats' own (receipts.mjs), not the viewer's.
 //
-//   const v = await streamViewer({ world, pkg });   // world: arena/v2/world.mjs startWorld's answer
+//   const v = await streamViewer({ world, pkg });   // world: arena/new-engine/world.mjs startWorld's answer
 //   v.bodies(), v.said(), v.node(clientId), v.errors; v.close()
 import { existsSync, readFileSync } from 'node:fs';
 import { registerHooks } from 'node:module';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { REPO_ROOT } from '../../../lib/paths.mjs';
-import { REPLICA_PKG } from '../../arena/v2/seat.mjs';
+import { REPLICA_PKG } from '../../arena/new-engine/seat.mjs';
 
 const WORKER = join(REPO_ROOT, 'apps/web/src/v2-engine/source/worker.ts');
 

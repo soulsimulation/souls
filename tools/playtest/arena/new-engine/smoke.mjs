@@ -4,7 +4,7 @@
 // client's thin command; the observer playing the public stream and reading the gateway's answers. Fake minds (no
 // model runs anywhere), loopback only, everything under an ignored .local/ folder. Nothing starts apps/server.
 //
-//   node tools/playtest/arena/v2/smoke.mjs [--template worlds/templates/hello-hamlet.json] [--seats 2] [--walk-to bench]
+//   node tools/playtest/arena/new-engine/smoke.mjs [--template worlds/templates/hello-hamlet.json] [--seats 2] [--walk-to bench]
 //        [--out <dir>] [--keep]
 //
 // run.sh builds what is missing (or reads V2_BIN, V2_REPLICA_PKG, V2_WEB); SOULS_REPLICA_PKG names the client's and the
@@ -17,8 +17,8 @@ import { isMain } from '../../../lib/is-main.mjs';
 import { REPO_ROOT } from '../../../lib/paths.mjs';
 import { startWorld, stopWorld, healthz } from './world.mjs';
 import { pairSeat } from './seat.mjs';
-import { streamViewer, closeViewers } from '../../observer/v2/stream.mjs';
-import { receiptReader, finalBySequence } from '../../observer/v2/receipts.mjs';
+import { streamViewer, closeViewers } from '../../observer/new-engine/stream.mjs';
+import { receiptReader, finalBySequence } from '../../observer/new-engine/receipts.mjs';
 
 const LABELS = ['alder', 'birch', 'cedar', 'dogwood', 'elm', 'fir'];
 

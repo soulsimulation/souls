@@ -4,7 +4,7 @@
 // its JSON answer is appended to the seat's transcript (`commands.jsonl`). No model runs here: a seat is a home and a
 // command line; whoever drives it (a script, a director, an agent) chooses the words.
 //
-//   const seat = await pairSeat({ world, dir, label, pkg });   // world: arena/v2/world.mjs startWorld's answer
+//   const seat = await pairSeat({ world, dir, label, pkg });   // world: arena/new-engine/world.mjs startWorld's answer
 //   await seat.join(); await seat.cli('act', '<id>', '--wait'); await seat.events(); await seat.stop();
 import { spawn } from 'node:child_process';
 import { appendFileSync, mkdirSync } from 'node:fs';

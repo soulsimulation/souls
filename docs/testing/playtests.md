@@ -56,15 +56,15 @@ snapshot it seeded, ignoring only Soul-body defs that no entity uses, because bo
 The parts above speak the old world. Their new-engine versions sit beside them (0.135 P1), and the old ones stay until
 each new one does the same job:
 
-- `tools/playtest/arena/v2/world.mjs`: a playtest world is a committed template (`worlds/templates/*.json`) exported
+- `tools/playtest/arena/new-engine/world.mjs`: a playtest world is a committed template (`worlds/templates/*.json`) exported
   with `v2/tools/import-eden/export/export.ts --template` and served by `v2/tools/dev/run.sh --facts`. Nothing starts
   `apps/server`.
-- `tools/playtest/arena/v2/seat.mjs`: a seat is paired as `v2/client/served/e2e` pairs one (the new client's
+- `tools/playtest/arena/new-engine/seat.mjs`: a seat is paired as `v2/client/served/e2e` pairs one (the new client's
   `pair.mjs`, approved by a test person), joins with `life:join`, and acts only through `v2/client/src/cli/souls.mjs`.
-- `tools/playtest/observer/v2/`: the observer plays the public stream with the old page's own stream worker, and reads
+- `tools/playtest/observer/new-engine/`: the observer plays the public stream with the old page's own stream worker, and reads
   the gateway's answers to each seat's intents through `souls.mjs events`.
 
-`node tools/playtest/arena/v2/smoke.mjs [--template <file>] [--seats n]` runs all three on a throwaway world under
+`node tools/playtest/arena/new-engine/smoke.mjs [--template <file>] [--seats n]` runs all three on a throwaway world under
 `.local/playtest-v2/` and prints one line per check.
 
 Everything prints JSON on stdout and logs to stderr. `--server-root` is the Souls checkout whose server the dev worlds

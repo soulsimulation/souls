@@ -1,5 +1,5 @@
 // The new-engine playtest world and seats (0.135 P1): the parts that need no running world. The world itself is run by
-// smoke.mjs (`node tools/playtest/arena/v2/smoke.mjs`).
+// smoke.mjs (`node tools/playtest/arena/new-engine/smoke.mjs`).
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
 import { addresses, runArgs, WORLD } from './world.mjs';
