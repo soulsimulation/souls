@@ -714,7 +714,8 @@ jobs:
 
   publish:
     needs: [preflight, ship]
-    if: ${{ !inputs.dry_run && !inputs.feed_only && !inputs.eyes_only && !inputs.receipts_only }}
+    # !cancelled(): with gate=report the receipts job (ship's need) is skipped, and a bare condition would skip publish with it
+    if: ${{ !cancelled() && needs.preflight.result == 'success' && needs.ship.result == 'success' && !inputs.dry_run && !inputs.feed_only && !inputs.eyes_only && !inputs.receipts_only }}
     runs-on: ubuntu-latest
     timeout-minutes: 10
     permissions:
