@@ -88,9 +88,10 @@ jobs:
             for arm in even uneven; do
               for r in base head; do
                 d="$PER_RUN/out/$r/500-$arm-burst-r$k"
+                mkdir -p "$(dirname "$d")"
                 CARGO_TARGET_DIR="$PER_RUN/bin-$r" bash "$r/v2/tools/bench/stage2a/rung.sh" 500 "$arm" burst "$world" 120 "$d" > "$d.log" 2>&1 || true
                 line=$(grep '^rung ' "$d.log" | tail -1)
-                if [ -z "$line" ]; then echo "$r $arm r$k: no result"; tail -5 "$d.log"; continue; fi
+                if [ -z "$line" ]; then echo "$r $arm r$k: no result"; tail -5 "$d.log" || true; continue; fi
                 node -e '
                   const [r, arm, k, line] = process.argv.slice(1); const o = JSON.parse(line.slice(5));
                   const pl = (o.threads.world.find(([n]) => n === "planner") ?? [, 0])[1];
