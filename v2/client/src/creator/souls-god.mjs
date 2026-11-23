@@ -6,6 +6,8 @@
 //
 //   souls-god.mjs pair <world url> --creator <creator grant>   asks the world's directory for the creator's token
 //   souls-god.mjs describe                       what is there (id, kind, parent) and what each kind admits
+//   souls-god.mjs describe <id>                  one thing: its kind and card, each frame it is in, its spot, its fields
+//                                                by name, its slots and what holds each, what is in it, its marks (R8b)
 //   souls-god.mjs map                            the world at a glance: the extent of what stands, its buildings, named
 //                                                things, roads and zones, each with its centre and size in metres (R8d)
 //   souls-god.mjs place <kind> --in <id> [--at x,y,z] [--slot n] [--field n=v ...]   a new thing; mm in the parent
@@ -15,6 +17,9 @@
 //   souls-god.mjs move <id> --at x,y,z [--slot n]                                     to another spot, same parent
 //   souls-god.mjs move <id> [<id> ...] --by dx,dz [--yaw r]   each that far over (metres), what is in it riding along;
 //                                                on the open ground it keeps its height over the ground
+//   souls-god.mjs select [--kind k] [--name words] [--in id] [--area x0,z0,x1,z1] [--near x,z [--radius m]]
+//                         [--remove | --by dx,dz [--yaw r]]   what matches (at most 1000), or all of it removed or
+//                                                moved in one edit (metres)
 //   souls-god.mjs clone <id> [--at x,z] [--count n] [--step dx,dz] [--yaw r]   copies of it and all in it (doorways
 //                                                and stairs too), the first one step away unless --at (metres)
 //   souls-god.mjs set <id> <field> <value>       one numbered field: an integer, true, false or a name
@@ -134,6 +139,7 @@ import { F_HOURS, hoursRows } from '../schedule/hours.mjs';
 import { parseShoot, runShoot } from '../shoot/shoot.mjs';
 import { parseSpace, runSpace } from './space.mjs';
 import { TRACE_MOST } from './trace.mjs';
+import { describeThing } from './thing.mjs';
 import { mapOf } from './map.mjs';
 import { kindsIn } from '../check/state.mjs';
 import { inSession, recordEdit, sessionAct } from './session.mjs';
@@ -176,6 +182,7 @@ export const VERBS = [
   'redo',
   'remove',
   'secret',
+  'select',
   'set',
   'sky',
   'status',
@@ -194,7 +201,7 @@ export const VERBS = [
   'zone-suggest',
 ];
 /** The world's verbs (#3695): the daemon makes their sets on the world node from its copy (`world.mjs`). */
-export const WORLD_VERBS = ['weather', 'sky', 'strike', 'land', 'time', 'expand', 'furnish', 'clone'];
+export const WORLD_VERBS = ['weather', 'sky', 'strike', 'land', 'time', 'expand', 'furnish', 'clone', 'select'];
 /** A world verb by its words, made on the daemon's copy (#3728): a place by its shape (a road or an area, on the
  *  open ground it knows) and `move --by`; `move --at` is G1's move. */
 const SHAPES = ['--path', '--area', '--rect', '--circle'];
@@ -285,6 +292,9 @@ export const FIX = {
   'clone.count': '--count is 1 to 100',
   'clone.flag': 'clone <id> [--at x,z] [--count n] [--step dx,dz] in metres [--yaw r in radians]',
   'clone.off-the-ground': 'start nearer, or with fewer copies or a smaller step: the world\'s ground ends there',
+  'select.flag': 'select [--kind k] [--name words] [--in id] [--area x0,z0,x1,z1] [--near x,z --radius m] [--remove | --by dx,dz]',
+  'select.nothing': 'nothing matches: describe, or widen the filters',
+  'select.too-many': 'select fewer: one edit changes at most 256 things',
   'export.file': 'export [file]: a file path to write',
   'edit.off-ground': 'put it somewhere on the world\'s ground: describe shows where things stand',
   'not-a-creator': 'pair with --creator <the world\'s creator grant>',
@@ -478,7 +488,9 @@ export function worldVerbOf(verb, words) {
     place: ['path', 'width', 'area', 'rect', 'circle', 'in'],
     move: ['by', 'yaw'],
     clone: ['at', 'count', 'step', 'yaw'],
+    select: ['kind', 'name', 'in', 'area', 'near', 'radius', 'by', 'yaw'],
   }[verb];
+  if (verb === 'select') { const k = args.indexOf('--remove'); if (k >= 0) { args.splice(k, 1); out.remove = true; } }
   for (const f of flags) { const v = takeOpt(args, `--${f}`); if (v !== undefined) out[f] = v; }
   if (verb === 'strike' && out.at === undefined && args[0] !== undefined) out.at = args.shift();
   if (verb === 'time') {
@@ -552,6 +564,8 @@ export function requestOf(argv) {
     return { listen: { seconds: Number(secs), follow }, creator };
   }
   if (verb === 'visitors') return { directory: '/v1/worlds/visitors', body: {}, creator };
+  // R8b: one thing, read from the copy (thing.mjs)
+  if (verb === 'describe' && rest.length) { if (rest.length !== 1) throw usage('describe [<id>]'); return { thing: rest[0], creator }; }
   // R8d: the world at a glance, read from the copy (map.mjs)
   if (verb === 'map') { if (rest.length) throw usage('map'); return { map: true, creator }; }
   if (verb === 'status' || verb === 'stop' || verb === 'describe' || verb === 'redo') return { req: { op: verb }, creator };
@@ -1012,6 +1026,13 @@ if (isMain(import.meta.url)) {
     // A helper's home sends every edit under its claim (#3727).
     const scoped = helperClaim(home);
     if (scoped && req && (req.op === 'edit' || req.op === 'check') && req.claim === undefined) req = { ...req, claim: scoped };
+    if (asked.thing !== undefined) {
+      const d = await ask({ op: 'describe' }, 15_000), f = d.ok === false ? null : await ask({ op: 'fields', node: asked.thing }, 15_000);
+      const said = d.ok === false ? d : f.ok === false ? f : describeThing(asked.thing, d, f.fields, kindsIn(join(home, 'kinds')));
+      out(withFix(said));
+      if (said.ok === false) process.exitCode = 1;
+      process.exit();
+    }
     if (asked.map) {
       const d = await ask({ op: 'describe' }, 15_000), root = d.ok === false ? null : await ask({ op: 'fields' }, 15_000);
       const said = d.ok === false ? d : mapOf(d, root?.ok === false ? {} : root?.fields ?? {}, kindsIn(join(home, 'kinds')));

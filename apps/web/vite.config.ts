@@ -289,7 +289,7 @@ export default defineConfig({
     // CDN4: god uploads via the pull-through Worker on assets.eden.art/w/* (default on; needs the CDN switch above)
     __SIM_GOD_UPLOADS_CDN__: process.env.SIM_GOD_UPLOADS_CDN!=='0',
     __SIM_ASSETS_CDN_ORIGIN__: JSON.stringify(process.env.SIM_ASSETS_CDN_ORIGIN ?? 'https://assets.eden.art') },
-  // #4153: the v2 stream reader's worker (v2/web/src/source, reused as it is) imports `replica` (the new engine's WASM)
+  // #4153: the v2 stream reader's worker (src/v2-engine/source, copied from v2/web/src/source by X1) imports `replica` (the new engine's WASM)
   // and `cborg` (ours). #4177: the default build loads the replica the front door serves for a world routed to v2
   // (replica-served.ts), so no Rust build is needed and its bytes match the deployed v2; V2_REPLICA_PKG bundles a package.
   resolve: { alias: [
