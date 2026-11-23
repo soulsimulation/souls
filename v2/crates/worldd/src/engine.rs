@@ -144,7 +144,7 @@ pub struct Engine {
     /// The crews' seating, when the world's kinds join parts (0.135 A2, [`Engine::with_structure`]).
     asm: Option<crate::assembly::Assembly>,
     /// Each take waiting for its commit: the crew's ground, its node's pose and its audience, to start its carry.
-    taking: BTreeMap<Id, (Id, Vec3, replica::pose::Quat)>,
+    taking: BTreeMap<Id, (Id, Vec3, replica::pose::Quat, i64)>,
     /// The entries the joined-part rule was read from, to read it again for the activities after a restart.
     joining: Option<Json>,
     /// Loads found riding a carry at a restart, set down at the first tick (0.135 C3): (activity, load).
@@ -270,6 +270,12 @@ fn param_kind(p: &BTreeMap<u64, Value>, k: u64, what: &'static str) -> R<Name> {
         },
         _ => param_name(p, k, what),
     }
+}
+
+/// How far apart two carriers stand along the ground, µm.
+fn apart(f: Vec3, k: Vec3) -> i64 {
+    let (dx, dz) = (i128::from(f.x - k.x), i128::from(f.z - k.z));
+    i64::try_from((dx * dx + dz * dz).isqrt()).unwrap_or(i64::MAX)
 }
 
 /// Where the controller has a body: the node it stands on and its position there.
@@ -624,6 +630,7 @@ impl Engine {
                         reach,
                         from,
                         ground,
+                        apart(f, k),
                     )?;
                     self.carries.remove(&activity);
                     self.push(effects, Some(by));
@@ -645,7 +652,8 @@ impl Engine {
                         a.verb == Verb::Unseat,
                         slots.reach_of(front).min(slots.reach_of(back)),
                     )?;
-                    self.taking.insert(activity, (ground, at, turn));
+                    self.taking
+                        .insert(activity, (ground, at, turn, apart(f, k)));
                 }
             }
             Verb::Lift | Verb::SetDown => {
@@ -949,6 +957,7 @@ impl Engine {
                 self.rules.clone(),
             );
             carry.track.push((now, s.end.0, s.end.1));
+            carry.span = s.span;
             self.carries.insert(activity, carry);
         }
     }
@@ -981,7 +990,7 @@ impl Engine {
             self.stop_refused(&mut tree, now);
             return;
         }
-        let (Some(asm), Some((ground, at, turn))) = (self.asm.as_mut(), taking) else {
+        let (Some(asm), Some((ground, at, turn, span))) = (self.asm.as_mut(), taking) else {
             return;
         };
         let part = asm.held.get(&r.activity).copied();
@@ -1000,6 +1009,8 @@ impl Engine {
                     self.rules.clone(),
                 );
                 carry.track.push((now, at, turn));
+                // Its carriers' span at the take: a carry they let drift apart breaks off (0.135 C3).
+                carry.span = span;
                 self.carries.insert(r.activity, carry);
             }
             _ => asm.written(r.activity, r.step, false),

@@ -125,6 +125,8 @@ pub struct Setting {
     reach: i64,
     track: Owner,
     pub end: (Vec3, Quat),
+    /// Between its carriers along the ground when the put was asked, µm: the carry's span when it starts again.
+    pub span: i64,
 }
 
 /// The crews' seating in a running world.
@@ -345,6 +347,7 @@ impl Assembly {
         reach: i64,
         from: (Vec3, Quat),
         ground: Id,
+        apart: i64,
     ) -> R<Vec<Effect>> {
         let part = *self
             .held
@@ -453,6 +456,7 @@ impl Assembly {
                 reach,
                 track: Owner::Track(Track::Straight { t0: now, velocity }),
                 end: (at, from.1),
+                span: apart,
             },
         );
         Ok(effects)

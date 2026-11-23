@@ -2611,6 +2611,8 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     hands[2].send("part:put", crew_b, into("upright_a"));
     let got = socket_end(&mut hands[0].s);
     println!("crew A puts frame A in upright_a: {got:?}");
+    for p in logged(&w) { for e in &p.effects { let t = format!("{:?}", e); if t.contains("apart") || t.contains("partner-left") || t.contains("restarted") { println!("DEBUG {}", &t[t.len().saturating_sub(700)..]); } } }
+    for l in s.lines.try_iter() { println!("DEBUG {l}"); }
     assert_eq!(got.kind, 1, "frame A in");
     let got = socket_end(&mut hands[2].s);
     refused(
