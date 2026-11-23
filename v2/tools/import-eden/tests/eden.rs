@@ -5,9 +5,9 @@
 
 use import_eden::json::{self, Json};
 use import_eden::{
-    F_DOORWAY, F_DOORWAYS, F_HEIGHT, F_LINE, F_LINE_WIDTH, F_NAME, F_OUTLINE, F_PARAMS, F_PLACE_KIND,
-    F_PLACE_OF, F_SILL, F_STAIRS, F_TILE_SIZE, F_TILES, F_WIDTH, FLOOR, Import, PLACE, ROOM,
-    WINDOW, base64, count, load, world_of,
+    F_DOORWAY, F_DOORWAYS, F_HEIGHT, F_LINE, F_LINE_WIDTH, F_NAME, F_OUTLINE, F_PARAMS,
+    F_PLACE_KIND, F_PLACE_OF, F_SILL, F_STAIRS, F_TILE_SIZE, F_TILES, F_WIDTH, FLOOR, Import,
+    PLACE, ROOM, WINDOW, base64, count, load, world_of,
 };
 use replica::effects::{Header, Part};
 use replica::encode::{Name, Value};
@@ -459,12 +459,17 @@ fn a_things_params_are_its_field_19() {
     assert_ne!(text, SMALL);
     let im = load(&text).expect("loads");
     let field = |im: &Import, key: &str| {
-        let n = im.tree.node(im.tree.handle(im.nodes[key]).unwrap()).unwrap();
+        let n = im
+            .tree
+            .node(im.tree.handle(im.nodes[key]).unwrap())
+            .unwrap();
         n.fields().get(&F_PARAMS).cloned()
     };
     assert_eq!(
         field(&im, "e_house"),
-        Some(Value::Bytes(br#"{"w":12,"material":"brick","roofPitch":22.5}"#.to_vec()))
+        Some(Value::Bytes(
+            br#"{"w":12,"material":"brick","roofPitch":22.5}"#.to_vec()
+        ))
     );
     assert_eq!(field(&im, "e_chair"), None);
 }
