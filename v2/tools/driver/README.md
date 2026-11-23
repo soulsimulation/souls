@@ -33,7 +33,9 @@ target/release/driver --schedule <run folder>/schedule.txt --dir <run folder> [-
   minute of the run, receipts (a receipt, or a move's acceptance) and receipts a second, act latency from send to
   the act's first answer (receipt or refusal) at p50, p95 and p99, refusals by name, and errors by name
   (`unanswered` 5 s after the last send, `socket-closed`, `send-failed`, a gateway's own word such as
-  `token.refused`).
+  `token.refused`). A `claim-taken` on an act the same agent's later act already replaced is the open loop's own
+  doing, not the world refusing a Soul: it is counted as `replacedByOwnAct`, not as a refusal, and `--trace` writes
+  it as `claim-taken replaced-by <sequence>` (#4171).
 
 ## A served world (X7, #4015)
 
