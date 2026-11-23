@@ -379,7 +379,12 @@ jobs:
         if: always()
         run: |
           if [ -n "${PER_RUN:-}" ]; then
-            if [ -f "$PER_RUN/check.pgid" ]; then kill -TERM -- "-$(cat "$PER_RUN/check.pgid")" 2>/dev/null && sleep 5; fi
+            if [ -f "$PER_RUN/check.pgid" ]; then
+              pgid=$(cat "$PER_RUN/check.pgid")
+              kill -TERM -- "-$pgid" 2>/dev/null && sleep 5
+              # the world's folder on /dev/shm is named by the check's pid (its group's id); the check removes it itself
+              rm -rf "/dev/shm/check-0132-$pgid-"*
+            fi
             rm -rf "$PER_RUN"
           fi
           rm -rf src

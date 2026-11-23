@@ -10,6 +10,7 @@
 //   --pkg    replica's wasm-bindgen package of the same head (target/wasm-load/pkg): the page's and the client's
 //   --card   the new page's build (v2/web/dist): the front door serves the pairing card (/pair) from it
 //   --facts  Eden's facts (v2/tools/import-eden/export/export.ts; exported here when not given)
+//   --world-root  the world's folder's parent (default /dev/shm on Linux, else the out folder)
 //   --gl soft  SwiftShader even where there is a GPU (line 2 is then not reported)
 //   --mars-web  the people's character set the old page draws (default mars/viewer/dist/client, `pnpm build:viewer`)
 //   The old page is this checkout's apps/web/dist (`pnpm --filter web build`); caddy and node on PATH.
@@ -23,9 +24,9 @@
 // 4. A browser smoke: home, sign-in, sound, music, the camera.
 // Prints a pass/fail table and writes report.json (and the clip) to the out folder. Exit 0 when every line passes.
 import { spawn, execFileSync } from 'node:child_process';
-import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
+import { copyFileSync, cpSync, existsSync, mkdirSync, readdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
-import { dirname, join, resolve } from 'node:path';
+import { basename, dirname, join, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 
@@ -73,7 +74,14 @@ const json = async (url, init) => { const r = await fetch(url, init); return { s
 // ---- the stack ----
 const facts = opt('facts') ? resolve(opt('facts')) : join(OUT, 'eden-2026.facts.json');
 if (!opt('facts')) { log('exporting Eden\'s facts'); execFileSync(process.execPath, ['v2/tools/import-eden/export/export.ts'], { cwd: repo, stdio: 'ignore' }); copyFileSync(join(repo, '.local/import-eden/eden-2026.facts.json'), facts); }
-const W = join(OUT, 'world'), E = join(OUT, 'entries');
+// The world's folder on a disk of its own where there is one (/dev/shm on Linux, as v2/tools/bench/stage2a/rung.sh's
+// WORLD_ROOT): on a shared build machine the log's syncs otherwise wait on CI's disk (B3-7: log.sync p99 1.31 s), which
+// is the machine's, not the world's. `--world-root` names another; it and its socket are removed at the end.
+const ROOT = opt('world-root', process.platform === 'linux' && existsSync('/dev/shm') ? '/dev/shm' : OUT);
+const W = join(ROOT, ROOT === OUT ? 'world' : `check-0132-${process.pid}-${randomBytes(4).toString('hex')}`), E = join(OUT, 'entries');
+if (ROOT !== OUT && !KEEP) process.on('exit', () => { for (const f of readdirSync(ROOT)) if (f === basename(W) || f.startsWith(`${basename(W)}.`)) try { rmSync(join(ROOT, f), { recursive: true, force: true }); } catch { /* gone */ } });
+/** The world's own log-sync times (its health.json, O4's `parts`), or null. */
+const logSync = () => { try { return JSON.parse(readFileSync(join(W, 'health.json'), 'utf8')).parts?.['log.sync'] ?? null; } catch { return null; } };
 cpSync(join(repo, 'content/kinds'), E, { recursive: true });
 log(`seeding Eden with ${AGENTS} test Souls`);
 execFileSync(join(BIN, 'worldd'), ['seed', '--facts', facts, '--dir', W, '--entries', E, '--souls', String(AGENTS)], { stdio: ['ignore', 'ignore', 'ignore'] });
@@ -374,6 +382,7 @@ else if (ONLY.has('2')) {
     await step('gesture', () => body ? cli('act', `wave:${body}`, `clap:${body}`) : { ok: false, detail: 'own body not known' }, (s) => s.acts.some((a) => /wave|clap|gesture/.test(a)) || /wave|clap/.test(s.activity ?? ''));
     await sleep(3000);
   }
+  report.lines[2].logSync = logSync();
   cli('quit'); // the agent's daemon is this run's: stopped by its own command
   await ctx.close(); // the clip is written on close
   report.clip = 'clip/';
@@ -461,13 +470,13 @@ if (ONLY.has('3')) {
   row(3, 'no two bodies overlap for more than a moment', overlapPairs === 0 && samples > 0, `${overlapPairs} pairs closer than 0.3 m in two chunks running, over ${samples} chunks; worst ${worst.overlapChunks} chunks (${worst.pair ?? 'none'})`);
   row(3, 'no body ignores a new intent', ignored.length === 0 && firsts.size > 0, `${ignored.length} of ${firsts.size + ignored.length} intents never answered${ignored.length ? `; first: agent ${ignored[0].split(' ')[0]}` : ''}`);
   row(3, 'no Soul stuck over 10 s without a receipt saying why', slow.length === 0 && ignored.length === 0 && firsts.size > 0, `${slow.length} acts answered after more than 10 s (worst ${slow[0] ? `${(slow[0][1] / 1000).toFixed(1)} s, agent ${slow[0][0].split(' ')[0]}` : 'none'}), ${ignored.length} never`);
-  report.lines[3] = { happened, overlapPairs, samples, worstOverlap: worst, intents: firsts.size + ignored.length, ignored: ignored.length, answeredAfter10s: slow.length, worstAnswerMs: slow[0]?.[1] ?? null };
+  report.lines[3] = { logSync: logSync(), happened, overlapPairs, samples, worstOverlap: worst, intents: firsts.size + ignored.length, ignored: ignored.length, answeredAfter10s: slow.length, worstAnswerMs: slow[0]?.[1] ?? null };
 }
 
 await browser.close();
 report.rows = rows;
 writeFileSync(join(OUT, 'report.json'), JSON.stringify(report, null, 2));
-const table = [`Renderer: ${gl.renderer ?? 'none'} (${gl.software ? 'software' : 'hardware'}, ${gl.flags})`, '', '| line | check | result | detail |', '|---|---|---|---|',
+const table = [`Renderer: ${gl.renderer ?? 'none'} (${gl.software ? 'software' : 'hardware'}, ${gl.flags})`, `World folder: ${ROOT === OUT ? 'the out folder' : ROOT}; its log.sync (health.json, µs): ${JSON.stringify(logSync())}`, '', '| line | check | result | detail |', '|---|---|---|---|',
   ...rows.map((r) => `| ${r.line} | ${r.what} | ${r.pass ? 'pass' : 'FAIL'} | ${r.detail.replaceAll('|', '/')} |`)].join('\n');
 writeFileSync(join(OUT, 'table.md'), table + '\n');
 console.log(`\n${table}`);
