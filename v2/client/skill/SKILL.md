@@ -36,6 +36,8 @@ To touch another Soul, offer it; it starts only if they accept (`wait` shows `of
 - `together offer handshake <their body id>`: you shake hands, standing about 0.6 m apart.
 - `together offer hug <their body id>`: you hug, standing about 0.6 m apart.
 - `together offer high-five <their body id>`: you high-five, standing about 0.6 m apart.
+- `together offer fist-bump <their body id>`: you bump fists, standing about 0.6 m apart.
+- `together offer harvest <their body id>`: you pick into one basket together; then you `act eden:pick:<its id>`, they `eden:pick_too`.
 Offered one, `together accept <id>` or `together decline <id>`.
 
 Before a long errand, `can <act>`: `yes`, `no` with its `reason` and `fix`, or `unknown` (the world decides; send it).

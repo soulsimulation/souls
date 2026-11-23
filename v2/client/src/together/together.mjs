@@ -3,7 +3,7 @@
 // its move). Each command is the intents it sends, built here with no daemon and no world, so it is read and tested
 // on its own.
 //
-//   together offer <handshake|hug|high-five> <body id>   offers that body the touch (`activity:offer` of its kind,
+//   together offer <handshake|hug|high-five|fist-bump|harvest> <body id>   offers that body the touch (`activity:offer` of its kind,
 //                                                        this Soul in the first role)
 //   together accept|decline <offer id>                   accepts, and both touch; or declines, and nobody moves
 //
@@ -15,6 +15,9 @@ export const KINDS = Object.freeze({
   handshake: 'eden:handshake_activity@1220b6204784ae7087cc16cd7d3b0b22bc7f851c2de8c2af7ae6b677d0a59b381682',
   'high-five': 'eden:high_five_activity@1220fd403508fcecb98fb4aff58e9b5450e67696a75b6fef0c7307b130be85453111',
   hug: 'eden:hug_activity@1220fe29f4c50afff5fc6ec78e7fd295cf2e4bde5b6a888d7dbfb4252e779446abd1',
+  // 0.135 E1: a fist bump, and harvesting into one basket (each member then picks with the activity's own form).
+  'fist-bump': 'eden:fist_bump_activity@12205c839cc6ba88bb9358e77b2d81fae60e8a750317deab8f736f6c28fb97b8fdab',
+  harvest: 'eden:harvest_together_activity@122032f46f98ac775f66fcc1ec36723d03fc63a16ba5a0835e99c31b55e2c16b885b',
 });
 export const OFFERER = 'eden:one';
 

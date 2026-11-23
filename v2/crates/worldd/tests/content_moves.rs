@@ -177,8 +177,8 @@ fn parity_nod_and_shake_head_are_head_gestures_of_today_s_length() {
     }
 }
 
-/// 0.134 B2 (for lane T's touch activities): handshake, hug and high-five are contact moves within an arm's reach
-/// (at most `REACH_MOST`), each reaching a named point of the other body that the move itself fixes.
+/// 0.134 B2 (for lane T's touch activities): handshake, hug, high-five and (0.135 E1) fist bump are contact moves
+/// within an arm's reach (at most `REACH_MOST`), each reaching a named point of the other body that the move fixes.
 #[test]
 fn the_touch_moves_reach_a_named_point_of_the_other_body_within_an_arm() {
     let lib = worldd::acts::library().unwrap();
@@ -186,6 +186,7 @@ fn the_touch_moves_reach_a_named_point_of_the_other_body_within_an_arm() {
         ("handshake", "souls:hand-right"),
         ("hug", "souls:chest"),
         ("high_five", "souls:hand-right"),
+        ("fist_bump", "souls:hand-right"),
     ] {
         let m = lib
             .iter()
