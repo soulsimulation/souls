@@ -42,14 +42,16 @@
     ]
   },
   "forms": {
-    "left_over_0": {
+    "braid": {
       "who": "anyone",
       "starts": "act",
       "needs": [
         {
           "need": "state",
           "field": "stage",
-          "is": 0,
+          "is": {
+            "arg": "after"
+          },
           "says": "wrong_stage"
         },
         {
@@ -77,19 +79,34 @@
         {
           "change": "set",
           "field": "stage",
-          "to": 1,
-          "event": "crossing_changed"
+          "event": "crossing_changed",
+          "by": 1
         }
-      ]
+      ],
+      "takes": {
+        "after": {
+          "type": "value",
+          "of": [
+            0,
+            1,
+            2,
+            3,
+            4,
+            5
+          ]
+        }
+      }
     },
-    "right_over_1": {
+    "undo": {
       "who": "anyone",
       "starts": "act",
       "needs": [
         {
           "need": "state",
           "field": "stage",
-          "is": 1,
+          "is": {
+            "arg": "after"
+          },
           "says": "wrong_stage"
         },
         {
@@ -117,410 +134,23 @@
         {
           "change": "set",
           "field": "stage",
-          "to": 2,
-          "event": "crossing_changed"
-        }
-      ]
-    },
-    "left_over_2": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "stage",
-          "is": 2,
-          "says": "wrong_stage"
-        },
-        {
-          "need": "hand",
-          "free": true,
-          "says": "free_hand"
-        },
-        {
-          "need": "within_reach",
-          "point": "practice"
+          "event": "crossing_changed",
+          "by": -1
         }
       ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand"
-        },
-        {
-          "step": "move",
-          "move": "touch",
-          "at": "practice"
+      "takes": {
+        "after": {
+          "type": "value",
+          "of": [
+            1,
+            2,
+            3,
+            4,
+            5,
+            6
+          ]
         }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "stage",
-          "to": 3,
-          "event": "crossing_changed"
-        }
-      ]
-    },
-    "right_over_3": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "stage",
-          "is": 3,
-          "says": "wrong_stage"
-        },
-        {
-          "need": "hand",
-          "free": true,
-          "says": "free_hand"
-        },
-        {
-          "need": "within_reach",
-          "point": "practice"
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand"
-        },
-        {
-          "step": "move",
-          "move": "touch",
-          "at": "practice"
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "stage",
-          "to": 4,
-          "event": "crossing_changed"
-        }
-      ]
-    },
-    "left_over_4": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "stage",
-          "is": 4,
-          "says": "wrong_stage"
-        },
-        {
-          "need": "hand",
-          "free": true,
-          "says": "free_hand"
-        },
-        {
-          "need": "within_reach",
-          "point": "practice"
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand"
-        },
-        {
-          "step": "move",
-          "move": "touch",
-          "at": "practice"
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "stage",
-          "to": 5,
-          "event": "crossing_changed"
-        }
-      ]
-    },
-    "right_over_5": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "stage",
-          "is": 5,
-          "says": "wrong_stage"
-        },
-        {
-          "need": "hand",
-          "free": true,
-          "says": "free_hand"
-        },
-        {
-          "need": "within_reach",
-          "point": "practice"
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand"
-        },
-        {
-          "step": "move",
-          "move": "touch",
-          "at": "practice"
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "stage",
-          "to": 6,
-          "event": "crossing_changed"
-        }
-      ]
-    },
-    "undo_1": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "stage",
-          "is": 1,
-          "says": "wrong_stage"
-        },
-        {
-          "need": "hand",
-          "free": true,
-          "says": "free_hand"
-        },
-        {
-          "need": "within_reach",
-          "point": "practice"
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand"
-        },
-        {
-          "step": "move",
-          "move": "touch",
-          "at": "practice"
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "stage",
-          "to": 0,
-          "event": "crossing_changed"
-        }
-      ]
-    },
-    "undo_2": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "stage",
-          "is": 2,
-          "says": "wrong_stage"
-        },
-        {
-          "need": "hand",
-          "free": true,
-          "says": "free_hand"
-        },
-        {
-          "need": "within_reach",
-          "point": "practice"
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand"
-        },
-        {
-          "step": "move",
-          "move": "touch",
-          "at": "practice"
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "stage",
-          "to": 1,
-          "event": "crossing_changed"
-        }
-      ]
-    },
-    "undo_3": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "stage",
-          "is": 3,
-          "says": "wrong_stage"
-        },
-        {
-          "need": "hand",
-          "free": true,
-          "says": "free_hand"
-        },
-        {
-          "need": "within_reach",
-          "point": "practice"
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand"
-        },
-        {
-          "step": "move",
-          "move": "touch",
-          "at": "practice"
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "stage",
-          "to": 2,
-          "event": "crossing_changed"
-        }
-      ]
-    },
-    "undo_4": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "stage",
-          "is": 4,
-          "says": "wrong_stage"
-        },
-        {
-          "need": "hand",
-          "free": true,
-          "says": "free_hand"
-        },
-        {
-          "need": "within_reach",
-          "point": "practice"
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand"
-        },
-        {
-          "step": "move",
-          "move": "touch",
-          "at": "practice"
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "stage",
-          "to": 3,
-          "event": "crossing_changed"
-        }
-      ]
-    },
-    "undo_5": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "stage",
-          "is": 5,
-          "says": "wrong_stage"
-        },
-        {
-          "need": "hand",
-          "free": true,
-          "says": "free_hand"
-        },
-        {
-          "need": "within_reach",
-          "point": "practice"
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand"
-        },
-        {
-          "step": "move",
-          "move": "touch",
-          "at": "practice"
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "stage",
-          "to": 4,
-          "event": "crossing_changed"
-        }
-      ]
-    },
-    "undo_6": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "stage",
-          "is": 6,
-          "says": "wrong_stage"
-        },
-        {
-          "need": "hand",
-          "free": true,
-          "says": "free_hand"
-        },
-        {
-          "need": "within_reach",
-          "point": "practice"
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "stand"
-        },
-        {
-          "step": "move",
-          "move": "touch",
-          "at": "practice"
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "stage",
-          "to": 5,
-          "event": "crossing_changed"
-        }
-      ]
+      }
     }
   },
   "motion": {
@@ -2386,30 +2016,5 @@
       "braid",
       "cord"
     ]
-  },
-  "howtos": {
-    "braid": {
-      "text": "howto_braid",
-      "steps": [
-        {
-          "form": "left_over_0"
-        },
-        {
-          "form": "right_over_1"
-        },
-        {
-          "form": "left_over_2"
-        },
-        {
-          "form": "right_over_3"
-        },
-        {
-          "form": "left_over_4"
-        },
-        {
-          "form": "right_over_5"
-        }
-      ]
-    }
   }
 }
