@@ -607,6 +607,47 @@ impl Activities {
         Ok(())
     }
 
+    /// Every activity running, by id (0.135 C3: worldd finds the loads riding them after a restart).
+    pub fn ids(&self) -> Vec<Id> {
+        self.live.keys().copied().collect()
+    }
+
+    /// The world's word that a carry in `activity` broke off and `load` was set down where it was, and `why`
+    /// (`souls:partner-left`, `souls:carriers-apart`, `souls:world-restarted`): `souls:carry-set-down`, `{1: activity, 2: load, 3: why}`,
+    /// to the activity's audience, acted and caused as `by` says (0.135 C3).
+    pub fn carry_set_down(
+        &mut self,
+        tree: &mut Tree,
+        activity: Id,
+        load: Id,
+        why: &'static str,
+        by: (Micros, Actor, Cause),
+    ) -> R<()> {
+        let audience = self
+            .live
+            .get(&activity)
+            .map_or(Audience::Everyone, |l| l.audience);
+        let fields = BTreeMap::from([
+            (1, activity.to_value()),
+            (2, load.to_value()),
+            (3, Value::Text(name(why))),
+        ]);
+        let node = if tree.handle(activity).is_some() {
+            activity
+        } else {
+            load
+        };
+        self.emit(
+            tree,
+            node,
+            audience,
+            by,
+            "souls:carry-set-down",
+            fields,
+            Vec::new(),
+        )
+    }
+
     /// The bodies of the activities started since [`Activities::begin_moves`] last ran: whom their moves reach.
     pub fn beginning(&self) -> Vec<Id> {
         self.begun
