@@ -29,6 +29,15 @@ Before starting the old launcher, install its operator-owned `/etc/souls/cutover
 {"oldWorldId":"<stable old registry worldId>","canonicalSlug":"eden","routesFile":"/var/lib/souls/routes/worlds.json","clientDir":"/usr/local/lib/souls/client"}
 ```
 
+While Eden is routed (#4177), the launcher writes `v2Stream` (the route's `stream`) into the world page's inline config,
+and `v2Bodies` when the binding names it: the same-origin directory serving the v2 body catalogue (`bodies.json`). Rollback
+removes both. With an optional absolute `staticDir` (the directory the v2 origin serves as `<stream>static/`), the first
+routed page publishes the old world's read-only views there (`scene.json`, `snapshot.json`, `items.json`,
+`platforms.json`, `config.json`, `kernel.json`, then `manifest.json`), and the page's reads of them are answered from those
+files. `/v1/config` keeps the served client's answer. The page loads the replica (`replica.js`, `replica_bg.wasm`) that
+the launcher serves from `clientDir` for the routed world. Known limit: god edits made on v2 after the switch are not in
+those files until a converter from v2 facts exists. The launcher's user must be able to write `staticDir`.
+
 The launcher reads `cutover-binding.json` through `/etc/souls`, which the install makes and keeps 751 (it can enter, not list); give the file mode 644 (check: `runuser -u simworlds -- test -r /etc/souls/cutover-binding.json`).
 
 Today's launcher runs as `simworlds`, outside the Souls group, and reads `routesFile` on every Eden write: the install keeps `/var/lib/souls` at 751 and `routes/` at 755 so it can (check: `runuser -u simworlds -- test -r /var/lib/souls/routes/worlds.json`). Unreadable, Eden's writes answer `cutover.activation-unavailable`. Use the resolved old registry identity, including existing aliases, rather than assuming the public slug is the
