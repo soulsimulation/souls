@@ -153,7 +153,7 @@ use sim::checkpoint::{self, Blobs, Checkpoints};
 use sim::clock::{Clock as Pace, Heartbeat, Ticker};
 use sim::commit::acts::{Deadlines, Receipts, Seen, Sequences, expired};
 use sim::commit::spot::{self, Spot as Bound};
-use sim::commit::{Checks, Outcome, commit, mark_clock_thread};
+use sim::commit::{Checks, Outcome, mark_clock_thread};
 use sim::daylight::{self, Daylight, Write as Fire};
 use sim::edit::Planned;
 use sim::edit::safety::{Known, Who};
@@ -972,6 +972,9 @@ struct Tick {
 
 struct Clock {
     replica: Replica,
+    /// The world's joined-part rule, read from its kinds at start (B18, B20 #3356): every act, form and creator's edit
+    /// is checked on it before it applies.
+    structure: Arc<sim::structure::Structure>,
     publisher: Arc<Publisher>,
     acts: Sender<Act>,
     answers: Sender<Tick>,
@@ -2495,12 +2498,13 @@ impl Clock {
                     c.checked.reads.iter().map(|(_, id)| *id),
                 );
                 let mut commit = || {
-                    sim::edit::commit_classes(
+                    sim::edit::commit_guarded_classes(
                         &mut self.replica,
                         &mut reserved,
                         &c,
                         current.as_deref().unwrap_or(&souls),
                         now,
+                        &self.structure,
                         current_classes.as_ref().unwrap_or(&classes),
                     )
                 };
@@ -3879,7 +3883,7 @@ impl Clock {
         for (k, e) in effects.iter_mut().enumerate() {
             e.envelope.sequence = self.replica.version() + k as u64;
         }
-        let part = sim::commit::write(&mut self.replica, &effects)?;
+        let part = sim::commit::write_guarded(&mut self.replica, &effects, &self.structure)?;
         self.unsealed = true;
         for e in &part.effects {
             self.forms.forms.logged(e);
@@ -4153,7 +4157,7 @@ impl Clock {
                 self.end(id, |c| c.refusal(actor, sequence, "object.private"));
                 continue;
             }
-            match commit(&mut self.replica, &checks, now) {
+            match sim::commit::commit_guarded(&mut self.replica, &checks, now, &self.structure) {
                 Outcome::Applied { part, .. } => {
                     self.unsealed = true;
                     self.receipts.index(&part.effects);
@@ -4229,6 +4233,8 @@ impl Clock {
                 ]));
                 encode(&v).unwrap_or_default()
             });
+        // The next tick's writes start with a whole record's room.
+        sim::commit::open_room(sim::commit::TICK_PARTS_MOST);
         if record.is_some() {
             self.unsealed = true;
         }
@@ -4997,6 +5003,7 @@ pub fn start<S: Storage + 'static>(
     )?;
     let publisher = Arc::new(Publisher::new(&world));
     let (kinds, library) = (rules.kinds.clone(), acts::library()?);
+    let structure = Arc::new(sim::structure::Structure::from_entries(&rules.kinds));
     let (header, engine_header) = (world.header().clone(), world.header().clone());
     // The ids the forms and the engine mint (links, transfers, things made): a scope of their own for each start,
     // from the zone and the version the world starts at, so ids minted before a restart are never minted again.
@@ -5146,6 +5153,7 @@ pub fn start<S: Storage + 'static>(
     let hatches = std::mem::take(&mut cfg.hatches);
     let build = move || Clock {
         replica: world,
+        structure,
         publisher,
         acts,
         answers,
@@ -5232,6 +5240,9 @@ pub fn start<S: Storage + 'static>(
         .name("clock".into())
         .spawn(move || {
             mark_clock_thread();
+            // A tick's parts fit its one log record: a write over the room left is refused `part.too-large` before
+            // it reaches the live world (`sim::commit`), so the log never meets a record it refuses.
+            sim::commit::open_room(sim::commit::TICK_PARTS_MOST);
             let beat = thread_beat;
             let mut c = build();
             // With joins (C3), a body the log placed is stood again only while its node is in the tree: a retired

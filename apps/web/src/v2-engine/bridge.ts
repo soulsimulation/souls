@@ -22,8 +22,8 @@ type SampleRec = [string, string, number | null, number, number, number, number]
 /** A world record (sound/record.ts Happened); only the fields read here (B3-3). */
 type Happened = { at: number; node: string; name?: string };
 type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; said?: Said[]; happened?: Happened[];
-  moves?: { body: string; name: string; start: number; ends: number[] }[]; runEnds?: { body: string; at: number }[] };
-type Pointer = { newest: number | null; newestTo: number | null; period: number; anchorWorld: number; anchorWallMs: number; quietUntil: number | null };
+  moves?: { body: string; name: string; start: number; ends: number[]; target?: string | null }[]; runEnds?: { body: string; at: number }[] };
+type Pointer = { newest: number | null; newestTo: number | null; period: number; anchorWorld: number; anchorWallMs: number; quietUntil: number | null; asleep?: true; stillUntil?: number | null };
 type Msg = { t: 'pointer'; p: Pointer } | { t: 'part'; p: PartRec } | { t: 'snapshot'; s: { nodes: NodeRec[]; removed: string[] } } | { t: 'error'; message: string };
 
 /** The page's view of the world, updated as parts arrive (read by the hook's 200 ms re-render). */
@@ -117,6 +117,18 @@ export class V2Bridge {
   private worker: Worker | null = null;
   /** World time of the first part played live: before it the reader caught up without samples, so no chunk is made. */
   private liveFrom: number | null = null;
+  /** Wall time, ms (tests set it). */
+  wallNow: () => number = () => Date.now();
+
+  /** The world time a pointer says the world is still up to: its quiet time, or, while it sleeps (S4p, #4264), the
+   *  world's time now (one second a second from the pointer's anchors, as the v2 page's main.ts) up to its next due
+   *  change, `stillUntil` (none: no end). Nothing in a sleeping world changes before then, so it plays as still. */
+  private stillTo(p: Pointer): number | null {
+    if (!p.asleep) return p.quietUntil;
+    const now = p.anchorWorld + (this.wallNow() - p.anchorWallMs) * 1000;
+    const t = p.stillUntil == null ? now : Math.min(now, p.stillUntil);
+    return p.quietUntil === null ? t : Math.max(p.quietUntil, t);
+  }
   private readonly frame: Omit<Frame, 'datetime'>;
   private readonly hour: string | undefined;
 
@@ -146,7 +158,7 @@ export class V2Bridge {
     // second). That is the world's time as surely as a part's end (the v2 page's clock.ts caughtUp), so the chunks it
     // completes are made, and a line said just before the world went still is shown, not held until something moves.
     if (m.t === 'pointer') {
-      const q = m.p.quietUntil;
+      const q = this.stillTo(m.p);
       if (typeof q !== 'number' || q <= (this.view.newestTo ?? -Infinity)) return;
       // B2-4: a world already still when the page opens plays no part (the reader posts a quiet time only once it has
       // played every part there is): its first quiet time makes the current chunk from the snapshot, once, so its Souls
@@ -162,7 +174,7 @@ export class V2Bridge {
     this.nodesChanged(p.nodes, p.removed, p.from);
     for (const [id, frame, slot, at, x, y, z] of p.samples) this.sample(id, frame, slot, at, [x, y, z]);
     // A gesture move plays on its body (take-gestures.ts); a run that ends early ends its gesture then.
-    for (const m of p.moves ?? []) { const g = gestureFrom(m), t = this.tracks.get(m.body); if (g && t) t.gestures.push(g); }
+    for (const m of p.moves ?? []) { const g = gestureFrom(m, this.toward(m.target)), t = this.tracks.get(m.body); if (g && t) t.gestures.push(g); }
     for (const e of p.runEnds ?? []) { const t = this.tracks.get(e.body); if (t) cutGestures(t.gestures, e.at); }
     for (const h of p.happened ?? []) {
       const word = h.name === undefined ? undefined : WOUND.get(h.name);
@@ -214,6 +226,13 @@ export class V2Bridge {
 
   /** The world frame of a node: its parents' places and turns composed (positions µm, turns `[w, x, y, z]`); null when
    *  its chain of frames is not all public in the copy (as the v2 page: a missing frame is never the world's). */
+  /** An aimed move's target, where it stands now: world x and z, mm (the takes' units); null when it is none or the copy
+   *  cannot place it. */
+  private toward(target: string | null | undefined): [number, number] | null {
+    const w = target ? this.world(target) : null;
+    return w ? [w.p[0] / 1000, w.p[2] / 1000] : null;
+  }
+
   private world(id: string | null, depth = 0): Mat | null {
     if (id === null) return { p: [0, 0, 0], q: [1, 0, 0, 0] };
     const n = this.nodes.get(id);
