@@ -5,6 +5,7 @@
 
 pub mod acts;
 pub mod answers;
+pub mod assembly;
 pub mod bodies;
 pub mod buildsafe;
 pub mod carrier;
@@ -19,7 +20,6 @@ pub mod moves;
 pub mod needs;
 pub mod orders;
 pub mod places;
-pub mod seat;
 pub mod setdown;
 pub mod shipping;
 pub mod start;

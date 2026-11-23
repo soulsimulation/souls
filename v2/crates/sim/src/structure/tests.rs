@@ -69,7 +69,10 @@ fn rack(height: i64, crew: u64) -> Rack {
                     .replacen("\"default\": 1,", &format!("\"default\": {crew},"), 1);
             }
             let name = p.file_name().unwrap().to_string_lossy().into_owned();
-            (name, entry_to_kind(&without_roles(&json)).expect("an entry"))
+            (
+                name,
+                entry_to_kind(&without_roles(&json)).expect("an entry"),
+            )
         })
         .collect();
     files.sort();

@@ -4,19 +4,19 @@
 //! entries (`sim::structure`).
 //!
 //! - **Verbs** ([`crate::engine::Verb`]): `part:take` and `part:unseat` (target the crew's activity, 1 the part) and
-//!   `part:seat` (target the activity; 1 the node it goes in, 2 its slot there, or 3 a point `[x, y, z]` µm in that
+//!   `part:put` (target the activity; 1 the node it goes in, 2 its slot there, or 3 a point `[x, y, z]` µm in that
 //!   node's frame; 4 the parts it joins, ids, when not the bay's standing parts).
-//! - **Take** ([`Seats::take`]): the part, within [`GRASP`] of the middle of its two carriers, goes into the crew's
+//! - **Take** ([`Assembly::take`]): the part, within [`GRASP`] of the middle of its two carriers, goes into the crew's
 //!   slot in one commit (B19's take: its joints undone, a holding crew's node moved off it), keeping the turn it had.
 //!   `part:unseat` is the same take for a part in a bay. The crew's carry (B9's samples) starts once it is committed.
-//! - **Seat** ([`Seats::seat`]): refused before anyone moves by B19's check (`crew.size`, `slot.occupied`,
+//! - **Seat** ([`Assembly::seat`]): refused before anyone moves by B19's check (`crew.size`, `slot.occupied`,
 //!   `reach.too-high`, B18's `support.none`), by `connectors-do-not-mate` for a join the kinds' connectors do not
 //!   allow, and by the world's rules for the seating as it would be committed (a slot that does not admit the part,
 //!   `child-not-admitted`). Then the crew's node goes on B19's straight set-in track to the slot, and when the track
-//!   ends ([`Seats::due`]) the part is seated: its change of parent, its joints, and the crew holding it (a standing
+//!   ends ([`Assembly::due`]) the part is seated: its change of parent, its joints, and the crew holding it (a standing
 //!   part in a bay) or at rest, in one commit.
 //! - **Through the walkers' maps.** A take and a seating change what walkers go round, so their entries are not
-//!   written with the tick's others: they wait in [`Seats::ready`] and the clock commits each through the walkers'
+//!   written with the tick's others: they wait in [`Assembly::ready`] and the clock commits each through the walkers'
 //!   prepared maps (`crate::answers`, as a set-down's), so the ground is rebuilt with the commit. The set-in track,
 //!   which moves only the crew's node, is written as any engine act's entries are.
 //!
@@ -115,7 +115,7 @@ struct Setting {
 }
 
 /// The crews' seating in a running world.
-pub struct Seats {
+pub struct Assembly {
     seating: Seating,
     /// The part each crew holds in its slot, taken and committed (or waiting to be).
     pub held: BTreeMap<Id, Id>,
@@ -136,14 +136,20 @@ fn kind_of(tree: &Tree, id: Id) -> R<Name> {
 /// The conjugate of a unit quaternion: its inverse turn.
 fn conj(q: Quat) -> R<Quat> {
     let [w, x, y, z] = q.parts();
-    Quat::new(w, -x, -y, -z).map_err(|e| refusal("seat-pose", format!("{e:?}")))
+    Quat::new(w, -x, -y, -z).map_err(|e| refusal("part-pose", format!("{e:?}")))
 }
 
-impl Seats {
-    pub fn new(header: Header, rules: Rules, structure: Structure) -> Seats {
-        Seats {
-            // The ground and audience are each crew's own, set as it acts ([`Seats::aim`]).
-            seating: Seating::new(header.clone(), rules, structure, header.zone, Audience::Everyone),
+impl Assembly {
+    pub fn new(header: Header, rules: Rules, structure: Structure) -> Assembly {
+        Assembly {
+            // The ground and audience are each crew's own, set as it acts ([`Assembly::aim`]).
+            seating: Seating::new(
+                header.clone(),
+                rules,
+                structure,
+                header.zone,
+                Audience::Everyone,
+            ),
             held: BTreeMap::new(),
             setting: BTreeMap::new(),
             ready: Vec::new(),
@@ -189,7 +195,7 @@ impl Seats {
 
     /// `part:take` (`unseat` false) or `part:unseat` (true) by crew `activity`, whose carriers stand at `front` and
     /// `back` on `ground` (µm in its frame): the part into the crew's slot, written on `tree` and waiting in
-    /// [`Seats::ready`]. Returns the crew's node's pose, where its carry starts.
+    /// [`Assembly::ready`]. Returns the crew's node's pose, where its carry starts.
     #[allow(clippy::too_many_arguments)]
     pub fn take(
         &mut self,
@@ -224,7 +230,7 @@ impl Seats {
             (false, true) => return Err(refusal("part.seated", show(part))),
             _ => {}
         }
-        let at = xform_to(tree, ph, gh).map_err(|e| refusal("seat-pose", e))?;
+        let at = xform_to(tree, ph, gh).map_err(|e| refusal("part-pose", e))?;
         let middle = Vec3::new(
             (front.x + back.x) / 2,
             (front.y + back.y) / 2,
@@ -247,30 +253,22 @@ impl Seats {
         let turn = yaw_toward([front.x - back.x, front.z - back.z])?;
         let inside = conj(turn)?
             .then(at.rot)
-            .map_err(|e| refusal("seat-pose", format!("{e:?}")))?;
+            .map_err(|e| refusal("part-pose", format!("{e:?}")))?;
         let frame = Vec3::new(middle.x, middle.y + HEIGHT, middle.z);
         self.aim(tree, activity, ground)?;
-        self.seating.take(
-            tree,
-            acts,
-            mint,
-            now,
-            activity,
-            part,
-            (frame, turn),
-            inside,
-        )?;
+        self.seating
+            .take(tree, acts, mint, now, activity, part, (frame, turn), inside)?;
         self.drain(by, activity, Step::Taken);
         self.held.insert(activity, part);
         Ok((frame, turn))
     }
 
-    /// `part:seat` by crew `activity`, its node now at `from` on `ground` and its members reaching `reach` µm: the
+    /// `part:put` by crew `activity`, its node now at `from` on `ground` and its members reaching `reach` µm: the
     /// part to `to`'s slot `slot` (or to `point` in `to`'s frame), joined to `joins` (by default, a bearing part to the
     /// bay's standing parts). Refused before anyone moves; else the set-in track is written on `tree` and the seating
-    /// waits for its end ([`Seats::due`]).
+    /// waits for its end ([`Assembly::due`]).
     #[allow(clippy::too_many_arguments)]
-    pub fn seat(
+    pub fn put(
         &mut self,
         tree: &mut Tree,
         acts: &Activities,
@@ -295,24 +293,26 @@ impl Seats {
         let (pk, tk) = (kind_of(tree, part)?, kind_of(tree, to)?);
         let (th, gh) = match (tree.handle(to), tree.handle(ground)) {
             (Some(t), Some(g)) => (t, g),
-            _ => return Err(refusal("seat-nowhere", show(to))),
+            _ => return Err(refusal("part-nowhere", show(to))),
         };
         let bay = slot.is_some() && s.is_bay(tk.as_str());
         let (place, at) = match (slot, point) {
             (Some(k), _) => {
                 let at = slot_points(tree, th, gh)
-                    .map_err(|e| refusal("seat-pose", e))?
+                    .map_err(|e| refusal("part-pose", e))?
                     .into_iter()
                     .find(|(n, _)| *n == k)
                     .map(|(_, p)| p)
-                    .ok_or_else(|| refusal("slot.unknown", format!("{} has no slot {k}", show(to))))?;
+                    .ok_or_else(|| {
+                        refusal("slot.unknown", format!("{} has no slot {k}", show(to)))
+                    })?;
                 (Vec3::ZERO, at)
             }
             (None, Some(p)) => {
-                let x = xform_to(tree, th, gh).map_err(|e| refusal("seat-pose", e))?;
-                (p, x.point(p).map_err(|e| refusal("seat-pose", e))?)
+                let x = xform_to(tree, th, gh).map_err(|e| refusal("part-pose", e))?;
+                (p, x.point(p).map_err(|e| refusal("part-pose", e))?)
             }
-            (None, None) => return Err(refusal("seat-needs-a-place", "parameter 2 or 3")),
+            (None, None) => return Err(refusal("part-needs-a-place", "parameter 2 or 3")),
         };
         let joins = match joins {
             Some(j) => j,
@@ -344,12 +344,26 @@ impl Seats {
             hold: bay && s.stands(pk.as_str()),
         };
         self.aim(tree, activity, ground)?;
-        self.seating
-            .check(tree, acts, &mut mint.clone(), activity, part, &target, reach)?;
+        self.seating.check(
+            tree,
+            acts,
+            &mut mint.clone(),
+            activity,
+            part,
+            &target,
+            reach,
+        )?;
         // The seating as it would be committed, on a copy: the world's own rules refuse it now, not at the track's end.
         let mut copy = tree.frozen();
-        self.seating
-            .put(&mut copy, acts, &mut mint.clone(), now, activity, part, &target)?;
+        self.seating.put(
+            &mut copy,
+            acts,
+            &mut mint.clone(),
+            now,
+            activity,
+            part,
+            &target,
+        )?;
         self.seating.parts.clear();
         let (dx, dy, dz) = (
             i128::from(at.x - from.0.x),
@@ -379,8 +393,8 @@ impl Seats {
         !self.setting.is_empty()
     }
 
-    /// The seatings whose track has ended by `now`, written on `tree`: each waits in [`Seats::ready`], or is refused
-    /// into [`Seats::refused`], the part left in its crew's slot.
+    /// The seatings whose track has ended by `now`, written on `tree`: each waits in [`Assembly::ready`], or is refused
+    /// into [`Assembly::refused`], the part left in its crew's slot.
     pub fn due(&mut self, tree: &mut Tree, acts: &Activities, mint: &mut Minter, now: Micros) {
         let ended: Vec<Id> = self
             .setting
@@ -393,9 +407,9 @@ impl Seats {
                 continue;
             };
             let done = self.aim(tree, activity, s.ground).and_then(|()| {
-                    self.seating
-                        .put(tree, acts, mint, s.due, activity, s.part, &s.target)
-                });
+                self.seating
+                    .put(tree, acts, mint, s.due, activity, s.part, &s.target)
+            });
             match done {
                 Ok(()) => {
                     self.drain(s.by, activity, Step::Seated);

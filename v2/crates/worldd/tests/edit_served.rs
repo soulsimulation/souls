@@ -2405,7 +2405,11 @@ fn logged(w: &Seeded) -> Vec<replica::effects::Part> {
 fn created_by(w: &Seeded, entries: &[u64], prefix: &str) -> Id {
     use replica::effects::{Body, Change};
     for p in logged(w) {
-        for e in p.effects.iter().filter(|e| entries.contains(&e.envelope.sequence)) {
+        for e in p
+            .effects
+            .iter()
+            .filter(|e| entries.contains(&e.envelope.sequence))
+        {
             if let Body::Changes(cs) = &e.body {
                 for c in cs {
                     if let Change::Create { node, kind, .. } = &c.change
@@ -2535,24 +2539,44 @@ fn a2_souls_seat_rack_parts_by_intents() {
     // Crew `c` of Souls `ab` takes frame `f`, carries it to slot `slot` and seats it there; they hold it.
     let frame_in = |hands: &mut [Hand], ab: (usize, usize), f: Id, slot: &str| {
         let at = where_is(&w, f).2;
-        both(hands, ab, v3(at.x + H, 0, at.z), v3(at.x - H, 0, at.z), "to the frame");
+        both(
+            hands,
+            ab,
+            v3(at.x + H, 0, at.z),
+            v3(at.x - H, 0, at.z),
+            "to the frame",
+        );
         let c = crew(hands, ab);
         let got = hands[ab.0].act("part:take", c, part(f));
-        println!("crew {} takes frame {} off the stand: {got:?}", c.counter(), f.counter());
+        println!(
+            "crew {} takes frame {} off the stand: {got:?}",
+            c.counter(),
+            f.counter()
+        );
         assert_eq!(got.kind, 1, "taken");
         assert_eq!(where_is(&w, f).0, Some(c), "the frame rides its crew");
         let u = slot_at(slot);
-        both(hands, ab, v3(u.x + H, 0, u.z), v3(u.x - H, 0, u.z), "the frame to the bay");
+        both(
+            hands,
+            ab,
+            v3(u.x + H, 0, u.z),
+            v3(u.x - H, 0, u.z),
+            "the frame to the bay",
+        );
         (c, u)
     };
 
     // Two Souls seat frame A in upright_a and hold it.
     let (crew_a, ua) = frame_in(&mut hands, (0, 1), fa, "upright_a");
-    let got = hands[0].act("part:seat", crew_a, into("upright_a"));
+    let got = hands[0].act("part:put", crew_a, into("upright_a"));
     println!("crew A seats frame A in upright_a: {got:?}");
     assert_eq!(got.kind, 1, "seated");
     let (parent, slot, _) = where_is(&w, fa);
-    assert_eq!((parent, slot), (Some(bay), Some(slots["upright_a"])), "in its slot");
+    assert_eq!(
+        (parent, slot),
+        (Some(bay), Some(slots["upright_a"])),
+        "in its slot"
+    );
     assert_eq!(where_is(&w, crew_a).0, Some(fa), "crew A holds frame A");
     // The ground under it is rebuilt: a walk to its column ends clear of it.
     let column = v3(ua.x + 572_000, 0, ua.z);
@@ -2560,7 +2584,10 @@ fn a2_souls_seat_rack_parts_by_intents() {
     let got = socket_end(&mut hands[1].s);
     let at = where_is(&w, body_of(&w, w.souls[1])).2;
     let off = (i128::from(at.x - column.x).pow(2) + i128::from(at.z - column.z).pow(2)).isqrt();
-    println!("Soul 2 walks to frame A's column: {got:?}, ends {} mm from it", off / 1000);
+    println!(
+        "Soul 2 walks to frame A's column: {got:?}, ends {} mm from it",
+        off / 1000
+    );
     assert!(off > 100_000, "a walker goes round the seated frame");
     // It stands clear of the bay while it holds the frame.
     hands[1].walk_to(g, v3(ua.x + 3_000_000, 0, ua.z - 2_000_000));
@@ -2571,16 +2598,23 @@ fn a2_souls_seat_rack_parts_by_intents() {
     assert_eq!(got.kind, 1, "Soul 1 lets go of frame A: {got:?}");
     let (crew_b, _) = frame_in(&mut hands, (0, 2), fb, "upright_b");
     let before = where_is(&w, fb);
-    let got = hands[0].act("part:seat", crew_b, into("upright_a"));
+    let got = hands[0].act("part:put", crew_b, into("upright_a"));
     println!("frame B into frame A's slot: {got:?}");
     assert_eq!((got.kind, got.reason.as_str()), (2, "slot.occupied"));
     let mut joined = into("upright_b");
     joined.insert(4, Value::Array(vec![fa.to_value()]));
-    let got = hands[0].act("part:seat", crew_b, joined);
+    let got = hands[0].act("part:put", crew_b, joined);
     println!("frame B joined to frame A: {got:?}");
-    assert_eq!((got.kind, got.reason.as_str()), (2, "connectors-do-not-mate"));
-    assert_eq!(where_is(&w, fb).0, before.0, "nothing changed: frame B still rides crew B");
-    let got = hands[0].act("part:seat", crew_b, into("upright_b"));
+    assert_eq!(
+        (got.kind, got.reason.as_str()),
+        (2, "connectors-do-not-mate")
+    );
+    assert_eq!(
+        where_is(&w, fb).0,
+        before.0,
+        "nothing changed: frame B still rides crew B"
+    );
+    let got = hands[0].act("part:put", crew_b, into("upright_b"));
     assert_eq!(got.kind, 1, "frame B seated: {got:?}");
     let ub = slot_at("upright_b");
     hands[2].walk_to(g, v3(ub.x - 3_000_000, 0, ub.z + 2_000_000));
@@ -2590,13 +2624,25 @@ fn a2_souls_seat_rack_parts_by_intents() {
     let got = hands[0].act("activity:leave", crew_b, BTreeMap::new());
     assert_eq!(got.kind, 1, "Soul 1 lets go of frame B: {got:?}");
     let m0 = where_is(&w, beam).2;
-    both(&mut hands, (0, 3), v3(m0.x, 0, m0.z + 1_700_000), v3(m0.x, 0, m0.z - 1_700_000), "to the beam");
+    both(
+        &mut hands,
+        (0, 3),
+        v3(m0.x, 0, m0.z + 1_700_000),
+        v3(m0.x, 0, m0.z - 1_700_000),
+        "to the beam",
+    );
     let crew_c = crew(&mut hands, (0, 3));
     let got = hands[0].act("part:take", crew_c, part(beam));
     assert_eq!(got.kind, 1, "beam taken: {got:?}");
     let bl = slot_at("beam_low_l");
-    both(&mut hands, (0, 3), v3(bl.x, 0, bl.z + 2_200_000), v3(bl.x, 0, bl.z - 2_200_000), "the beam to the bay");
-    let got = hands[0].act("part:seat", crew_c, into("beam_low_l"));
+    both(
+        &mut hands,
+        (0, 3),
+        v3(bl.x, 0, bl.z + 2_200_000),
+        v3(bl.x, 0, bl.z - 2_200_000),
+        "the beam to the bay",
+    );
+    let got = hands[0].act("part:put", crew_c, into("beam_low_l"));
     println!("crew C seats the beam in beam_low_l, joined to both frames: {got:?}");
     assert_eq!(got.kind, 1, "beam seated");
     assert_eq!(where_is(&w, beam).0, Some(bay));
@@ -2611,12 +2657,22 @@ fn a2_souls_seat_rack_parts_by_intents() {
     let goal = v3(fa_at.x + H, 0, fa_at.z + 900_000);
     hands[0].walk_to(g, goal);
     let got = socket_end(&mut hands[0].s);
-    let (p1, p4) = (where_is(&w, body_of(&w, w.souls[0])).2, where_is(&w, body_of(&w, w.souls[3])).2);
-    assert_eq!(got.kind, 1, "Soul 1 to frame A: {got:?}, at {p1:?} for {goal:?}; Soul 4 at {p4:?}");
+    let (p1, p4) = (
+        where_is(&w, body_of(&w, w.souls[0])).2,
+        where_is(&w, body_of(&w, w.souls[3])).2,
+    );
+    assert_eq!(
+        got.kind, 1,
+        "Soul 1 to frame A: {got:?}, at {p1:?} for {goal:?}; Soul 4 at {p4:?}"
+    );
     let crew_d = crew(&mut hands, (0, 3));
     let (frame_before, beam_before) = (where_is(&w, fa), where_is(&w, beam));
     let got = hands[0].act("part:unseat", crew_d, part(fa));
     println!("crew D takes frame A out from under the beam: {got:?}");
     assert_eq!((got.kind, got.reason.as_str()), (2, "support.none"));
-    assert_eq!((where_is(&w, fa), where_is(&w, beam)), (frame_before, beam_before), "nothing changed");
+    assert_eq!(
+        (where_is(&w, fa), where_is(&w, beam)),
+        (frame_before, beam_before),
+        "nothing changed"
+    );
 }
