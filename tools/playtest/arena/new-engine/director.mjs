@@ -42,6 +42,16 @@ export function placePathOf(nodes, id) {
   return out;
 }
 
+/** Where "walk to <words>" goes in a Soul's own copy: the first thing found for the words (not a body); a building is
+ *  gone into, to its first room (a walk to a building's id ends at its door, outside). */
+export async function placeIn(v2, words) {
+  const found = ((await v2.cli('find', ...words.split(/\s+/))).found ?? []).filter((r) => !r.kind?.startsWith('souls:body'));
+  const there = found[0] ?? null;
+  if (!there?.name) return there;
+  const rooms = ((await v2.cli('find', 'room', '--limit', '80')).found ?? []).filter((r) => r.kind?.endsWith(':room') && String(r.in ?? '').split(', ').includes(there.name));
+  return rooms[0] ?? there;
+}
+
 export function newEngineModules({ log = () => {} } = {}) {
   let world = null, viewer = null;
   const sent = new Map(); // soul → [message ids], newest last
@@ -100,7 +110,7 @@ export function newEngineModules({ log = () => {} } = {}) {
           let words = newWords(stepArgs(step));
           const bound = bindPrev(words, prev);
           if (bound.error) { ok = false; note({ message: m.id, step: words, error: bound.error }); break; }
-          words = await Promise.all(bound.args.map(async (w) => (w.startsWith('?') ? (((await v2.cli('find', ...w.slice(1).split(/\s+/))).found ?? []).find((r) => !r.kind?.startsWith('souls:body'))?.id ?? w) : w)));
+          words = await Promise.all(bound.args.map(async (w) => (w.startsWith('?') ? (await placeIn(v2, w.slice(1)))?.id ?? w : w)));
           const r = await v2.cli(...words);
           prev = r;
           const refused = r?.ok === false || r?.phase === 'refused';
