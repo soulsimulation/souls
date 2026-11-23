@@ -48,7 +48,7 @@ if [[ $O16_SYSTEMD == system ]]; then
   sctl=(sudo systemctl); units=/run/systemd/system; put=(sudo tee); user="User=$(id -un)"
 else
   sctl=(systemctl --user); units=${XDG_RUNTIME_DIR:?the user manager needs XDG_RUNTIME_DIR}/systemd/user; put=(tee); user=
-  mkdir -p "$ROOT/shim"
+  mkdir -p "$ROOT/shim" "$units"
   printf '#!/bin/sh\nexec %s --user "$@"\n' "$(command -v systemctl)" > "$ROOT/shim/systemctl"
   chmod +x "$ROOT/shim/systemctl"
 fi
