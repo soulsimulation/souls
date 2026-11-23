@@ -1179,5 +1179,61 @@ fn r21_joined_principal_private_turn_uses_body_and_rejects_nonmember() {
     run.stop();
 }
 
+/// G2 (0.133, from #3998): a Soul's own `life:look` puts a humanoid look (its params, one JSON object of at most 2 KiB)
+/// on its default body: one write of field 33 by the body, answered with a receipt. The same look again is refused
+/// `look.worn`; anything but one JSON object, or one over 2 KiB, `look.malformed`; nothing more is written. (A body
+/// that wears a preset by hash is refused `look.wears-body`: `skills::wear`'s own test.)
+#[test]
+fn g2_a_souls_own_look_writes_field_33_once_and_is_refused_by_name_otherwise() {
+    let (run, mut a, _) = serve("g2look");
+    a.act(JOIN, None, p(&[(1, words("Ada"))]))
+        .expect("Ada joins");
+    let body = run.body_of(ada()).expect("born");
+    let look = |b: &[u8]| p(&[(1, Value::Bytes(b.to_vec()))]);
+    let params = br##"{"frame":"fem","hair":"bob","skin":"#a0785a"}"##;
+    let entries = a
+        .act(skills::wear::LOOK_VERB, None, look(params))
+        .expect("the look is written");
+    assert_eq!(entries.len(), 1, "one entry: the look");
+    let field = |run: &Run| {
+        let r = run.replay();
+        let t = r.tree();
+        let n = t.node(t.handle(body).expect("the body")).expect("the body");
+        (
+            n.fields().get(&skills::wear::LOOK).cloned(),
+            n.fields().get(&skills::wear::BODY).cloned(),
+        )
+    };
+    assert_eq!(field(&run), (Some(Value::Bytes(params.to_vec())), None));
+    assert_eq!(
+        a.act(skills::wear::LOOK_VERB, None, look(params)),
+        Err("look.worn".to_owned())
+    );
+    for bad in [&b"[1]"[..], b"not json", &[b'{', 0xff, b'}']] {
+        assert_eq!(
+            a.act(skills::wear::LOOK_VERB, None, look(bad)),
+            Err("look.malformed".to_owned()),
+            "{bad:?}"
+        );
+    }
+    let big = format!(r#"{{"hair":"{}"}}"#, "x".repeat(skills::wear::LOOK_MOST));
+    assert_eq!(
+        a.act(skills::wear::LOOK_VERB, None, look(big.as_bytes())),
+        Err("look.malformed".to_owned()),
+        "over 2 KiB"
+    );
+    assert_eq!(
+        a.act(skills::wear::LOOK_VERB, None, BTreeMap::new()),
+        Err("look.malformed".to_owned()),
+        "no params"
+    );
+    assert_eq!(
+        field(&run).0,
+        Some(Value::Bytes(params.to_vec())),
+        "nothing more written"
+    );
+    run.stop();
+}
+
 #[path = "join/base_forms.rs"]
 mod base_forms;

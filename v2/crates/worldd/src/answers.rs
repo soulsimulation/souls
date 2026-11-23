@@ -1631,6 +1631,9 @@ impl Clock {
         if intent.verb.as_str() == skills::wear::VERB {
             return self.wear(&intent, key, (reply, stamps), now);
         }
+        if intent.verb.as_str() == skills::wear::LOOK_VERB {
+            return self.look(&intent, key, (reply, stamps), now);
+        }
         let mut value = intent.to_value();
         keep_arg_names(&mut value);
         // Every text the intent would be logged with must be a name the log's reader takes (#3765). A malformed word
@@ -2449,6 +2452,66 @@ impl Clock {
         {
             let _ = tx.send(CheckJob::Release(kept));
         }
+    }
+
+    /// G2 (0.133, from #3998): a Soul's look put on its default body, one write of [`skills::wear::LOOK`] by the
+    /// body, answered with a receipt after its tick's sync, as a describe is. Refused `look.wears-body` while it wears
+    /// a hash, `look.worn` when it already carries these params, `look.malformed` for anything but one JSON object of
+    /// at most 2 KiB.
+    fn look(
+        &mut self,
+        intent: &Intent,
+        key: Vec<u8>,
+        (reply, stamps): (Reply, Stamps),
+        now: Micros,
+    ) {
+        let (actor, sequence) = (intent.actor, intent.sequence);
+        let value = intent.to_value();
+        let written = (|| {
+            let params = skills::wear::look_params(&intent.parameters)?;
+            if expired(intent.expiry, now) {
+                return Err("intent.expired");
+            }
+            let body = self.body_of(intent)?;
+            let tree = self.replica.tree();
+            let node = tree.handle(body).and_then(|h| tree.node(h));
+            match skills::wear::look(node.ok_or("intent.no-body")?.fields(), params) {
+                skills::wear::Look::WearsBody => return Err("look.wears-body"),
+                skills::wear::Look::Worn => return Err("look.worn"),
+                skills::wear::Look::Write => {}
+            }
+            let id = Id::new(self.lineage, self.next_intent).ok_or("intent.ids-exhausted")?;
+            let env = words::envelope(self.replica.version(), now, id, actor, body);
+            let effect = Effect {
+                envelope: Envelope {
+                    audience: Audience::Everyone,
+                    ..env
+                },
+                body: Body::Changes(vec![ChangeRec {
+                    change: skills::wear::look_change(body, params),
+                    rest: Rest::new(),
+                }]),
+                events: None,
+                rest: Rest::new(),
+            };
+            self.write_all(vec![effect]).map_err(|r| r.name)?;
+            Ok(id)
+        })();
+        let a = match written {
+            Ok(id) => {
+                self.next_intent += 1;
+                Answer::Receipt {
+                    actor,
+                    sequence,
+                    intent: id,
+                    entries: self.receipts.entries(id).to_vec(),
+                    names: BTreeMap::new(),
+                }
+            }
+            Err(r) => self.refusal(actor, sequence, r),
+        };
+        let id = written.ok();
+        self.answered(key, sequence, id, Some(value), &a, (vec![reply], stamps));
     }
 
     /// B15's existing hash-only record, checked off-clock and committed without mutating refused actors.
