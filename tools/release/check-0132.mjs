@@ -183,10 +183,10 @@ async function worldPage(video) {
   return { ctx, page };
 }
 /** What the page's v2 reader shows of one Soul now: its activity and held prop in the newest chunk, and its speech. */
-/** What the page draws of one Soul now: the moment LiveWorld plays (serverTick and the time since it came, less the
+/** What the page draws of one Soul now: the moment LiveWorld plays (`since`: acts begun at or after that tick only) (serverTick and the time since it came, less the
  *  source's play delay, at most the newest chunk's end), not the newest chunk's end. Its activity, held prop and walking
  *  from the chunk changes up to that tick, and its words said by then. */
-const probe = (page, soul) => page.evaluate((soul) => {
+const probe = (page, soul, since = 0) => page.evaluate(({ soul, since }) => {
   const v = window.__soulsV2; if (!v) return null;
   const s = v.souls.get(soul), t = v.takes, chunks = t.chunks; if (!s || !chunks.length) return { doing: s?.doing ?? null, activity: null, acts: [], prop: null, said: 0, p: null };
   const tick = Math.min(chunks.at(-1).toTick, t.serverTick + Math.min(2, (performance.now() - t.receivedAt) / 1000) * 20 - (t.playDelay ?? 30));
@@ -196,13 +196,13 @@ const probe = (page, soul) => page.evaluate((soul) => {
     const e = c.take.finalState.entities[s.entityId];
     if (c.toTick <= tick) { activity = e?.human?.activity ?? activity; prop = e?.human?.prop ?? null; p = e?.pose?.p ?? p; }
     for (const ch of c.take.changes ?? []) if (ch[1] === s.entityId && c.fromTick + ch[0] <= tick) {
-      if (ch[2] === 'activity') { activity = ch[3]; if (c.toTick + 20 > tick) acts.add(ch[3]); }
+      if (ch[2] === 'activity') { activity = ch[3]; if (c.toTick + 20 > tick && c.fromTick + ch[0] >= since) acts.add(ch[3]); }
       if (ch[2] === 'prop') prop = ch[3] ?? null;
     }
     for (const ev of c.take.events ?? []) if (ev.data?.from === soul && c.fromTick + ev.t <= tick) said++;
   }
   return { doing: s.doing, activity, acts: [...acts], prop, said, p, tick };
-}, soul);
+}, { soul, since });
 
 /** B3-7: where the time went for a step sent at page time `pt0` (ms): the world's time then (the newest part's end and the
  *  time since the page had it), and for this Soul's first move started and first thing put in its frame after that, the
@@ -293,7 +293,12 @@ else if (ONLY.has('2')) {
   /** One timed step: the act sent, then the page polled until `shown` holds (at most 6 s); passes within 2 s. */
   let soul = null, arrivalT0 = null;
   const step = async (name, send, shown) => {
-    const b = soul ? await probe(page, soul) : null, pt0 = await page.evaluate(() => performance.now()), t0 = Date.now(), sent = send();
+    const b = soul ? await probe(page, soul) : null, pt0 = await page.evaluate(() => performance.now()), t0 = Date.now();
+    // The world's tick at the send, as the page knows it (its newest part's end and the time since; a little early by
+    // the parts' own lag): a step counts as shown only when the page draws a moment at or after it, never a moment
+    // before the act (B3-7: a carry sent while the page still played the take's slide was seen walking at once).
+    const since = await page.evaluate((pt0) => { const p = [...(window.__parts ?? [])].reverse().find((x) => x.at <= pt0); return p ? Math.floor((p.to + (pt0 - p.at) * 1000) / 50_000) : 0; }, pt0);
+    const sent = send();
     let seenMs = null;
     while (Date.now() - t0 < (soul ? 6000 : 30_000)) { // a Soul not on the page yet: wait longer, to say when it came
       if (!soul) {
@@ -302,8 +307,8 @@ else if (ONLY.has('2')) {
         // the clip follows it: its card by the page's own link, then Follow
         if (soul) { await page.evaluate((id) => { location.hash = `soul/${id}`; }, soul); await page.getByRole('button', { name: /^Follow$/ }).first().click({ timeout: 3000 }).catch(() => {}); }
       }
-      const s = soul ? await probe(page, soul) : null;
-      if (s && shown(s, b ?? s)) { seenMs = Date.now() - t0; break; }
+      const s = soul ? await probe(page, soul, since) : null;
+      if (s && s.tick >= since && shown(s, b ?? s)) { seenMs = Date.now() - t0; break; }
       if (soul && !s && Date.now() - t0 > 6000) break;
       await sleep(100);
     }
@@ -335,7 +340,7 @@ else if (ONLY.has('2')) {
     report.lines[2].arrivals.push({ acceptedMs: took, shownMs: came, afterMs: took !== null && came !== null ? came - took : null });
     row(2, `arrival ${ARRIVALS} of ${ARRIVALS}`, took !== null && came !== null && came - took <= 2000, `first act taken at ${took ?? '?'} ms; its body on the page ${came === null ? 'not within 30 s' : `at ${came} ms, ${came - took} ms after`}`);
     if (r?.sequence) await walked(r.sequence);
-    r = await step('sit', () => bench ? cli('act', `sit:${bench}`) : { ok: false, detail: 'no seat found' }, (s) => s.activity === 'sit' || s.acts.includes('sit') || s.doing === 'seated');
+    r = await step('sit', () => bench ? cli('act', `sit:${bench}`) : { ok: false, detail: 'no seat found' }, (s) => s.activity === 'sit' || s.acts.includes('sit'));
     if (r?.sequence) await ended(r.sequence, 15_000);
     // seated, a Soul stands up before it goes anywhere (the skill: `act <ns>:rise`), in the world's namespace or the seat's
     const rise = () => { const ns = [...new Set([bench, bed].filter(Boolean).map((id) => JSON.stringify(cli('inspect', id)).match(/"([a-z0-9_-]+):rise:/)?.[1]).filter(Boolean))]; const w = cli('act', ...(ns.length ? ns : ['eden', SLUG]).map((n) => `${n}:rise`)); return w.sequence ? ended(w.sequence, 15_000) : null; };
