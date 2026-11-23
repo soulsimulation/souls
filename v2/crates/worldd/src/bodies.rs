@@ -227,8 +227,11 @@ pub struct Bodies {
     pub heard: Vec<(Id, Said, Micros)>,
     /// The wind-down (B16, #2751): the one rule by which the world moves a body its agent did not order.
     pub wind: WindDown,
-    /// Its records since the world last took them, cause and actor the world.
+    /// Its records since the world last took them, cause and actor the world; and the never-stuck ladder's (0.133 N1,
+    /// [`crate::unstick`]), which the world writes the same way.
     pub wind_log: Vec<Effect>,
+    /// The never-stuck ladder over the bodies' walks (0.133 N1).
+    pub unstuck: crate::unstick::Unstuck,
     /// The rule's own move going on each body, by its intent id.
     wind_moves: BTreeMap<Id, Id>,
     /// Each body the rule put to sleep on the ground: the driver holding it lying.
@@ -397,6 +400,7 @@ impl Bodies {
                     .unwrap_or(wind_down::KNOBS),
             ),
             wind_log: Vec::new(),
+            unstuck: crate::unstick::Unstuck::default(),
             wind_moves: BTreeMap::new(),
             sleeping: BTreeMap::new(),
         })
@@ -1212,7 +1216,11 @@ impl Bodies {
             crate::orders::step(self, at);
             self.wind_step(at);
             let planned = std::mem::take(&mut self.planned);
+            self.unstuck.planned(&self.runner, &planned);
             let (mut wants, _) = self.runner.tick_planned(&mut self.town, &planned);
+            // The never-stuck ladder (0.133 N1): walk-outs, then each walker's rungs; its records are the world's.
+            let rungs = self.unstuck.after(&mut self.runner, &mut self.town);
+            self.wind_log.extend(rungs);
             // Every body in a seat move, with its seat: its reach for the next tick's phase timers.
             let mut seated: Vec<(Id, Id, Id)> = self
                 .live
@@ -1651,9 +1659,12 @@ impl Bodies {
         body_of: impl Fn(Id) -> Option<Id>,
         placed: &Placed,
         now: Micros,
+        since: Micros,
+        born: &BTreeMap<Id, Micros>,
     ) {
         let ids: Vec<Id> = self.runner.controller.ids().collect();
-        self.wind.resume(effects, body_of, ids.iter().copied(), now);
+        self.wind
+            .resume_since(effects, body_of, ids.iter().copied(), now, since, born);
         for (body, (pose, stance)) in placed {
             if *stance == Some(Stance::Lie)
                 && matches!(pose.support, Support::Surface { .. })

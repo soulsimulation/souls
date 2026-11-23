@@ -242,7 +242,6 @@ fn walk_crowd(split: bool) -> Vec<Vec<(Vec3, Vec3)>> {
 /// neighbours read from the controller's index), and an index kept across 400 steps of a seeded crowd that gathers into one square and spreads
 /// out again, so its node splits and merges, asked the same questions as an index that never splits.
 #[test]
-#[ignore = "A2-2: walled in by standing bodies"]
 fn a4_streams_identical_with_splitting_on_and_off() {
     let (on, off) = (walk_crowd(true), walk_crowd(false));
     assert_eq!(
