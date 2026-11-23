@@ -815,10 +815,25 @@ const EDIT_BULK_WITHIN = 120_000; // a bulk edit's (#3695)
 /** The world's kinds text, which the creator's pairing or setup keeps in the home; empty when there is none. */
 const kindsText = () => { try { return readFileSync(join(home, 'kinds', `${seat.world}.kinds`), 'utf8'); } catch { return ''; } };
 /** The pinned kinds by full name, with what each admits; {} without a kinds text. */
-const pinned = () => { const t = kindsText(); return t.trim() ? JSON.parse(wire.editKinds(t)) : {}; };
+const pinned = () => {
+  const t = kindsText();
+  const boot = t.trim() ? JSON.parse(wire.editKinds(t)) : {};
+  // #3697: and the creator's own kinds, each a `souls:kind` node of the copy.
+  let own = {};
+  try { if (copy) own = JSON.parse(wire.definedKinds(copy)); } catch { /* no copy yet */ }
+  return { ...boot, ...own };
+};
+/** #3697: a `define` operation as the world reads it: a `souls:kind` node at the root holding the record's bytes. */
+function definition(o) {
+  const text = typeof o.entry === 'string' ? o.entry : JSON.stringify(o.entry ?? null);
+  const root = [...rowsOf(copy).values()].find((r) => r.parent === null)?.id;
+  if (!root) throw Object.assign(new Error('no copy of the world yet'), { code: 'edit.no-copy' });
+  return { op: 'place', name: o.name ?? 1, kind: wire.definitionKind(), in: root, at: [0, 0, 0], fields: { 2: { hex: Buffer.from(text, 'utf8').toString('hex') } } };
+}
 /** A kind's full name from what a creator writes: the full name, `namespace:name`, or the bare name. */
 function fullKind(kinds, k) {
   const s = String(k ?? '');
+  if (s.includes('@')) return s; // a full name is the world's to judge
   const hit = Object.keys(kinds).filter((n) => n === s || n.split('@')[0] === s || n.split('@')[0].split(':')[1] === s);
   if (hit.length === 1) return hit[0];
   throw Object.assign(new Error(`${s}: ${hit.length ? 'ambiguous; copy a full pinned name from describe' : `not pinned; describe lists ${Object.keys(kinds).join(', ')}`}`), { code: 'edit.kind-unknown' });
@@ -844,9 +859,11 @@ async function editOnce(req) {
   const w = undo ? { ops: [] } : await worldBatch(req);
   if (w.ok === false) return closing({ ...w, sent: false, local: true }, null, { age });
   const batch = undo ? null : batchOf(w.ops, req.claim);
+  let defines;
   if (!undo) {
     const v = JSON.parse(wire.editCheck(copy, batch, kindsText()));
     if (!v.ok) return closing({ ...v, sent: false, local: true }, null, { age });
+    defines = v.defines;
   }
   if (!copyVersion) return closing({ ok: false, code: 'edit.no-copy', sent: false, detail: 'no copy of the world yet' }, null, { age });
   state.sequence++;
@@ -887,7 +904,7 @@ async function editOnce(req) {
     save();
   }
   const out = a.answer === 1
-    ? { ok: true, sequence, ...(undo ? { [req.op === 'undo' ? 'undone' : 'redone']: true } : { names: a.names ?? {} }), ...(step ?? {}), ...(w.says ? { did: w.says } : {}) }
+    ? { ok: true, sequence, ...(undo ? { [req.op === 'undo' ? 'undone' : 'redone']: true } : { names: a.names ?? {} }), ...(defines?.length ? { defines } : {}), ...(step ?? {}), ...(w.says ? { did: w.says } : {}) }
     : { ok: false, sequence, code: a.reason ?? 'edit.refused', ...(a.op !== undefined ? { op: a.op } : {}) };
   // The world node is written by the world's own sky timers too: a world verb planned just before one is stale, and
   // is made again from the copy brought current, once.
@@ -900,7 +917,7 @@ function batchOf(ops, claim) {
   const kinds = pinned();
   const um = (at) => (Array.isArray(at) ? at.map((n) => Math.round(Number(n) * 1000)) : undefined);
   // #3695: a move that must land to the micrometre (a thing lifted with the ground) gives its position as `atUm`.
-  const list = ops.map(({ atUm, ...o }) => ({ ...o, ...(o.kind !== undefined ? { kind: Object.keys(kinds).length ? fullKind(kinds, o.kind) : o.kind } : {}), ...(o.at ? { at: um(o.at) } : {}), ...(atUm ? { at: atUm.map(Number) } : {}) }));
+  const list = ops.map(({ atUm, ...o }) => (o?.op === 'define' ? definition(o) : { ...o, ...(o.kind !== undefined ? { kind: Object.keys(kinds).length ? fullKind(kinds, o.kind) : o.kind } : {}), ...(o.at ? { at: um(o.at) } : {}), ...(atUm ? { at: atUm.map(Number) } : {}) }));
   return JSON.stringify(claim === undefined ? list : { claim: String(claim), ops: list });
 }
 

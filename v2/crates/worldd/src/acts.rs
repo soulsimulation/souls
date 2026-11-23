@@ -2309,9 +2309,19 @@ impl Acts {
         Err(first.unwrap_or_else(|| refusal("no_candidate", "")))
     }
 
-    /// The Soul's leave: the run on `body` ends `left` at its next stable moment.
-    pub fn leave(&mut self, tree: &Tree, bodies: Option<&mut Bodies>, body: Id, now: Micros) {
-        let _ = self.with(tree, bodies, 0, |forms, w| forms.leave(w, body, now));
+    /// The Soul's leave: the run on `body` ends `left` at its next stable moment; or, when `intent` names the act
+    /// waiting on that run (#4187), that act alone ends `left` and never starts.
+    pub fn leave(
+        &mut self,
+        tree: &Tree,
+        bodies: Option<&mut Bodies>,
+        body: Id,
+        intent: Option<Id>,
+        now: Micros,
+    ) {
+        let _ = self.with(tree, bodies, 0, |forms, w| {
+            forms.leave(w, body, intent, now)
+        });
     }
 
     /// The forms' part of a tick at world time `now`: their walks, each one that stalled ended [`BLOCKED`] (C21), then
@@ -2446,6 +2456,15 @@ impl Acts {
                 }
             }
         }
+    }
+
+    /// Runs that started late since the last call (#4187: an act that waited on its body's posture step), each
+    /// with its intent.
+    pub fn started_late(&mut self) -> Vec<(Id, sim::forms::RunId)> {
+        std::mem::take(&mut self.forms.late)
+            .into_iter()
+            .filter_map(|run| Some((*self.runs.get(&run)?, run)))
+            .collect()
     }
 
     /// Runs that ended since the last call: each one's intent, its ending's name and, for [`BLOCKED`], what blocked

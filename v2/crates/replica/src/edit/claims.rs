@@ -20,7 +20,8 @@
 //! only things inside that claim's area, before and after each operation, and never the root's fields
 //! (`edit.outside-claim`); an edit sent under no claim does not touch anything inside a live claim (`edit.claimed`);
 //! an edit naming a claim that is not live is refused `edit.claim-unknown`. Where a thing is: its origin in the root's
-//! frame; a removal tests the whole subtree; a place tests its spot in its parent (a slot's offset aside).
+//! frame; a removal tests the whole subtree, and the owning end of the doorway its field 7 names, whose rows the
+//! unlink rewrites; a place tests its spot in its parent (a slot's offset aside).
 
 use super::{Edit, Op, Ref, Refused, refuse};
 use crate::apply::Replica;
@@ -40,6 +41,9 @@ pub const ROADS_MOST: usize = 32;
 pub const ROAD_POINTS_MOST: usize = 32;
 /// The farthest a coordinate may be from the root's origin, mm (1000 km).
 const FAR: i64 = 1_000_000_000;
+/// A door leaf's field naming its doorway link, and that link's type (`sim::ground::scene`).
+const DOOR_LINK: u64 = 7;
+const DOORWAY: &str = "eden:doorway";
 
 /// A live claim: its id, the part of the work it is for, its area `[x0, z0, x1, z1]` in mm, x0 < x1, z0 < z1, and the
 /// helper that builds under it (#3727): a creator-scope actor of its own, which may edit only under this claim.
@@ -402,6 +406,7 @@ pub fn judge_effects(copy: &Replica, effects: &[crate::effects::Effect]) -> Resu
                 }
                 Change::Set { node, .. } if Some(*node) != root => points.push(at(*node)),
                 Change::Remove { node } => points.extend(below(*node).into_iter().map(at)),
+                // An unlink is written with its owning end's rows, a set judged above (#3934 review).
                 _ => {}
             }
         }
@@ -505,6 +510,20 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
             .map(Ref::Node),
         Ref::New(n) => placed.get(&n).map(|(_, p)| *p),
     };
+    // Each node's doorway link (its field 7) as the batch leaves it: removing the node unlinks that doorway and
+    // rewrites its owning end's rows (`sim::edit`), so a removal touches the owner too (#3934 review).
+    let mut aimed: BTreeMap<Ref, Value> = BTreeMap::new();
+    let doorway_owner = |aimed: &BTreeMap<Ref, Value>, r: Ref| {
+        let link = aimed.get(&r).cloned().or_else(|| match r {
+            Ref::Node(id) => tree
+                .handle(id)
+                .and_then(|h| tree.node(h))
+                .and_then(|n| n.fields().get(&DOOR_LINK).cloned()),
+            Ref::New(_) => None,
+        })?;
+        let (ty, [owner, _], ..) = tree.link(crate::effects::read_id(&link).ok()?)?;
+        (ty.as_str() == DOORWAY).then_some(owner)
+    };
     for (i, op) in edit.ops.iter().enumerate() {
         let mut t = Touch::default();
         let add = |t: &mut Touch, p: Option<Vec3>| match p {
@@ -513,10 +532,17 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
         };
         match op {
             Op::Place {
-                name, parent, at, ..
+                name,
+                parent,
+                at,
+                fields,
+                ..
             } => {
                 let p = point_in(&placed, *parent, at.position);
                 placed.insert(*name, (p, *parent));
+                if let Some(v) = fields.get(&DOOR_LINK) {
+                    aimed.insert(Ref::New(*name), v.clone());
+                }
                 add(&mut t, p);
             }
             Op::Move { node, at: spot } => {
@@ -582,7 +608,10 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
                     );
                 }
             }
-            Op::Set { node, .. } => {
+            Op::Set { node, field, to } => {
+                if *field == DOOR_LINK {
+                    aimed.insert(*node, to.clone());
+                }
                 if *node == root.map_or(Ref::New(u64::MAX), Ref::Node) {
                     t.root = true;
                 } else {
@@ -590,6 +619,9 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
                 }
             }
             Op::Remove { node } => {
+                if let Some(owner) = doorway_owner(&aimed, *node) {
+                    add(&mut t, origin(&placed, Ref::Node(owner)));
+                }
                 let mut stack = vec![*node];
                 while let Some(r) = stack.pop() {
                     add(&mut t, origin(&placed, r));
