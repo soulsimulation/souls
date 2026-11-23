@@ -249,6 +249,20 @@ test('A1, A2: can answers from the local check; a walk to a named thing and a si
     assert.ok(got.answer > 1 && typeof got.reason === 'string' && got.reason.length > 0, `refused by name: ${JSON.stringify(got)}`);
   }
 
+  // R1b: an act the world refuses names one offer of the same thing that would work, from this client's own offers:
+  // a form the rules pass on the copy before a move they cannot judge here, never one needing arguments, never the
+  // refused verb, walking there last.
+  mkdirSync(join(home, 'kinds'), { recursive: true });
+  writeFileSync(join(home, 'kinds', 'chair.json'), JSON.stringify({ format: 'souls-entry/1', kind: bare.kind, owner: 'thing',
+    slots: { seat: { admits: 'body', posture: 'sit', most: 1 } },
+    forms: { tidy: { who: 'anyone', starts: 'act', takes: { grams: { type: 'count' } }, needs: [], steps: [], effects: [] },
+      rest: { who: 'anyone', starts: 'act', needs: [], steps: [], effects: [] } } }));
+  const refusedHere = souls(home, ['act', `carrier:stop:${room}`, '--wait']);
+  assert.deepEqual([refusedHere.ok, refusedHere.phase], [false, 'refused'], JSON.stringify(refusedHere));
+  assert.deepEqual(refusedHere.try, { act: `rest:${room}`, name: 'rest', checked: 'yes' }, JSON.stringify(refusedHere.try));
+  assert.deepEqual(souls(home, ['receipt', String(refusedHere.sequence)]).receipt.try, refusedHere.try, 'the receipt names it too');
+  rmSync(join(home, 'kinds'), { recursive: true });
+
   // #3705: `stop` ends this Soul's own walk where it stands (a souls:cancel naming it); `receipt` shows its answers,
   // `events --since` lists what came without taking it, `conversations` lists the copy's, and `quit` is the daemon's.
   const cursor = souls(home, ['events']).cursor;

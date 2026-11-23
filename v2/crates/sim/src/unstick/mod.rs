@@ -9,12 +9,16 @@
 //!   walker circling a goal it cannot reach, or nudged forward now and then, still climbs them. A new route
 //!   to the same leg's end (the reroute rung) keeps its least distance to it, so one going to and fro climbs too.
 //! - **The rungs** (the declared timings, [`REROUTE`], [`MAKE_WAY`], [`SHOULDER`], [`END`]): at 3 s it is routed
-//!   again once from where it stands; at 6 s a `make-way` is sent to the agent of each still body in its way (within
-//!   [`NEAR`] of it, or within [`ROOM`] of the far end of the link it waits for) that has no order to stay
-//!   there; at 9 s it passes with a shoulder turn (no neighbour pushes it); at 15 s its order ends by name,
-//!   `goal-unreachable`, naming what it waited for. Each is a [`Record`] in [`Ladder::log`].
-//! - **Still bodies.** The engine never moves a still body: it asks that Soul's agent. A body staying by its own order
-//!   (E3; `Runner::staying`) is sent nothing, and the walker passes it (other bodies are a preference, not a wall).
+//!   again once from where it stands; at 5 s each still body in its way (within [`NEAR`] of it, or within [`ROOM`]
+//!   of the far end of the link it waits for) that has no order to stay there is sent `make-way`, and the world steps
+//!   it aside ([`Rung::StepAside`]); at 9 s it passes with a shoulder turn (no neighbour pushes it); at 15 s its order
+//!   ends by name, `goal-unreachable`, naming what it waited for. Each is a [`Record`] in [`Ladder::log`].
+//! - **Still bodies** (Gene's decision, 0.132 A2-3: no Soul is left stuck). When the only way is blocked, the world
+//!   moves a still body aside by the smallest step that clears the walker's line: across that line, to
+//!   [`CLEAR`] from it, onto legal ground and clear of every other body, the nearer side first, at walking speed and
+//!   in a straight line, as the last rung walks (nothing teleports). A body staying by its own order (E3;
+//!   `Runner::staying`) is sent nothing and never moved, and the walker passes it (other bodies are a preference, not
+//!   a wall).
 //! - **The last rung.** A body found on illegal ground (by [`crate::ground::exits::check`], on a rebuild, a size
 //!   change or a birth) walks at its own speed in a straight line to the nearest legal point, collision off: a
 //!   `walk-out` record that names it when it starts, `walked-out` when it stands on the ground again. The controller
@@ -62,8 +66,8 @@ use std::collections::{BTreeMap, BTreeSet};
 pub const SECOND: Micros = 1_000_000;
 /// Without progress this long, a walker is routed again once, µs.
 pub const REROUTE: Micros = 3_000_000;
-/// Then `make-way` to the agents of still bodies in its way.
-pub const MAKE_WAY: Micros = 6_000_000;
+/// Then `make-way` to the agents of still bodies in its way, and each is stepped aside (0.132 A2-3: after 5 s).
+pub const MAKE_WAY: Micros = 5_000_000;
 /// Then it passes with a shoulder turn.
 pub const SHOULDER: Micros = 9_000_000;
 /// Then its order ends by name. The design's 20 s is a bound; 15 s ends a jam that starts within 5 s of a walk's
@@ -71,11 +75,71 @@ pub const SHOULDER: Micros = 9_000_000;
 pub const END: Micros = 15_000_000;
 /// A still body this near a walker is in its way, µm: the walk's push range (`skills::route::RANGE`).
 pub const NEAR: i64 = 1_200_000;
+/// A still body stepped aside stands at least this far across the walker's line, µm: two standard bodies' radii and
+/// 0.1 m, so a walker passes it.
+pub const CLEAR: i64 = (2 * crate::ground::HUMAN_RADIUS + 100) * 1000;
 /// The walks planned on changed ground are all planned again within this, µs (G3's bar is 2 s).
 pub const REPLAN_WITHIN: Micros = 1_000_000;
 
 /// Whether a body with abilities `has` may stand on `ground` (the routes' own rule, N11c #3218).
 pub use crate::routes::may_stand;
+
+/// The smallest step that takes a still body at `at` on `node` out of the walker's `line` (from, to), when it is on
+/// that line (within [`CLEAR`] across it, between the walker and the line's end): across the line to [`CLEAR`] from
+/// it, the nearer side first, then each side a [`CLEAR`] further, up to three; a point on legal ground and at least
+/// two standard radii from every body in `taken`. None when no such point is found.
+pub fn aside(
+    world: &impl Unstick,
+    node: Id,
+    at: Vec3,
+    line: (Vec3, Vec3),
+    taken: &[Vec3],
+) -> Option<Vec3> {
+    let (a, b) = line;
+    let (dx, dz) = (b.x - a.x, b.z - a.z);
+    let d = len(a, b);
+    // Across the line (a line of no length: across the way from the walker to the body).
+    let (nx, nz, lat) = if d > 0 {
+        let lat = (i128::from(at.x - a.x) * i128::from(-dz)
+            + i128::from(at.z - a.z) * i128::from(dx))
+            / i128::from(d);
+        (-dz, dx, lat as i64)
+    } else {
+        (at.z - a.z, a.x - at.x, 0)
+    };
+    let n = len(Vec3::ZERO, Vec3::new(nx, 0, nz));
+    if n == 0 {
+        return None;
+    }
+    // Only a body on the way: across the line within [`CLEAR`], and not behind the walker or past the line's end.
+    if d > 0 {
+        let along = (i128::from(at.x - a.x) * i128::from(dx)
+            + i128::from(at.z - a.z) * i128::from(dz))
+            / i128::from(d);
+        let r = crate::ground::HUMAN_RADIUS * 1000;
+        if lat.abs() >= CLEAR || along < i128::from(-r) || along > i128::from(d + CLEAR) {
+            return None;
+        }
+    }
+    let side = if lat < 0 { -1 } else { 1 };
+    let apart = 2 * crate::ground::HUMAN_RADIUS * 1000;
+    for k in 0..3 {
+        for s in [side, -side] {
+            let want = s * (CLEAR + k * CLEAR);
+            let step = want - lat;
+            let to = Vec3::new(
+                at.x + (i128::from(nx) * i128::from(step) / i128::from(n)) as i64,
+                at.y,
+                at.z + (i128::from(nz) * i128::from(step) / i128::from(n)) as i64,
+            );
+            let legal = world.nearest(node, to).is_some_and(|q| len(q, to) == 0);
+            if legal && taken.iter().all(|&t| len(t, to) >= apart) {
+                return Some(to);
+            }
+        }
+    }
+    None
+}
 
 /// Whether two pieces touch: a corner of either lies on an edge of the other, within [`exits::ON`].
 fn touch(a: &Piece, b: &Piece) -> bool {
@@ -177,6 +241,13 @@ pub enum Rung {
     Reroute,
     /// Sent to the agent of still body `to`: make way.
     MakeWay { to: Id },
+    /// Still body `body` stepped aside by the world, on node `node` from `from` to `to` (µm, that node's frame).
+    StepAside {
+        body: Id,
+        node: Id,
+        from: Vec3,
+        to: Vec3,
+    },
     /// Passes with a shoulder turn.
     Shoulder,
     /// Its order ended by name.
@@ -193,6 +264,7 @@ impl Rung {
         match self {
             Rung::Reroute => "reroute",
             Rung::MakeWay { .. } => "make-way",
+            Rung::StepAside { .. } => "step-aside",
             Rung::Shoulder => "shoulder-turn",
             Rung::Ended { .. } => "order-ended",
             Rung::WalkOut { .. } => "walk-out",
@@ -248,6 +320,8 @@ pub struct Ladder {
     pub replans: Vec<(Id, Micros, Option<&'static str>)>,
     /// Plans a tick for the stale walks of the ground change under way (0: none under way).
     spread: usize,
+    /// Where still bodies stepped aside this tick are going (node and point), so two are not sent to one place.
+    aside: Vec<(Id, Vec3)>,
 }
 
 fn len(a: Vec3, b: Vec3) -> i64 {
@@ -407,6 +481,7 @@ impl Ladder {
             speed: w.speed,
             to: node,
             arrive: None,
+            hold: false,
         };
         runner.controller.carry(who, track)?;
         if runner.running(who) {
@@ -470,6 +545,7 @@ impl Ladder {
 
     fn climb(&mut self, runner: &mut Runner, town: &mut Town) {
         let now = runner.now;
+        self.aside.clear();
         // The walk-outs the controller has stood on the ground: the order, if it has one still, goes on from there.
         let outs: Vec<Id> = self.outs.iter().copied().collect();
         for who in outs {
@@ -603,15 +679,55 @@ impl Ladder {
                             !runner.staying.contains(&b.id)
                                 && !running.contains(&b.id)
                                 && !self.outs.contains(&b.id)
+                                && !runner.controller.carried(b.id)
                         })
                         .map(|b| (b.id, node_of(b), b.pose.position))
                         .collect()
                 });
-                for &(s, sn, sp) in still.iter() {
+                let still: Vec<(Id, Id, Vec3)> = still.clone();
+                for &(s, sn, sp) in &still {
                     let near = sn == node && len(sp, p) < NEAR;
                     let blocks = far.is_some_and(|(fnode, fp)| sn == fnode && len(sp, fp) < ROOM);
                     if (near || blocks) && asked.insert((who, s)) {
                         self.record(now, who, order, Rung::MakeWay { to: s });
+                        // The line it blocks: the walker's to its leg's end, or the link's far end it waits at.
+                        let line = match far {
+                            Some((_, fp)) if blocks => (p, fp),
+                            _ => (p, leg.to),
+                        };
+                        let taken = runner
+                            .controller
+                            .bodies()
+                            .filter(|b| b.id != s)
+                            .map(|b| (node_of(b), b.pose.position))
+                            .chain(self.aside.iter().map(|&(n, at)| (n, at)))
+                            .filter(|(n, _)| *n == sn)
+                            .map(|(_, at)| at)
+                            .collect::<Vec<_>>();
+                        if let Some(to) = aside(town, sn, sp, line, &taken) {
+                            let track = Track {
+                                link: None,
+                                line: vec![to],
+                                speed,
+                                to: sn,
+                                arrive: None,
+                                hold: false,
+                            };
+                            if runner.controller.carry(s, track).is_ok() {
+                                self.aside.push((sn, to));
+                                self.record(
+                                    now,
+                                    who,
+                                    order,
+                                    Rung::StepAside {
+                                        body: s,
+                                        node: sn,
+                                        from: sp,
+                                        to,
+                                    },
+                                );
+                            }
+                        }
                     }
                 }
             } else if idle >= REROUTE && c.rung < 1 {

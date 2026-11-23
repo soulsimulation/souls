@@ -6,6 +6,7 @@ import { chunkEnd, chunkOf, TICK_US, type Body, type Frame, type RecordedChunk, 
 import { defaultLookOf, entityWithLook, legacyBodyOf, lookBodyOf, propOf, seatOf, type CatalogueBody, type Held, type Seat } from './take-bodies.ts';
 import { isPublic, saidKey, speechOf, talkOf, type Said, type Talk } from './take-speech.ts';
 import { cut as cutGestures, gestureFrom, type Gesture } from './take-gestures.ts';
+import { privateTurnOf, tickerOf } from './take-talk.ts';
 
 /** What the reader's worker posts (v2/web/src/source/source.ts: NodeRec, PartRec, Pointer; only the fields read here). */
 type NodeRec = { id: string; kind: string; parent: string | null; slot: number | null; pos: [number, number, number]; rot: [number, number, number, number];
@@ -40,6 +41,9 @@ export type V2View = {
   /** What the Souls said aloud, as the old socket's edge `speech` messages (the dock and the speech layer read them as
    *  public, with the speaker's name), once each, in order, as their chunks come in (take-speech.ts). */
   speech: ReturnType<typeof speechOf>[];
+  /** R3 (take-talk.ts): private turns as the dock shows them to anyone (members, a `…` line a turn), and the ticker. */
+  conversations: NonNullable<ReturnType<typeof privateTurnOf>>;
+  ticker: { tick: number; text: string }[];
 };
 
 /** One Soul as the old page's card shows it (B3-3): its public name and description, and what it is doing now. */
@@ -83,13 +87,11 @@ const mul = (a: Mat['q'], b: Mat['q']): Mat['q'] => [a[0] * b[0] - a[1] * b[1] -
 /** A body: a node with a public Soul (its body-of link), or one of a body kind. */
 const isBody = (n: NodeRec) => !!n.soul || /:(humanoid|body)$/.test(n.kind.split('@')[0]);
 const samePlace = (a: NodeRec, b: NodeRec) => a.parent === b.parent && a.slot === b.slot && a.pos.every((v, i) => v === b.pos[i]);
-/** Chunks the page keeps: 12 s, as useSouls keeps the socket's twelve one-second ones. */
-const KEEP = 24;
-/** Samples kept a body: a minute of world time before the oldest chunk kept. */
-const KEEP_US = (KEEP * CHUNK * TICK_US) + 60_000_000;
+/** World time the page keeps in chunks: 12 s, as useSouls keeps the socket's twelve one-second ones. */
+const KEEP_CHUNKS_US = 12_000_000;
 
 export class V2Bridge {
-  readonly view: V2View = { unplaced: 0, unplacedFrames: [], takes: { serverTick: 0, chunks: [], receivedAt: 0, playDelay: PLAY_DELAY }, souls: new Map(), newestTo: null, error: null, parts: 0, speech: [] };
+  readonly view: V2View = { unplaced: 0, unplacedFrames: [], takes: { serverTick: 0, chunks: [], receivedAt: 0, playDelay: PLAY_DELAY }, souls: new Map(), newestTo: null, error: null, parts: 0, speech: [], conversations: [], ticker: [] };
   private readonly nodes = new Map<string, NodeRec>();
   /** Each body's samples, its last record and, while the public copy cannot draw it (a frame that is not public, or it
    *  left), since when: it is not drawn from then until it is back. */
@@ -113,7 +115,12 @@ export class V2Bridge {
   private readonly hour: string | undefined;
 
   /** `hour` (HH:MM) shows the picture at that hour of the world's day; the world's clock is not changed. */
-  constructor(frame: Omit<Frame, 'datetime'>, hour?: string) { this.frame = frame; this.hour = hour; }
+  /** Ticks a chunk: the live page's half second (CHUNK); a past window's one second, as the old `/v1/takes` (history.ts). */
+  private readonly chunk: number;
+  private readonly keep: number;
+  constructor(frame: Omit<Frame, 'datetime'>, hour?: string, chunk = CHUNK) {
+    this.frame = frame; this.hour = hour; this.chunk = chunk; this.keep = Math.round(KEEP_CHUNKS_US / (chunk * TICK_US));
+  }
 
   start(stream: string, make: () => Worker): void {
     this.worker = make();
@@ -151,6 +158,7 @@ export class V2Bridge {
     }
     this.said = [...this.said, ...(p.said ?? []).filter((x) => x.words !== null)].filter((x) => x.at + x.length > p.to - 60_000_000);
     for (const s of p.said ?? []) if (isPublic(s) && !this.saidSeen.has(saidKey(s))) { this.saidSeen.add(saidKey(s)); this.pendingSaid.push(s); }
+    this.talk(p);
     this.view.newestTo = Math.max(this.view.newestTo ?? p.to, p.to);
     this.view.parts++;
     this.publish();
@@ -260,8 +268,8 @@ export class V2Bridge {
     if (to === null) return;
     // A body's samples come at its turns and steps, not every tick: a chunk is made once the world is BEHIND_US past its
     // end, so the sample after it is in and a walking body is not held at its last one.
-    const end = chunkEnd(to - BEHIND_US, CHUNK), bodies = this.bodies();
-    const first = Math.max(end - KEEP * CHUNK, Math.ceil((this.liveFrom ?? Infinity) / TICK_US / CHUNK) * CHUNK);
+    const end = chunkEnd(to - BEHIND_US, this.chunk), bodies = this.bodies();
+    const first = Math.max(end - this.keep * this.chunk, Math.ceil((this.liveFrom ?? Infinity) / TICK_US / this.chunk) * this.chunk);
     // what each is doing at the time the page shows (the world's newest time less the page's lag)
     const shown = to - BEHIND_US;
     const souls = new Map(bodies.map((b) => {
@@ -275,9 +283,10 @@ export class V2Bridge {
     if (end === this.view.takes.serverTick) return;
     this.speak(end);
     const datetime = this.datetime(end * TICK_US);
-    for (let from = first; from < end; from += CHUNK) if (from >= 0 && !this.built.has(from)) this.built.set(from, chunkOf(bodies, from, { ...this.frame, datetime }, CHUNK));
+    for (let from = first; from < end; from += this.chunk) if (from >= 0 && !this.built.has(from)) this.built.set(from, chunkOf(bodies, from, { ...this.frame, datetime }, this.chunk));
     for (const from of [...this.built.keys()]) if (from < first) this.built.delete(from);
-    const cut = first * TICK_US - KEEP_US;
+    // samples kept a body: a minute of world time before the oldest chunk kept
+    const cut = first * TICK_US - KEEP_CHUNKS_US - 60_000_000;
     for (const [id, t] of this.tracks) {
       if (t.gone !== null && t.gone < cut) { this.tracks.delete(id); continue; }
       let k = 0;
@@ -291,6 +300,26 @@ export class V2Bridge {
     }
     this.view.takes = { serverTick: end, chunks: [...this.built.values()].sort((a, b) => a.fromTick - b.fromTick), receivedAt: performance.now(), playDelay: PLAY_DELAY };
   }
+
+  /** R3: a part's private turns (take-talk.ts) and what its bodies did (the ticker), each once. */
+  private talk(p: PartRec): void {
+    const who = (id: string) => { const n = this.nodes.get(id) ?? this.tracks.get(id)?.node; return n ? { soulId: soulIdOf(n.soul ?? id), name: nameOf(id, n) } : null; };
+    for (const s of p.said ?? []) {
+      if (!s.private || this.saidSeen.has(saidKey(s))) continue;
+      this.saidSeen.add(saidKey(s));
+      const turn = privateTurnOf(s, Math.floor(s.at / TICK_US), Date.now(), who);
+      if (turn) this.view.conversations = [...this.view.conversations, ...turn].slice(-300);
+    }
+    const did = [...(p.moves ?? []).map((m) => ({ node: m.body, name: m.name, at: m.start })), ...(p.happened ?? []).filter((h) => h.name).map((h) => ({ node: h.node, name: h.name!, at: h.at }))];
+    for (const d of did) {
+      const n = this.nodes.get(d.node), key = `${d.node}|${d.name}|${d.at}`;
+      if (!n || !isBody(n) || this.tickerSeen.has(key)) continue;
+      this.tickerSeen.add(key);
+      const line = tickerOf(Math.floor(d.at / TICK_US), nameOf(d.node, n), d.name);
+      if (line) this.view.ticker = [...this.view.ticker, line].slice(-40);
+    }
+  }
+  private readonly tickerSeen = new Set<string>();
 
   /** The saids before chunk tick `end` become talk lines, in world-time order, each once: on its speaker's body (the
    *  take's events) and in the page's talk, timed by the wall clock at which the page draws its tick. */

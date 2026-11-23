@@ -164,6 +164,7 @@ export const OPS = [
   'status',
   'stop',
   'wait',
+  'wake',
   'wear',
   'whatson',
   'whisper',
@@ -315,6 +316,12 @@ export function requestOf(argv) {
   if (op === 'whisper') Object.assign(req, { to: rest[0], words: rest.slice(1).join(' ') });
   if (op === 'lie') req.this = rest[0];
   if (op === 'wear') req.body = rest[0];
+  // R5: the owner's wake rules, by name (act-ended, soul-arrives, idle) or as a rule's JSON; listen and wait hand them.
+  if (op === 'wake') {
+    const w = wakeOf(rest);
+    if (w.refused) return w;
+    return { req: w, soul: opts.soul };
+  }
   // G3: `look set <preset | params file>` is the Soul's own `life:look`, waited for like `act --wait`.
   if (op === 'look' && rest[0] === 'set') {
     const look = lookParams(rest[1]);
@@ -337,6 +344,48 @@ export function requestOf(argv) {
   // #3706: a write sent again with the same --key is one write; the daemon answers the repeat with the first answer.
   if (opts.key !== undefined) req.key = opts.key;
   return { req, soul: opts.soul, ...(waits ? { wait: true } : {}), ...(opts.now !== undefined && !LOCAL.includes(op) && op !== 'pending' ? { now: opts.now } : {}) };
+}
+
+/** R5: `wake` named rules: what each matches. `soul-arrives` is another Soul's move ending near this one (the world's
+ *  `souls:move-ended`, which reaches this Soul only from bodies in its view), from anyone or the Soul named. */
+export const WAKES = {
+  'act-ended': () => ({ when: { event: 'client:act-ended' }, why: 'an act of yours ended' }),
+  'soul-arrives': (who) => ({ when: { event: 'souls:move-ended', ...(who ? { from: [who] } : {}) }, why: who ? `${who} arrived near you` : 'a Soul arrived near you' }),
+  // The daemon's `client:idle` carries the quiet in seconds (field 1).
+  idle: (minutes) => ({ when: { event: 'client:idle', fields: { 1: Number(minutes) * 60 } }, why: `no command for ${minutes} minutes` }),
+};
+const WAKE_USAGE = "wake | wake add act-ended | wake add soul-arrives [<soul id>] | wake add idle <minutes> | wake add '<rule json>' | wake remove <id> | wake budget <quiet|normal|lively|unlimited|n> [--day <n>]";
+
+/** R5: the daemon request for `wake` words, or a refusal by name. */
+export function wakeOf([what, arg, ...more]) {
+  const usage = { refused: 'wake-usage', detail: WAKE_USAGE };
+  if (what === undefined || what === 'list') return arg === undefined ? { op: 'wake', do: 'list' } : usage;
+  if (what === 'remove') return arg && !more.length ? { op: 'wake', do: 'remove', id: arg } : usage;
+  if (what === 'add') {
+    if (arg === 'act-ended' && !more.length) return { op: 'wake', do: 'add', rule: WAKES['act-ended']() };
+    if (arg === 'soul-arrives' && more.length <= 1) {
+      if (more[0] !== undefined && !/^s_[A-Za-z0-9_-]+$/.test(more[0])) return { refused: 'wake-soul', detail: 'soul-arrives [<soul id, s_...>]' };
+      return { op: 'wake', do: 'add', rule: WAKES['soul-arrives'](more[0]) };
+    }
+    if (arg === 'idle' && more.length === 1) {
+      if (!/^\d{1,4}$/.test(more[0]) || Number(more[0]) < 1) return { refused: 'wake-idle-minutes', detail: 'idle <whole minutes, at least 1>' };
+      return { op: 'wake', do: 'add', rule: WAKES.idle(more[0]) };
+    }
+    if (arg?.trim().startsWith('{') && !more.length) {
+      try { return { op: 'wake', do: 'add', rule: JSON.parse(arg) }; } catch { return { refused: 'wake-rule-json', detail: 'a rule is one JSON object' }; }
+    }
+    return usage;
+  }
+  if (what === 'budget') {
+    const req = { op: 'wake', do: 'budget' }, words = [arg, ...more].filter((w) => w !== undefined);
+    for (let k = 0; k < words.length; k++) {
+      if (words[k] === '--day') { req.day = /^\d+$/.test(words[k + 1] ?? '') ? Number(words[++k]) : NaN; continue; }
+      if ('hour' in req) return usage;
+      req.hour = /^\d+$/.test(words[k]) ? Number(words[k]) : words[k];
+    }
+    return 'hour' in req || 'day' in req ? req : usage;
+  }
+  return usage;
 }
 
 /** G3: the humanoid look presets a page composes (`apps/web/src/humanoid/look.ts` PRESETS), by name. */
@@ -388,7 +437,9 @@ export async function actEnd(ask, sent, { ms = ACT_WAIT_MS, every = 200, now = D
         return { ...sent, ...r, ok: phase !== 'refused' && phase !== 'unread', phase, ...(end.reason ? { reason: end.reason } : {}),
           ...(phase === 'refused' || phase === 'unread' ? { code: end.reason ?? phase } : {}),
           // D7: which of the ranked targets holds the body now (a seat a fallback took), when one does.
-          ...(r?.receipt?.held ? { held: r.receipt.held } : {}) };
+          ...(r?.receipt?.held ? { held: r.receipt.held } : {}),
+          // R1b: refused, one offer of the same thing that would work instead.
+          ...(phase === 'refused' && r?.receipt?.try ? { try: r.receipt.try } : {}) };
       }
       return { ...sent, ...(r?.ok ? r : {}), phase: end ? 'running' : 'sent', stillRunning: true,
         detail: `still running after ${Math.round(ms / 1000)} s: check with \`receipt ${sent.sequence}\`, or \`stop ${sent.sequence}\` to end it` };
@@ -425,7 +476,9 @@ export async function listen(ask, print, { follow = false, seconds = 60, pause =
       printed.add(m.id);
       print({ ok: true, kind: 'mail', id: m.id, text: m.text, at: m.at, serve: SERVE(m.id) });
     }
-    if (!follow && (printed.size || got.timedOut)) return printed.size ? undefined : print({ ok: true, mail: [], timedOut: true });
+    // R5: a wake the owner's rules fired, one line each (its rule, why, how many times since the last).
+    for (const w of got.wakes ?? []) print({ ok: true, kind: 'wake', rule: w.rule, why: w.why, count: w.count, ...(w.untrusted ? { untrusted: true } : {}) });
+    if (!follow && (printed.size || got.wakes?.length || got.timedOut)) return printed.size || got.wakes?.length ? undefined : print({ ok: true, mail: [], timedOut: true });
   }
 }
 

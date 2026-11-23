@@ -267,13 +267,15 @@ pub fn capture_checkpoint(path: &Path, expected: &sim::checkpoint::Root) -> R<Ve
     Ok(bytes)
 }
 
-/// Writes `bytes` to `path` under a temporary name, then renames it (rule 4).
+/// Writes `bytes` to `path` under a temporary name, synced, then renames it (rule 4).
 pub fn write_whole(path: &Path, bytes: &[u8]) -> R<()> {
     let mut tmp = path.as_os_str().to_owned();
     tmp.push(".tmp");
     let tmp = PathBuf::from(tmp);
     let mut f = fs::File::create(&tmp).map_err(io)?;
     f.write_all(bytes).map_err(io)?;
+    // Synced before the rename (B1-7): after a power cut the name holds the old bytes or the new, never a short file.
+    f.sync_all().map_err(io)?;
     drop(f);
     fs::rename(&tmp, path).map_err(io)
 }
@@ -999,14 +1001,47 @@ use crate::closed::{Closed, Inside};
 fn shown(header: &Header, closed: Option<&Closed>, tree: &replica::tree::Tree) -> R<Value> {
     let mut state = tree.to_state();
     let hidden = closed.map(|c| c.hidden(tree)).unwrap_or_default();
-    if !hidden.is_empty() {
-        state.nodes.retain(|id, _| !hidden.contains(id));
-        state
-            .links
-            .retain(|_, l| !l.ends.iter().any(|e| hidden.contains(e)));
-        state.timers.retain(|_, t| !hidden.contains(&t.node));
+    leave_out(&mut state, &hidden);
+    // A node the public state cannot hold (a kind it cannot check, a frame or pose it cannot read) is left out and
+    // logged by name, never the stream stopped for every viewer (C5). Leaving one out can leave out another (a
+    // definition), so until none is left.
+    loop {
+        let bad = replica::stream::public::unplaceable(header, &state);
+        if bad.is_empty() {
+            break;
+        }
+        for (id, e) in &bad {
+            left_out(*id, e);
+        }
+        leave_out(&mut state, &bad.into_iter().map(|(id, _)| id).collect());
     }
     project(header, &state)
+}
+
+/// `state` without `ids`, the links with an end in them and their timers.
+fn leave_out(state: &mut replica::effects::State, ids: &std::collections::BTreeSet<Id>) {
+    if ids.is_empty() {
+        return;
+    }
+    state.nodes.retain(|id, _| !ids.contains(id));
+    state
+        .links
+        .retain(|_, l| !l.ends.iter().any(|e| ids.contains(e)));
+    state.timers.retain(|_, t| !ids.contains(&t.node));
+}
+
+/// Logs a node the public stream leaves out, once per node a process (C5).
+fn left_out(id: Id, e: &Refusal) {
+    static LOGGED: std::sync::Mutex<std::collections::BTreeSet<Id>> =
+        std::sync::Mutex::new(std::collections::BTreeSet::new());
+    if LOGGED.lock().is_ok_and(|mut l| l.insert(id)) {
+        eprintln!(
+            "worldd: the public stream leaves out {}: {} ({})",
+            replica::world_model::show(id),
+            e.name,
+            e.detail
+        );
+    }
 }
 
 /// The public place names a value's public nodes reference (#3574), under #3571's rule: a node of the public
@@ -1257,32 +1292,38 @@ fn id_of(header: &Header) -> String {
         header.epoch
     )
 }
+/// Writes `bytes` under `path` once (rule 4): whole and synced under `<name>.tmp`, then linked to its name, which fails
+/// if the name exists. A writer killed mid-write leaves only its `.tmp`, which the next write of that name replaces; a
+/// file under a final name is always whole. A name already written must hold the same bytes.
 fn immutable(path: &Path, bytes: &[u8]) -> R<()> {
     if let Some(p) = path.parent() {
         fs::create_dir_all(p).map_err(io)?;
     }
-    match fs::OpenOptions::new()
-        .write(true)
-        .create_new(true)
-        .open(path)
-    {
-        Ok(mut f) => {
-            if let Err(e) = f.write_all(bytes).and_then(|_| f.sync_all()) {
-                let _ = fs::remove_file(path);
-                return Err(io(e));
-            }
-            Ok(())
+    let same = |path: &Path| -> R<()> {
+        let meta = fs::symlink_metadata(path).map_err(io)?;
+        if !meta.is_file() || meta.file_type().is_symlink() || fs::read(path).map_err(io)? != bytes
+        {
+            return Err(fault("stream-immutable", "existing bytes differ"));
         }
-        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => {
-            let meta = fs::symlink_metadata(path).map_err(io)?;
-            if !meta.is_file()
-                || meta.file_type().is_symlink()
-                || fs::read(path).map_err(io)? != bytes
-            {
-                return Err(fault("stream-immutable", "existing bytes differ"));
-            }
-            Ok(())
-        }
+        Ok(())
+    };
+    if path.exists() {
+        return same(path);
+    }
+    let mut tmp = path.as_os_str().to_owned();
+    tmp.push(".tmp");
+    let tmp = PathBuf::from(tmp);
+    let written =
+        fs::File::create(&tmp).and_then(|mut f| f.write_all(bytes).and_then(|_| f.sync_all()));
+    if let Err(e) = written {
+        let _ = fs::remove_file(&tmp);
+        return Err(io(e));
+    }
+    let linked = fs::hard_link(&tmp, path);
+    let _ = fs::remove_file(&tmp);
+    match linked {
+        Ok(()) => Ok(()),
+        Err(e) if e.kind() == std::io::ErrorKind::AlreadyExists => same(path),
         Err(e) => Err(io(e)),
     }
 }
@@ -3223,9 +3264,34 @@ impl<S: ObjectStore> PublicWriter<S> {
                 }
             }
         }
+        // A whole cut names change versions only of nodes in the state before or after it: one left out (C5) is
+        // in neither, and a reader refuses a version for it.
+        let rows_of = |v: &Value| -> std::collections::BTreeSet<Id> {
+            match v {
+                Value::Map(m) => match m.get(&2) {
+                    Some(Value::Array(rows)) => rows
+                        .iter()
+                        .filter_map(|r| match r {
+                            Value::Array(p) => {
+                                p.first().and_then(|i| replica::effects::read_id(i).ok())
+                            }
+                            _ => None,
+                        })
+                        .collect(),
+                    _ => Default::default(),
+                },
+                _ => Default::default(),
+            }
+        };
+        let shown_ids = after.as_ref().map(|a| {
+            let mut ids = rows_of(a);
+            ids.extend(rows_of(self.player.state()));
+            ids
+        });
         let changed = self
             .changes
             .iter()
+            .filter(|(i, _)| shown_ids.as_ref().is_none_or(|s| s.contains(i)))
             .map(|(i, v)| (*i, *v))
             .collect::<Vec<_>>();
         // A whole cut's rows that differ from the published state: its context's delta, and what the words index
@@ -3309,6 +3375,15 @@ impl<S: ObjectStore> PublicWriter<S> {
         self.delete_some(DELETES_PER_PART);
         if self.rollover_due() {
             self.rollover()?;
+        }
+        // The cut has just published the source's public state: the next idle need not project it again to find the
+        // world still (C4; at 500 agents that projection was most of the writer's core).
+        if self.migration_cut.is_none() {
+            self.still_at = Some((
+                self.canonical.version(),
+                self.player.version(),
+                self.player.next(),
+            ));
         }
         lap.mark(9);
         self.pointer(None)?;

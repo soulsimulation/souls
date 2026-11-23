@@ -108,8 +108,7 @@ impl Store for Folder {
         let wrote = path
             .parent()
             .map_or(Ok(()), std::fs::create_dir_all)
-            .and_then(|()| std::fs::write(&tmp, bytes))
-            .and_then(|()| std::fs::rename(&tmp, &path));
+            .and_then(|()| crate::durable::replace(&path, &tmp, bytes));
         match wrote {
             Ok(()) => Ok(to_hex(&sha256(bytes))),
             Err(e) => refuse("store-error", format!("{key}: {e}")),
