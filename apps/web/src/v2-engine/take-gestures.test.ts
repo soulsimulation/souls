@@ -3,18 +3,30 @@ import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { sampleTake } from '../../../../mars/viewer/engine/take/replay.ts';
 import type { Take } from '../../../../mars/viewer/engine/take/types.ts';
-import { ACTIVITY_OVERLAYS } from '../../../../mars/viewer/app/engine-view/activity-poses.ts';
+import { readFileSync } from 'node:fs';
+import { ACTIVITY_OVERLAYS, CYCLES, FACE_DOWN, LYING } from '../../../../mars/viewer/app/engine-view/activity-poses.ts';
 import { cut, gestureAt, gestureFrom, gestureOf } from './take-gestures.ts';
 import { chunkOf, TICK_US, type Body } from './takes.ts';
 
 const FROM = 2000, t0 = FROM * TICK_US, frame = { rulesVersion: 'test/1', datetime: null };
 
-test('each gesture move names an old pose; other moves draw nothing', () => {
-  for (const [move, want] of [['eden:wave', 'wave'], ['souls:nod@1', 'nod'], ['clap', 'clap'], ['point', 'point'], ['shake_head', 'shake-head'], ['bow', 'bow'], ['cheer', 'cheer']])
+test('every move a body form runs plays a pose of its own, never another move\'s; object moves draw nothing', () => {
+  // The moves the humanoid's forms run (content/kinds/body/humanoid.json), as a body offers them.
+  const humanoid = JSON.parse(readFileSync(new URL('../../../../content/kinds/body/humanoid.json', import.meta.url), 'utf8'));
+  const moves = [...new Set(Object.values(humanoid.forms as Record<string, { steps: { step: string; move?: string }[] }>)
+    .flatMap((f) => f.steps.filter((s) => s.step === 'move').map((s) => s.move!)))];
+  assert.ok(moves.length >= 24, `the humanoid runs ${moves.length} moves`);
+  const known = new Set([...ACTIVITY_OVERLAYS, ...CYCLES, ...LYING, ...FACE_DOWN]);
+  const poses = new Map<string, string>();
+  for (const move of moves) {
+    const pose = gestureOf(`eden:${move}`);
+    assert.ok(pose && known.has(pose), `${move} plays an old pose (${pose})`);
+    assert.ok(!poses.has(pose!), `${move} and ${poses.get(pose!)} would share ${pose}`);
+    poses.set(pose!, move);
+  }
+  for (const [move, want] of [['souls:nod@1', 'nod'], ['shake_head', 'shake-head'], ['shrug', 'shrug'], ['look_around', 'look-around'], ['slump', 'slump']])
     assert.equal(gestureOf(move), want, move);
-  for (const move of ['wave', 'nod', 'clap', 'point', 'shake_head', 'bow', 'cheer', 'shrug', 'look_around', 'slump'])
-    assert.ok(ACTIVITY_OVERLAYS.has(gestureOf(move)!) || ['dance', 'jump', 'stretch', 'listen'].includes(gestureOf(move)!), `${move} is an old pose`);
-  for (const move of ['consume', 'pour', 'press', 'look', 'souls:walk']) assert.equal(gestureOf(move), null, move);
+  for (const move of ['consume', 'pour', 'souls:walk', 'handshake']) assert.equal(gestureOf(move), null, move);
 });
 
 test('a standing body plays the gesture from the move start to its end, then stands idle; a cancel ends it early', () => {
