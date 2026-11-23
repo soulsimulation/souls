@@ -151,6 +151,9 @@ A role's move whose last phase holds (`hold_hand`, 0.134 T2) lasts until a membe
 `"on_beat": true` (0.134 T3) puts the move on the world's beat: each member's begins on one beat, at its own body, and
 again on the next beat after it ends, until the member leaves. The role's link `most` is how many take it, so a dance
 (`dance_together`) offered to several takes up to eight.
+`"follows": true` (0.135 G2) marks the role whose member follows the other's: once the offer is accepted, the follower's
+own `souls:follow` order (`v2/docs/intents.md` rule 5) walks it along the leader's trail, 1 to 2.5 m behind, until either
+leaves, the follower acts on its own, or the order ends (`follow`).
 Starting, leaving and ending are SA-G1b's and B5's; the rules are `packages/form-rules/src/activity.ts`. Section 17 is
 meaning, so covered by the hash.
 
