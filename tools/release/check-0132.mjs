@@ -172,7 +172,7 @@ async function worldPage(video) {
           for (const h of e.data?.p?.happened ?? []) if (h?.name) seen[h.name] = (seen[h.name] ?? 0) + 1;
           // B3-7: each part's world span and when the page had it, with its moves and the things it moved into a frame
           const p = e.data?.t === 'part' ? e.data.p : null;
-          if (p) parts.push({ from: p.from, to: p.to, at: performance.now(), moves: (p.moves ?? []).map((m) => ({ body: m.body, name: m.name, start: m.start, end: m.ends?.at(-1) })),
+          if (p) parts.push({ from: p.from, to: p.to, at: performance.now(), wall: Date.now(), moves: (p.moves ?? []).map((m) => ({ body: m.body, name: m.name, start: m.start, end: m.ends?.at(-1) })),
             framed: (p.nodes ?? []).filter((n) => n.parent).map((n) => ({ id: n.id, parent: n.parent, at: n.at })) }), parts.length > 400 && parts.shift();
         });
       }
@@ -221,6 +221,10 @@ const timeline = (page, soul, pt0) => page.evaluate(({ soul, pt0 }) => {
     move: of((p) => { const m = p.moves.find((m) => mine(m.body)); return m ? { at: m.start, what: `${m.name} to ${ms(m.end)}` } : undefined; }),
     framed: of((p) => { const n = p.framed.find((n) => mine(n.parent)); return n ? { at: p.from, what: `${n.id}, its record at ${n.at === undefined ? '?' : ms(n.at)}` } : undefined; }),
     playDelayTicks: v.takes.playDelay,
+    // world time is wall-clock µs: how far behind the wall clock each part came, at the send and over the step
+    behindMs: before ? Math.round(before.wall - before.to / 1000) : null,
+    behindAfterMs: after.slice(0, 12).map((p) => Math.round(p.wall - p.to / 1000)),
+    sentWall: before ? Math.round(before.wall + (pt0 - before.at)) : null,
   };
 }, { soul, pt0 });
 
