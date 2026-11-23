@@ -22,6 +22,23 @@ use sim::log::{FileStore, Log};
 use sim::text::{Grade, Store};
 use worldd::answers::{self, STATE};
 
+thread_local! {
+    /// The acts that had their one progress answer (C20) on this test's thread.
+    static PROGRESSED: std::cell::RefCell<std::collections::BTreeSet<(Vec<u8>, u64)>> =
+        std::cell::RefCell::default();
+}
+
+/// Whether `frame` is an act's progress answer (C20, W11 #4087), which the answer helpers read past. An act has at
+/// most one: a second fails the test.
+fn progress_once(frame: &[u8]) -> bool {
+    let Some(key) = answers::progress_of(frame) else {
+        return false;
+    };
+    let first = PROGRESSED.with(|p| p.borrow_mut().insert(key));
+    assert!(first, "a second progress answer for one act");
+    true
+}
+
 fn worldd() -> Command {
     Command::new(env!("CARGO_BIN_EXE_worldd"))
 }
@@ -263,10 +280,16 @@ fn send(
 
 /// The next answer's kind: 1 a receipt, 2 a refusal (with its reason).
 fn answer(s: &mut UnixStream) -> (u64, String) {
-    let mut len = [0u8; 4];
-    s.read_exact(&mut len).expect("an answer");
-    let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
-    s.read_exact(&mut frame).expect("an answer");
+    // A progress answer (C20, sent as a walk's route is planned) is read past.
+    let frame = loop {
+        let mut len = [0u8; 4];
+        s.read_exact(&mut len).expect("an answer");
+        let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
+        s.read_exact(&mut frame).expect("an answer");
+        if !progress_once(&frame) {
+            break frame;
+        }
+    };
     let Value::Map(m) = decode(&frame).expect("a frame").value else {
         panic!("a frame")
     };
@@ -311,6 +334,62 @@ fn a1_a2_a5_seeded_world_serves_walks_and_restarts_after_sigkill() {
     println!("A1: {first}");
     // No store named (O3b A1): this test is C1's, unchanged.
     serves_walks_and_restarts(w, &d, &dir, body, root, ground);
+}
+
+/// #4013 A1: while it loads, `serve` tells the service manager it made progress (`EXTEND_TIMEOUT_USEC`, as much as
+/// the unit's 30 s `TimeoutStartSec`), then `READY=1`, and no more progress notices after it.
+#[test]
+fn x5_a1_serve_says_progress_while_it_loads_and_none_once_ready() {
+    let d = scratch("x5");
+    let (dir, ..) = seeded(&d);
+    let notify = d.join("n");
+    let manager = std::os::unix::net::UnixDatagram::bind(&notify).expect("a notify socket");
+    manager
+        .set_read_timeout(Some(Duration::from_secs(60)))
+        .expect("a read timeout");
+    let w = serve_env(
+        &dir,
+        &d.join("s"),
+        &[],
+        &[("NOTIFY_SOCKET", notify.to_str().expect("a path"))],
+    );
+    let mut said = Vec::new();
+    let mut buf = [0u8; 512];
+    while !said.iter().any(|s: &String| s.starts_with("READY=1")) {
+        let n = manager.recv(&mut buf).expect("a notice before READY=1");
+        said.push(String::from_utf8_lossy(&buf[..n]).into_owned());
+    }
+    let before = said
+        .iter()
+        .filter(|s| *s == "EXTEND_TIMEOUT_USEC=30000000")
+        .count();
+    println!("A1: {before} progress notices, then {:?}", said.last());
+    assert!(before >= 1, "no progress before ready: {said:?}");
+    // The watchdog's thread starts before READY=1, so its word may come first too.
+    let other = said[..said.len() - 1]
+        .iter()
+        .filter(|s| *s != "EXTEND_TIMEOUT_USEC=30000000" && *s != "WATCHDOG=1")
+        .count();
+    assert_eq!(other, 0, "only progress and alive, then ready: {said:?}");
+    // After READY=1, only the watchdog's word, twice a second: no progress notice in the next second.
+    after_ready(&manager);
+    drop(w);
+}
+
+// A real process on the real clock: the second read after READY=1 is real time.
+#[allow(clippy::disallowed_methods)]
+fn after_ready(manager: &std::os::unix::net::UnixDatagram) {
+    let mut buf = [0u8; 512];
+    manager
+        .set_read_timeout(Some(Duration::from_millis(200)))
+        .expect("a read timeout");
+    let end = Instant::now() + Duration::from_secs(1);
+    while Instant::now() < end {
+        if let Ok(n) = manager.recv(&mut buf) {
+            let s = String::from_utf8_lossy(&buf[..n]).into_owned();
+            assert_eq!(s, "WATCHDOG=1", "after READY=1");
+        }
+    }
 }
 
 /// The seeded world: its folder, its Soul's body, its root and its ground.

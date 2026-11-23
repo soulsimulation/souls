@@ -120,12 +120,15 @@ test('A1 to A4: paired while the gateway runs, the Soul joins, acts and leaves, 
   assert.ok(readFileSync(join(world, 'tokens'), 'utf8').includes(said.grant), 'the directory rewrote the tokens file');
 
   const rt = runtimeOf(home, said.soul);
+  // The gateway writes an act's record at its end: a form's or a walk's accepted (C20, W11 #4087) answers it, but is
+  // not its end, so each act waits for its own record.
+  const recorded = () => { try { return receipts(receiptsDir).length; } catch { return 0; } };
   const act = async (req) => {
-    const before = (await request(rt.socket, { op: 'status' }).catch(() => ({ answered: 0 }))).answered ?? 0;
+    const before = recorded();
     const a = await call(home, said.soul, { op: 'act', ...req }, { pkg: PKG });
     outputs.push(JSON.stringify(a));
     assert.equal(a.ok, true, JSON.stringify(a));
-    await waitFor(async () => { const s = await request(rt.socket, { op: 'status' }); return s.connected && s.unanswered.length === 0 && s.answered > before && s; }, 30_000);
+    await waitFor(async () => recorded() > before, 30_000);
     return receipts(receiptsDir).at(-1);
   };
   const find = async (words) => (await request(rt.socket, { op: 'find', words, limit: 50 })).found;

@@ -2,7 +2,7 @@
 // (tools/bench/capacity/profiles/shapes.mjs, #2556), imported and never copied. Each load is one schedule, or two
 // merged, and prints its `describe` line.
 //
-//   node v2/tools/driver/loads.mjs <target|target-even|stretch> [--agents 1000] [--seconds 600] [--seed 1] --out <file>
+//   node v2/tools/driver/loads.mjs <target|target-even|stretch|ladder-<n>-<even|uneven>> [--agents 1000] [--seconds 600] [--seed 1] --out <file>
 //
 // The file is the driver's input (v2/tools/driver/README.md): the describe line, then one act a line, in time order,
 // `<due ms> <agent> <kind> <verb>`, with `-` for a kind no v2 intent carries yet.
@@ -32,7 +32,21 @@ export function merge(a, b, name) {
   return { shape: name, n: a.n + b.n, seconds: a.seconds, seed: a.seed, agents, parts: [a.shape, b.shape], summary: summarize(agents, a.seconds) };
 }
 
-/** The three loads: (agents, seconds, seed) → a schedule. */
+/** The ladder's steps (X7, #4015): agent counts for the measured runs on a served world. */
+export const LADDER = Object.freeze([10, 50, 100, 200, 350, 500]);
+
+/** A ladder step's two arms, its count fixed by its name (`--agents` is not read): uneven is the shared `event` shape
+ *  as it is; even is `uniform` at the pace that intends as many acts as the uneven arm with the same seconds and seed,
+ *  so the two differ in how the load falls, not in how much there is (docs/architecture/scaling.md). */
+const ladder = (n) => ({
+  [`ladder-${n}-uneven`]: (_, s, seed) => schedule('event', n, s, seed),
+  [`ladder-${n}-even`]: (_, s, seed) => {
+    const acts = schedule('event', n, s, seed).summary.acts;
+    return schedule('uniform', n, s, seed, { actSec: Math.round((10 * n * s) / Math.max(1, acts)) / 10 });
+  },
+});
+
+/** The loads: (agents, seconds, seed) → a schedule. */
 export const LOADS = Object.freeze({
   target: (n, s, seed) => schedule(TARGET, n, s, seed),
   'target-even': (n, s, seed) => schedule('uniform', n, s, seed, { actSec: 12 }),
@@ -42,6 +56,7 @@ export const LOADS = Object.freeze({
     const fast = Math.round(n / 10);
     return merge(schedule(TARGET, n - fast, s, seed), schedule('uniform', fast, s, seed, { actSec: 0.5 }), 'stretch');
   },
+  ...Object.assign({}, ...LADDER.map(ladder)),
 });
 
 /** The driver's file: the describe line, then `<due ms> <agent> <kind> <verb>` a line, by due time then agent. */

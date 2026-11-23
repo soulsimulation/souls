@@ -1,6 +1,16 @@
 #!/usr/bin/env node
 // O24: approve a waiting test-Soul pairing from the directory's own machine. No file access or bearer token.
+// X8a: `pair <world> <n> --out <file>` asks N new-Soul pairings as a client would, approves each with the same
+// operator approve, collects their tokens by the normal poll and writes them, one `<soul> <token>` line each, to a new
+// file outside this repository (mode 0600); its answer never carries a token. `retire-all <world>` retires every
+// active test Soul of that world.
+import { createHash, randomBytes } from 'node:crypto';
+import { open, realpath, unlink } from 'node:fs/promises';
+import { basename, dirname, isAbsolute, join, relative, resolve } from 'node:path';
+import { fileURLToPath } from 'node:url';
 import { isMain } from '../../../tools/lib/is-main.mjs';
+
+const sleep = (ms) => new Promise((ok) => setTimeout(ok, ms));
 
 export async function run(args, request = fetch) {
   const flag = args.indexOf('--directory');
@@ -12,19 +22,87 @@ export async function run(args, request = fetch) {
       || origin.pathname !== '/' || !(host === 'localhost' || host === '::1' || /^127(?:\.\d{1,3}){3}$/.test(host))) {
     throw new Error('operator.direct-only');
   }
+  const post = async (path, body) => {
+    const response = await request(new URL(path, origin), {
+      method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
+      redirect: 'error', signal: AbortSignal.timeout(10_000),
+    });
+    const result = await response.json();
+    if (!response.ok) throw new Error(result.refused ?? `directory.status-${response.status}`);
+    return result;
+  };
+  const outFlag = args.indexOf('--out');
+  const out = outFlag < 0 ? undefined : args[outFlag + 1];
+  if (outFlag >= 0) args = [...args.slice(0, outFlag), ...args.slice(outFlag + 2)];
   const [action, first, second, ...extra] = args;
+  if (action === 'pair' && first && /^\d+$/.test(second ?? '') && +second >= 1 && +second <= 1000 && out && !extra.length) {
+    return pairMany(first, +second, out, post);
+  }
+  if (out !== undefined) throw new Error('Use --out only with test-soul pair');
+  if (action === 'retire-all' && first && args.length === 2) {
+    const { souls } = await post('/v1/pair/operator/list', {});
+    const mine = souls.filter((s) => s.world === first);
+    for (const s of mine) await post('/v1/pair/operator/retire', { soul: s.soul });
+    return { ok: true, world: first, retired: mine.length };
+  }
   let body;
   if (action === 'approve' && first && second && !extra.length) body = { world: first, code: second };
   else if (action === 'list' && args.length === 1) body = {};
   else if (action === 'retire' && first && args.length === 2) body = { soul: first };
-  else throw new Error('Use test-soul approve <world> <request> | list | retire <soul>, with --directory <origin>');
-  const response = await request(new URL(`/v1/pair/operator/${action}`, origin), {
-    method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify(body),
-    redirect: 'error', signal: AbortSignal.timeout(10_000),
-  });
-  const result = await response.json();
-  if (!response.ok) throw new Error(result.refused ?? `directory.status-${response.status}`);
-  return result;
+  else throw new Error('Use test-soul approve <world> <request> | list | retire <soul> | pair <world> <n> --out <file>'
+    + ' | retire-all <world>, with --directory <origin>');
+  return post(`/v1/pair/operator/${action}`, body);
+}
+
+/** The tokens file's real place, refused inside this repository so a token is never committed or posted. */
+async function outside(out) {
+  const repo = await realpath(fileURLToPath(new URL('../../../', import.meta.url)));
+  const file = join(await realpath(dirname(resolve(out))), basename(out));
+  const rel = relative(repo, file);
+  if (!rel.startsWith('..') && !isAbsolute(rel)) throw new Error('operator.tokens-in-repo');
+  return file;
+}
+
+async function pairMany(world, n, out, post) {
+  const file = await outside(out);
+  // Made first, so an existing file is refused before any Soul is paired.
+  const handle = await open(file, 'wx', 0o600);
+  try {
+    const paired = await pairAll(world, n, post);
+    await handle.writeFile(paired);
+    return { ok: true, world, paired: n, test: true };
+  } catch (e) {
+    await unlink(file);
+    throw e;
+  } finally {
+    await handle.close();
+  }
+}
+
+async function pairAll(world, n, post) {
+  const asked = [];
+  for (let i = 1; i <= n; i++) {
+    const secret = randomBytes(32).toString('hex');
+    const secret_hash = createHash('sha256').update(secret).digest('hex');
+    const { code, interval } = await post('/v1/pair/request',
+      { secret_hash, device: 'operator load', label: `test soul ${i}`, new: true, world });
+    const { soul } = await post('/v1/pair/operator/approve', { world, code });
+    asked.push({ secret, soul, at: Date.now() + (interval ?? 5) * 1000 });
+  }
+  const lines = [];
+  for (const a of asked) {
+    for (;;) {
+      await sleep(Math.max(0, a.at - Date.now()));
+      const answer = await post('/v1/pair/poll', { secret: a.secret });
+      if (answer.token) {
+        lines.push(`${a.soul} ${answer.token}\n`);
+        break;
+      }
+      if (answer.refused) throw new Error(answer.refused);
+      a.at = Date.now() + (answer.interval ?? 5) * 1000;
+    }
+  }
+  return lines.join('');
 }
 
 if (isMain(import.meta.url)) {
