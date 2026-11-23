@@ -15,6 +15,13 @@ use super::store::{Object, R, Store, When, refuse};
 /// directory's caller, not the tick, that makes these calls.
 const TIMEOUT: Duration = Duration::from_secs(5);
 
+/// The largest object a world's store reads ([`S3::for_world`]): 1 GiB, the largest legitimate object (a large
+/// world's stream-recovery object or checkpoint, tens of MB) with a wide margin.
+pub const WORLD_READ_LIMIT: u64 = 1 << 30;
+
+/// How long one object's body may take to send or receive in a world's store ([`S3::for_world`]).
+const BODY_TIMEOUT: Duration = Duration::from_secs(120);
+
 /// One bucket of an S3-compatible store, and the prefix every key is put under.
 pub struct S3 {
     agent: ureq::Agent,
@@ -87,6 +94,27 @@ impl S3 {
             secret_access_key: secret_access_key.to_owned(),
             prefix: prefix.to_owned(),
         })
+    }
+
+    /// This store as a world's (`worldd`'s history, checkpoints, log parts and stream recovery): reads of whole objects
+    /// up to [`WORLD_READ_LIMIT`], where ureq's own cap is 10 MiB and a fresh Eden's stream-recovery object is already
+    /// 11.8 MB (its checkpoint 10.1 MB, its import part 9.6 MB). A store out of reach is still found within [`TIMEOUT`]:
+    /// the name's lookup, the connection, the request and the answer's head each have that long; only an object's body, sent or
+    /// received, has [`BODY_TIMEOUT`].
+    pub fn for_world(mut self) -> S3 {
+        self.agent = ureq::Agent::config_builder()
+            .timeout_global(None)
+            .timeout_resolve(Some(TIMEOUT))
+            .timeout_connect(Some(TIMEOUT))
+            .timeout_send_request(Some(TIMEOUT))
+            .timeout_recv_response(Some(TIMEOUT))
+            .timeout_send_body(Some(BODY_TIMEOUT))
+            .timeout_recv_body(Some(BODY_TIMEOUT))
+            .http_status_as_error(false)
+            .build()
+            .into();
+        self.read_limit = Some(WORLD_READ_LIMIT);
+        self
     }
 
     /// This store for an operator's tool that copies whole objects (`world-aside`): reads of any size up to

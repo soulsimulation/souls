@@ -1,9 +1,9 @@
 #!/usr/bin/env bash
-# 0.132: start Eden's new-engine world fresh, on today's build, under the same world name.
+# Start Eden's new-engine world fresh, on a release's build, under the same world name (0.132, 0.132.1).
 #
-# WHAT THIS DOES, in plain words. Today's build (0.132, 2d90b525d5d8) cannot read the Eden store the 22 Nov build wrote
-# (its first record names another header), so the release refused to move it. This gives Eden a fresh start from the
-# same import instead. It:
+# WHAT THIS DOES, in plain words. A new build may not read the Eden store an older build wrote (its first record names
+# another header), and then the release refuses to move it. This gives Eden a fresh start from the same import on the
+# release's build instead. It:
 #   - stops Eden's new-engine world and its gateway (Eden's page is still served by the old engine until
 #     switch-eden.sh, so visitors see no change);
 #   - MOVES the world's folder to /var/lib/souls/worlds/aside/ (renamed, nothing deleted);
@@ -11,22 +11,24 @@
 #     and history; only this world's keys) under aside/<time>/ in the same bucket. Each object is copied, read back and
 #     compared (length and SHA-256) before any original is deleted, and no original is deleted until every copy checks.
 #     Nothing else in the bucket is touched: not accounts, not Souls, not the name "eden", not other worlds;
-#   - seeds a fresh world from the same facts with today's build, puts it where the old one was, pins today's build and
-#     starts the gateway. The world itself stays stopped: release-v2 starts it.
+#   - seeds a fresh world from the same facts with the release's build, puts it where the old one was, pins that build
+#     and starts the gateway. The world itself stays stopped: release-v2 starts it.
 # Undo: reseed-eden-undo.sh <time> (printed at the end).
 #
-#   bash reseed-eden.sh check                   reads and prints every value; changes nothing
-#   bash reseed-eden.sh run                     the check, then the steps above
-#   bash reseed-eden.sh resume <time> check     for a run that stopped: which steps are done; changes nothing
-#   bash reseed-eden.sh resume <time> run       the steps not yet done, in order (a copy already made in the bucket
-#                                               with the same bytes counts as made; one with other bytes refuses)
+#   bash reseed-eden.sh <sha> check                  reads and prints every value; changes nothing
+#   bash reseed-eden.sh <sha> run                    the check, then the steps above
+#   bash reseed-eden.sh <sha> resume <time> check    for a run that stopped: which steps are done; changes nothing
+#   bash reseed-eden.sh <sha> resume <time> run      the steps not yet done, in order (a copy already made in the
+#                                                    bucket with the same bytes counts as made; one with other bytes
+#                                                    refuses)
 #
-# Root on the production host, with the release staged (release-v2's failed run staged it) and the one-off
+# <sha> is the release's full commit: its build is the worldd its staged manifest names
+# (/var/lib/souls/releases/<sha>/manifest.json; a release-v2 dry run stages it). Root on the production host, with
+# that release staged, release.yml's old page at the same commit (its content/kinds are the entries) and the one-off
 # `world-aside` (v2/tools/ops/src/world_aside.rs) at /var/lib/souls/oneoff/world-aside. RESEED_* stand in for the
 # host's folders in a test.
 set -euo pipefail
 
-SHA=2d90b525d5d82f3626f6d6c3cbd67810133bdd0f
 ASIDE_TOOL_SHA256=${RESEED_TOOL_SHA256:-2ca1a2790546905466786285ae8149863b429e6c32c86e7c7f82f2394b2191e5}
 DATA=${RESEED_DATA:-/var/lib/souls}
 ETC=${RESEED_ETC:-/etc/souls}
@@ -42,14 +44,19 @@ die() {
 }
 sha256() { if command -v sha256sum > /dev/null; then sha256sum "$1" | cut -c1-64; else shasum -a 256 "$1" | cut -c1-64; fi; }
 RESUME=''
-case ${1:-} in
-  check | run) ACT=$1 ;;
+SHA=${1:-}
+[[ "$SHA" =~ ^[0-9a-f]{40}$ ]] || {
+  sed -n 2,30p "$0"
+  exit 2
+}
+case ${2:-} in
+  check | run) ACT=$2 ;;
   resume)
-    RESUME=${2:-} ACT=${3:-}
-    [[ "$RESUME" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] && { [ "$ACT" = check ] || [ "$ACT" = run ]; } || die "resume <time> check|run"
+    RESUME=${3:-} ACT=${4:-}
+    [[ "$RESUME" =~ ^[0-9]{8}T[0-9]{6}Z$ ]] && { [ "$ACT" = check ] || [ "$ACT" = run ]; } || die "<sha> resume <time> check|run"
     ;;
   *)
-    sed -n 2,26p "$0"
+    sed -n 2,30p "$0"
     exit 2
     ;;
 esac
@@ -79,8 +86,11 @@ WORLD=$(sed -n 's/^WORLD="\{0,1\}\([^"]*\)"\{0,1\}$/\1/p' "$ETC/cutover.env")
 [[ "$WORLD" =~ ^[0-9a-f]{32}-[0-9a-f]{32}-[0-9]+$ ]] || die "no world name in $ETC/cutover.env"
 OLD_DIR=$ROOT/worlds/$WORLD
 REL=$DATA/releases/$SHA
-[ -f "$REL/manifest.json" ] || die "release $SHA is not staged ($REL/manifest.json)"
+[ -f "$REL/manifest.json" ] || die "release $SHA is not staged ($REL/manifest.json): a release-v2 dry run stages it"
+[ "$(sed -n 's/^{"commit":"\([0-9a-f]\{40\}\)".*/\1/p' "$REL/manifest.json")" = "$SHA" ] || die "$REL/manifest.json is not release $SHA's"
 NEW=$(sed -n 's/^{"name":"worldd","hash":"\(1220[0-9a-f]\{64\}\)".*/\1/p' "$REL/manifest.json")
+VERSION=$(sed -n 's/^{"commit":"[0-9a-f]\{40\}","version":"\([0-9.]*\)".*/\1/p' "$REL/manifest.json")
+[ -n "$VERSION" ] || die "no version in $REL/manifest.json"
 [ -n "$NEW" ] || die "no worldd in $REL/manifest.json"
 NEW_WORLDD=$ROOT/builds/$NEW/worldd
 [ -x "$NEW_WORLDD" ] && [ "$("$LIB/supervisor" hash "$NEW_WORLDD")" = "$NEW" ] || die "$NEW_WORLDD is missing or not $NEW"
@@ -137,7 +147,7 @@ echo "reseed: label            $STAMP$([ -n "$RESUME" ] && echo ' (resuming)')"
 echo "reseed: its folder       $([ "$done2" = yes ] && echo "aside at $ASIDE_DIR" || echo "$OLD_DIR ($(du -sh "$OLD_DIR" | cut -f1)), moves to $ASIDE_DIR")"
 echo "reseed: pinned now       $PINNED"
 echo "reseed: the old build    $OLD"
-echo "reseed: today's build    $NEW (release $SHA)"
+echo "reseed: the release      $VERSION at $SHA, its worldd $NEW"
 echo "reseed: store            $STORE_WHAT"
 echo "reseed: one-off tool     $TOOL, sha256 $ASIDE_TOOL_SHA256 (checked)"
 echo "reseed: facts            $SRC_DIR/facts.json, sha256 $(sha256 "$SRC_DIR/facts.json")"
@@ -165,11 +175,11 @@ if [ "$done2" = yes ]; then echo "reseed: 2. the folder: already aside"; else
 fi
 if [ "$done3" = yes ]; then echo "reseed: 3. the bucket objects: already aside"; else
   echo "reseed: 3. the bucket objects aside: aside/$STAMP/"
-  "$TOOL" "$WORLD" --label "$STAMP" || die "the bucket move refused (no original deleted); resume: bash $0 resume $STAMP check"
+  "$TOOL" "$WORLD" --label "$STAMP" || die "the bucket move refused (no original deleted); resume: bash $0 $SHA resume $STAMP check"
 fi
 grep -qx 'bucket=moved' "$RECEIPT" || echo 'bucket=moved' >> "$RECEIPT"
 if [ "$done5" = yes ]; then echo "reseed: 4-5. the fresh seed: already in place"; else
-  echo "reseed: 4. a fresh seed with today's build"
+  echo "reseed: 4. a fresh seed with the release's build"
   if [ -e "$SEED_DIR" ]; then mv "$SEED_DIR" "$SEED_DIR.stopped-$(date -u +%Y%m%dT%H%M%SZ)"; fi
   args=(seed --facts "$ASIDE_DIR/facts.json" --dir "$SEED_DIR" --entries "$ENTRIES" --souls 0 --at "$AT")
   if [ -n "$CREATOR" ]; then args+=(--creator "$CREATOR"); fi
@@ -181,12 +191,12 @@ if [ "$done5" = yes ]; then echo "reseed: 4-5. the fresh seed: already in place"
   mkdir -p "$OLD_DIR/views" "$OLD_DIR/history" "$OLD_DIR/receipts"
   if [ -z "${RESEED_DATA:-}" ] && id souls > /dev/null 2>&1; then chown -R souls:souls "$OLD_DIR"; fi
 fi
-echo "reseed: 6. pin today's build"
+echo "reseed: 6. pin the release's build"
 "$LIB/supervisor" pin "$WORLD" "$NEW"
 [ "$("$REL/bin/deploy" pinned "$WORLD")" = "$NEW" ] || die "the pin did not take"
 echo "reseed: 7. start the gateway; the world stays stopped until release-v2 starts it"
 systemctl start "souls-gateway@$WORLD"
 echo "reseed: done: $WORLD is fresh, pinned to ${NEW:0:16}…, its world stopped, its gateway started"
 echo "reseed: next, release-v2 again:"
-echo "  gh workflow run release-v2.yml --ref main -f version=0.132 -f sha=$SHA -f dry_run=false -f target=production"
+echo "  gh workflow run release-v2.yml --ref main -f version=$VERSION -f sha=$SHA -f dry_run=false -f target=production"
 echo "reseed: undo: bash $(dirname "$0")/reseed-eden-undo.sh $STAMP check"
