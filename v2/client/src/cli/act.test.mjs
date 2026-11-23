@@ -296,6 +296,12 @@ test('A1, A2: can answers from the local check; a walk to a named thing and a si
   assert.equal(talks.ok, true, JSON.stringify(talks));
   assert.deepEqual(talks.conversations, souls(home, ['converse', 'list']).conversations, 'the same as converse list');
 
+  // 0.135 G1: a walk names its gait, sent as parameter 2 (`gait:jog`); an unknown gait is refused by name.
+  const jog = souls(home, ['act', chair, 'gait=jog', '--wait']);
+  assert.deepEqual([jog.ok, jog.phase], [true, 'done'], `the jog ends with a receipt: ${JSON.stringify(jog)}`);
+  const sprint = souls(home, ['act', chair, 'gait=sprint', '--wait']);
+  assert.deepEqual([sprint.ok, sprint.phase, sprint.reason], [false, 'refused', 'move.unknown-gait'], JSON.stringify(sprint));
+
   // D1: act --wait returns once the receipt has its final phase, or the world's refusal by name.
   const walk = souls(home, ['act', chair, '--wait']);
   assert.deepEqual([walk.ok, walk.phase, walk.receipt?.answers.at(-1).answer], [true, 'done', 'receipt'], `the walk ends with a receipt: ${JSON.stringify(walk)}`);
