@@ -85,6 +85,10 @@ width is the larger of its other two sides, its two outermost `grip` points alon
 hold it (each stands 0.35 m beyond its grip), and `state.hold_crew`'s default is how many must carry it. Before the
 lift, a crew too small, a carrier more than 0.7 m from its grip, and (when the lift names where the front goes) a way
 too narrow for the load are refused by name (`carry-crew-too-small`, `carry-grip-out-of-reach`, `carry-board-clips`).
+Held and set down, its longest side runs from one carrier to the other (0.135 C4: a beam whose length is its z is turned
+a quarter turn; an upright, whose length is its y, is laid flat). The carry itself is an entry too,
+`content/kinds/construction/carry.json`: its two roles (`front`, `back`) make it an activity kind in a served world, and
+its first slot admitting a `thing` is where the load rides.
 `loose` is how long a loose thing lasts once nobody holds or owns it, Engine v2 F10
 ([#2773](https://github.com/soulsimulation/souls/issues/2773)): `{"ever": true}` or `{"us": <whole microseconds above zero>}`;
 owned, or in a slot, a thing lasts. Both are meaning, so covered by the hash; a body's family says neither.
