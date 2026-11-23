@@ -101,7 +101,7 @@ jobs:
                 # at most 107 bytes (the runner's own folder is too deep for the gateway's control socket).
                 d="$OUT/$r/$n-${arm:0:2}-${rate:0:2}-$k"
                 mkdir -p "$OUT/$r"
-                CARGO_TARGET_DIR="$PER_RUN/bin-$r" bash "$r/v2/tools/bench/stage2a/rung.sh" "$n" "$arm" "$rate" "$world" 120 "$d" > "$d.log" 2>&1 || true
+                SOULS_S11_DIAG=1 CARGO_TARGET_DIR="$PER_RUN/bin-$r" bash "$r/v2/tools/bench/stage2a/rung.sh" "$n" "$arm" "$rate" "$world" 120 "$d" > "$d.log" 2>&1 || true
                 line=$(grep '^rung {' "$d.log" | tail -1)
                 if [ -z "$line" ]; then
                   echo "$r $rung $arm r$k: no result"
@@ -114,6 +114,7 @@ jobs:
                   const fm = (o.threads.world.find(([n]) => n === "planner-forms") ?? [, 0])[1];
                   console.log(`| ${r} | ${rung} | ${arm} | ${k} | ${pl} | ${fm} | ${o.threads.world.slice(0, 4).map(([n, c]) => n + " " + c).join(", ")} | ${(o.tick.onTimeShare * 100).toFixed(2)} | ${o.acts.perS} | ${o.cpu.world} | ${o.accepted.p95Ms} | ${o.wait.p50Ms} / ${o.wait.p95Ms} | ${o.stuck?.stuck ?? "-"} |`);
                 ' "$r" "$rung" "$arm" "$k" "$line" | tee -a "$PER_RUN/table.md"
+                echo "diag $r $rung $arm r$k: $(grep -c s11-diag "$d/worldd.log") lines"; grep s11-diag "$d/worldd.log" | sed -E 's/n=[0-9]+ //' | sort | uniq -c | sort -rn | head -12
                 # The stuck agents' acts (S11): verb, accepted or unanswered, counted, with the longest time since sent.
                 node -e '
                   const [r, rung, arm, k, line] = process.argv.slice(1); const o = JSON.parse(line.slice(5));

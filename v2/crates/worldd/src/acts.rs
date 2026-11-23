@@ -220,6 +220,8 @@ struct Planning {
     current: BTreeMap<FormKey, (FormQuestion, Arc<Versions>)>,
     answers: BTreeMap<FormKey, FormAnswer>,
     queued: BTreeMap<FormKey, FormQuestion>,
+    /// S11 diagnostic only: each cursor's new generations while waiting, by why (body moved, query moved, map).
+    regen: BTreeMap<FormKey, [u32; 3]>,
 }
 
 impl Planning {
@@ -286,6 +288,21 @@ impl Planning {
             .get(&key)
             .is_some_and(|(q, m)| q.body == body && q.query == query && Arc::ptr_eq(m, map));
         if !unchanged {
+            if let Some((q, m)) = self.current.get(&key)
+                && std::env::var_os("SOULS_S11_DIAG").is_some()
+            {
+                let why = if !Arc::ptr_eq(m, map) { 2 } else if q.query != query { 1 } else { 0 };
+                let moved = {
+                    let (a, b) = (q.body.pose.position, body.pose.position);
+                    ((a.x - b.x).abs() + (a.z - b.z).abs()) / 1000
+                };
+                let c = self.regen.entry(key).or_default();
+                c[why] += 1;
+                let n = c[0] + c[1] + c[2];
+                if n == 40 || n == 400 || n == 2000 {
+                    eprintln!("s11-diag form-regen n={n} body={} query={} map={} last-move-mm={moved} kind={:?}", c[0], c[1], c[2], key.kind);
+                }
+            }
             self.generation += 1;
             let q = FormQuestion {
                 key,
@@ -995,6 +1012,9 @@ impl Geometry for Sight<'_> {
             return WalkPlan::Unplanned;
         }
         let Some(key) = self.key(body, step, FormKind::Walk) else {
+            if std::env::var_os("SOULS_S11_DIAG").is_some() {
+                eprintln!("s11-diag form-walk-no-key step={step}");
+            }
             return WalkPlan::Pending;
         };
         let Some(me) = self.bodies.get(&body) else {

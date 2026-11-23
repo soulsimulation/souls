@@ -625,6 +625,8 @@ pub struct Runner {
     out_places: BTreeMap<Id, (Id, u64)>,
     /// The walkers' line requests still out at the planner (S8): each walker's leg end and the batch it went in.
     out_lines: BTreeMap<Id, (Vec3, u64)>,
+    /// S11 diagnostic only: ticks each walk has waited for its place, by order.
+    diag_wait: BTreeMap<Id, (Id, u32)>,
 }
 
 fn decode_int(v: &Value) -> Option<i64> {
@@ -940,6 +942,7 @@ impl Runner {
             chunk: CHUNK,
             out_places: BTreeMap::new(),
             out_lines: BTreeMap::new(),
+            diag_wait: BTreeMap::new(),
         }
     }
 
@@ -1260,6 +1263,25 @@ impl Runner {
                     Some((o, Err(name))) if *o == order => self.end(who, named(name)),
                     // Asked again only once the batch it went in has been taken without its answer (S8).
                     _ => match planned.batches {
+                        _ if {
+                            static DIAG: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+                            *DIAG.get_or_init(|| std::env::var_os("SOULS_S11_DIAG").is_some())
+                        } && {
+                            let e = self.diag_wait.entry(who).or_insert((order, 0));
+                            if e.0 != order {
+                                *e = (order, 0);
+                            }
+                            e.1 += 1;
+                            if e.1 == 600 || e.1 == 1800 {
+                                eprintln!(
+                                    "s11-diag walk-waits-place ticks={} out={} answer={:?}",
+                                    e.1,
+                                    self.out_places.contains_key(&who),
+                                    planned.places.get(&who).map(|(o, r)| (*o == order, r.as_ref().err().copied()))
+                                );
+                            }
+                            false
+                        } => unreachable!(),
                         Some(b) => {
                             if !self
                                 .out_places
