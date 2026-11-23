@@ -15,17 +15,28 @@
 //   land pond|lake (an area as plateau) [--level m] [--depth m]          a water over a carved bed
 //   land water <id> --level m | --by m                                 an existing water's level
 //
-// Not here: `smooth` (a brush that samples its neighbours is not folded onto tiles), `move` of a landform, and
-// `extend` (the world's ground grows with #3728's `expand`). Each is refused by name.
+//   land extend --toward n|s|e|w|ne|nw|se|sw --metres m | --bounds x0,z0,x1,z1      the ground grows that way
+//   expand <m>                                                         the ground grows to a centred square m a side
+//
+// Growing the ground (#3728, today's `expand` and `land extend`): new tiles, flat outward from the old ground's edge,
+// and the world's extent, a place (`eden:extent`) whose outline the open ground is cut to, so Souls walk the new ground.
+// It only grows.
+//
+// Not here: `smooth` (a brush that samples its neighbours is not folded onto tiles) and `move` of a landform. Each is
+// refused by name.
 
 import { decode, idText, plainKind } from '../../brief/copy.mjs';
-import { F, bodiesUnder, changedCells, expand, heightAt } from './terrain.mjs';
+import { F, bodiesUnder, changedCells, expand, grownTiles, heightAt, tileRange } from './terrain.mjs';
 
 /** A body's radius and margin on the open ground (`sim::ground::HUMAN_RADIUS + MARGIN`), µm: the world's own. */
 export const BODY_REACH_UM = 350_000;
 const TILE_SIZE = 24;
 /** The most operations one edit carries (`replica::edit::OPS_MOST`). */
 const OPS_MOST = 256;
+/** The most bytes one creator's edit carries (`replica::intents::BULK_MOST`), less room for the rest of the edit. */
+const EDIT_BYTES = (8 << 20) - (64 << 10);
+/** What a place that is the world's extent is derived from (field 20): data, as `eden:landform` is. */
+const EXTENT = 'eden:extent';
 
 const no = (code, detail) => ({ ok: false, code, detail });
 const num = (v) => (typeof v === 'bigint' ? Number(v) : v);
@@ -59,7 +70,7 @@ export function groundOf(copy) {
     return { tx: num(tx), tz: num(tz), heights, classes: new Uint8Array(c) };
   });
   const things = [], bodies = [], waters = new Map();
-  let placeKind = null;
+  let placeKind = null, extent = null;
   for (const [id, m] of records) {
     if (m.get(3) === undefined || idText(m.get(3)) !== ground.id) continue;
     const kind = String(m.get(2));
@@ -67,6 +78,7 @@ export function groundOf(copy) {
     if (plainKind(kind) === 'eden:place') {
       placeKind ??= kind;
       if (f.has(F.WATER_LEVEL)) waters.set(id, { level: num(f.get(F.WATER_LEVEL)) });
+      if (f.get(F.PLACE_OF) === EXTENT) extent = { id, outline: (f.get(F.OUTLINE) ?? []).map(([x, z]) => [num(x) / 1000, num(z) / 1000]) };
       continue;
     }
     const pose = m.get(7);
@@ -81,7 +93,7 @@ export function groundOf(copy) {
     const support = { which, ...(s.has(2) ? { node: idText(s.get(2)) } : {}), ...(s.has(3) ? { height: num(s.get(3)) } : {}) };
     things.push({ id, position, orientation: (pose.get(3) ?? [1_000_000, 0, 0, 0]).map(num), support });
   }
-  return { id: ground.id, tileMm: num(ground.f.get(TILE_SIZE)), tiles, things, bodies, placeKind: placeKind ?? 'eden:place', waters };
+  return { id: ground.id, tileMm: num(ground.f.get(TILE_SIZE)), tiles, things, bodies, placeKind: placeKind ?? 'eden:place', waters, extent };
 }
 
 const pt = (v, what) => {
@@ -188,15 +200,76 @@ export function landformOf(verb, a, ground, id) {
     }
     case 'smooth': throw Object.assign(new Error('smooth samples its neighbours and is not folded onto the tiles: use flatten'), { code: 'land.smooth' });
     case 'move': throw Object.assign(new Error('a landform is not moved: remove its place and shape the land again'), { code: 'land.move' });
-    case 'extend': throw Object.assign(new Error('the ground grows with the world\'s expand'), { code: 'land.extend' });
-    default: throw Object.assign(new Error(`land raise, lower, flatten, knoll, hill, mountain, plateau, terrace, valley, ditch, cliff, pond, lake or water, not ${verb}`), { code: 'land.verb' });
+    default: throw Object.assign(new Error(`land raise, lower, flatten, knoll, hill, mountain, plateau, terrace, valley, ditch, cliff, pond, lake, water or extend, not ${verb}`), { code: 'land.verb' });
   }
 }
 
-/** The batch a land verb makes on `copy` (`a` its flags, `a.land` the verb and `a.ref`); or a refusal by name. */
+const COMPASS = { n: [0, -1], s: [0, 1], e: [1, 0], w: [-1, 0], ne: [1, -1], nw: [-1, -1], se: [1, 1], sw: [-1, 1] };
+const WORDS = { north: 'n', south: 's', east: 'e', west: 'w', northeast: 'ne', northwest: 'nw', southeast: 'se', southwest: 'sw' };
+const boxOf = (pts) => [Math.min(...pts.map((p) => p[0])), Math.min(...pts.map((p) => p[1])), Math.max(...pts.map((p) => p[0])), Math.max(...pts.map((p) => p[1]))];
+
+/** The bounds ([x0, z0, x1, z1] m) `expand <m>` or `land extend` asks for, from the world's extent now `cur`. */
+export function boundsOf(a, cur) {
+  if (a.land !== 'extend') {
+    const h = n(a.extent, 'extent', 1, 16000) / 2;
+    return [Math.min(cur[0], -h), Math.min(cur[1], -h), Math.max(cur[2], h), Math.max(cur[3], h)];
+  }
+  if (a.bounds !== undefined) {
+    const b = String(a.bounds).split(',').map(Number);
+    if (b.length !== 4 || !b.every(Number.isFinite) || !(b[2] > b[0] && b[3] > b[1])) throw Object.assign(new Error('--bounds x0,z0,x1,z1 in metres'), { code: 'land.flag' });
+    return [Math.min(cur[0], b[0]), Math.min(cur[1], b[1]), Math.max(cur[2], b[2]), Math.max(cur[3], b[3])];
+  }
+  const k = String(a.toward ?? '').toLowerCase().replace(/[^a-z]/g, ''), dir = COMPASS[k] ?? COMPASS[WORDS[k] ?? ''];
+  if (!dir) throw Object.assign(new Error('extend needs --toward n, s, e, w, ne, nw, se or sw, and --metres'), { code: 'land.flag' });
+  const d = n(a.metres, 'metres', 1, 8000);
+  return [cur[0] - (dir[0] < 0 ? d : 0), cur[1] - (dir[1] < 0 ? d : 0), cur[2] + (dir[0] > 0 ? d : 0), cur[3] + (dir[1] > 0 ? d : 0)];
+}
+
+/** The batch that grows the open ground (`expand <m>`, `land extend`): the new tiles as rows, the extent place
+ *  made or its outline set, and a move for each thing resting off the old tiles whose ground the new ones raise. */
+export function extentOps(g, a) {
+  const side = g.tileMm / 1000;
+  const tb = boxOf(g.tiles.flatMap((t) => [[t.tx * side, t.tz * side], [(t.tx + 1) * side, (t.tz + 1) * side]]));
+  const cur = g.extent?.outline.length ? boxOf(g.extent.outline) : tb;
+  let b;
+  try { b = boundsOf(a, cur); } catch (e) { return no(e.code ?? 'land.flag', e.message); }
+  if (b[2] - b[0] > 16000 || b[3] - b[1] > 16000) return no('land.flag', `the world would be ${b[2] - b[0]} by ${b[3] - b[1]} m; each side at most 16000 m`);
+  // Sized before it is made: the new tiles go in one edit, as rows (the old ones are not sent again).
+  const r = tileRange(g.tiles, g.tileMm, b), old = tileRange(g.tiles);
+  const count = (r[2] - r[0] + 1) * (r[3] - r[1] + 1) - (old[2] - old[0] + 1) * (old[3] - old[1] + 1);
+  const perTile = g.tiles[0].heights.length * 4 + g.tiles[0].classes.length + 16;
+  if (count * perTile > EDIT_BYTES) {
+    const most = Math.floor(EDIT_BYTES / perTile);
+    return no('expand.too-large', `the world would grow by ${count} tiles of ${side} m (${Math.round((count * perTile) / 1e5) / 10} MB); one edit adds at most ${most}: grow it in steps`);
+  }
+  const added = grownTiles(g.tiles, g.tileMm, b);
+  if (!added.length && b.every((v, k) => v === cur[k])) return no('expand.nothing', `the world already reaches [${cur.join(', ')}] m`);
+  const outside = (p) => heightAt(g.tiles, g.tileMm, p[0], p[2]) === null;
+  const under = g.bodies.filter((x) => outside(x.position) && (heightAt(added, g.tileMm, x.position[0], x.position[2]) ?? 0n) !== 0n);
+  if (under.length) return no('edit.terrain-under-soul', under.map((x) => `${x.id} stands at (${Number(x.position[0]) / 1e6}, ${Number(x.position[2]) / 1e6}) m, where the new ground is not at 0`).join('; '));
+  const outline = [[b[0], b[1]], [b[2], b[1]], [b[2], b[3]], [b[0], b[3]]].map(([x, z]) => [Math.round(x * 1000), Math.round(z * 1000)]);
+  const hexOf = (u) => ({ hex: Buffer.from(u.buffer, u.byteOffset, u.byteLength).toString('hex') });
+  const ops = [
+    { op: 'rows', node: g.id, field: F.TILES, rows: added.map((t) => [t.tx, t.tz, hexOf(t.heights), hexOf(t.classes)]) },
+    g.extent
+      ? { op: 'set', node: g.extent.id, field: F.OUTLINE, value: outline }
+      : { op: 'place', name: 1, kind: g.placeKind, in: g.id, at: [0, 0, 0], fields: { [F.OUTLINE]: outline, [F.PLACE_OF]: EXTENT } },
+  ];
+  for (const th of g.things) {
+    if (!outside(th.position)) continue;
+    const rise = heightAt(added, g.tileMm, th.position[0], th.position[2]) ?? 0n;
+    if (rise !== 0n) ops.push({ op: 'move', node: th.id, atUm: [Number(th.position[0]), Number(th.position[1] + rise), Number(th.position[2])], orientation: th.orientation, support: th.support });
+  }
+  if (ops.length > OPS_MOST) return no('land.too-many-things', `${ops.length - 2} things rest where the new ground rises; one edit moves at most ${OPS_MOST - 2}`);
+  return { ops, says: `the world reaches [${b.join(', ')}] m: ${added.length} new tile(s) of ${side} m, ${g.tiles.length + added.length} in all` };
+}
+
+/** The batch a land verb makes on `copy` (`a` its flags, `a.land` the verb and `a.ref`), or `expand`'s (`a.verb`,
+ *  `a.extent`); or a refusal by name. */
 export function landOps(copy, a) {
   const g = groundOf(copy);
   if (!g || !g.tiles.length || !g.tileMm) return no('land.no-ground', 'this world has no open ground with tiles');
+  if (a.verb === 'expand' || a.land === 'extend') return extentOps(g, a);
   const metres = (x, z) => Number(heightAt(g.tiles, g.tileMm, BigInt(Math.round(x * 1e6)), BigInt(Math.round(z * 1e6))) ?? 0n) / 1e6;
   if (a.land === 'water') {
     const w = g.waters.get(String(a.ref ?? ''));
