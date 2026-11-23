@@ -460,8 +460,8 @@ impl Map {
         version: &dyn Fn(Id) -> u64,
     ) -> Result<Map, String> {
         let open = OpenGround::of(tree, ground, size.radius_mm())?;
-        let cuts = open.cut_all();
-        Ok(Map::build_cut(tree, ground, size, version, &open, &cuts)?.0)
+        let cuts = open.cut_all(1);
+        Ok(Map::build_cut(tree, ground, size, version, &open, &cuts, 1)?.0)
     }
 
     /// As [`Map::build_for`], on the open ground `open_ground` already cut into `cuts` (in its squares' order), and
@@ -474,6 +474,7 @@ impl Map {
         version: &dyn Fn(Id) -> u64,
         open_ground: &OpenGround,
         cuts: &[((i32, i32), crate::ground::Patch)],
+        threads: usize,
     ) -> Result<Cut, String> {
         let radius = size.radius_mm();
         let gh = tree.handle(ground).ok_or("no such ground")?;
@@ -543,7 +544,7 @@ impl Map {
         let gdoors = ground_doors(tree, ground)?;
         let mut known = BTreeSet::new();
         let mut buildings = Vec::new();
-        // Each building read on its own, on as many threads as the machine has (S5): a read sees only the tree and
+        // Each building read on its own, on at most `threads` threads (S5; one but at a world's start): a read sees only the tree and
         // the open ground's squares, which no floor changes, so reading them all first and putting their floors on in
         // order gives what reading and putting on one by one gave.
         let mut placed = Vec::with_capacity(things.len());
@@ -565,9 +566,7 @@ impl Map {
                 };
                 Building::read_sized(tree, id, Some(open), radius)
             };
-            let threads = std::thread::available_parallelism()
-                .map_or(1, std::num::NonZeroUsize::get)
-                .min(placed.len().max(1));
+            let threads = crate::ground::fan_out(threads, placed.len());
             let chunk = placed.len().div_ceil(threads).max(1);
             std::thread::scope(|s| {
                 let parts: Vec<_> = placed
@@ -618,7 +617,7 @@ impl Map {
         for (b, _) in &buildings {
             m.add_links(b, &all);
         }
-        m.add_water(open_ground, ground, gv);
+        m.add_water(open_ground, ground, gv, threads);
         // The open ground's gates are kept as a building of the ground's own, replaced when a square cut again
         // changes their meets (G3b, #3449).
         m.scratch.fit(m.portals.len());
@@ -960,10 +959,10 @@ impl Map {
     /// meet) share a portal, and pieces of two grounds a shore link whose two ends are the stretch of edge they share.
     /// Dry ground and wading ground are joined by a [`Kind::Wade`]; wading ground, or dry ground, and swimming water
     /// by a [`Kind::Swim`]. End 0 is on the drier piece.
-    fn add_water(&mut self, open: &OpenGround, ground: Id, version: u64) {
+    fn add_water(&mut self, open: &OpenGround, ground: Id, version: u64, threads: usize) {
         let first_wet = self.pieces.len() as u32;
-        // Cut on as many threads as the machine has, put on in the squares' order (S5).
-        for ((i, j), wet) in open.cut_all_water() {
+        // Cut on at most `threads` threads, put on in the squares' order (S5).
+        for ((i, j), wet) in open.cut_all_water(threads) {
             let at = PatchAt {
                 node: ground,
                 square: Some((i, j)),

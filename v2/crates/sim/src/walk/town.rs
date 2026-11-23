@@ -600,9 +600,15 @@ fn find_link<'b>(
 impl Town {
     /// Everything on the open ground `ground`; openings are written by `doors`.
     pub fn new(tree: Tree, ground: Id, doors: Doors) -> Result<Town, String> {
+        Town::new_on(tree, ground, doors, 1)
+    }
+
+    /// As [`Town::new`], assembled on at most `threads` threads ([`crate::ground::START_THREADS`] at a world's
+    /// start): the same town.
+    pub fn new_on(tree: Tree, ground: Id, doors: Doors, threads: usize) -> Result<Town, String> {
         let versions = Versions::default();
         let (map, surfaces, buildings, basis, square_pieces) =
-            Town::assemble(&tree, ground, &versions)?;
+            Town::assemble_for(&tree, ground, &versions, Size::Standard, threads)?;
         let link_at = link_index(&buildings);
         Ok(Town {
             tree,
@@ -669,7 +675,7 @@ impl Town {
         for size in sizes {
             if size != Size::Standard && !self.classes.contains_key(&size) {
                 crate::commit::off_clock();
-                let g = Self::assemble_for(&self.tree, self.ground, &self.versions, size)?;
+                let g = Self::assemble_for(&self.tree, self.ground, &self.versions, size, 1)?;
                 self.classes.insert(size, Geometry::from(g));
             }
         }
@@ -789,7 +795,7 @@ impl Town {
                 Err(w) => {
                     why = Some(w);
                     Fresh::Whole(Box::new(Town::assemble_for(
-                        base, ground, &versions, basis.size,
+                        base, ground, &versions, basis.size, 1,
                     )?))
                 }
             }
@@ -797,7 +803,7 @@ impl Town {
             match Town::reread(&parents, base, ground, &touched, basis) {
                 Some(bs) => Fresh::Buildings(bs),
                 None => Fresh::Whole(Box::new(Town::assemble_for(
-                    base, ground, &versions, basis.size,
+                    base, ground, &versions, basis.size, 1,
                 )?)),
             }
         };
@@ -805,7 +811,8 @@ impl Town {
             .classes
             .keys()
             .map(|&size| {
-                Self::assemble_for(base, ground, &versions, size).map(|g| (size, Geometry::from(g)))
+                Self::assemble_for(base, ground, &versions, size, 1)
+                    .map(|g| (size, Geometry::from(g)))
             })
             .collect::<Result<_, _>>()?;
         let mut after = match &fresh {
@@ -1259,48 +1266,61 @@ impl Town {
     }
 
     /// The route map, each node's surface, the buildings and the basis for a rebuild, read from `tree` at `versions`.
-    fn assemble(tree: &Tree, ground: Id, versions: &Versions) -> Result<Assembled, String> {
-        Self::assemble_for(tree, ground, versions, Size::Standard)
-    }
     fn assemble_for(
         tree: &Tree,
         ground: Id,
         versions: &Versions,
         size: Size,
+        threads: usize,
     ) -> Result<Assembled, String> {
         // One cut of the open ground and one read of its buildings, shared with the map (S5, 0.133): the squares cut
-        // in parallel, and the buildings the map read, in the same order as reading them again here gave.
+        // on at most `threads` threads, and the buildings the map read, in the same order as reading them again gave.
         let open = OpenGround::of(tree, ground, size.radius_mm())?;
-        let cuts = open.cut_all();
-        // The map and the open ground's own surface, from the same cut, on two threads.
-        let (built, ground_part) = std::thread::scope(|s| {
-            let part = s.spawn(|| {
-                let (mut pieces, mut meets, mut squares) =
-                    (Vec::new(), Vec::new(), BTreeMap::new());
-                let mut square_pieces = BTreeMap::new();
-                let mut square_flags = BTreeMap::new();
-                for ((i, j), p) in &cuts {
-                    let (i, j) = (*i, *j);
-                    let first = pieces.len() as u32;
-                    square_flags.insert((i, j), open.on_terrain(&p.pieces));
-                    square_pieces.insert((i, j), (first..first + p.pieces.len() as u32).collect());
-                    squares.insert((i, j), Arc::new(p.pieces.clone()));
-                    pieces.extend(p.pieces.iter().cloned());
-                    meets.extend(p.meets.iter().cloned().map(|m| ((i, j), m)));
-                }
-                let on = open.on_terrain(&pieces);
-                let mut surface = Surface::new(ground, pieces);
-                if let Some(t) = open.terrain() {
-                    surface = surface.on_terrain(t.clone(), on);
-                }
-                (surface, meets, squares, square_pieces, square_flags)
-            });
-            let built = Map::build_cut(tree, ground, size, &|n| versions.of(n), &open, &cuts);
-            (
-                built,
-                part.join().unwrap_or_else(|e| std::panic::resume_unwind(e)),
+        let cuts = open.cut_all(threads);
+        // The map and the open ground's own surface, from the same cut: on two threads when it may fan out.
+        let ground_of = || {
+            let (mut pieces, mut meets, mut squares) = (Vec::new(), Vec::new(), BTreeMap::new());
+            let mut square_pieces = BTreeMap::new();
+            let mut square_flags = BTreeMap::new();
+            for ((i, j), p) in &cuts {
+                let (i, j) = (*i, *j);
+                let first = pieces.len() as u32;
+                square_flags.insert((i, j), open.on_terrain(&p.pieces));
+                square_pieces.insert((i, j), (first..first + p.pieces.len() as u32).collect());
+                squares.insert((i, j), Arc::new(p.pieces.clone()));
+                pieces.extend(p.pieces.iter().cloned());
+                meets.extend(p.meets.iter().cloned().map(|m| ((i, j), m)));
+            }
+            let on = open.on_terrain(&pieces);
+            let mut surface = Surface::new(ground, pieces);
+            if let Some(t) = open.terrain() {
+                surface = surface.on_terrain(t.clone(), on);
+            }
+            (surface, meets, squares, square_pieces, square_flags)
+        };
+        let map_of = || {
+            Map::build_cut(
+                tree,
+                ground,
+                size,
+                &|n| versions.of(n),
+                &open,
+                &cuts,
+                threads,
             )
-        });
+        };
+        let (built, ground_part) = if threads > 1 {
+            std::thread::scope(|s| {
+                let part = s.spawn(ground_of);
+                let built = map_of();
+                (
+                    built,
+                    part.join().unwrap_or_else(|e| std::panic::resume_unwind(e)),
+                )
+            })
+        } else {
+            (map_of(), ground_of())
+        };
         let (map, mut read, joins) = built?;
         let (surface, meets, squares, square_pieces, square_flags) = ground_part;
         let mut surfaces = BTreeMap::new();
@@ -1455,9 +1475,20 @@ impl Town {
     /// gets a clone of the assembled ground instead of a second assembly. Equal to [`Town::new`] then
     /// [`Town::copy`]: assembly reads only the tree, the ground and fresh versions, all the same for both.
     pub fn with_planner(tree: Tree, ground: Id, doors: Doors) -> Result<(Town, Town), String> {
+        Town::with_planner_on(tree, ground, doors, 1)
+    }
+
+    /// As [`Town::with_planner`], assembled on at most `threads` threads (a world's start-up:
+    /// [`crate::ground::START_THREADS`]).
+    pub fn with_planner_on(
+        tree: Tree,
+        ground: Id,
+        doors: Doors,
+        threads: usize,
+    ) -> Result<(Town, Town), String> {
         let frozen = tree.frozen();
         let planner_doors = Doors::new(doors.header.clone(), doors.rules.clone(), doors.next);
-        let town = Town::new(tree, ground, doors)?;
+        let town = Town::new_on(tree, ground, doors, threads)?;
         let (map, surfaces, buildings, basis, square_pieces) = (
             town.map.clone(),
             town.surfaces.clone(),

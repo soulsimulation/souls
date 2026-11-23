@@ -296,47 +296,6 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
 /// The facts with today's rowing punts added (#3603): one moored on each standing water that has room
 /// (`sim::courses::punts`), a thing of kind `core:rowing_punt` at its home, turned with its plank toward the bank, on its
 /// own loop (its course). The same facts give the same punts, so a seed and every serve of the world agree.
-/// Where `worldd serve` keeps [`courses`]' answer for its facts and entries (S5): `<world>/facts.courses`.
-static COURSES_CACHE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
-
-/// The facts with their punts' moorings, their rides' courses and the entries' own kinds: [`with_punts`] (which loads
-/// the facts and cuts a town only to find where planks and exits stand), [`with_rides`], [`with_entry_kinds`].
-fn courses(facts: &str, entries: &[(String, Json)]) -> R<String> {
-    let punts = with_punts(facts)?;
-    stamp("facts: punts");
-    let rides = with_rides(&punts, entries)?;
-    stamp("facts: rides");
-    with_entry_kinds(&rides, entries)
-}
-
-/// [`courses`] once per facts and entries (S5, 0.133): its answer is a function of them alone, so `worldd serve` keeps
-/// it beside the world, keyed by the SHA-256 of the facts and of each entry, and a start whose facts and entries are
-/// the same reads it back. Anything changed, or no cache, computes it again.
-fn courses_cached(facts: &str, entries: &[(String, Json)]) -> R<String> {
-    let Some(path) = COURSES_CACHE.get() else {
-        return courses(facts, entries);
-    };
-    let mut key = to_hex(&sha256(facts.as_bytes()));
-    for (k, e) in entries {
-        key.push('.');
-        key.push_str(&to_hex(&sha256(format!("{k}\0{}", e.to_json()).as_bytes()))[..16]);
-    }
-    let key = to_hex(&sha256(key.as_bytes()));
-    if let Ok(text) = std::fs::read_to_string(path)
-        && let Some((k, out)) = text.split_once('\n')
-        && k == key
-    {
-        return Ok(out.to_owned());
-    }
-    let out = courses(facts, entries)?;
-    let tmp = path.with_extension("courses.new");
-    // Best effort: a world that cannot keep it computes it at its next start too.
-    if std::fs::write(&tmp, format!("{key}\n{out}")).is_ok() {
-        let _ = std::fs::rename(&tmp, path);
-    }
-    Ok(out)
-}
-
 fn with_punts(facts: &str) -> R<String> {
     let im = import_eden::load(facts)?;
     let Some(&ground) = im.nodes.get("ground") else {
@@ -616,10 +575,86 @@ fn with_rides(facts: &str, entries: &[(String, Json)]) -> R<String> {
 /// The rowing punt's def (#3603): today's `rowing-punt`, a kind the world adds.
 const PUNT_REF: &str = "core-rowing-punt@1";
 
+/// Where `worldd serve` keeps [`courses`]' answer for its facts and entries (S5): `<world>/facts.courses`.
+static COURSES_CACHE: std::sync::OnceLock<PathBuf> = std::sync::OnceLock::new();
+
+/// The cache's format and the meaning of what it holds: bump it whenever [`courses`], the punts' moorings or the
+/// rides' courses (`sim::courses`), or [`import_eden::kind_name`] change what they give, so a cache from before is
+/// never read as now's. The build's own hash (`WORLDD_BUILD`, the launcher's) or the crate's version is in the key
+/// too, so a deploy of a new build computes them again.
+const COURSES_FORMAT: &str = "souls/facts-courses/1";
+
+/// The facts with their punts' moorings, their rides' courses and the entries' own kinds: [`with_punts`] (which loads
+/// the facts and cuts a town only to find where planks and exits stand), [`with_rides`], [`with_entry_kinds`].
+fn courses(facts: &str, entries: &[(String, Json)]) -> R<String> {
+    let punts = with_punts(facts)?;
+    stamp("facts: punts");
+    let rides = with_rides(&punts, entries)?;
+    stamp("facts: rides");
+    with_entry_kinds(&rides, entries)
+}
+
+/// The cache key of `facts` and `entries` for this build.
+fn courses_key(facts: &str, entries: &[(String, Json)]) -> String {
+    let build =
+        std::env::var("WORLDD_BUILD").unwrap_or_else(|_| env!("CARGO_PKG_VERSION").to_owned());
+    let mut key = format!(
+        "{COURSES_FORMAT}.{build}.{}",
+        to_hex(&sha256(facts.as_bytes()))
+    );
+    for (k, e) in entries {
+        key.push('.');
+        key.push_str(&to_hex(&sha256(format!("{k}\0{}", e.to_json()).as_bytes())));
+    }
+    to_hex(&sha256(key.as_bytes()))
+}
+
+/// [`courses`] once per facts, entries and build (S5, 0.133): its answer is a function of them alone, so `worldd serve`
+/// keeps it in `cache` (`<key> <SHA-256 of the text>`, then the text), and a start with the same reads it back. A
+/// cache that is missing, of other facts, entries or build, or torn (its text not its hash) is computed again, and
+/// rewritten synced (`view_out::write_whole`). Returns the text and whether it came from the cache.
+fn courses_cached(
+    cache: Option<&Path>,
+    facts: &str,
+    entries: &[(String, Json)],
+) -> R<(String, bool)> {
+    let Some(path) = cache else {
+        return Ok((courses(facts, entries)?, false));
+    };
+    let key = courses_key(facts, entries);
+    if let Ok(text) = std::fs::read_to_string(path)
+        && let Some((head, out)) = text.split_once('\n')
+        && let Some((k, hash)) = head.split_once(' ')
+        && k == key
+        && hash == to_hex(&sha256(out.as_bytes()))
+    {
+        return Ok((out.to_owned(), true));
+    }
+    let out = courses(facts, entries)?;
+    let kept = format!("{key} {}\n{out}", to_hex(&sha256(out.as_bytes())));
+    // Best effort: a world that cannot keep it computes it at its next start too.
+    if let Err(e) = view_out::write_whole(path, kept.as_bytes()) {
+        eprintln!("worldd: the facts' courses are not kept: {}", refusal(e));
+    }
+    Ok((out, false))
+}
+
 fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
-    let facts = &courses_cached(facts, entries)?;
+    build_with(COURSES_CACHE.get().map(PathBuf::as_path), facts, entries)
+}
+
+/// [`build`] with its facts' courses kept in `cache` (S5).
+fn build_with(cache: Option<&Path>, facts: &str, entries: &[(String, Json)]) -> R<Built> {
+    let (prepared, kept) = courses_cached(cache, facts, entries)?;
     stamp("facts: courses");
-    let mut im = import_eden::load(facts)?;
+    // A kept text that does not load is never the start's end: it is computed again.
+    let mut im = match import_eden::load(&prepared) {
+        Err(e) if kept => {
+            eprintln!("worldd: the kept facts' courses do not load ({e}); computing them again");
+            import_eden::load(&courses(facts, entries)?)?
+        }
+        im => im?,
+    };
     stamp("facts");
     for (k, id) in (0..).map_while(|k| Some((k, *im.nodes.get(&format!("e_punt{k}"))?))) {
         println!(
@@ -732,8 +767,13 @@ fn recovered_towns(built: &Built, initial: &Replica, records: &[Vec<u8>]) -> R<(
         live.tree().next(),
     );
     stamp("log applied");
-    let towns = Town::with_planner(live.tree().frozen(), built.ground, doors)
-        .map_err(|e| format!("the recovered town: {e}"))?;
+    let towns = Town::with_planner_on(
+        live.tree().frozen(),
+        built.ground,
+        doors,
+        sim::ground::START_THREADS,
+    )
+    .map_err(|e| format!("the recovered town: {e}"))?;
     stamp("town and planner");
     Ok(towns)
 }
@@ -2178,8 +2218,13 @@ fn serve(args: &[String]) -> R<()> {
         stamp("log applied");
         built.header = header.clone();
         let doors = Doors::new(header, built.rules.clone(), live.tree().next());
-        let towns = Town::with_planner(live.tree().frozen(), built.ground, doors)
-            .map_err(|e| format!("the fork's town: {e}"))?;
+        let towns = Town::with_planner_on(
+            live.tree().frozen(),
+            built.ground,
+            doors,
+            sim::ground::START_THREADS,
+        )
+        .map_err(|e| format!("the fork's town: {e}"))?;
         stamp("town and planner");
         let resumed = initial.frozen();
         (
@@ -3621,6 +3666,69 @@ mod tests {
         assert!(cloned.iter().any(|a| !a.contains("None None")));
         assert_eq!(cloned, assembled);
         assert_eq!(ask(&mut town), assembled);
+    }
+
+    /// S5: a kept courses text is the bytes [`courses`] computes; a torn cache, changed entries, or a kept text that
+    /// does not load are computed again, never a start's end.
+    #[test]
+    fn s5_kept_courses_equal_the_computed_and_a_torn_stale_or_bad_cache_is_computed_again() {
+        let facts = testworld::generate(1, 0).expect("test world").text;
+        let entries = |extra: &str| {
+            vec![(
+                "testworld:planter".to_owned(),
+                replica::rules::json::parse(&format!(r#"{{"kind":"testworld:planter"{extra}}}"#))
+                    .expect("an entry"),
+            )]
+        };
+        let (a, b) = (entries(""), entries(r#","note":"changed""#));
+        let dir = std::env::temp_dir().join(format!("s5-courses-{}", std::process::id()));
+        let _ = std::fs::remove_dir_all(&dir);
+        std::fs::create_dir_all(&dir).expect("a folder");
+        let path = dir.join("facts.courses");
+        let fresh = courses(&facts, &a).expect("computed");
+        assert_eq!(
+            courses_cached(None, &facts, &a).expect("no cache"),
+            (fresh.clone(), false)
+        );
+        assert_eq!(
+            courses_cached(Some(&path), &facts, &a).expect("kept"),
+            (fresh.clone(), false)
+        );
+        assert_eq!(
+            courses_cached(Some(&path), &facts, &a).expect("a hit"),
+            (fresh.clone(), true)
+        );
+        // Torn: cut short, as a crash mid-write without the sync would leave it.
+        let whole = std::fs::read(&path).expect("the cache");
+        std::fs::write(&path, &whole[..whole.len() / 2]).expect("torn");
+        assert_eq!(
+            courses_cached(Some(&path), &facts, &a).expect("torn"),
+            (fresh.clone(), false)
+        );
+        // Other entries: computed for them, not the kept text.
+        let other = courses(&facts, &b).expect("computed");
+        assert_eq!(
+            courses_cached(Some(&path), &facts, &b).expect("stale"),
+            (other, false)
+        );
+        // A kept text that matches its key and hash but does not load: the start computes it again.
+        let bad = "not facts";
+        let key = courses_key(&facts, &a);
+        std::fs::write(
+            &path,
+            format!("{key} {}\n{bad}", to_hex(&sha256(bad.as_bytes()))),
+        )
+        .expect("bad");
+        assert_eq!(
+            courses_cached(Some(&path), &facts, &a).expect("read"),
+            (bad.to_owned(), true)
+        );
+        let built = build_with(Some(&path), &facts, &a).expect("built again");
+        assert_eq!(
+            built.header.hash(),
+            build_with(None, &facts, &a).expect("built").header.hash()
+        );
+        let _ = std::fs::remove_dir_all(&dir);
     }
 
     /// #1960: a creator places a thing of a kind the world has an entry for but no seeded thing of. Without the
