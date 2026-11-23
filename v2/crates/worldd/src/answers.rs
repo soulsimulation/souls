@@ -1186,7 +1186,11 @@ fn reserve_edit(edit: &Edit, lineage: Scope, next: &mut u64) -> Result<Minter, R
     let reserved = Minter::at(lineage, *next);
     let mut end = reserved.clone();
     for op in &edit.ops {
-        if matches!(op, edit::Op::Place { .. } | edit::Op::Doorway { .. }) {
+        // Every operation the edit lowering names a new id for (`sim::edit`'s `names`): a link too (#3934).
+        if matches!(
+            op,
+            edit::Op::Place { .. } | edit::Op::Doorway { .. } | edit::Op::Link { .. }
+        ) {
             end.mint().map_err(|e| Refused {
                 op: None,
                 name: "edit.ids-exhausted",
@@ -5818,6 +5822,32 @@ mod tests {
     use replica::sync::{self, wire};
     use sim::log::{Mem, recover};
     use std::sync::{Condvar, Mutex};
+
+    /// K2 (#3934): a link is named a new id when the edit is lowered, so it is reserved at intake as a place is. Before,
+    /// an import's links took ids the live counter then gave again: the next edit was refused `id-duplicate`.
+    #[test]
+    fn k2_a_links_id_is_reserved_at_intake() {
+        let id = |n| Id::new(Scope([0x42; 16]), n).unwrap();
+        let link = edit::Op::Link {
+            name: 1,
+            ty: Name::new("eden:doorway").unwrap(),
+            ends: [edit::Ref::Node(id(2)), edit::Ref::Node(id(3))],
+            owner: replica::world_model::End::First,
+            field: 22,
+            row: Vec::new(),
+            door: None,
+        };
+        let e = Edit {
+            intent: id(9),
+            actor: Actor::Creator(id(8)),
+            planned: 0,
+            ops: vec![link],
+            claim: None,
+        };
+        let mut next = 5;
+        reserve_edit(&e, Scope([0x42; 16]), &mut next).unwrap();
+        assert_eq!(next, 6, "the link's id is reserved");
+    }
 
     /// #4117 review (0.132 scaling, #1960): a motion sample whose pose the log's reader refuses fails the tick's
     /// motion part in every build (this runs in release in CI too), so `write_motion` takes its per-sample fallback:

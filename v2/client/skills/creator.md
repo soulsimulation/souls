@@ -134,6 +134,16 @@ the root, which `describe` shows), and from then on you place it like any other 
 - **Removing a kind:** `remove <its souls:kind id>`, once nothing of that kind is left and no other kind's form
   creates it, or in the same batch as the last of them (`kind.in-use`).
 
+## Export and import
+
+- `node souls-god.mjs export [file]` writes every node of the world (not its Souls) to a file, `world.souls.json` by
+  default: kinds, places, fields and poses, and the world's public names.
+- `node souls-god.mjs import <file>` brings such a file into the world you are paired with, as edits, parents first.
+  What the world already holds (the same id and kind, the world itself and its open ground) keeps its id and only its
+  changed fields are set; everything else is placed, and then each doorway and stair it lacks is linked again (the
+  `link` operation), so Souls walk in through the doors and up the stairs. The answer counts the edits, what was
+  placed, set and linked, and anything not brought over. A refusal stops it and says how far it got.
+
 ## Your own models and pictures
 
 `upload models/kalama.glb` (or a `.png` or `.jpg`) sends the file through the world's check: it is measured, its

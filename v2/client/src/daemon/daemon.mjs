@@ -137,7 +137,7 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { atSocket, readSeat, runtimeOf } from '../home/home.mjs';
 import { QUOTED_NOTE, brief, changedBlock, heldBy } from '../brief/brief.mjs';
-import { changedBetween, decode, posesOf, rememberPublicNames, rowsOf, sequenceOf, rememberPublicWords } from '../brief/copy.mjs';
+import { changedBetween, decode, posesOf, publicNames as toldNames, rememberPublicNames, rememberPublicWords, rowsOf, sequenceOf } from '../brief/copy.mjs';
 import { find } from '../find/find.mjs';
 import { publicNameHydration } from '../find/public-names.mjs';
 import { achievedOf, causeOf, openTrace } from '../stats/trace.mjs';
@@ -155,6 +155,7 @@ import { history } from '../history/history.mjs';
 import { readLog, soulDirOf } from '../memory/memory.mjs';
 import { clockOf, worldNow } from '../clock/clock.mjs';
 import { worldOps } from '../creator/world.mjs';
+import { exportOf, importOf } from '../creator/genesis.mjs';
 import { TRACE_MOST, openCreatorTrace, rowOf } from '../creator/trace.mjs';
 import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
@@ -830,10 +831,12 @@ const OPS = new Set([
   'edit',
   'event',
   'events',
+  'export',
   'fields',
   'find',
   'halt',
   'history',
+  'import',
   'inspect',
   'lie',
   'listen',
@@ -1132,6 +1135,14 @@ function sendIntent(ranked, { target, words, args, params, basis, expiry, reflex
   if (signedIn) send(bytes, sequence, ranked.length); else queued.push({ bytes, sequence, ranked: ranked.length });
   return { sequence, sent };
 }
+
+/** How far an import got: its edits, what it placed and set, and what it did not bring over. */
+const summary = (plan, edits, started) => ({
+  edits, placed: plan.counts.placed, set: plan.counts.set, matched: plan.counts.matched, seconds: Math.round((performance.now() - started) / 100) / 10,
+  linked: plan.counts.linked,
+  ...(plan.counts.links ? { links_not_brought: plan.counts.links } : {}),
+  ...(plan.counts.dropped ? { fields_not_brought: Object.fromEntries(plan.counts.droppedFields) } : {}),
+});
 
 // --- #3706 (today's `--key`): a command sent again with the same key is one write --------------------------------
 // A write's key is kept with its first answer and the world's answer to its intent, on disk with the sequence, so a
@@ -1437,6 +1448,36 @@ async function answer(req, conn = null) {
       kinds: Object.fromEntries(Object.entries(pinned()).map(([n, k]) => [n, { admits: k.admits, ...(Object.keys(k.slots).length ? { slots: k.slots } : {}) }])),
       };
     });
+    case 'export': {
+      // #3728: every node of the copy, brought current first, to the file the creator named (absolute).
+      if (seat.grant.actor !== 'creator') return { ok: false, code: 'edit.not-the-creator', detail: 'this home holds a Soul\'s token, not a creator\'s' };
+      const file = String(req.file ?? '');
+      if (!file.startsWith('/')) return { ok: false, code: 'export.file', detail: 'export <file>: the command passes its absolute path' };
+      const age = await ageAfter();
+      if (!copyVersion) return { ok: false, code: 'edit.no-copy', detail: 'no copy of the world yet' };
+      const out = exportOf(copy, { names: toldNames(copy), world: seat.world, at: sequenceOf(copyVersion) });
+      writeFileSync(file, JSON.stringify(out));
+      return { ok: true, file, nodes: out.nodes.length, bodies: out.bodies, at: out.at, ...age };
+    }
+    case 'import': {
+      // #3728: a file's nodes into this world, one edit at a time (each answered before the next is planned, so a
+      // level's places name the nodes the level above became). The first refusal stops it, and says how far it got.
+      if (seat.grant.actor !== 'creator') return { ok: false, code: 'edit.not-the-creator', detail: 'this home holds a Soul\'s token, not a creator\'s' };
+      let file, plan;
+      try { file = JSON.parse(readFileSync(String(req.file ?? ''), 'utf8')); } catch (e) { return { ok: false, code: 'import.file', detail: String(e.message ?? e).slice(0, 200) }; }
+      await ageAfter();
+      if (!copyVersion) return { ok: false, code: 'edit.no-copy', detail: 'no copy of the world yet' };
+      try { plan = importOf(file, exportOf(copy)); } catch (e) { return { ok: false, code: e.code ?? 'import.format', detail: String(e.message ?? e).slice(0, 200) }; }
+      const started = performance.now();
+      let edits = 0;
+      for (let ops; (ops = plan.next());) {
+        const a = await answer({ op: 'edit', ops });
+        if (!a.ok) return { ok: false, code: a.code, op: a.op, detail: `edit ${edits + 1} was refused (${ops.length} operations, the first ${ops[0].op} ${ops[0].kind ?? ops[0].node}); ${edits} edits were made`, ...summary(plan, edits, started) };
+        plan.took(a.names);
+        edits++;
+      }
+      return { ok: plan.left() === 0, ...(plan.left() ? { code: 'import.unplaced', detail: `${plan.left()} nodes or links name a parent, support, end or door that was not placed` } : {}), ...summary(plan, edits, started) };
+    }
     case 'check': {
       // On the copy as it is: no sync, no frame to the world (A4). A world verb (#3695) is made into its sets first.
       const w = await worldBatch(req);
