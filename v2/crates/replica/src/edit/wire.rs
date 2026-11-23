@@ -24,7 +24,7 @@ use crate::encode::{Name, Value, from_hex, to_hex};
 use crate::ids::{Id, Scope};
 use crate::intents::Intent;
 use crate::pose::{Frame, Pose};
-use crate::world_model::Audience;
+use crate::world_model::{Audience, End};
 use std::collections::BTreeMap;
 
 /// The verb of an edit intent.
@@ -201,6 +201,37 @@ fn op(o: &Op) -> Value {
             (11, Value::Array(closed.clone())),
             (12, Value::Array(open.clone())),
         ]),
+        Op::Link {
+            name,
+            ty,
+            ends,
+            owner,
+            field,
+            row,
+            door,
+        } => {
+            let mut m = vec![
+                (1, Value::Uint(6)),
+                (2, Value::Uint(*name)),
+                (3, Value::Text(ty.clone())),
+                (4, Value::Array(vec![node(ends[0]), node(ends[1])])),
+                (5, Value::Uint(u64::from(*owner == End::Second))),
+                (6, Value::Uint(*field)),
+                (7, Value::Array(row.clone())),
+            ];
+            m.extend(door.map(|d| (8, node(d))));
+            map(m)
+        }
+        Op::Rows {
+            node: n,
+            field,
+            rows,
+        } => map(vec![
+            (1, Value::Uint(7)),
+            (2, node(*n)),
+            (3, Value::Uint(*field)),
+            (4, Value::Array(rows.clone())),
+        ]),
     }
 }
 
@@ -292,8 +323,47 @@ fn read_op(v: &Value) -> R<Op> {
                 },
             })
         }
+        6 => {
+            only(&[1, 2, 3, 4, 5, 6, 7, 8], "a link")?;
+            let Some(Value::Text(ty)) = m.get(&3) else {
+                return Err("a link's type is a name".into());
+            };
+            let Some(Value::Array(ends)) = m.get(&4) else {
+                return Err("a link's ends are [node, node]".into());
+            };
+            if ends.len() != 2 {
+                return Err("a link's ends are [node, node]".into());
+            }
+            let Some(Value::Array(row)) = m.get(&7) else {
+                return Err("a link's row is an array".into());
+            };
+            Ok(Op::Link {
+                name: uint(m.get(&2), "a link's name")?,
+                ty: ty.clone(),
+                ends: [read_node(Some(&ends[0]))?, read_node(Some(&ends[1]))?],
+                owner: match uint(m.get(&5), "a link's owner")? {
+                    0 => End::First,
+                    1 => End::Second,
+                    _ => return Err("a link's owner is 0 or 1".into()),
+                },
+                field: uint(m.get(&6), "a link's field")?,
+                row: row.clone(),
+                door: m.get(&8).map(|d| read_node(Some(d))).transpose()?,
+            })
+        }
+        7 => {
+            only(&[1, 2, 3, 4], "rows")?;
+            let Some(Value::Array(rows)) = m.get(&4) else {
+                return Err("rows are an array".into());
+            };
+            Ok(Op::Rows {
+                node: read_node(m.get(&2))?,
+                field: uint(m.get(&3), "the rows' field")?,
+                rows: rows.clone(),
+            })
+        }
         n => Err(format!(
-            "operation kind {n}: 1 place, 2 move, 3 set, 4 remove, 5 doorway"
+            "operation kind {n}: 1 place, 2 move, 3 set, 4 remove, 5 doorway, 6 link, 7 rows"
         )),
     }
 }

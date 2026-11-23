@@ -10,6 +10,7 @@
 //   --pkg    replica's wasm-bindgen package of the same head (target/wasm-load/pkg): the page's and the client's
 //   --card   the new page's build (v2/web/dist): the front door serves the pairing card (/pair) from it
 //   --facts  Eden's facts (v2/tools/import-eden/export/export.ts; exported here when not given)
+//   --gl soft  SwiftShader even where there is a GPU (line 2 is then not reported)
 //   --mars-web  the people's character set the old page draws (default mars/viewer/dist/client, `pnpm build:viewer`)
 //   The old page is this checkout's apps/web/dist (`pnpm --filter web build`); caddy and node on PATH.
 //
@@ -26,7 +27,7 @@ import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, 
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const argv = process.argv.slice(2), opt = (k, d) => { const i = argv.indexOf(`--${k}`); return i >= 0 ? argv[i + 1] : d; };
@@ -131,8 +132,24 @@ const sw = JSON.parse(execFileSync(process.execPath, [join(repo, 'tools/world-la
 need(sw.page?.v2Stream, `the switch did not take: ${JSON.stringify(sw)}`);
 log(`switched: ${BASE}/w/${SLUG}/ reads ${sw.page.v2Stream}`);
 
-const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
-const report = { base: '<local front door>', world: SLUG, agents: AGENTS, seconds: SECONDS, lines: {} };
+// The machine's GPU (B3-5, F5-run): with software GL the page's main thread blocks for about 20 s on shader compiles after
+// it opens, holding every stream message behind them, which no viewer with a GPU sees. The proof recorder's flag sets are
+// tried in order (ANGLE Metal on macOS; ANGLE Vulkan, ANGLE GL-EGL, EGL on Linux) and the first whose
+// WEBGL_debug_renderer_info names a hardware renderer is used. With none (or `--gl soft`) lines 3 and 4 still run on
+// SwiftShader, but line 2 is not reported: its 2 s would measure the software renderer, not the page.
+const { GPU_CANDIDATES, softwareGl } = await import(pathToFileURL(join(repo, '.claude/skills/proof/record.mjs')).href);
+const glBase = ['--no-sandbox', '--disable-dev-shm-usage', '--ignore-gpu-blocklist', '--enable-gpu', '--autoplay-policy=no-user-gesture-required'];
+const readGl = async (b) => { const p = await b.newPage(); try { return await p.evaluate(() => { const gl = document.createElement('canvas').getContext('webgl2'); const x = gl?.getExtension('WEBGL_debug_renderer_info'); return gl ? { vendor: gl.getParameter(x ? x.UNMASKED_VENDOR_WEBGL : gl.VENDOR), renderer: gl.getParameter(x ? x.UNMASKED_RENDERER_WEBGL : gl.RENDERER) } : {}; }); } finally { await p.close(); } };
+let browser, gl;
+for (const c of opt('gl') === 'soft' ? [] : GPU_CANDIDATES) {
+  let b; try { b = await chromium.launch({ args: [...glBase, ...c.args], ...(c.channel ? { channel: c.channel } : {}) }); } catch (e) { log(`gl ${c.label}: ${String(e?.message ?? e).split('\n')[0].slice(0, 120)}`); continue; }
+  const g = await readGl(b).catch(() => ({})); log(`gl ${c.label}: ${g.renderer ?? 'no WebGL'}`);
+  if (!softwareGl(g.renderer)) { browser = b; gl = { ...g, flags: c.label, software: false }; break; }
+  await b.close();
+}
+if (!browser) { browser = await chromium.launch({ args: [...glBase, '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] }); gl = { ...(await readGl(browser).catch(() => ({}))), flags: 'swiftshader', software: true }; }
+log(`renderer: ${gl.renderer ?? 'none'} (${gl.software ? 'software' : 'hardware'})`);
+const report = { base: '<local front door>', world: SLUG, agents: AGENTS, seconds: SECONDS, gl: { vendor: gl.vendor ?? null, renderer: gl.renderer ?? null, flags: gl.flags, software: gl.software }, lines: {} };
 const rows = [];
 const row = (line, what, pass, detail) => { rows.push({ line, what, pass, detail }); log(`${pass ? 'PASS' : 'FAIL'} ${line} ${what}: ${detail}`); };
 
@@ -157,36 +174,77 @@ async function worldPage(video) {
   return { ctx, page };
 }
 /** What the page's v2 reader shows of one Soul now: its activity and held prop in the newest chunk, and its speech. */
+/** What the page draws of one Soul now: the moment LiveWorld plays (serverTick and the time since it came, less the
+ *  source's play delay, at most the newest chunk's end), not the newest chunk's end. Its activity, held prop and walking
+ *  from the chunk changes up to that tick, and its words said by then. */
 const probe = (page, soul) => page.evaluate((soul) => {
   const v = window.__soulsV2; if (!v) return null;
-  const s = v.souls.get(soul), chunk = v.takes.chunks.at(-1);
-  const e = s && chunk ? chunk.take.finalState.entities[s.entityId] : null;
-  const acts = new Set(); for (const c of v.takes.chunks.slice(-3)) for (const ch of c.take.changes ?? []) if (s && ch[1] === s.entityId && ch[2] === 'activity') acts.add(ch[3]);
-  return { doing: s?.doing ?? null, activity: e?.human?.activity ?? null, acts: [...acts], prop: e?.human?.prop ?? null, said: v.speech.filter((x) => x.from?.soulId === soul).length, p: e?.pose?.p ?? null };
+  const s = v.souls.get(soul), t = v.takes, chunks = t.chunks; if (!s || !chunks.length) return { doing: s?.doing ?? null, activity: null, acts: [], prop: null, said: 0, p: null };
+  const tick = Math.min(chunks.at(-1).toTick, t.serverTick + Math.min(2, (performance.now() - t.receivedAt) / 1000) * 20 - (t.playDelay ?? 30));
+  let activity = null, prop = null, said = 0, p = null; const acts = new Set();
+  for (const c of chunks) {
+    if (c.fromTick > tick) break;
+    const e = c.take.finalState.entities[s.entityId];
+    if (c.toTick <= tick) { activity = e?.human?.activity ?? activity; prop = e?.human?.prop ?? null; p = e?.pose?.p ?? p; }
+    for (const ch of c.take.changes ?? []) if (ch[1] === s.entityId && c.fromTick + ch[0] <= tick) {
+      if (ch[2] === 'activity') { activity = ch[3]; if (c.toTick + 20 > tick) acts.add(ch[3]); }
+      if (ch[2] === 'prop') prop = ch[3] ?? null;
+    }
+    for (const ev of c.take.events ?? []) if (ev.data?.from === soul && c.fromTick + ev.t <= tick) said++;
+  }
+  return { doing: s.doing, activity, acts: [...acts], prop, said, p, tick };
 }, soul);
 
 // ---- 2: a freshly paired agent ----
-if (ONLY.has('2')) {
+if (ONLY.has('2') && gl.software) row(2, 'line 2 needs a hardware GL renderer', false, `not reported: the browser's renderer is ${gl.renderer ?? 'none'} (software); run where WEBGL_debug_renderer_info names a GPU`);
+else if (ONLY.has('2')) {
   // The agent's own home, named with SOULS_HOME: an empty .souls is not a home, and the client would walk up from here
   // to the nearest real one (a person's own Souls, when the checkout sits in their folder).
-  const home = join(OUT, 'agent'); mkdirSync(join(home, '.souls'), { recursive: true });
-  const cli = (...a) => { try { return JSON.parse(execFileSync(process.execPath, [join(repo, 'v2/client/src/cli/souls.mjs'), ...a], { cwd: home, encoding: 'utf8', env: { ...process.env, SOULS_HOME: join(home, '.souls'), SOULS_REPLICA_PKG: PKG }, timeout: 30_000 }).trim().split('\n').at(-1)); } catch (e) { const out = String(e.stdout ?? '').trim().split('\n').at(-1); try { return JSON.parse(out); } catch { return { ok: false, detail: String(out || e.message).slice(0, 300) }; } } };
+  const cliIn = (home) => (...a) => { try { return JSON.parse(execFileSync(process.execPath, [join(repo, 'v2/client/src/cli/souls.mjs'), ...a], { cwd: home, encoding: 'utf8', env: { ...process.env, SOULS_HOME: join(home, '.souls'), SOULS_REPLICA_PKG: PKG }, timeout: 30_000 }).trim().split('\n').at(-1)); } catch (e) { const out = String(e.stdout ?? '').trim().split('\n').at(-1); try { return JSON.parse(out); } catch { return { ok: false, detail: String(out || e.message).slice(0, 300) }; } } };
+  /** A fresh agent in its own home, paired at /pair and approved in the card: its client and its Soul's page id. */
+  const pairAgent = async (name) => {
+    const home = join(OUT, name); mkdirSync(join(home, '.souls'), { recursive: true });
+    const cli = cliIn(home), pair = cli('pair', `${BASE}/${SLUG}?gateway=${BASE.replace(/^http/, 'ws')}/w/${SLUG}/v2/ws`);
+    let st = null;
+    if (pair.link) {
+      const card = await (await browser.newContext()).newPage();
+      await card.goto(pair.link.replace(/^https?:\/\/[^/]+/, BASE));
+      if (await card.locator('#signin').isVisible().catch(() => false)) await card.click('#signin');
+      if (await card.locator('#who').isVisible().catch(() => false)) { await card.fill('#person', 'Ada'); await card.locator('#who button').click(); }
+      await card.check('#match', { timeout: 15_000 }).catch(() => {});
+      await card.click('#approve', { timeout: 15_000 }).catch(() => {});
+      // the pairing finishes in the background (the client's own pair process): until then no Soul lives in the home
+      for (let i = 0; i < 60 && st?.connected !== true; i++) { st = cli('status'); if (st.connected !== true) await sleep(1000); }
+      await card.context().close();
+    }
+    return { cli, pair, soul: st?.connected === true ? st.soul : null };
+  };
+  /** A newly arrived Soul on the page (B3-5): its first act (a walk to a seat on the ground) sent, and how long after the
+   *  world took it the page lists its body; at most 30 s. */
+  const arrival = async (agent, target) => {
+    const t0 = Date.now(), sent = agent.cli('act', target);
+    let shownMs = null;
+    for (; Date.now() - t0 < 30_000 && shownMs === null; await sleep(100)) if (await page.evaluate((id) => !!window.__soulsV2?.souls.has(id), agent.soul)) shownMs = Date.now() - t0;
+    const rc = sent.sequence ? agent.cli('receipt', String(sent.sequence)).receipt : null;
+    const acceptedMs = rc?.answers?.[0]?.at ? Date.parse(rc.answers[0].at) - Date.parse(rc.sentAt) : null;
+    return { sent, acceptedMs, shownMs, afterMs: shownMs !== null && acceptedMs !== null ? shownMs - acceptedMs : null };
+  };
   const { ctx, page } = await worldPage(true);
-  const before = new Set(await page.evaluate(() => [...(window.__soulsV2?.souls.keys() ?? [])]));
-  const pair = cli('pair', `${BASE}/${SLUG}?gateway=${BASE.replace(/^http/, 'ws')}/w/${SLUG}/v2/ws`);
-  let connected = false;
-  if (pair.link) {
-    const card = await (await browser.newContext()).newPage();
-    await card.goto(pair.link.replace(/^https?:\/\/[^/]+/, BASE));
-    if (await card.locator('#signin').isVisible().catch(() => false)) await card.click('#signin');
-    if (await card.locator('#who').isVisible().catch(() => false)) { await card.fill('#person', 'Ada'); await card.locator('#who button').click(); }
-    await card.check('#match', { timeout: 15_000 }).catch(() => {});
-    await card.click('#approve', { timeout: 15_000 }).catch(() => {});
-    // the pairing finishes in the background (the client's own pair process): until then no Soul lives in the home
-    for (let i = 0; i < 60 && !connected; i++) { connected = cli('status').connected === true; if (!connected) await sleep(1000); }
+  const ARRIVALS = Number(opt('arrivals', 5));
+  report.lines[2] = { steps: [], arrivals: [] };
+  // the arrivals before the main agent's: each a fresh Soul whose first act is a walk; the main agent's own first walk
+  // is the last of them
+  const seat = () => (cliIn(join(OUT, 'agent'))('find', 'bench').found ?? []).find((f) => /^ground/.test(f.in ?? ''))?.id;
+  for (let k = 1; k < ARRIVALS; k++) {
+    const a = await pairAgent(`arrival-${k}`), at = a.soul ? seat() ?? (a.cli('find', 'bench').found ?? [])[0]?.id : null;
+    const r = a.soul && at ? await arrival(a, at) : { afterMs: null, acceptedMs: null, shownMs: null };
+    report.lines[2].arrivals.push(r);
+    row(2, `arrival ${k} of ${ARRIVALS}`, r.afterMs !== null && r.afterMs <= 2000, a.soul ? `first act taken at ${r.acceptedMs ?? '?'} ms; its body on the page ${r.shownMs === null ? 'not within 30 s' : `at ${r.shownMs} ms, ${r.afterMs} ms after`}` : `not paired: ${JSON.stringify(a.pair).slice(0, 160)}`);
+    a.cli('quit');
   }
-  row(2, 'pair', connected, connected ? 'paired at /pair, approved in the card by the page\'s local sign-in, the client connected' : `pairing: ${JSON.stringify(pair).slice(0, 200)}`);
-  report.lines[2] = { paired: connected, steps: [] };
+  const agent = await pairAgent('agent'), cli = agent.cli, connected = !!agent.soul;
+  row(2, 'pair', connected, connected ? 'paired at /pair, approved in the card by the page\'s local sign-in, the client connected' : `pairing: ${JSON.stringify(agent.pair).slice(0, 200)}`);
+  report.lines[2].paired = connected;
   /** The first thing `find <word>` gives whose own offers include `<verb>:` (inspect), for each word in turn. */
   const offering = (verb, ...words) => {
     // outdoors first (on the ground: reachable from where a new Soul arrives), then the rest
@@ -195,14 +253,18 @@ if (ONLY.has('2')) {
   };
   /** Waits for act `seq` to end (its receipt, or a refusal), at most `ms`. */
   const ended = async (seq, ms = 120_000) => { for (const t0 = Date.now(); Date.now() - t0 < ms; await sleep(1000)) { const r = cli('receipt', String(seq)).receipt; if (r && r.going === false) return r; } return null; };
+  /** Waits for walk `seq` to end. The world ends a walk: done when it arrives, `walk.blocked` when it stalls (C21), so a
+   *  long walk that keeps closing on its goal is waited for (D11: a 233 s walk to a bed was cut at 120 s here, by the
+   *  next act sent while it still walked). The bound only keeps a check from hanging on a world that never answers. */
+  const walked = (seq) => ended(seq, 20 * 60_000);
   /** One timed step: the act sent, then the page polled until `shown` holds (at most 6 s); passes within 2 s. */
-  let soul = null;
+  let soul = null, arrivalT0 = null;
   const step = async (name, send, shown) => {
     const b = soul ? await probe(page, soul) : null, t0 = Date.now(), sent = send();
     let seenMs = null;
     while (Date.now() - t0 < (soul ? 6000 : 30_000)) { // a Soul not on the page yet: wait longer, to say when it came
       if (!soul) {
-        soul = (await page.evaluate(() => [...(window.__soulsV2?.souls.keys() ?? [])])).find((s) => !before.has(s)) ?? null;
+        soul = (await page.evaluate((id) => (window.__soulsV2?.souls.has(id) ? id : null), agent.soul)) ?? null;
         if (soul) report.lines[2].appearedMs = Date.now() - t0;
         // the clip follows it: its card by the page's own link, then Follow
         if (soul) { await page.evaluate((id) => { location.hash = `soul/${id}`; }, soul); await page.getByRole('button', { name: /^Follow$/ }).first().click({ timeout: 3000 }).catch(() => {}); }
@@ -212,37 +274,46 @@ if (ONLY.has('2')) {
       if (soul && !s && Date.now() - t0 > 6000) break;
       await sleep(100);
     }
-    const pass = sent?.ok !== false && seenMs !== null && seenMs <= 2000;
-    // what the world answered so far (its receipt's phases or refusal, by name) and what the page showed last
-    // each answer with how long after the send the world gave it (the client's own receipt: sentAt and each answer's at)
+    // what the world answered so far (its receipt's phases or refusal, by name), each with how long after the send it
+    // came (the client's own receipt: sentAt and each answer's at), and what the page showed last
     const rc = sent?.sequence ? cli('receipt', String(sent.sequence)).receipt : null;
-    const answers = (rc?.answers ?? []).map((a) => `${a.reason ?? a.answer}${rc.sentAt && a.at ? ` at ${Date.parse(a.at) - Date.parse(rc.sentAt)} ms` : ''}`).join(' > ');
+    const timed = (rc?.answers ?? []).map((a) => ({ name: a.reason ?? a.answer, ms: rc.sentAt && a.at ? Date.parse(a.at) - Date.parse(rc.sentAt) : null }));
+    const answers = timed.map((a) => `${a.name}${a.ms !== null ? ` at ${a.ms} ms` : ''}`).join(' > ');
+    // the answer the page shows (a receipt ends a sit, a take, a set-down, a say; a walk shows from its acceptance), and
+    // the line's bar: on the page within 2 s of it
+    const shownBy = [...timed].reverse().find((a) => a.ms !== null && seenMs !== null && a.ms <= seenMs) ?? null;
+    const afterAnswer = seenMs !== null && shownBy ? seenMs - shownBy.ms : null;
+    const pass = sent?.ok !== false && afterAnswer !== null && afterAnswer <= 2000;
     const last = soul ? await probe(page, soul) : null;
-    report.lines[2].steps.push({ name, answer: sent?.ok === false ? sent : { ok: true, sequence: sent?.sequence }, answers, seenMs, page: last });
-    row(2, name, pass, `${sent?.ok === false ? `refused: ${JSON.stringify(sent).slice(0, 160)}` : `world: ${answers || 'no answer yet'}`}; on the page ${seenMs === null ? `not within 6 s (it shows ${last ? `${last.doing ?? '?'}, ${last.activity ?? '?'}${last.prop ? `, holding ${last.prop}` : ''}` : 'no such Soul'})` : `after ${seenMs} ms`}`);
+    report.lines[2].steps.push({ name, answer: sent?.ok === false ? sent : { ok: true, sequence: sent?.sequence }, answers, timed, seenMs, afterAnswer, page: last });
+    row(2, name, pass, `${sent?.ok === false ? `refused: ${JSON.stringify(sent).slice(0, 160)}` : `world: ${answers || 'no answer yet'}`}; on the page ${seenMs === null ? `not within 6 s (it shows ${last ? `${last.doing ?? '?'}, ${last.activity ?? '?'}${last.prop ? `, holding ${last.prop}` : ''}` : 'no such Soul'})` : `after ${seenMs} ms, ${afterAnswer ?? '?'} ms after the world's ${shownBy?.name ?? 'answer'}`}`);
     return sent;
   };
-  const walking = (s) => s.doing === 'walking' || s.acts.includes('walk') || s.activity === 'walk';
+  const walking = (s) => s.activity === 'walk'; // drawn walking at the moment the page plays
   if (connected) {
     const bench = offering('sit', 'bench', 'chair'), bed = offering('lie', 'bed', 'hammock'), cup = offering('take', 'cup', 'book', 'apple', 'mug');
     report.lines[2].targets = { bench, bed, cup };
     // walk (the first act also brings the new Soul into the world: no join is taught or needed)
     let r = await step('walk', () => bench ? cli('act', bench) : { ok: false, detail: 'no seat found' }, walking);
-    if (r?.sequence) await ended(r.sequence);
+    // the main agent's first act is the last arrival: its body on the page after the world took the walk
+    const took = report.lines[2].steps[0]?.timed?.[0]?.ms ?? null, came = report.lines[2].appearedMs ?? null;
+    report.lines[2].arrivals.push({ acceptedMs: took, shownMs: came, afterMs: took !== null && came !== null ? came - took : null });
+    row(2, `arrival ${ARRIVALS} of ${ARRIVALS}`, took !== null && came !== null && came - took <= 2000, `first act taken at ${took ?? '?'} ms; its body on the page ${came === null ? 'not within 30 s' : `at ${came} ms, ${came - took} ms after`}`);
+    if (r?.sequence) await walked(r.sequence);
     r = await step('sit', () => bench ? cli('act', `sit:${bench}`) : { ok: false, detail: 'no seat found' }, (s) => s.activity === 'sit' || s.acts.includes('sit') || s.doing === 'seated');
     if (r?.sequence) await ended(r.sequence, 15_000);
     // seated, a Soul stands up before it goes anywhere (the skill: `act <ns>:rise`), in the world's namespace or the seat's
     const rise = () => { const ns = [...new Set([bench, bed].filter(Boolean).map((id) => JSON.stringify(cli('inspect', id)).match(/"([a-z0-9_-]+):rise:/)?.[1]).filter(Boolean))]; const w = cli('act', ...(ns.length ? ns : ['eden', SLUG]).map((n) => `${n}:rise`)); return w.sequence ? ended(w.sequence, 15_000) : null; };
     await rise();
-    if (bed) { const w = cli('act', bed); if (w.sequence) await ended(w.sequence); }
+    if (bed) { const w = cli('act', bed); if (w.sequence) await walked(w.sequence); }
     r = await step('lie', () => bed ? cli('act', `lie:${bed}`) : { ok: false, detail: 'no bed found' }, (s) => s.activity === 'lie' || s.acts.includes('lie'));
     if (r?.sequence) await ended(r.sequence, 15_000);
     await rise();
-    if (cup) { const w = cli('act', cup); if (w.sequence) await ended(w.sequence); }
+    if (cup) { const w = cli('act', cup); if (w.sequence) await walked(w.sequence); }
     r = await step('take', () => cup ? cli('act', `take:${cup}`) : { ok: false, detail: 'no thing to take found' }, (s) => !!s.prop);
     if (r?.sequence) await ended(r.sequence, 15_000);
     r = await step('carry', () => bench ? cli('act', bench) : { ok: false, detail: 'no place to carry it to' }, (s) => !!s.prop && walking(s));
-    if (r?.sequence) await ended(r.sequence);
+    if (r?.sequence) await walked(r.sequence);
     // the client's set-down names the held thing itself (a take from a bookcase holds a new book, not the bookcase): the
     // thing `find` places in the Soul's own body, by the body's name
     const me = cli('status').body, myName = me ? cli('inspect', me).name : null, held = (await probe(page, soul))?.prop;
@@ -258,7 +329,7 @@ if (ONLY.has('2')) {
   }
   cli('quit'); // the agent's daemon is this run's: stopped by its own command
   await ctx.close(); // the clip is written on close
-  report.clip = join(OUT, 'clip');
+  report.clip = 'clip/';
 }
 // ---- 4: a browser smoke of home, sign-in, sound, music, the camera ----
 if (ONLY.has('4')) {
@@ -349,8 +420,10 @@ if (ONLY.has('3')) {
 await browser.close();
 report.rows = rows;
 writeFileSync(join(OUT, 'report.json'), JSON.stringify(report, null, 2));
-console.log('\n| line | check | result | detail |\n|---|---|---|---|');
-for (const r of rows) console.log(`| ${r.line} | ${r.what} | ${r.pass ? 'pass' : 'FAIL'} | ${r.detail.replaceAll('|', '/')} |`);
-console.log(`\nreport: ${join(OUT, 'report.json')}${report.clip ? `; clip: ${report.clip}` : ''}`);
+const table = [`Renderer: ${gl.renderer ?? 'none'} (${gl.software ? 'software' : 'hardware'}, ${gl.flags})`, '', '| line | check | result | detail |', '|---|---|---|---|',
+  ...rows.map((r) => `| ${r.line} | ${r.what} | ${r.pass ? 'pass' : 'FAIL'} | ${r.detail.replaceAll('|', '/')} |`)].join('\n');
+writeFileSync(join(OUT, 'table.md'), table + '\n');
+console.log(`\n${table}`);
+console.log(`\nreport: ${join(OUT, 'report.json')}${report.clip ? `; clip: ${join(OUT, 'clip')}` : ''}`);
 if (KEEP) { log('kept running (--keep); Ctrl-C stops everything'); await new Promise(() => {}); }
 process.exit(rows.every((r) => r.pass) ? 0 : 1);

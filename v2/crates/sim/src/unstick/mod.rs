@@ -322,6 +322,9 @@ pub struct Ladder {
     spread: usize,
     /// Where still bodies stepped aside this tick are going (node and point), so two are not sent to one place.
     aside: Vec<(Id, Vec3)>,
+    /// A served world's ladder (`worldd`, 0.133 N1): no route search on the clock thread; the reroute rung asks the
+    /// world's planner again ([`Ladder::served`]).
+    served: bool,
 }
 
 fn len(a: Vec3, b: Vec3) -> i64 {
@@ -334,9 +337,43 @@ impl Ladder {
         Ladder::default()
     }
 
+    /// A ladder for a served world, whose routes are searched off the clock (K18b): the reroute rung lets go the walk's
+    /// granted place, so the runner asks the planner for its place and legs again from where it stands, and the walk
+    /// is given them a tick later ([`Ladder::routed`]).
+    pub fn served() -> Ladder {
+        Ladder {
+            served: true,
+            ..Ladder::default()
+        }
+    }
+
+    /// `who`'s walk, for the order the ladder keeps, was given new legs from where it stands (a served world's planner
+    /// answered its reroute): it walks them from the first, and keeps its least distance to its leg's end, as a reroute
+    /// does (#3168).
+    pub fn routed(&mut self, runner: &Runner, who: Id, legs: Vec<Leg>) {
+        let Some(w) = self.walkers.get_mut(&who) else {
+            return;
+        };
+        let old = w.legs.get(w.leg).copied();
+        (w.legs, w.leg) = (legs, 0);
+        if let (Some(c), Some(first), Some(body)) = (
+            self.clocks.get_mut(&who),
+            w.legs.first(),
+            runner.controller.body(who),
+        ) {
+            c.leg = 0;
+            if old.is_none_or(|l| l.to != first.to) {
+                c.best = len(body.pose.position, first.to);
+                c.mark = c.best;
+            }
+        }
+    }
+
     /// Keeps a walker the runner walks along `legs` for the order `order`, at free speed `speed`, to `goal` on
     /// `node`, for routing it again.
     pub fn add(&mut self, who: Id, order: Id, speed: i64, node: Id, goal: Vec3, legs: Vec<Leg>) {
+        // A new walk is a new leg: its clock starts again.
+        self.clocks.remove(&who);
         self.walkers.insert(
             who,
             Walker {
@@ -348,6 +385,22 @@ impl Ladder {
                 carried: false,
             },
         );
+    }
+
+    /// The order the ladder keeps `who`'s walk for.
+    pub fn order(&self, who: Id) -> Option<Id> {
+        self.walkers.get(&who).map(|w| w.order)
+    }
+
+    /// Lets go every walker whose run has ended and that is not walking out (a served world keeps no walk it no longer
+    /// runs).
+    pub fn forget_ended(&mut self, runner: &Runner) {
+        let running = runner.running_bodies();
+        let outs = &self.outs;
+        self.walkers
+            .retain(|who, _| running.contains(who) || outs.contains(who));
+        let walkers = &self.walkers;
+        self.clocks.retain(|who, _| walkers.contains_key(who));
     }
 
     /// The leg `who` walks as the ladder keeps it: its index in the route and the leg.
@@ -385,6 +438,12 @@ impl Ladder {
         town: &mut Town,
         who: Id,
     ) -> Result<(), &'static str> {
+        if self.served {
+            // A served world searches no route on its clock: the planner plans it again from where it stands, and its
+            // answer comes to [`Ladder::routed`] (0.133 N1).
+            runner.granted.remove(&who);
+            return Ok(());
+        }
         let (Some(w), Some(body)) = (self.walkers.get_mut(&who), runner.controller.body(who))
         else {
             return Ok(());
@@ -511,6 +570,14 @@ impl Ladder {
         self.faults(runner);
         self.climb(runner, town);
         ticked
+    }
+
+    /// The rungs after a tick a served world ran itself (`worldd` steps the runner with the planner's answers, K18b):
+    /// each walker the tick refused ended, the walk-outs ended, then each walker's clock and rungs, as [`Ladder::step`]
+    /// does after its own tick.
+    pub fn after(&mut self, runner: &mut Runner, town: &mut Town) {
+        self.faults(runner);
+        self.climb(runner, town);
     }
 
     /// Each walker refused in the last tick (its first refusal) whose walk the tick ended or whose walk-out was under
@@ -711,6 +778,7 @@ impl Ladder {
                                 speed,
                                 to: sn,
                                 arrive: None,
+                                hold: false,
                             };
                             if runner.controller.carry(s, track).is_ok() {
                                 self.aside.push((sn, to));

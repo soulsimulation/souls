@@ -46,7 +46,8 @@ export class V2History {
 
   /** The recorded chunks from take tick `from` to `to`, at most `limit`, as the old server's `/v1/takes` gives them. */
   async chunks(from: number, to: number, limit: number, signal?: AbortSignal): Promise<RecordedChunk[]> {
-    const bridge = new V2Bridge(this.frame), got = new Map<number, RecordedChunk>(), endUs = to * TICK_US;
+    // one-second chunks, as the old /v1/takes gives a past window (B3-4: the live page plays half-second ones)
+    const bridge = new V2Bridge(this.frame, undefined, TICKS), got = new Map<number, RecordedChunk>(), endUs = to * TICK_US;
     let at = from * TICK_US, first = true;
     const take = () => { for (const c of bridge.view.takes.chunks) if (c.fromTick >= from && c.toTick <= to) got.set(c.fromTick, c); };
     // a chunk is made once the world is the bridge's lag past it, so the bundle after the window is read too

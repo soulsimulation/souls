@@ -174,6 +174,24 @@ pub struct Meet {
     pub step: bool,
 }
 
+/// The most threads a world's start-up assembles its town on (S5, 0.133): its ground cut, its buildings read and its
+/// surface built beside its map. Only a start fans out; a rebuild after an edit, a check and a copy run on the thread
+/// that asks (one thread, its own limit, per the scaling rule).
+pub const START_THREADS: usize = 8;
+
+/// How many threads `want` threads come to for `jobs` jobs on this machine: at least one, at most one a job and no
+/// more than the machine has.
+pub fn fan_out(want: usize, jobs: usize) -> usize {
+    std::thread::available_parallelism()
+        .map_or(1, std::num::NonZeroUsize::get)
+        .min(want)
+        .min(jobs)
+        .max(1)
+}
+
+/// One square's wet pieces, each with its water's index ([`OpenGround::cut_water`]).
+pub type Wet = Vec<(u32, Piece)>;
+
 /// The walkable ground of one node (or one square of the open ground) for one radius.
 #[derive(Clone, Debug)]
 pub struct Patch {
@@ -971,6 +989,46 @@ impl OpenGround {
             }
         }
         out
+    }
+
+    /// Every square's patch, in [`OpenGround::squares`]' order (S5, 0.133): the squares are cut on at most `threads`
+    /// threads (and no more than the machine has), each square on its own (a cut reads only the ground), and put back
+    /// in order, so the answer is the same as cutting them one by one.
+    pub fn cut_all(&self, threads: usize) -> Vec<((i32, i32), Patch)> {
+        self.each_square(threads, |i, j| self.cut_square(i, j))
+    }
+
+    /// Every square's wet pieces ([`OpenGround::cut_water`]), as [`OpenGround::cut_all`] cuts the dry ones.
+    pub fn cut_all_water(&self, threads: usize) -> Vec<((i32, i32), Wet)> {
+        self.each_square(threads, |i, j| self.cut_water(i, j))
+    }
+
+    /// `f` of every square, on at most `threads` threads, in [`OpenGround::squares`]' order.
+    fn each_square<T: Send>(
+        &self,
+        threads: usize,
+        f: impl Fn(i32, i32) -> T + Sync,
+    ) -> Vec<((i32, i32), T)> {
+        let squares = self.squares();
+        let threads = fan_out(threads, squares.len());
+        let chunk = squares.len().div_ceil(threads).max(1);
+        let f = &f;
+        std::thread::scope(|s| {
+            let parts: Vec<_> = squares
+                .chunks(chunk)
+                .map(|c| {
+                    s.spawn(move || {
+                        c.iter()
+                            .map(|&(i, j)| ((i, j), f(i, j)))
+                            .collect::<Vec<_>>()
+                    })
+                })
+                .collect();
+            parts
+                .into_iter()
+                .flat_map(|h| h.join().unwrap_or_else(|e| std::panic::resume_unwind(e)))
+                .collect()
+        })
     }
 
     /// One square's patch.
