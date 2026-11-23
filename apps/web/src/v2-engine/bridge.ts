@@ -117,7 +117,14 @@ export class V2Bridge {
 
   receive(m: Msg): void {
     if (m.t === 'error') { this.view.error = m.message; return; }
-    if (m.t === 'pointer') return;
+    // B2-3: a still world writes no part; its pointer says it is quiet up to a time (worldd view_out `idle`, every half
+    // second). That is the world's time as surely as a part's end (the v2 page's clock.ts caughtUp), so the chunks it
+    // completes are made, and a line said just before the world went still is shown, not held until something moves.
+    if (m.t === 'pointer') {
+      const q = m.p.quietUntil;
+      if (typeof q === 'number' && this.liveFrom !== null && q > (this.view.newestTo ?? -Infinity)) { this.view.newestTo = q; this.publish(); }
+      return;
+    }
     if (m.t === 'snapshot') { this.nodesChanged(m.s.nodes, m.s.removed, this.view.newestTo ?? 0); this.publish(); return; }
     const p = m.p;
     this.liveFrom ??= p.from;
