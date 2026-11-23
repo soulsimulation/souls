@@ -40,8 +40,10 @@ function runNode(args, { env, cwd, timeoutMs = 120_000, onText } = {}) {
   });
 }
 
-/** Pairs one Soul: pair.mjs asks, the test person `label` approves, the token comes back into the seat's home. */
-export async function pairSeat({ world, dir, label, pkg = REPLICA_PKG, approveMs = 60_000 }) {
+/** Pairs one Soul: pair.mjs asks, the test person `owner` (default `label`) approves, the token comes back into the
+ *  seat's home. `name`: the Soul's name, saved by its owner on the directory (`/v1/account/souls/profile`), which the
+ *  world gives its body (the page's name tag, its search). */
+export async function pairSeat({ world, dir, label, owner = label, name = null, pkg = REPLICA_PKG, approveMs = 60_000 }) {
   if (!/^[a-z][a-z0-9-]{0,31}$/.test(label ?? '')) throw new Error('label: lowercase letters, digits, dashes');
   const folder = resolve(dir, label), home = join(folder, '.souls'), log = join(folder, 'commands.jsonl');
   mkdirSync(folder, { recursive: true });
@@ -53,11 +55,19 @@ export async function pairSeat({ world, dir, label, pkg = REPLICA_PKG, approveMs
   while (!asked && Date.now() < until) await sleep(50);
   if (!asked) throw new Error(`${label}: no pairing code in ${approveMs / 1000} s`);
   const approve = await fetch(new URL('/v1/pair/approve', world.directory), { method: 'POST', headers: { 'content-type': 'application/json' },
-    body: JSON.stringify({ code: asked.code, confirm: true, test_person: label }) });
+    body: JSON.stringify({ code: asked.code, confirm: true, test_person: owner }) });
   if (approve.status !== 200) throw new Error(`${label}: the owner's approval answered ${approve.status}`);
   const done = await asking;
   const said = lastJson(done.out);
   if (done.code !== 0 || !said?.ok) throw new Error(`${label}: pairing failed: ${done.out.slice(-300)} ${done.err.slice(-300)}`);
+  if (name) {
+    // the directory keys the Soul as its owner's list names it (`soul-<hex>-<n>`; the client's `s_<hex>-<n>`)
+    const post = (path, body) => fetch(new URL(path, world.directory), { method: 'POST', headers: { 'content-type': 'application/json' }, body: JSON.stringify({ ...body, test_person: owner }) });
+    const mine = (await (await post('/v1/account/souls', {})).json()).souls ?? [];
+    const key = mine.find((s) => s.soul.replace(/^soul-/, '') === said.soul.replace(/^s_/, ''))?.soul ?? said.soul;
+    const named = await post('/v1/account/souls/profile', { soul: key, name });
+    if (named.status !== 200) throw new Error(`${label}: naming the Soul ${name} answered ${named.status} ${await named.text().catch(() => "")} (a name is the world's once)`);
+  }
   return seatOf({ label, folder, home, soul: said.soul, env, log });
 }
 

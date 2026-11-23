@@ -1,51 +1,58 @@
-// Setup shared by clip kits (timed-run.yml `clip`): Souls for local dev users and an optional god agent on the clip's
-// fake-mind dev world, each with its agent listening for the whole take, so no owner's card shows the Reconnect box and
-// the god box shows no start prompt. Runs when the recorder imports a kit's steps, before the page opens.
-// CLIP_WORLD is the world's base URL, CLIP_CHECKOUT the ref's checkout, CLIP_WORK a per-run scratch folder.
-import { spawn, spawnSync } from 'node:child_process';
-import { mkdirSync, writeFileSync } from 'node:fs';
+// Setup shared by clip kits (timed-run.yml `clip`; 0.135 P6 on the new engine): the kit's Souls, each paired to the
+// clip's world as tools/playtest/arena/new-engine/seat.mjs pairs one (approved by its owner, a test person), named, and
+// joined, so the page has them before the take. They act only through the new client's thin command (`souls.mjs`).
+// Runs when the recorder imports a kit's steps, before the page opens.
+// CLIP_V2 is the new engine's addresses (old-page.mjs's world: page, directory, gateway), CLIP_CHECKOUT the ref's
+// checkout, CLIP_WORK a per-run scratch folder. A god agent (`god`) has no form on the new engine's clip world yet: it is
+// listed in the log and left out.
 import { join } from 'node:path';
+import { pathToFileURL } from 'node:url';
 
-const { CLIP_WORLD, CLIP_CHECKOUT = '.', CLIP_WORK } = process.env;
-const EDEN = join(CLIP_CHECKOUT, 'tools/world-launcher/soul/eden.mjs'), GOD = join(CLIP_CHECKOUT, 'tools/god-skill/eden-god.mjs');
-let ended = false;
-process.once('exit', () => { ended = true; });
+const { CLIP_V2, CLIP_CHECKOUT = '.', CLIP_WORK } = process.env;
+const seats = new Map();
 
-function cli(script, cwd, args) {
-  const r = spawnSync(process.execPath, [script, ...args], { cwd, encoding: 'utf8', timeout: 60_000 });
-  if (r.status !== 0) throw Error(`${args[0]} failed (${r.status}): ${(r.stderr || r.stdout).split('\n').filter(Boolean).at(-1)?.slice(0, 300)}`);
-  return r.stdout;
-}
-/** Keep `listen` running in cwd until the recorder exits (it ends when the owner writes, so it starts again). */
-function hold(script, cwd) {
-  let held = null;
-  const again = () => {
-    if (ended) return;
-    held = spawn(process.execPath, [script, 'listen'], { cwd, stdio: 'ignore' });
-    held.unref();
-    held.once('exit', () => setTimeout(again, 1000).unref());
-  };
-  again();
-  process.once('exit', () => held?.kill());
-}
-
-/** cast({ souls: [{ name, owner }], god: 'admin' | null }): each Soul made by dev:<owner> and held; the god minted for
- *  dev:<god> (the dev world's owner is admin) and held. */
-export function cast({ souls = [], god = null }) {
-  if (!CLIP_WORLD || !CLIP_WORK) throw Error('cast: CLIP_WORLD and CLIP_WORK are set by timed-run.yml `clip`');
+/** cast({ souls: [{ name, owner }], god }) → the Souls by name, each `{ cli(...words), body, soul }`. */
+export async function cast({ souls = [], god = null }) {
+  if (!CLIP_V2 || !CLIP_WORK) throw Error('cast: CLIP_V2 and CLIP_WORK are set by timed-run.mjs `clip`');
+  const world = JSON.parse(CLIP_V2);
+  const { pairSeat } = await import(pathToFileURL(join(CLIP_CHECKOUT, 'tools/playtest/arena/new-engine/seat.mjs')).href);
   for (const s of souls) {
-    const dir = join(CLIP_WORK, `soul-${s.name.toLowerCase()}`);
-    mkdirSync(dir, { recursive: true });
-    writeFileSync(join(dir, '.eden-agent.json'), JSON.stringify({ identity: s.owner }));
-    cli(EDEN, dir, ['register', CLIP_WORLD]);
-    cli(EDEN, dir, ['create', s.name]);
-    hold(EDEN, dir);
+    const seat = await pairSeat({ world, dir: CLIP_WORK, label: `soul-${s.name.toLowerCase()}`, owner: s.owner, name: s.name });
+    const { body } = await seat.join();
+    console.error(`kit: ${s.name} (${s.owner}) paired and joined, body ${body}`);
+    seats.set(s.name, seat);
   }
-  if (god) {
-    const dir = join(CLIP_WORK, 'god');
-    mkdirSync(dir, { recursive: true });
-    cli(GOD, dir, ['register', CLIP_WORLD, `dev:${god}`]);
-    cli(GOD, dir, ['mint']);
-    hold(GOD, dir);
-  }
+  if (god) console.error(`kit: a god agent for dev:${god} has no form on the new engine's clip world yet; left out`);
+  return Object.fromEntries(seats);
+}
+
+/** The Soul named `name` in the cast. */
+export const soul = (name) => { const s = seats.get(name); if (!s) throw Error(`cast: no Soul ${name}`); return s; };
+
+/** What `name`'s own copy finds for `words` (not a body), or null: the thing named exactly that first (Eden's things keep
+ *  their old ids as names: `street-bench-1`), else the first found. `"<words> in <thing>"` keeps to what is inside that
+ *  thing (`Top room in eden-tower-house`). */
+export async function find(name, words) {
+  const [what, within] = words.split(/ in (?=\S+$)/);
+  const r = await soul(name).cli('find', ...what.split(/\s+/), '--limit', '50');
+  const rows = (r.found ?? []).filter((x) => !x.kind?.startsWith('souls:body') && (!within || String(x.in ?? '').includes(within)));
+  return rows.find((x) => x.name === what) ?? rows[0] ?? null;
+}
+
+/** `name` walks to what its copy finds for `words` and waits for the receipt; logged. → the answer */
+export async function walk(name, words) {
+  const there = await find(name, words);
+  if (!there) { console.error(`kit: ${name}: nothing found for "${words}"`); return { ok: false }; }
+  const r = await soul(name).cli('act', there.id, '--wait');
+  console.error(`kit: ${name} walk to ${words} (${there.id}): ${JSON.stringify(r).slice(0, 400)}`);
+  return r;
+}
+
+/** `name` acts `verb` on what its copy finds for `words` (a door's `close`, an easel's `paint`), waiting; logged. */
+export async function actOn(name, verb, words) {
+  const there = await find(name, words);
+  if (!there) { console.error(`kit: ${name}: nothing found for "${words}"`); return { ok: false }; }
+  const r = await soul(name).cli('act', `${verb}:${there.id}`, '--wait');
+  console.error(`kit: ${name} ${verb} ${words} (${there.id}): ${JSON.stringify(r).slice(0, 400)}`);
+  return r;
 }

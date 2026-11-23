@@ -1,0 +1,18 @@
+{
+  "name": "hamlet-planned",
+  "seconds": 16,
+  "hour": "17:30",
+  "world": {
+    "template": "worlds/templates/hello-hamlet.json",
+    "add": [
+      { "op": "place", "def": "core/bench@1", "name": "meadow-bench", "p": [24, 0, -2], "r": 1.2 }
+    ]
+  },
+  "souls": [{ "id": "ada" }, { "id": "bo" }],
+  "setup": [{ "souls": "*", "do": ["act", "?bench", "--wait"] }],
+  "beats": [
+    { "at": 0, "souls": ["ada"], "do": ["act", "?meadow-bench"] },
+    { "at": 2, "souls": ["bo"], "do": ["act", "?meadow-bench"] }
+  ],
+  "camera": { "plan": { "subjects": ["ada"] } }
+}

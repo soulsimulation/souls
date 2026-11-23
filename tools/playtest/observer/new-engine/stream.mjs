@@ -5,7 +5,7 @@
 //
 //   const v = await streamViewer({ world, pkg });   // world: arena/new-engine/world.mjs startWorld's answer
 //   v.bodies(), v.said(), v.node(clientId), v.errors; v.close()
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { registerHooks } from 'node:module';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -24,8 +24,8 @@ export const streamUrl = (page, advert) => new URL(String(advert.stream).replace
 
 let hooked = null;
 const timers = new Set();
-/** Once per process: `replica` resolves to the package, a file: fetch reads the file (the WASM), timers are kept. */
-function hookOnce(pkg) {
+/** Once per process: `replica` resolves to the package, a file: fetch reads the file (the WASM, a world's history), timers are kept. */
+export function hookOnce(pkg) {
   if (hooked) { if (hooked !== pkg) throw new Error(`one replica package per process: ${hooked} already loaded`); return; }
   if (!existsSync(join(pkg, 'replica.js'))) throw new Error(`no replica package at ${pkg} (v2/tools/dev/run.sh builds one)`);
   const url = pathToFileURL(join(pkg, 'replica.js')).href;
@@ -33,7 +33,10 @@ function hookOnce(pkg) {
   const realFetch = globalThis.fetch;
   globalThis.fetch = (input, init) => {
     const u = String(input instanceof Request ? input.url : input);
-    return u.startsWith('file:') ? Promise.resolve(new Response(readFileSync(new URL(u)), { headers: { 'content-type': 'application/wasm' } })) : realFetch(input, init);
+    if (!u.startsWith('file:')) return realFetch(input, init);
+    // a file: a world's folder read in place (its history), or the WASM; a missing file answers 404, as the origin does
+    const f = new URL(u);
+    return Promise.resolve(existsSync(f) && statSync(f).isFile() ? new Response(readFileSync(f), { headers: { 'content-type': 'application/wasm' } }) : new Response(null, { status: 404 }));
   };
   const realSetInterval = globalThis.setInterval;
   globalThis.setInterval = (f, ms, ...a) => { const t = realSetInterval(f, ms, ...a); timers.add(t); return t; };

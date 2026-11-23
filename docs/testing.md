@@ -451,8 +451,12 @@ sign-off; T4 is the release head. "Done" means walked on the real URL with real 
 
 When the local machine is busy, record the clip on a `souls-timed` runner with its GPU: write a clip kit in
 `tools/proof/clips/<kit>/` (`kit.json` with the template, viewport and any `localStorage` such as
-`{"sim.dev": "admin"}`, and `steps.mjs`; `_shared/cast.mjs` makes Souls and a god agent and keeps them listening),
-push it to an `agent/` branch, then dispatch the timed run from that branch:
+`{"sim.dev": "admin"}`, and `steps.mjs`), push it to an `agent/` branch, then dispatch the timed run from that branch.
+The runner brings up the ref's old page on a new-engine world of the template
+(`tools/playtest/arena/new-engine/old-page.mjs`, built in the job); `_shared/cast.mjs` pairs the kit's Souls through
+the new client, names them and joins them, and its `walk`, `actOn` and `find` act by words in a Soul's own copy. A kit
+whose verbs have no new-engine form yet (rides, the television: 0.135 K4) carries `skip` in its kit.json, saying why,
+and the runner refuses it by name:
 
 ```bash
 gh workflow run timed-run.yml --ref agent/<kit-branch> -f command=clip -f ref=agent/<pr-branch> -f args='--kit <kit>'
