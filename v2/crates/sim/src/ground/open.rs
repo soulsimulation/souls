@@ -155,7 +155,11 @@ pub fn off_ground(
         terrain: None,
         widest: 0,
     };
-    let terrain = Terrain::extent(before, ground)?;
+    // A terrain edit may grow the ground (`expand`, `land extend`): things may reach as far as it reaches after.
+    let terrain = match (Terrain::extent(before, ground)?, Terrain::extent(after, ground)?) {
+        (Some(a), Some(b)) => Some(join(Some(a), b)),
+        (a, b) => a.or(b),
+    };
     let mut extent = match terrain {
         Some(t) => Some(t),
         None => {
