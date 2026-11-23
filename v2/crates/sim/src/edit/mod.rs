@@ -317,8 +317,9 @@ pub fn commit_classes(
         classes,
     )
 }
+/// [`commit_classes`], with the world's structure rule checked on the write (B18; a running world's, B20 #3356).
 #[allow(clippy::too_many_arguments)]
-fn commit_guarded_classes(
+pub fn commit_guarded_classes(
     live: &mut Replica,
     minter: &mut Minter,
     planned: &Planned,
