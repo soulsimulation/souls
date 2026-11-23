@@ -1659,9 +1659,12 @@ impl Bodies {
         body_of: impl Fn(Id) -> Option<Id>,
         placed: &Placed,
         now: Micros,
+        since: Micros,
+        born: &BTreeMap<Id, Micros>,
     ) {
         let ids: Vec<Id> = self.runner.controller.ids().collect();
-        self.wind.resume(effects, body_of, ids.iter().copied(), now);
+        self.wind
+            .resume_since(effects, body_of, ids.iter().copied(), now, since, born);
         for (body, (pose, stance)) in placed {
             if *stance == Some(Stance::Lie)
                 && matches!(pose.support, Support::Surface { .. })

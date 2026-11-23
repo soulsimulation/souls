@@ -45,6 +45,8 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 | --- | --- |
 | `place <kind> --in <id> [--at x,y,z] [--slot n] [--field n=v]` | a new thing in `<id>`; the answer's `names["1"]` is its id |
 | `move <id> --at x,y,z [--slot n]` | to another spot in the same parent |
+| `move <id> [<id> ...] --by dx,dz [--yaw r]` | each that far over (metres), what is in it riding along; on the open ground it keeps its height over the ground |
+| `clone <id> [--at x,z] [--count n] [--step dx,dz] [--yaw r]` | copies of it and everything in it (its doorways and stairs too), the first one step away unless `--at` (metres); with `--claim`, each of its edits goes under that claim |
 | `set <id> <field> <value>` | one numbered field: an integer, `true`, `false` or a name |
 | `remove <id>` | it and everything in it |
 | `about <id> --title '<t>' [--alias '<a>' ...]` | a place's title and aliases, kept as words for everyone; Souls' `find` matches either. `--set '{"title":"..","aliases":[".."]}'` sets both, `--clear` clears both |
@@ -142,7 +144,18 @@ the root, which `describe` shows), and from then on you place it like any other 
   What the world already holds (the same id and kind, the world itself and its open ground) keeps its id and only its
   changed fields are set; everything else is placed, and then each doorway and stair it lacks is linked again (the
   `link` operation), so Souls walk in through the doors and up the stairs. The answer counts the edits, what was
-  placed, set and linked, and anything not brought over. A refusal stops it and says how far it got.
+  placed, set and linked, and anything not brought over. A refusal stops it and says how far it got. When the file's
+  ground is larger than the world's, its tiles are set first, so the world grows before anything is placed on it.
+
+## Growing the world
+
+- `node souls-god.mjs expand <m>` grows the world's ground to a square `m` metres a side, centred on the middle.
+- `node souls-god.mjs land extend --toward n|s|e|w|ne|nw|se|sw --metres <m>` grows it one way, or
+  `--bounds x0,z0,x1,z1` (metres) to cover a box.
+- The new ground is flat, level with the old ground's edge, and Souls walk on it. The world only grows. Your upload
+  carries only the new tiles, so one grow adds at most about 390 of Eden's 64 m tiles; a larger one is refused
+  `expand.too-large`: grow it in steps. The world still writes the whole ground to its log and to viewers on every
+  land edit, so a ground past about 16 MB is refused `edit.too-large`.
 
 ## Your own models and pictures
 
@@ -170,6 +183,7 @@ texture inside the GLB), textures at most 2,048 px; a picture at most 2 MB. A re
 | `edit.name-unknown` | the batch uses a name no earlier place gave |
 | `edit.stale` | someone changed that thing after your copy saw it: `describe`, then send again |
 | `edit.not-the-creator` | this token is not the creator's |
+| `edit.too-large` | the fields the batch sets come to over 16 MB: split it, or the field has grown as large as it can |
 | `kind.invalid` | the record is not one the world can keep: its `detail` names the part |
 | `kind.too-large` | the record is over 64 KiB, or a `bounds_mm` is over 1 km |
 | `kind.effects` | a form would fail every time it ran: it creates a kind the world has not got (use its full name), into a slot that does not admit it, a kind with solids into a slot rather than a hand, or its timers start each other sooner than 50 ms in a ring |
