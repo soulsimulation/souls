@@ -14,7 +14,7 @@
 # What it makes: the unprivileged user souls; the programs in /usr/local/lib/souls (supervisor, worldd, gatewayd,
 # directoryd, register-world, deploy, gateway-upgrade, import-accounts, import-world, publish-template, the origin and the page's files); data in
 # /var/lib/souls; settings in /etc/souls (751), the secrets file root-owned; the units souls.slice, worldd@ (with its drop-in), souls-gateway@,
-# souls-directory and souls-origin.
+# souls-directory, souls-origin and souls-agents.
 # Carried over from today's installer: idempotent, and it starts, enables and restarts nothing. It never reads or
 # writes today's units, users, data, proxy, DNS or firewall: it refuses, changing nothing, when anything it would
 # make is already there and not its own (install.state records what it made).
@@ -32,7 +32,7 @@ PROGRAMS=(supervisor worldd gatewayd directoryd register-world deploy gateway-up
 # A program's cargo binary: the `templates` crate's is installed as publish-template, since $LIB/templates is the
 # catalogue it writes (W3b's placement.json `templates`).
 built() { if [ "$1" = publish-template ]; then echo templates; else echo "$1"; fi; }
-UNIT_FILES=(souls.slice worldd@.service souls-gateway@.service souls-directory.service souls-origin.service souls-place.path souls-place.service)
+UNIT_FILES=(souls.slice worldd@.service souls-gateway@.service souls-directory.service souls-origin.service souls-agents.service souls-place.path souls-place.service)
 DROPIN=$UNITS/worldd@.service.d
 # Everything it may make, and so everything it may remove: the user, three folders it owns whole, its units.
 OWNED=("user $ACCOUNT" "tree $LIB" "tree $DATA" "tree $ETC" "tree $DROPIN")
@@ -133,7 +133,7 @@ ensure_tree() {
   done < <(cd "$R$dst" && find . -mindepth 1 | sed 's|^\./||' | sort -r)
 }
 
-DIRECTORY_PORT=7310 # on loopback; the origin's, 7320, is in souls-origin.service
+DIRECTORY_PORT=7310 # on loopback; the origin's, 7320, and the agents' relay's, 7330, are in their units
 # The directory's arguments, written once. It listens on this machine's IPv4 loopback address, as localhost resolves
 # (directoryd takes an address, not a name).
 directory_args() {
@@ -410,7 +410,7 @@ bundle() {
   for p in "${PROGRAMS[@]}"; do install -m 755 "$bins/$(built "$p")" "$out/bin/$p"; done
   rm -rf "$out/origin" "$out/web"
   mkdir -p "$out/origin"
-  cp "$HERE/../origin/origin.mjs" "$HERE/../origin/cache.mjs" "$HERE/../origin/site.mjs" "$HERE/../origin/ops.mjs" "$HERE/../origin/owner-auth.mjs" "$HERE/../origin/world-routes.mjs" "$HERE/../origin/upgrade-refusal.mjs" "$HERE/../../client/served/serve.mjs" "$out/origin/"
+  cp "$HERE/../origin/origin.mjs" "$HERE/../origin/cache.mjs" "$HERE/../origin/site.mjs" "$HERE/../origin/ops.mjs" "$HERE/../origin/owner-auth.mjs" "$HERE/../origin/world-routes.mjs" "$HERE/../origin/upgrade-refusal.mjs" "$HERE/../origin/agents.mjs" "$HERE/../../client/served/serve.mjs" "$out/origin/"
   cp "$HERE/../../../tools/world-launcher/owner-overview-data.mjs" "$out/origin/"
   cp -R "$page" "$out/web"
   mkdir -p "$out/ops/proxy"

@@ -99,6 +99,27 @@ own disk, unacknowledged; a ships, and the store refuses the mark (`precondition
 to 2 and epoch 2's 3, and ignores epoch 1's 3 as `superseded-epoch`; c then claims epoch 3, and the reader keeps and
 ignores the same. The modelled store refuses the stale writer.
 
+## What a served world syncs, and when
+
+14. **The clock thread never waits for a disk** (#4134; `v2/crates/worldd/src/answers.rs`). Each sync is on a
+    thread of its own, and the first point of rule 1 is reached in this order:
+    - **Words** (K16's text store, `log.text/`): the clock queues an intent's words and goes on with the reference;
+      the store's writer thread appends and syncs what has queued, once per batch.
+    - **The tick's records** (the log): the answers thread first waits until every word the tick queued is on the
+      disk, then appends the tick's input record and part, and the log's writer thread syncs them, once per batch.
+      So the log never holds a reference to words a crash would lose.
+    - **The answers** leave only after both. The tick's parts reach the views and the follower once its words are
+      on the disk. A failed sync of either file is final (`sim::log` rule 6): nothing more is answered, and a world
+      process ends with `disk-failed` (exit 87, `answers::EXIT_DISK_FAILED`), so its unit starts it again from its
+      log rather than leave a world that ticks and answers nothing.
+    - **Checkpoints** are written and synced by their own writer thread (rule 13), each from a tick whose records
+      are all on the disk.
+
+    A tick never waits for a sync, so a busy disk delays answers, never the world. A tick's words read as
+    `text-unknown` until they are on the disk; the directory's word for a Soul (W11b) waits, a tick at a time, for
+    the words queued when that Soul was first put off, its own birth's name among them. A lockstep run waits for
+    every queued word before each tick, so whether such a Soul waits or is taken is the same in every run.
+
 ## What would quietly break this
 
 - **A lock or a lease alone.** A paused holder wakes and writes; only the store's check of the version stops it.
