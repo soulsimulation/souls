@@ -6,7 +6,7 @@
 export type Seat = { height: number; lie: boolean };
 
 /** Things a body lies on rather than sits on, by kind name (`<pack>:<name>@<rev>`). */
-const LIE_ON = /(^|[:_-])(bed|bunk|cot|hammock|mattress|sleeping[_-]?bag|futon)([_-]|@|$)/i;
+const LIE_ON = /(^|[:_-])(bed|bunk|cot|hammock|mattress|sleeping[_-]?(?:bag|mat)|futon)([_-]|@|$)/i;
 
 /** The seat a slot gives: `slot` is its row `[n, x, y, z, yaw mdeg, capacity]` (mm), `kind` its thing's kind. */
 export function seatOf(kind: string, slot: readonly number[] | undefined): Seat {

@@ -73,6 +73,7 @@ test('a thing in a body\'s frame is drawn in its hand while held, and gone when 
 test('the pure parts: seats, postures, props and what is held when', () => {
   assert.deepEqual(seatOf('eden:bench@3', [1, 0, 420, 0, 0, 2]), { height: 420, lie: false });
   assert.equal(seatOf('eden:hammock@1', [0, 0, 900, 0, 0, 1]).lie, true);
+  assert.equal(seatOf('eden:sleeping_mat@1', [0, 0, 40, 0, 0, 1]).lie, true, 'a sleeping mat is lain on');
   assert.equal(seatOf('eden:bedside-table@1', [0, 0, 600, 0, 0, 1]).lie, false, 'a bedside table is not a bed');
   assert.equal(postureOf(null), null);
   assert.equal(postureOf({ height: 400, lie: true }), 'lie');
