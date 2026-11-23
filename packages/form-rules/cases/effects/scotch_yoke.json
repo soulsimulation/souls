@@ -1,0 +1,1004 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "Both full circuits, wraps and immediate reversal; generic duplicate-receipt replay for every step.",
+  "cases": [
+    {
+      "name": "scotch_yoke_cycles_wraps_reversal",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "c1"
+            ]
+          },
+          "c1": {
+            "kind": "eden:scotch_yoke",
+            "fields": {
+              "phase": 0
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              1200,
+              -410
+            ]
+          }
+        },
+        "moves": {
+          "turn": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_00"
+          },
+          "receipt": "yoke0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_01"
+          },
+          "receipt": "yoke1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_02"
+          },
+          "receipt": "yoke2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_03"
+          },
+          "receipt": "yoke3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 4
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_04"
+          },
+          "receipt": "yoke4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 5
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_05"
+          },
+          "receipt": "yoke5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 6
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_06"
+          },
+          "receipt": "yoke6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 7
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_07"
+          },
+          "receipt": "yoke7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 8
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_08"
+          },
+          "receipt": "yoke8",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 9
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_09"
+          },
+          "receipt": "yoke9",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 10
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_10"
+          },
+          "receipt": "yoke10",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 11
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_11"
+          },
+          "receipt": "yoke11",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 12
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_12"
+          },
+          "receipt": "yoke12",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 13
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_13"
+          },
+          "receipt": "yoke13",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 14
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_14"
+          },
+          "receipt": "yoke14",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 15
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_15"
+          },
+          "receipt": "yoke15",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_00"
+          },
+          "receipt": "yoke16",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 15
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_15"
+          },
+          "receipt": "yoke17",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 14
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_14"
+          },
+          "receipt": "yoke18",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 13
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_13"
+          },
+          "receipt": "yoke19",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 12
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_12"
+          },
+          "receipt": "yoke20",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 11
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_11"
+          },
+          "receipt": "yoke21",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 10
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_10"
+          },
+          "receipt": "yoke22",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 9
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_09"
+          },
+          "receipt": "yoke23",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 8
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_08"
+          },
+          "receipt": "yoke24",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 7
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_07"
+          },
+          "receipt": "yoke25",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 6
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_06"
+          },
+          "receipt": "yoke26",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 5
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_05"
+          },
+          "receipt": "yoke27",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 4
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_04"
+          },
+          "receipt": "yoke28",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 3
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_03"
+          },
+          "receipt": "yoke29",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 2
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_02"
+          },
+          "receipt": "yoke30",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_01"
+          },
+          "receipt": "yoke31",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "next_00"
+          },
+          "receipt": "yoke32",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        },
+        {
+          "act": {
+            "this": "c1",
+            "form": "previous_01"
+          },
+          "receipt": "yoke33",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "c1",
+                "field": "phase",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:indexed",
+                "node": "c1",
+                "changes": [
+                  0
+                ]
+              }
+            ]
+          }
+        }
+      ],
+      "after": {
+        "c1": {
+          "kind": "eden:scotch_yoke",
+          "fields": {
+            "phase": 0
+          }
+        }
+      }
+    }
+  ]
+}
