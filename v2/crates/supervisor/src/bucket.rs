@@ -193,6 +193,36 @@ mod tests {
         let _ = std::fs::remove_dir_all(&dir);
     }
 
+    /// 0.132.1: a world's store reads a whole object past ureq's 10 MiB cap (a fresh Eden's stream-recovery object is
+    /// 11.8 MB), where the directory's client is refused it; a store that does not answer is still out of reach
+    /// within the 5 s it always had.
+    #[test]
+    fn a_world_store_reads_an_object_past_ten_mib_and_still_times_out() {
+        let s = StandIn::start(10).expect("a stand-in");
+        let big: Vec<u8> = (0..30u32 << 20).map(|i| (i % 251) as u8).collect();
+        let plain = Bucket::parse(&s.url("souls"), keys).expect("settings");
+        plain.put("big", &big, When::Absent).expect("written");
+        assert_eq!(
+            plain.get("big").expect_err("ureq's cap").name,
+            "store-unreachable"
+        );
+        let world = Bucket::parse(&s.url("souls"), keys)
+            .expect("settings")
+            .for_world();
+        assert_eq!(world.get("big").expect("read").map(|o| o.bytes), Some(big));
+        s.stall_reads(1, std::time::Duration::from_secs(7), "/big");
+        let begun = std::time::Instant::now();
+        assert_eq!(
+            world.get("big").expect_err("stalled").name,
+            "store-unreachable"
+        );
+        assert!(
+            begun.elapsed() < std::time::Duration::from_secs(7),
+            "{:?}",
+            begun.elapsed()
+        );
+    }
+
     /// A3: a refusal never carries the address or a key; unsigned requests are refused by the stand-in.
     #[test]
     fn o3c_a3_settings_refusals_name_no_address_or_key() {

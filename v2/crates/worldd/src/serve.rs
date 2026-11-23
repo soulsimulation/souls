@@ -1991,7 +1991,9 @@ fn off_machine(
     } = source;
     let (first, records) = (recovered.first, recovered.records.as_slice());
     let store: Bucket = Shared(Arc::new(Patient::new(
-        supervisor::bucket::Bucket::from_spec(spec).map_err(refusal)?,
+        supervisor::bucket::Bucket::from_spec(spec)
+            .map_err(refusal)?
+            .for_world(),
     )));
     println!("store: {}", store.0.store.what());
     let prefix = format!("h/{name}/{}/", to_hex(&built.header.lineage.0));
@@ -2128,7 +2130,11 @@ fn off_machine(
 /// each [`CREATOR_EVERY`] on a thread of its own: a change replaces it (there is never more than one), and a failed
 /// read keeps the last.
 fn creator(spec: &str, built: &Built) -> R<Arc<Creator>> {
-    let store = Patient::new(supervisor::bucket::Bucket::from_spec(spec).map_err(refusal)?);
+    let store = Patient::new(
+        supervisor::bucket::Bucket::from_spec(spec)
+            .map_err(refusal)?
+            .for_world(),
+    );
     let (lineage, zone) = (built.header.lineage.0, built.header.zone);
     let read = Arc::new(move || directory_creator_of(&store, &lineage, zone));
     let admission = Arc::clone(&read);
@@ -2580,7 +2586,8 @@ fn serve(args: &[String]) -> R<()> {
                 })
                 .as_str(),
         )
-        .map_err(refusal)?,
+        .map_err(refusal)?
+        .for_world(),
     );
     if let Some(seed) = stream_mapping {
         println!(
