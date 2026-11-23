@@ -386,6 +386,17 @@ fn stuck_report(agents: &[Sent]) -> serde_like::Obj {
 /// place (walk or sit: its target; a body form: its thing; a look or a point left out), as the copy read 15 s after
 /// the last act holds it. A body within 4 m of the place (frames' positions composed, `targets::world_xz`), or seated
 /// in it, counts as there. Acts the world did not take, and those it took but has not said are done, are counted apart.
+/// #4193: how many Souls were sent to one place over the run (walks, sits and takes): the most, and how many places
+/// more than [`targets::SHARE_MOST`] Souls were sent to, of the places sent to.
+fn same_target(sent_to: &BTreeMap<Id, std::collections::BTreeSet<usize>>) -> String {
+    let most = sent_to.values().map(|s| s.len()).max().unwrap_or(0);
+    let over = sent_to.values().filter(|s| s.len() > targets::SHARE_MOST).count();
+    format!("{{\"places\": {}, \"mostSouls\": {most}, \"placesOverShare\": {over}}}", sent_to.len())
+}
+
+/// #4193: how near its place a body counts as there, in micrometres (positions are micrometres, `v2/docs/pose.md`).
+const NEAR_PLACE_UM: i128 = 4_000_000;
+
 fn accuracy_report(
     agents: &[Sent],
     last: &[Option<(u64, String, Id)>],
@@ -406,12 +417,12 @@ fn accuracy_report(
         let body = seen.bodies.get(&soul);
         let seated = body
             .and_then(|b| seen.places.get(b))
-            .is_some_and(|(f, _, _)| f == place);
+            .is_some_and(|p| p.frame == *place);
         let near = match (
             body.and_then(|b| targets::world_xz(seen, b)),
             targets::world_xz(seen, place),
         ) {
-            (Some((x, z)), Some((px, pz))) => (x - px).pow(2) + (z - pz).pow(2) <= 4_000 * 4_000,
+            (Some((x, z)), Some((px, pz))) => i128::from(x - px).pow(2) + i128::from(z - pz).pow(2) <= NEAR_PLACE_UM.pow(2),
             _ => false,
         };
         let done = agents[k].done.contains(seq);
@@ -1457,6 +1468,8 @@ async fn main() {
     let mut intended = vec![0u64; s.agents as usize];
     let mut unmapped: BTreeMap<&str, u64> = BTreeMap::new();
     let mut by_verb: BTreeMap<String, u64> = BTreeMap::new();
+    // #4193: the Souls sent to each place (a walk's, a sit's or a take's target), for the same-target count.
+    let mut sent_to: BTreeMap<Id, std::collections::BTreeSet<usize>> = BTreeMap::new();
     let (mut withheld, mut stand_ins) = (BTreeMap::new(), BTreeMap::new());
     for act in &s.acts {
         let Some(v) = act.verb else {
@@ -1498,6 +1511,9 @@ async fn main() {
         } else {
             arg.as_ref().map(|x| x.1)
         };
+        if let (Some(t), true) = (target, v.ends_with(":walk") || v.ends_with(":sit") || v.ends_with(":take")) {
+            sent_to.entry(t).or_default().insert(k);
+        }
         if let (Some(p), false) = (place, v.ends_with(":look_at") || v.ends_with(":point")) {
             last_place[k] = Some((sequence[k], v.to_owned(), p));
         }
@@ -1608,6 +1624,7 @@ async fn main() {
         .raw("withheld", counts(&withheld))
         .raw("standIns", counts(&stand_ins))
         .raw("refusedBy", counts(&refused_by))
+        .raw("sameTarget", same_target(&sent_to))
         .n("replacedByOwnAct", replaced as f64)
         .raw("perMinute", serde_like::list(&minutes))
         .n("duplicateReceipts", duplicates as f64)
@@ -1681,6 +1698,7 @@ async fn main() {
         println!("  minute {}", m.json());
     }
     println!("  refused by verb {}", counts(&refused_by));
+    println!("  same target (Souls sent to one place) {}", same_target(&sent_to));
     println!(
         "  replaced by the agent's own next act (claim-taken, not counted as refused): {replaced}"
     );

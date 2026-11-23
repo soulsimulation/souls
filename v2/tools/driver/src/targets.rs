@@ -23,6 +23,7 @@ use std::sync::atomic::{AtomicBool, Ordering};
 use futures_util::{SinkExt, StreamExt};
 use replica::encode::{Value, decode, encode};
 use replica::ids::Id;
+use replica::pose::{Quat, Vec3};
 use replica::rules::json::{self, Value as Json};
 use replica::sync::{Copy, read_hashes, read_records, wire};
 use tokio::io::{AsyncReadExt, AsyncWriteExt};
@@ -69,6 +70,32 @@ pub struct Targets {
     pub forms: BTreeMap<String, (String, Vec<Id>)>,
     /// Each Soul's body in the copy (its `souls:body-of` link), for a body family's form.
     pub bodies: BTreeMap<Id, Id>,
+    /// #4193: each Soul's own walk, sit, take and thing targets, the nearest its body of those reachable, spread so
+    /// that at most [`SHARE_MOST`] Souls share one where there are enough; a Soul not in it uses the lists above.
+    pub mine: BTreeMap<Id, Mine>,
+}
+
+/// #4193: one Soul's targets, nearest first.
+#[derive(Debug, Default, PartialEq)]
+pub struct Mine {
+    pub walk: Vec<Id>,
+    pub sit: Vec<Id>,
+    pub takeable: Vec<Id>,
+    pub things: Vec<Id>,
+}
+
+/// #4193: how many targets each Soul gets of each kind, and how many Souls may share one before a farther one is
+/// taken instead.
+pub const MINE_EACH: usize = 4;
+pub const SHARE_MOST: usize = 3;
+
+/// A node's pose as its record holds it: its frame's node, its position (micrometres, `v2/docs/pose.md` rule 2) and
+/// its orientation, both in the frame's axes.
+#[derive(Debug, Clone, Copy, PartialEq)]
+pub struct Place {
+    pub frame: Id,
+    pub at: Vec3,
+    pub turn: Quat,
 }
 
 /// What a test Soul's copy holds: each node's id and plain kind, and each body's Soul.
@@ -76,13 +103,13 @@ pub struct Targets {
 pub struct Seen {
     pub nodes: Vec<(Id, String)>,
     pub bodies: BTreeMap<Id, Id>,
-    /// #4154: each node's frame and its x and z (mm), for the things near the Souls.
-    pub places: BTreeMap<Id, (Id, i64, i64)>,
+    /// #4154: each node's pose, for the things near the Souls.
+    pub places: BTreeMap<Id, Place>,
 }
 
 /// #4154: how far from where the Souls stand a thing may be to be acted on, as an agent acts on what it sees: the
-/// radius (mm) doubles from this until at least [`NEAR_LEAST`] things are in it.
-pub const NEAR_MM: i64 = 30_000;
+/// radius (micrometres: 30 m) doubles from this until at least [`NEAR_LEAST`] things are in it.
+pub const NEAR_UM: i64 = 30_000_000;
 pub const NEAR_LEAST: usize = 20;
 
 fn entry_ns(e: &Json) -> &str {
@@ -119,17 +146,70 @@ fn has_form(e: &Json, form: &str) -> bool {
     })
 }
 
-/// #4154: a node's place in the world, roughly: its position added to its frames' up the chain (rotations left out, so
-/// a thing inside a turned building may be off by its distance from the building's origin). None without a place.
+/// A node's place in the world's axes, x and z in micrometres: its position turned by each frame's orientation and
+/// added to the frame's position, up the chain (#4193: #4154 left the turns out and read micrometres as millimetres).
+/// None without a place.
 pub fn world_xz(seen: &Seen, id: &Id) -> Option<(i64, i64)> {
-    let (mut f, mut x, mut z) = *seen.places.get(id)?;
+    let p = *seen.places.get(id)?;
+    let (mut f, mut at) = (p.frame, p.at);
     for _ in 0..12 {
-        let Some((up, fx, fz)) = seen.places.get(&f).copied().filter(|p| p.0 != f) else {
+        let Some(up) = seen.places.get(&f).copied().filter(|u| u.frame != f) else {
             break;
         };
-        (f, x, z) = (up, x + fx, z + fz);
+        at = up.turn.rotate(at).ok()?.plus(up.at).ok()?;
+        f = up.frame;
     }
-    Some((x, z))
+    Some((at.x, at.z))
+}
+
+/// #4193: the frame most bodies stand in (the world's ground). A thing in another frame (inside a building, on a
+/// table) is not walked to: its walk crosses the world or is refused while it runs.
+fn ground(seen: &Seen) -> Option<Id> {
+    let mut n: BTreeMap<Id, usize> = BTreeMap::new();
+    for b in seen.bodies.values() {
+        if let Some(p) = seen.places.get(b) {
+            *n.entry(p.frame).or_default() += 1;
+        }
+    }
+    n.into_iter().max_by_key(|(_, k)| *k).map(|(f, _)| f)
+}
+
+/// #4193: each Soul's [`MINE_EACH`] nearest of `of`, taking a farther one where [`SHARE_MOST`] Souls already have it.
+fn spread(seen: &Seen, of: &[Id]) -> BTreeMap<Id, Vec<Id>> {
+    let at: Vec<(Id, (i64, i64))> = of.iter().filter_map(|t| Some((*t, world_xz(seen, t)?))).collect();
+    let mut used: BTreeMap<Id, usize> = BTreeMap::new();
+    let mut out = BTreeMap::new();
+    if at.is_empty() {
+        return out;
+    }
+    for (soul, body) in &seen.bodies {
+        let Some((x, z)) = world_xz(seen, body) else { continue };
+        let mut by: Vec<(i128, Id)> = at
+            .iter()
+            .map(|(t, (tx, tz))| (i128::from(tx - x).pow(2) + i128::from(tz - z).pow(2), *t))
+            .collect();
+        by.sort_unstable();
+        let mut mine: Vec<Id> = by
+            .iter()
+            .filter(|(_, t)| used.get(t).copied().unwrap_or(0) < SHARE_MOST)
+            .take(MINE_EACH)
+            .map(|(_, t)| *t)
+            .collect();
+        // Too few targets for every Soul to have its own: the nearest, shared.
+        for (_, t) in &by {
+            if mine.len() >= MINE_EACH.min(by.len()) {
+                break;
+            }
+            if !mine.contains(t) {
+                mine.push(*t);
+            }
+        }
+        for t in &mine {
+            *used.entry(*t).or_default() += 1;
+        }
+        out.insert(*soul, mine);
+    }
+    out
 }
 
 /// #4154: the things within a radius of the Souls' bodies' middle that doubles from [`NEAR_MM`] until it holds
@@ -156,8 +236,8 @@ fn near<'a>(seen: &Seen, things: Vec<(Id, &'a Json)>) -> Vec<(Id, &'a Json)> {
             Some((*t, (x - cx).pow(2) + (z - cz).pow(2)))
         })
         .collect();
-    let mut r = NEAR_MM;
-    while r < 4_000_000 {
+    let mut r = NEAR_UM;
+    while r < 4_000_000_000 {
         let close: Vec<(Id, &Json)> = placed
             .iter()
             .filter(|(_, d)| *d <= r * r)
@@ -195,11 +275,22 @@ impl Targets {
                 .filter(|e| e.get("owner").and_then(Json::str) == Some("family"))
                 .collect();
         }
-        let things: Vec<(Id, &Json)> = nodes
+        let mut things: Vec<(Id, &Json)> = nodes
             .iter()
             .filter(|(id, _)| !is_body(id))
             .filter_map(|(id, k)| Some((*id, *by_kind.get(k.as_str())?)))
             .collect();
+        // #4193: only things on the ground the bodies stand on are targets, where there are any.
+        if let Some(g) = ground(seen) {
+            let on: Vec<(Id, &Json)> = things
+                .iter()
+                .filter(|(id, _)| seen.places.get(id).is_some_and(|p| p.frame == g))
+                .copied()
+                .collect();
+            if !on.is_empty() {
+                things = on;
+            }
+        }
         // Each kind of target is taken near the Souls on its own (#4154), so seats and things to take are found
         // even where the nearest things are neither.
         let ids = |f: &dyn Fn(&Json) -> bool| -> Vec<Id> {
@@ -250,15 +341,34 @@ impl Targets {
                 Some(format!("{}:{g}", entry_ns(fam)))
             })
             .collect();
+        let sit = ids(&|e| has_slot(e, Some("sit")));
+        let all_things = ids(&|_| true);
+        let takeable = ids(&|e| has_form(e, "take"));
+        let (mut w, mut s, mut k, mut a) =
+            (spread(seen, &walk), spread(seen, &sit), spread(seen, &takeable), spread(seen, &all_things));
+        let mine = seen
+            .bodies
+            .keys()
+            .filter_map(|soul| {
+                let m = Mine {
+                    walk: w.remove(soul).unwrap_or_default(),
+                    sit: s.remove(soul).unwrap_or_default(),
+                    takeable: k.remove(soul).unwrap_or_default(),
+                    things: a.remove(soul).unwrap_or_default(),
+                };
+                (m != Mine::default()).then_some((*soul, m))
+            })
+            .collect();
         Targets {
             walk,
-            sit: ids(&|e| has_slot(e, Some("sit"))),
-            things: ids(&|_| true),
-            takeable: ids(&|e| has_form(e, "take")),
+            sit,
+            things: all_things,
+            takeable,
             body_forms,
             gestures,
             forms,
             bodies: seen.bodies.clone(),
+            mine,
         }
     }
 
@@ -344,6 +454,16 @@ impl Choice {
             stand_in: None,
         };
         let body = t.bodies.get(&soul).copied();
+        let mine = t.mine.get(&soul);
+        let own = |m: Option<&Vec<Id>>, all: &Vec<Id>| -> Vec<Id> {
+            m.filter(|v| !v.is_empty()).unwrap_or(all).clone()
+        };
+        let (walk, sit_on, takeable, things) = (
+            own(mine.map(|m| &m.walk), &t.walk),
+            own(mine.map(|m| &m.sit), &t.sit),
+            own(mine.map(|m| &m.takeable), &t.takeable),
+            own(mine.map(|m| &m.things), &t.things),
+        );
         let holding = *self.holding.lock().unwrap_or_else(|e| e.into_inner());
         let standing_form =
             |k: &str| k == "take" || (BODY_FORMS.contains(&k) && k != "look_at" && k != "point");
@@ -365,13 +485,13 @@ impl Choice {
                 *self.holding.lock().unwrap_or_else(|e| e.into_inner()) = None;
                 plain("hands:set-down".to_owned(), holding)
             }
-            "take" if !t.takeable.is_empty() => {
-                plain(format!("{ns}:take"), pick(&t.takeable, a * 13 + n))
+            "take" if !takeable.is_empty() => {
+                plain(format!("{ns}:take"), pick(&takeable, a * 13 + n))
             }
-            k if t.body_forms.contains_key(k) && body.is_some() && !t.things.is_empty() => {
+            k if t.body_forms.contains_key(k) && body.is_some() && !things.is_empty() => {
                 let (v, arg) = &t.body_forms[k];
                 Chosen {
-                    arg: pick(&t.things, a * 11 + n).map(|x| (arg.clone(), x)),
+                    arg: pick(&things, a * 11 + n).map(|x| (arg.clone(), x)),
                     ..plain(v.clone(), body)
                 }
             }
@@ -383,10 +503,10 @@ impl Choice {
                 sit(false);
                 plain(format!("{ns}:rise"), None)
             }
-            "walk" => plain(format!("{ns}:walk"), pick(&t.walk, a * 7 + n)),
+            "walk" => plain(format!("{ns}:walk"), pick(&walk, a * 7 + n)),
             // Seated once the sit's receipt comes (the agent's socket sets it): a sit still on its way is replaced by
             // the next walk, as the world does, and needs no rise.
-            "sit" if !t.sit.is_empty() => plain(format!("{ns}:sit"), pick(&t.sit, a)),
+            "sit" if !sit_on.is_empty() => plain(format!("{ns}:sit"), pick(&sit_on, a)),
             k => match t.forms.get(k) {
                 Some((v, on)) if on.is_empty() && t.bodies.contains_key(&soul) => {
                     plain(v.clone(), t.bodies.get(&soul).copied())
@@ -398,7 +518,7 @@ impl Choice {
                 }
                 _ => Chosen {
                     stand_in: Some(k.to_owned()),
-                    ..plain(format!("{ns}:walk"), pick(&t.walk, a * 7 + n))
+                    ..plain(format!("{ns}:walk"), pick(&walk, a * 7 + n))
                 },
             },
         };
@@ -445,8 +565,9 @@ fn plain_kind(record: &BTreeMap<u64, Value>) -> Option<String> {
     Some(k.split_once('@').map_or(k, |(p, _)| p).to_owned())
 }
 
-/// A node record's pose (field 7): its frame's node and its position's x and z, in mm.
-fn place_of(record: &BTreeMap<u64, Value>) -> Option<(Id, i64, i64)> {
+/// A node record's pose (field 7, `{1: frame, 2: position, 3: orientation}`): its frame's node, its position in
+/// micrometres and its orientation (no turn when it is not read).
+fn place_of(record: &BTreeMap<u64, Value>) -> Option<Place> {
     let Some(Value::Map(p)) = record.get(&7) else {
         return None;
     };
@@ -462,7 +583,17 @@ fn place_of(record: &BTreeMap<u64, Value>) -> Option<(Id, i64, i64)> {
         Value::Nint(u) => Some(-1 - *u as i64),
         _ => None,
     };
-    Some((frame, n(xyz.first()?)?, n(xyz.get(2)?)?))
+    let turn = match p.get(&3) {
+        Some(Value::Array(q)) if q.len() == 4 => {
+            Quat::new(n(&q[0])?, n(&q[1])?, n(&q[2])?, n(&q[3])?).ok()
+        }
+        _ => None,
+    };
+    Some(Place {
+        frame,
+        at: Vec3::new(n(xyz.first()?)?, n(xyz.get(1)?)?, n(xyz.get(2)?)?),
+        turn: turn.unwrap_or(Quat::IDENTITY),
+    })
 }
 
 /// The Soul a body record's `souls:body-of` link names (field 9's links `[[id, {1: type, 2: [body, soul]}], ...]`).
