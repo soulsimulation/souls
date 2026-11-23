@@ -27,9 +27,14 @@
 //   souls-god.mjs define <record.json>          a kind of your own (#3697): a souls-entry/1 record (the format of
 //                                                content/kinds), kept in the world under the full name it answers
 //                                                (`defines`); a changed record is a new revision, and old things keep
-//                                                theirs. Your own namespace only (not souls: or eden:)
+//                                                theirs. Your own namespace only (not souls: or eden:). Its look may be
+//                                                a model you uploaded: `"looks": {"model": "upload:<hash>"}`, the hash
+//                                                `upload` answered; a hash that is not an allowed upload is refused
+//                                                (kind.model-unknown) and nothing is sent
 //   souls-god.mjs define-kit <kit.json> [--ns <namespace>]   today's kit (a name and shapes in metres) as a record
 //                                                with geometry.parts (kit.mjs), then defined; namespace `kit` unless given
+//   souls-god.mjs upload <file.glb|png|jpg>     a model or a picture, through the world's check and hold point:
+//                                                {hash, state: allowed|held}; an allowed one is served at `url`
 //   souls-god.mjs check <any of these, or batch> ...   the same, checked on the copy only; nothing is sent
 //   souls-god.mjs export [file]                  every node of the world (not its Souls) to a file, world.souls.json
 //   souls-god.mjs import <file>                  such a file's nodes into this world, as edits, parents first
@@ -96,7 +101,7 @@ import { spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { mkdirSync, openSync, readFileSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
-import { dirname, join, resolve as resolvePath } from 'node:path';
+import { dirname, join, resolve as absolute } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, call } from '../daemon/client.mjs';
 import { findHome, readSeat, soulsWithTokens, worldsOf } from '../home/home.mjs';
@@ -148,6 +153,7 @@ export const VERBS = [
   'time',
   'trace',
   'undo',
+  'upload',
   'visitors',
   'weather',
   'welcome',
@@ -171,7 +177,14 @@ export const FIX = {
   'kind.audience': 'define a kind for everyone (no audience)',
   'kind.namespace': 'name it in your own namespace (not souls: or eden:, nor one the world\'s own kinds use)',
   'kind.collision': 'that kind is defined already: place it by the full name describe lists',
+  'kind.model': 'looks.model names an upload as "upload:1220<64 hex>", the hash upload answered',
+  'kind.model-unknown': 'upload the model first (souls-god upload <file>) and name the hash it answers; a held upload cannot be used until it is released',
   'kind.in-use': 'remove the things of that kind first, and change or remove a kind whose form creates it, or do it in the same batch',
+  'upload.size': 'a model is at most 3 MB and a picture 2 MB: make it smaller first',
+  'upload.format': 'a GLB 2.0 model, a PNG or a JPEG',
+  'upload.external-resource': 'export the GLB self-contained: every texture inside it',
+  'upload.triangle-budget': 'at most 80,000 triangles: decimate it',
+  'upload.off': 'this world takes no uploads',
   'kit.invalid': 'a kit is {"name", "shapes": [{"kind", "at": [x,y,z] m, ...}]}, as today\'s define-kit',
   'kit.program': 'write each shape out: repeat, radial, mirror and $params are not carried',
   'edit.child-not-admitted': 'put it in something whose kind admits it: describe shows each kind\'s admits',
@@ -431,7 +444,11 @@ export function requestOf(argv) {
   if (verb === 'status' || verb === 'stop' || verb === 'describe' || verb === 'redo') return { req: { op: verb }, creator };
   if (verb === 'export' || verb === 'import') {
     if (rest.length > 1 || (verb === 'import' && !rest[0])) throw usage(`${verb} ${verb === 'import' ? '<file>' : '[file]'}`);
-    return { req: { op: verb, file: resolvePath(rest[0] ?? 'world.souls.json') }, creator };
+    return { req: { op: verb, file: absolute(rest[0] ?? 'world.souls.json') }, creator };
+  }
+  if (verb === 'upload') {
+    if (rest.length !== 1 || !/\.(glb|png|jpe?g)$/i.test(rest[0])) throw usage('upload <file.glb|png|jpg>');
+    return { req: { op: 'upload', path: absolute(rest[0]) }, creator };
   }
   if (verb === 'trace') {
     const n = rest[0] === undefined ? 20 : Number(rest[0]);

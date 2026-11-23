@@ -35,7 +35,8 @@ import { isMarsCamp, MarsDesert } from './WorldMarsDesert.ts';
 export type Chunk = { fromTick: number; toTick: number; take: Take };
 export type RawChunk = { fromTick: number; toTick: number; take: unknown };
 /** What the server streams over the socket (useSouls keeps the latest). `receivedAt` is performance.now(). */
-export type LiveTakes = { serverTick: number; chunks: RawChunk[]; receivedAt: number };
+/** `playDelay`: ticks to play behind serverTick, when the source says (the v2 bridge's half-second chunks, B3-4). */
+export type LiveTakes = { serverTick: number; chunks: RawChunk[]; receivedAt: number; playDelay?: number };
 export type BuildingPlacement = { file: string; p: [number, number, number]; yaw?: number;scale?:number|[number,number,number] };
 export type MarsBackdrop={contract:'mars-campus-backdrop/1';url:string;at:[number,number,number];hide?:BackdropHide};
 export type SceneInfo = { scene: SpatialScene | null; buildings: BuildingPlacement[]; kin: KinPlacement[]; backdrop?:MarsBackdrop;assetRoot?:string;platforms?:PlatformFloor[]; clock?: { origin: number; dayTicks: number } | null; ground?: 'grass'; commons?: CommonsSceneMetadataV1; shore?:WorldShore };

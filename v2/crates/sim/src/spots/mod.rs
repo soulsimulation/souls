@@ -161,7 +161,9 @@ pub struct Table {
     pub places: Vec<Place>,
 }
 
-/// An asker, as its mark of the last tick says: where it stands (µm, its node's frame), what it asks, for which order.
+/// An asker, as its mark of the last tick says: where it stands (µm, its node's frame), what it asks, for which order,
+/// and whether the world is carrying it across a link (a stair, a doorway): then it stands on no floor's ground until
+/// it lands, and a new ask waits for that instead of being refused (#4171).
 #[derive(Clone, Copy, Debug)]
 pub struct Ask {
     pub who: Id,
@@ -169,6 +171,7 @@ pub struct Ask {
     pub node: Id,
     pub from: Vec3,
     pub target: Target,
+    pub carried: bool,
 }
 
 /// The record of the tables' changes, in order.
@@ -823,6 +826,11 @@ impl Spots {
         });
         for (a, size) in asks {
             if self.held.contains_key(&a.who) || self.refused.contains_key(&a.who) {
+                continue;
+            }
+            // Mid-crossing (part way up a stair) the asker is on no piece of ground, and every place would be refused
+            // `spot-none-free` though none is held (#4171). It is asked again each tick and answered once it lands.
+            if a.carried {
                 continue;
             }
             let t = a.target;

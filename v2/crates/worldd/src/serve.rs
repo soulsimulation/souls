@@ -1962,7 +1962,9 @@ fn creator(spec: &str, built: &Built) -> R<Arc<Creator>> {
 /// [--store <store>] [--machine <name>] [--rate <num>/<den>]`: runs the world until killed. A checkpoint is taken each
 /// `--checkpoint-every` bytes of log (default 8 MiB); the log is compacted once every reader has passed at least
 /// `--compact-after` bytes of it (default 64 MiB, `compactor`). The clock's rate is world µs per real µs (default 1/1); a start whose rate differs from the
-/// last logged applies a new mapping, and the mapping in force is on the zone root for every copy (E7b, #3516).
+/// last logged applies a new mapping, and the mapping in force is on the zone root for every copy (E7b, #3516). With
+/// `--sleep <alarm daemon's socket> [--world-name <name>]` (O2, the launcher's), a still world with nothing due for a
+/// minute goes to sleep and exits 75 (`sleep.rs`); its name is its folder's unless given.
 pub fn run(args: &[String]) -> i32 {
     crate::stopped::install(); // D6: a SIGTERM or SIGINT leaves one line naming it
     match serve(args) {
@@ -1986,7 +1988,8 @@ fn serve(args: &[String]) -> R<()> {
     }
     let dir = PathBuf::from(arg(args, "--dir").ok_or(
         "usage: worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] \
-         [--compact-after <bytes>] [--store <store>] [--machine <name>] [--directory <file>] [--rate <num>/<den>]",
+         [--compact-after <bytes>] [--store <store>] [--machine <name>] [--directory <file>] [--rate <num>/<den>] \
+         [--sleep <alarm socket> [--world-name <name>]]",
     )?);
     let socket = arg(args, "--socket")
         .map(PathBuf::from)
@@ -2451,6 +2454,8 @@ fn serve(args: &[String]) -> R<()> {
     )?;
     drop(found);
     let (stream_tx, stream_rx) = channel::<(u64, Vec<u8>)>();
+    // O2 (0.133 S3b): the sleep watch asks the public stream to say the world is still until its next due change.
+    let (sleep_tx, sleep_rx) = channel::<crate::sleep::Ask>();
     // Shipping/archive delivery remains independent of a stopped public observer.
     std::thread::Builder::new()
         .name("synced".into())
@@ -2528,6 +2533,22 @@ fn serve(args: &[String]) -> R<()> {
                         }
                         Err(std::sync::mpsc::RecvTimeoutError::Timeout) => {}
                     }
+                    // Going to sleep (S4w, #2731): what is waiting first, then the pointer still until `due`; once
+                    // written, the world exits and this thread with it. Refused (`stream-sleep`): it stays awake.
+                    if let Ok((due, answer)) = sleep_rx.try_recv() {
+                        while let Ok((record, bytes)) = stream_rx.try_recv() {
+                            if record >= writer.source_cursor() {
+                                writer.push(record, &bytes)?;
+                            }
+                        }
+                        let slept = writer.sleep(answers::now(), due).map_err(refusal);
+                        let done = slept.is_ok();
+                        let _ = answer.send(slept);
+                        if done {
+                            published(&writer);
+                            return Ok(());
+                        }
+                    }
                     writer.idle(answers::now())?;
                     published(&writer);
                 }
@@ -2562,6 +2583,23 @@ fn serve(args: &[String]) -> R<()> {
     stamp("listening");
     println!("listening {}", socket.display());
     crate::ready();
+    // O2 (0.133 S3b): asleep when still and nothing is due for a minute (`sleep.rs`).
+    if let Some(alarms) = arg(args, "--sleep") {
+        let name = arg(args, "--world-name").cloned().unwrap_or_else(|| {
+            dir.file_name()
+                .map_or_else(String::new, |n| n.to_string_lossy().into_owned())
+        });
+        crate::sleep::watch(
+            name,
+            PathBuf::from(alarms),
+            Arc::clone(&world.quiet),
+            world.durable.clone(),
+            sleep_tx,
+            STARTED.get().map_or(0, |t| {
+                i64::try_from(t.elapsed().as_micros()).unwrap_or(i64::MAX)
+            }),
+        );
+    }
     for stream in listener.incoming().flatten() {
         let door = door.clone();
         std::thread::spawn(move || answers::serve(door, stream));

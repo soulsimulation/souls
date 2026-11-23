@@ -253,6 +253,10 @@
     {"def": "listening-counter@1", "placed": 1, "live": "made by the god on live Eden, not in the template", "entry": "eden:record_player", "forms": "own", "state": {"playing": {"from": "playing", "values": [[false, "off"], [true, "waltz"]]}}, "issue": 3980},
     {"def": "record-bin@1", "placed": 4, "live": "made by the god on live Eden, not in the template", "waiting": "none: its own entry (#3980 option B), and the base forms served on things", "note": "another kind's card would misname it", "issue": 3980},
     {"def": "alpine-shrine@1", "placed": 1, "live": "made by the god on live Eden, not in the template", "waiting": "none: its own entry (#3980 option B), and the base forms served on things", "note": "another kind's card would misname it", "issue": 3980},
-    {"def": "rainbow@1", "placed": 1, "live": "made by the god on live Eden, not in the template", "waiting": "none: a 221 m arc in the sky, nothing a body reaches", "issue": 3980}
+    {"def": "rainbow@1", "placed": 1, "live": "made by the god on live Eden, not in the template", "waiting": "none: a 221 m arc in the sky, nothing a body reaches", "issue": 3980},
+    {"def": "core/toilet@1", "placed": 16, "live": "placed inside buildings by the template's generators, not by the template itself", "entry": "eden:toilet", "forms": "own", "state": {"cistern": "default"}},
+    {"def": "core/bathtub@1", "placed": 16, "live": "placed inside buildings by the template's generators, not by the template itself", "entry": "eden:bathtub", "forms": "own", "state": {"water": "default"}, "dropped": {"level": "a share of a full tub; the entry holds grams of water and starts empty"}},
+    {"def": "core/hearth@1", "placed": 6, "live": "placed inside buildings by the template's generators, not by the template itself", "entry": "eden:hearth", "forms": "base", "dropped": {"on": "the fire's glow is the look's; lighting it is no form today either"}},
+    {"def": "core/chest@1", "placed": 6, "live": "placed inside buildings by the template's generators, not by the template itself", "entry": "eden:chest", "forms": "own", "state": {"open": {"from": "open"}, "locked": {"from": "locked"}}}
   ]
 }

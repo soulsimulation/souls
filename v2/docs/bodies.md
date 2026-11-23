@@ -245,3 +245,10 @@ comes from a recorded arbitrary URL. Optional public-boot field7 pins the regula
 and fork carry only its validated bytes. Without field7 the legacy support encoding is unchanged.
 
 The prepared catalogue also pins canonical released BODY-v1 definitions for account migration. Mapped `import-accounts --bodies` records choices only in the private per-world birth file. Serve validates that fixed `births.json` against its actual header and catalogue before handing choices to the existing C3 path. Existing bodies and subsequent wear are unchanged; private birth choices are never public boot support. A look the catalogue cannot carry (a custom humanoid look, an unknown definition, another URL form) is born in the default body, counted by reason in the import's row, and kept whole in the private account store for a later migration; it never silently becomes the default and never drops the Soul.
+
+A humanoid look made in today's editor (core/humanoid@2 params: hair, skin, top, ...) rides on the default body as the
+body node's field 33 (`skills::wear::LOOK`, engine-reserved on bodies in `replica::fields`), the params as UTF-8 JSON.
+It is written only by the Soul's own `life:look` (parameter 1: the params' bytes, one JSON object of at most 2 KiB), one
+`Change::Set` by the body answered with a receipt; refused `look.wears-body` while field32 holds a hash, `look.worn`
+when it already carries those bytes and `look.malformed` otherwise. The world does not read it; a page draws it over
+the default body, and a worn hash always wins.

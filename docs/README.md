@@ -77,7 +77,7 @@ Ownership rules for each directory: [repository layout](development/repository-l
   - [architecture/](architecture/): [map](architecture/map.md), [api](architecture/api.md), [protocol](architecture/protocol.md),
     [engine contract](architecture/engine-contract.md), [brain](architecture/brain.md), [data](architecture/data.md),
     [worlds](architecture/worlds.md), [souls](architecture/souls.md), [god mode](architecture/godmode.md),
-    [contracts](architecture/contracts.md), [load](architecture/load.md), [split](architecture/split.md), [scaling](architecture/scaling.md), [Soul Actions](architecture/soul-actions.md), [safety](architecture/safety.md)
+    [contracts](architecture/contracts.md), [load](architecture/load.md), [split](architecture/split.md), [scaling](architecture/scaling.md), [Soul Actions](architecture/soul-actions.md), [safety](architecture/safety.md), [camera and page](architecture/camera-and-page.md)
 - [glossary.md](glossary.md)
 - [development.md](development.md): setup, environment variables, local worlds, media
 - [testing.md](testing.md): unit tests, gates, e2e, playtests, proof tiers

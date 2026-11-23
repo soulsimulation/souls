@@ -142,10 +142,11 @@ import { find } from '../find/find.mjs';
 import { publicNameHydration } from '../find/public-names.mjs';
 import { achievedOf, causeOf, openTrace } from '../stats/trace.mjs';
 import { stats, transcriptOf } from '../stats/stats.mjs';
-import { ageOf } from './age.mjs';
+import { FOLLOW_AGAIN_MS, ageOf, followsAgain } from './age.mjs';
 import { moveForm, moveVerdict, seatedAfter } from './moves.mjs';
 import { BATCH_MOST, BATCH_READS, catalog, context, query } from './reads.mjs';
 import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check/check.mjs';
+import { risesFromSeat } from '../check/stand.mjs';
 import { kindsIn, stateOf } from '../check/state.mjs';
 import { actWords, nearestIds, nearestOffers, offerNamed, offersOf } from '../check/offers.mjs';
 import { Table } from '../reflex/reflex.mjs';
@@ -279,6 +280,12 @@ function receiptAnswered(e) {
   const r = receipts.get(e.sequence);
   if (r) r.answers.push({ answer: ANSWER_NAMES[e.answer] ?? String(e.answer), ...(e.reason ? { reason: e.reason } : {}), ...(e.version ? { version: e.version } : {}), at: new Date().toISOString() });
   const order = r && ORDERS.has(r.verbs[0]) && e.answer === 1;
+  // R5: an act of this Soul's that ends (not words, not a progress answer) is the client's `client:act-ended`, which a
+  // wake rule (`wake add act-ended`) or a reflex can match: field 1 its sequence, 2 how it ended, 3 the reason.
+  if (e.answer !== 3 && !order && going.includes(e.sequence)) {
+    // The client's own word, so no actor: a rule never matches what its own Soul caused (`match.mjs`).
+    fire({ name: ACT_ENDED, fields: { 1: e.sequence, 2: ANSWER_NAMES[e.answer] ?? String(e.answer), ...(e.reason ? { 3: e.reason } : {}) }, actor: null, toMe: true, sequence: `act-${e.sequence}` });
+  }
   if (e.answer !== 3 && !order) { const k = going.indexOf(e.sequence); if (k >= 0) going.splice(k, 1); }
   // A cancel's receipt: what it named has ended.
   if (r?.replaces !== undefined && e.answer === 1) { const k = going.indexOf(r.replaces); if (k >= 0) going.splice(k, 1); }
@@ -318,6 +325,29 @@ const INTENT_MOST = 4096;
 
 /** A creator's bulk edit (#3695) by the gateway's `POST /v2/creator-edit`: null when it was taken (its answer comes on
  *  the socket), else the refusal's name. Its bytes are never logged. */
+/** #3697: a creator's upload, by the gateway's `POST /v2/creator-upload`: G6's check in a child process, metadata
+ *  stripped, the hold point. The answer `{hash, state: allowed|held}` or the refusal; the token never leaves here. */
+async function upload(req) {
+  if (seat.grant.actor !== 'creator') return { ok: false, code: 'upload.not-the-creator', detail: 'this home holds a Soul\'s token, not a creator\'s' };
+  let body;
+  try { body = readFileSync(String(req.path ?? '')); } catch (e) { return { ok: false, code: 'file-unreadable', detail: `${req.path}: ${e.code ?? e.message}` }; }
+  const u = new URL(seat.gateway);
+  u.protocol = u.protocol === 'wss:' ? 'https:' : u.protocol === 'ws:' ? 'http:' : u.protocol;
+  const base = u.pathname.replace(/\/v2\/ws$/, '');
+  u.pathname = `${base}/v2/creator-upload`;
+  u.search = ''; u.hash = '';
+  try {
+    const r = await fetch(u, { method: 'POST', headers: { authorization: `Bearer ${seat.token}`, 'content-type': 'application/octet-stream' }, body, signal: AbortSignal.timeout(30_000) });
+    let a = {};
+    try { a = await r.json(); } catch { /* not JSON */ }
+    if (r.status !== 200) return { ok: false, code: a.refused ?? `upload.http-${r.status}`, ...(a.detail ? { detail: a.detail } : {}) };
+    u.pathname = `${base}/v2/uploads/${a.hash}`;
+    return { ok: true, ...a, ...(a.state === 'allowed' ? { url: u.href } : {}) };
+  } catch {
+    return { ok: false, code: 'upload.unreachable', detail: 'the gateway did not answer' };
+  }
+}
+
 async function sendBulk(bytes, sequence) {
   state.unanswered.push(sequence);
   save();
@@ -380,8 +410,15 @@ function granted() {
 /**
  * R9b: the copy brought current by hash once an entry changed the world near it, or after a drop (the items missed
  * while away are not replayed). One at a time: entries that arrive during a sync ask for one more after it.
+ * #1960: `owed` is the newest version a receipt of this Soul's or an entry named since sign-in; a follow that ends
+ * behind it (the world answered from a seal before that tick) follows again FOLLOW_AGAIN_MS later (`followsAgain`).
  */
 let followWanted = false;
+let owed = 0, again = 0, againTimer = null;
+// A refresh's waiters (an answer bringing the copy current) when it ended behind `owed`: handed to the follow again,
+// so an answer after this Soul's own write or edit shows it, not the seal before it.
+let carried = [];
+const owe = (sequence) => { if (sequence > owed) { owed = sequence; again = 0; } };
 function follow() {
   if (!followWanted || syncing || !ws || !signedIn || ws.granting) return;
   followWanted = false;
@@ -472,7 +509,7 @@ function closeMail(id, state, outcome) {
 
 /** Compare and descend through the gateway (R5b): the scope's hashes, then the records not held, level by level. */
 function startSync(sock, kind) {
-  syncing = { n: ++asked, step: 'hashes', kind, t0: performance.now(), version: null, waiters: [] };
+  syncing = { n: ++asked, step: 'hashes', kind, t0: performance.now(), version: null, waiters: carried.splice(0) };
   if (cutAt !== null) cutWhy = 'syncing';
   awaitAnswer(sock);
   sock.send(wire.wireSyncScope(BigInt(syncing.n)));
@@ -503,10 +540,21 @@ function syncAnswer(sock, n, refused, bytes) {
   const { waiters } = syncing;
   syncing = null;
   hearing();
-  for (const w of waiters) w(true);
+  const behind = (done.kind === 'refresh' || done.kind === 'follow') && followsAgain({ at: sequenceOf(copyVersion), owed, again });
+  if (behind) carried.push(...waiters);
+  else for (const w of waiters) w(true);
   // A refresh (R7) brings the copy current for an answer, and a follow for an entry (R9b); the stream's cursor stays
   // the last frame it was given.
-  if (done.kind === 'refresh' || done.kind === 'follow') { scheduleWorld(); follow(); return; }
+  if (done.kind === 'refresh' || done.kind === 'follow') {
+    scheduleWorld();
+    if (behind) {
+      again++;
+      followWanted = true;
+      clearTimeout(againTimer);
+      againTimer = setTimeout(() => { againTimer = null; follow(); }, FOLLOW_AGAIN_MS);
+    } else follow();
+    return;
+  }
   state.cursor = copyVersion; // the stream carries on from the version the hashes are at
   state.seen = null; // no frame of it applied: the gateway's default
   save();
@@ -553,6 +601,8 @@ function connect() {
         if (a === 'stream.resumed') counts.resumed++;
         if (a === 'stream.cannot-resume') counts.cannotResume++;
         log(`signed in: ${a}`);
+        owed = 0; // versions named on an earlier socket may be another epoch's
+        again = 0;
         refreshKinds();
         step = 'stream';
         clearTimeout(deadline);
@@ -582,7 +632,7 @@ function connect() {
           // read the authoritative body link and renew hearing through the usual sync completion path.
           if (Number(c) === 1) changed = true;
         }
-        if (changed) { followWanted = true; follow(); }
+        if (changed) { if (b !== '-') owe(sequenceOf(b)); followWanted = true; follow(); }
         if (movesOf.has(s) && Number(c) !== 3) { state.seated = seatedAfter(movesOf.get(s), Number(c), state.seated ?? null); movesOf.delete(s); }
         if (serving.has(s) && Number(c) !== 3) {
           closeMail(serving.get(s), achievedOf(Number(c), d) ? 'done' : 'failed', d !== '-' ? d : ['', 'receipt', 'refused', '', 'resolved', 'unread'][Number(c)] || 'answered');
@@ -614,6 +664,7 @@ function connect() {
       cutAt ??= performance.now();
       cutWhy = 'not-connected';
       if (syncing) { clearTimeout(syncing.timer); for (const w of syncing.waiters) w(false); syncing = null; }
+      for (const w of carried.splice(0)) w(false);
     }
     if (stopping) return;
     counts.drops++;
@@ -659,6 +710,8 @@ function onItem(bytes) {
 
 // --- What happens near this Soul (R9b, #3201) ----------------------------------------------------------------------
 const SAID = 'souls:said';
+/** R5: the client's own events, for wake rules and reflexes: an act of this Soul's ended, and no command for a while. */
+const ACT_ENDED = 'client:act-ended', IDLE = 'client:idle';
 const FIRED_KEYS_KEPT = 4096;
 const firedKeys = new Set(); // `<sequence>/<name>` of the events handed to the reflexes, the oldest let go first
 
@@ -668,6 +721,8 @@ function fire(event) {
   if (firedKeys.has(key)) return;
   firedKeys.add(key);
   if (firedKeys.size > FIRED_KEYS_KEPT) firedKeys.delete(firedKeys.values().next().value);
+  // R5: the owner's wake rules match the same events; a wake that fires is handed to the reader waiting (`listen`, `wait`).
+  if (wakes.onEvent(event, Date.now())) for (const w of wakers.splice(0)) w();
   for (const { intent } of reflexes.onEvent(event, Date.now())) {
     // Marked as a reflex (#3764): sent on the Soul's standing consent, it is not its agent acting.
     sendIntent([intent.verb], { target: ID.test(String(intent.target ?? '')) ? intent.target : undefined, basis: shownVersion ?? state.cursor, reflex: true });
@@ -694,7 +749,8 @@ function remember(entries) {
  */
 function onEntry(e) {
   counts.entries++;
-  if (e.changes > 0) { followWanted = true; follow(); }
+  // The version after an entry is its sequence and one (`replica::apply`).
+  if (e.changes > 0) { owe(e.sequence + 1); followWanted = true; follow(); }
   const actor = e.actor === ME ? soul : e.actor;
   const events = e.events.filter((ev) => ev.name !== SAID);
   for (const ev of events) fire({ name: ev.name, fields: ev.fields, actor, toMe: Object.values(ev.fields).includes(ME), sequence: e.sequence });
@@ -784,6 +840,7 @@ const OPS = new Set([
   'lie',
   'listen',
   'look',
+  'look-set',
   'now',
   'object',
   'pending',
@@ -800,6 +857,7 @@ const OPS = new Set([
   'stop',
   'trace',
   'undo',
+  'upload',
   'wait',
   'wake',
   'wear',
@@ -851,6 +909,37 @@ function marksOf(row) {
   return { marks: { ...(owner !== undefined ? { owner: who } : {}), ...(access !== undefined ? { access: Number(access) } : {}) } };
 }
 
+/** K3 (0.133): the uploaded models the batch's definitions name (`looks.model: "upload:<hash>"`), or a refusal when
+ *  one is written wrong. A model is the hash `upload` answered: `1220` and the SHA-256 in hex. */
+const UPLOAD_MODEL = /^upload:(1220[0-9a-f]{64})$/;
+function modelsOf(ops) {
+  const hashes = [];
+  for (const o of ops ?? []) {
+    if (o?.op !== 'define') continue;
+    let r;
+    try { r = typeof o.entry === 'string' ? JSON.parse(o.entry) : o.entry; } catch { continue; } // the copy's check names it
+    const m = r?.looks?.model;
+    if (typeof m !== 'string' || !m.startsWith('upload:')) continue;
+    const hit = UPLOAD_MODEL.exec(m);
+    if (!hit) return { code: 'kind.model', detail: `looks.model ${JSON.stringify(m).slice(0, 80)}: upload:1220 and 64 hex` };
+    hashes.push(hit[1]);
+  }
+  return { hashes };
+}
+/** Whether the gateway serves the upload (an allowed one; a held or unknown one is not served), or the refusal. */
+async function modelAllowed(hash) {
+  const u = new URL(seat.gateway);
+  u.protocol = u.protocol === 'wss:' ? 'https:' : u.protocol === 'ws:' ? 'http:' : u.protocol;
+  u.pathname = `${u.pathname.replace(/\/v2\/ws$/, '')}/v2/uploads/${hash}`;
+  u.search = ''; u.hash = '';
+  try {
+    const r = await fetch(u, { method: 'HEAD', signal: AbortSignal.timeout(10_000) });
+    return r.status === 200 ? null : { code: 'kind.model-unknown', detail: `${hash} is not an allowed upload of this world` };
+  } catch {
+    return { code: 'upload.unreachable', detail: 'the gateway did not answer' };
+  }
+}
+
 /** The batch as replica's `ops_of` reads it: kinds by full name, positions in µm (a creator writes mm). */
 async function editOnce(req) {
   if (seat.grant.actor !== 'creator') return { ok: false, code: 'edit.not-the-creator', detail: 'this home holds a Soul\'s token, not a creator\'s' };
@@ -861,6 +950,12 @@ async function editOnce(req) {
   // #3695: weather, sky and strike are sets on the world node, made from the copy as it is now, after the sync.
   const w = undo ? { ops: [] } : await worldBatch(req);
   if (w.ok === false) return closing({ ...w, sent: false, local: true }, null, { age });
+  // K3: a definition whose look is an uploaded model names an allowed upload of this world, else nothing is sent
+  if (!undo) {
+    const m = modelsOf(w.ops);
+    if (m.code) return closing({ ok: false, ...m, sent: false, local: true }, null, { age });
+    for (const h of m.hashes) { const no = await modelAllowed(h); if (no) return closing({ ok: false, ...no, sent: false, local: true }, null, { age }); }
+  }
   const batch = undo ? null : batchOf(w.ops, req.claim);
   let defines;
   if (!undo) {
@@ -961,7 +1056,8 @@ function towardOf(req) {
   const them = found[0], forms = heldKinds()[me?.kind]?.forms ?? {};
   const takes = (f) => Object.keys(forms[f]?.takes ?? {});
   const gestures = Object.entries(forms).filter(([, f]) => f.steps?.length && f.steps.every((x) => x.step === 'move') && Object.keys(f.takes ?? {}).every((k) => k === 'toward'));
-  const g = req.gesture === undefined ? null : String(req.gesture);
+  // Today's verbs are hyphenated (`shake-head`); a kind's form names are snake_case (`shake_head_at`).
+  const g = req.gesture === undefined ? null : String(req.gesture).replace(/-/g, '_');
   let form = g === null ? (forms.look_at && takes('look_at').includes('target') ? 'look_at' : null) : null, arg = 'target';
   if (g !== null) {
     form = [`${g}_at`, `${g}_to`, g].find((f) => gestures.some(([n]) => n === f) && takes(f).includes('toward')) ?? (gestures.some(([n]) => n === g) ? g : null);
@@ -1017,6 +1113,9 @@ function actsOf(words) {
   }
   return out;
 }
+
+/** D8 (`check/stand.mjs`): a stand on this Soul's own seated or lying body goes as its seat's rise. */
+const standsFromSeat = (candidates) => risesFromSeat(candidates, { rows: rowsOf(copy), kinds: heldKinds(), me: ME, ns: NS });
 
 /**
  * Builds the next intent, `ranked` verbs on `target` with `words`, and sends it once (now, or at the next sign-in).
@@ -1100,14 +1199,14 @@ async function worldBatch(req) {
   return worldOps(copy, req.world, worldNowOrReal());
 }
 
-async function answer(req) {
+async function answer(req, conn = null) {
   if (req.key !== undefined) {
     if (!KEYED.has(req.op)) return { ok: false, code: 'key-not-a-write', detail: `--key goes on a write: ${[...KEYED].join(', ')}` };
     if (!keyOk(req.key)) return { ok: false, code: 'key-form', detail: '--key takes 1 to 100 printable characters, no spaces' };
     return keyed(req);
   }
   // R13: a command from the model's turn shows that what a reader was handed was taken.
-  if (!['wait', 'status', 'pending', 'listen'].includes(req.op)) wakes.confirm();
+  if (!['wait', 'status', 'pending', 'listen'].includes(req.op)) { wakes.confirm(); lastCommand = Date.now(); }
   switch (req.op) {
     case 'pending': {
       // R20 (#3328): whether a turn has anything to serve: an open message, or wakes the budget lets through now. It
@@ -1212,11 +1311,16 @@ async function answer(req) {
       const from = req.since === undefined || Number(req.since) > eventN ? undefined : Math.max(Number(req.since) || 0, 0);
       const since = from ?? eventN;
       let got = from === undefined ? [...mail.values()].map((m) => ({ kind: 'mail', id: m.id, text: String(m.text), at: m.at })) : fresh(since);
-      while (got.length === 0 && Date.now() < until) {
+      // R5: the wakes the owner's rules queued are handed here too, as `wait` hands them, within the budget.
+      const gone = () => conn?.destroyed === true;
+      let handed = gone() ? [] : wakes.deliver(Date.now());
+      while (got.length === 0 && handed.length === 0 && !gone() && Date.now() < until) {
         await new Promise((ok) => { const t = setTimeout(ok, Math.max(until - Date.now(), 0)); wakers.push(() => { clearTimeout(t); ok(); }); });
         got = fresh(since);
+        handed = gone() ? [] : wakes.deliver(Date.now());
       }
-      return { ok: true, cursor: eventN, daemon: process.pid, mail: got, ...(got.length ? {} : { timedOut: true }) };
+      if (handed.length) saveWakes();
+      return { ok: true, cursor: eventN, daemon: process.pid, mail: got, ...(handed.length ? { wakes: handed } : {}), ...(got.length || handed.length ? {} : { timedOut: true }) };
     }
     case 'can': {
       const intent = Array.isArray(req.acts) ? actsOf(req.acts)[0] : req.intent;
@@ -1234,7 +1338,7 @@ async function answer(req) {
     }
     case 'act': {
       if (req.for !== undefined && !mail.has(req.for)) return { ok: false, code: 'mail-not-found', detail: 'for names an open message this daemon was given' };
-      const candidates = Array.isArray(req.acts) ? actsOf(req.acts) : (Array.isArray(req.verbs) ? req.verbs : [req.verb]).map(candidateOf);
+      const candidates = standsFromSeat(Array.isArray(req.acts) ? actsOf(req.acts) : (Array.isArray(req.verbs) ? req.verbs : [req.verb]).map(candidateOf));
       if (candidates.length === 0 || candidates.length > ACT_MOST || candidates.some((c) => !c.verb || /\s/.test(c.verb))) {
         return { ok: false, code: 'act-ranked-list', detail: `one to ${ACT_MOST} verbs, best first` };
       }
@@ -1295,6 +1399,7 @@ async function answer(req) {
       return closing({ ok: true, sequence, sent, verb: f.verb, basis: sequenceOf(basis), ...(toward ? { to: toward } : {}) }, null, { now: true });
     }
     case 'inspect': return inspect(req);
+    case 'upload': return upload(req);
     case 'whatson': case 'calendar': return calendar(req);
     // #3704 (today's `query`, `catalog`, `context` and `batch`): reads from the copy, asking the world nothing.
     case 'query': { const rows = rowsOf(copy), me = [...rows.values()].find((r) => r.id === ME || r.soul === ME)?.id ?? null; const q = query(rows, req.questions, { budget: req.budget, me }); return q.ok ? closing(q, null, { now: true }) : { ...q, ...ageNow() }; }
@@ -1437,6 +1542,14 @@ async function answer(req) {
 
     }
     case 'converse': return converse(req);
+    case 'look-set': {
+      // G3: the Soul's own look on its default body (`life:look`, G2): its params' bytes as T8's words shape.
+      const params = String(req.params ?? '');
+      if (!params.startsWith('{') || Buffer.byteLength(params) > 2048) return { ok: false, code: 'look-params', detail: 'one JSON object of at most 2048 bytes' };
+      const basis = shownVersion ?? state.cursor;
+      const { sequence, sent } = sendIntent(['life:look'], { words: params, basis });
+      return closing({ ok: true, sequence, sent, verb: 'life:look', basis: sequenceOf(basis) }, null, { now: true });
+    }
     case 'wear': {
       const body = String(req.body ?? '');
       if (!/^[A-Za-z0-9_.:@-]{1,80}$/.test(body)) return { ok: false, code: 'wear-names-a-body', detail: 'wear <preset>' };
@@ -1479,6 +1592,9 @@ async function answer(req) {
       // D7: an act that ended with its receipt names which of its ranked targets now holds this Soul's body (a seat a
       // fallback took), read from the copy brought current.
       const done = r.answers.at(-1)?.answer === 'receipt';
+      // R1b: an act the world refused names one offer of the same thing that would work, from this client's own offers.
+      const instead = r.answers.at(-1)?.answer === 'refused' ? suggestionFor(r) : null;
+      if (instead) got.receipt.try = instead;
       return closing(got, done ? (rows) => { const h = heldBy(rows, ME, r); return h ? { receipt: { ...got.receipt, held: h } } : {}; } : null, { now: !done });
     }
     case 'events': {
@@ -1493,6 +1609,33 @@ async function answer(req) {
 }
 
 /**
+ * R1b: for an act the world refused, one other offer of the thing or place it named first (`thingOf`'s offers, from
+ * this machine's kind entries) that would work: the first the form rules pass on the copy (`yes`), else the first they
+ * cannot judge here (`unknown`, a move such as a sit); never one they refuse, one needing arguments it has no default
+ * or choice for, nor the verb that was refused. Walking there comes last. Null when there is none.
+ */
+function suggestionFor(r) {
+  const target = String(r.target ?? '').split(' ')[0];
+  if (!ID.test(target)) return null;
+  const t = thingOf(target);
+  if (!t.ok) return null;
+  const refused = new Set(r.verbs.map((v) => String(v).replace(/^.*:/, '')));
+  const free = (o) => !Object.values(o.params ?? {}).some((p) => !p.optional && p.default === undefined);
+  const offers = t.offers.filter((o) => !refused.has(o.name) && !o.act.startsWith('carrier:') && free(o));
+  offers.sort((a, b) => (a.name === 'walk') - (b.name === 'walk'));
+  let unknown = null;
+  for (const o of offers) {
+    let c;
+    try { [c] = actsOf([o.act]); } catch { continue; }
+    if (!c) continue;
+    const v = c.form ? verdicts([c])[0] : { verdict: 'unknown' };
+    if (v.verdict === 'yes') return { act: o.act, name: o.name, checked: 'yes' };
+    if (v.verdict !== 'no' && !unknown) unknown = { act: o.act, name: o.name, checked: 'unknown' };
+  }
+  return unknown;
+}
+
+/**
  * #3686: thing `id` as this Soul's copy holds it, with its offers from its kind's entry in `<home>/kinds/`, or a
  * refusal naming the ids nearest it. It reads the copy as it is: no sync, nothing asked of the world.
  */
@@ -1501,7 +1644,8 @@ function thingOf(id) {
   if (!row) {
     return { ok: false, code: 'inspect.unknown-id', detail: `${id ?? '(none)'} is not an id this Soul's copy holds; ids come from look and find`, did_you_mean: nearestIds(rows.values(), id) };
   }
-  const kinds = kindsIn(join(home, 'kinds')), entry = kinds[row.entry ?? row.kind];
+  // A Soul's body has the family's forms (E21, #2791), as `can` and `act` read them.
+  const kinds = heldKinds(), entry = kinds[row.entry ?? row.kind];
   return { ok: true, row, entry, offers: offersOf(row.id, entry, { moving: Boolean(row.moving) }), fields: stateOf(copy, kinds, ME).nodes[row.id]?.fields };
 }
 
@@ -1678,7 +1822,7 @@ const server = createServer((c) => {
         const req = JSON.parse(line);
         asked = req;
         op = !OPS.has(req.op) ? 'unknown' : req.op === 'pending' && req.list ? 'pending-list' : req.op; // a listing is the agent's
-        return answer(req);
+        return answer(req, c);
       })
         .catch((e) => ({ ok: false, code: e.code ?? 'refused', detail: String(e.message ?? e).slice(0, 200) }))
         .then((out) => {
@@ -1702,6 +1846,8 @@ const server = createServer((c) => {
     }
   });
   c.on('error', () => {});
+  // R5: a reader that went away (its `listen` stopped) is let go now, so it takes no wake it cannot print.
+  c.on('close', () => { for (const w of wakers.splice(0)) w(); });
 });
 
 // --- The Soul's own schedule (R15, #2757) ------------------------------------------------------------------------
@@ -1784,8 +1930,24 @@ async function fireEntry(e, now, late, moment = false) {
 }
 
 /** Each second: the beat (a gap is the daemon off or the machine asleep), then the real times that have come. */
+/** R5: when this Soul's agent last sent a command (any but a reader's), and each idle rule's last firing. */
+let lastCommand = Date.now();
+const idleFired = new Map();
+/** R5: an idle rule (`wake add idle <minutes>`: `client:idle` with field 1 the quiet in seconds) fires once per quiet
+ *  spell, checked each beat. */
+function idleCheck(now) {
+  for (const r of wakes.rules) {
+    if (!r.when.event.includes(IDLE)) continue;
+    const seconds = Number(r.when.fields?.[1] ?? r.when.fields?.['1']);
+    if (!(seconds > 0) || now - lastCommand < seconds * 1000 || idleFired.get(r.id) === lastCommand) continue;
+    idleFired.set(r.id, lastCommand);
+    fire({ name: IDLE, fields: { 1: seconds }, actor: null, toMe: true, sequence: `idle-${r.id}-${lastCommand}` });
+  }
+}
+
 function beat() {
   const now = Date.now(), s = state.schedule;
+  idleCheck(now);
   const off = s.beat !== null && now - s.beat > GAP_MS ? [s.beat, now] : null;
   if (off) log(`schedule: no beat for ${Math.round((now - s.beat) / 1000)} s`);
   s.beat = now;

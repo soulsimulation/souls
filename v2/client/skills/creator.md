@@ -52,6 +52,7 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 | `check <verb> ...` | the same, checked on your copy only: nothing is sent and nothing changes |
 | `define <record.json>` | a kind of your own, from a `souls-entry/1` record; the answer's `defines` is its full name |
 | `define-kit <kit.json> [--ns <namespace>]` | a kind of your own from a kit: a name and primitive shapes, in metres |
+| `upload <file.glb\|png\|jpg>` | a model or a picture, through the world's check: `{hash, state}` |
 | `find <words> [--category c] [--has slot:sit]` | kinds that match, best first, each with why |
 | `recommend <what you want to make>` | kinds for each need it names, the words no kind answers, and an example batch |
 | `catalog [--category c] [--has ...]` / `taxonomy` | every kind, one each / categories and what kinds offer (`--has` names) |
@@ -141,6 +142,17 @@ the root, which `describe` shows), and from then on you place it like any other 
   changed fields are set; everything else is placed, and then each doorway and stair it lacks is linked again (the
   `link` operation), so Souls walk in through the doors and up the stairs. The answer counts the edits, what was
   placed, set and linked, and anything not brought over. A refusal stops it and says how far it got.
+
+## Your own models and pictures
+
+`upload models/kalama.glb` (or a `.png` or `.jpg`) sends the file through the world's check: it is measured, its
+metadata (camera, place, author) is stripped, and it passes the world's hold point. The answer is
+`{"ok": true, "hash": "1220…", "state": "allowed", "url": "…"}`: an allowed upload is served at `url`, by its hash. A
+`"held"` upload is kept for the owner's review and is not shown until they release it; say so when you report.
+
+Get the file within budget before sending it: a model at most 3 MB and 80,000 triangles, self-contained (every
+texture inside the GLB), textures at most 2,048 px; a picture at most 2 MB. A refusal names what was over
+(`upload.size`, `upload.triangle-budget`, `upload.texture-side`, `upload.external-resource`, `upload.format`, ...).
 
 ## Answers and refusals
 
