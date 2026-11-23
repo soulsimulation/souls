@@ -1016,7 +1016,7 @@ export async function openLauncher(cfg = {}) {
   function siteIndex() { let idx; try { idx = readFileSync(join(webDir, 'llms.txt'), 'utf8'); } catch { return null; }
     return siteLlmsTxt(idx, { origin: publicOrigin, base: B, worlds: publicWorlds(registry.worlds.filter((w) => !closing.has(w.slug))) }); }
   function robotsOf(slug, headers) { const w = slug ? registry.get(slug) : null; return w && isUnlisted(w) ? { ...headers, 'x-robots-tag': NOINDEX } : headers; }
-  function proxyHttp(req, res, targetPort, { tee, path, retry, soul, maxBody = 0, slug = null, noindex = false, onData, keep, pageStream = null } = {}) {
+  function proxyHttp(req, res, targetPort, { tee, path, retry, soul, maxBody = 0, slug = null, noindex = false, onData, keep, pageStream = null, pageBodies = null } = {}) {
     if (clientGone(req, res)) return;
     const sent = performance.now();
     // Behind Caddy (a public origin other than our own) keep the visitor's x-forwarded-for, so per-person limits in
@@ -1036,7 +1036,7 @@ export async function openLauncher(cfg = {}) {
       if (keep) keep(r);   // #2515: the world page, kept for the next arrivals
       if (pageStream && r.statusCode === 200 && /^text\/html\b/.test(headers['content-type'] ?? '') && !headers['content-encoding']) {
         const chunks = []; r.on('data', (c) => chunks.push(c)); r.on('error', () => res.destroy());
-        r.on('end', () => { const body = Buffer.from(withV2Stream(Buffer.concat(chunks).toString('utf8'), pageStream)); res.writeHead(200, robotsOf(slug, { ...headers, 'content-length': String(body.length) })).end(body); });
+        r.on('end', () => { const body = Buffer.from(withV2Stream(Buffer.concat(chunks).toString('utf8'), pageStream, pageBodies)); res.writeHead(200, robotsOf(slug, { ...headers, 'content-length': String(body.length) })).end(body); });
         return;
       }
       res.writeHead(r.statusCode ?? 502, noindex ? { ...headers, 'x-robots-tag': NOINDEX } : robotsOf(slug, headers));
@@ -1204,16 +1204,18 @@ export async function openLauncher(cfg = {}) {
     // proxied as before. Its robots tag is the world's own rule, set for each request. Only a GET that asks for HTML (a
     // browser's arrival) is a page: any other GET, such as a long-poll, never waits behind another caller's flight.
     // #4177: the page of a world routed to v2 names its stream in its inline config (written as it leaves, never kept)
-    let keep, pageStream = null;
+    let keep, pageStream = null, pageBodies = null;
     if (req.method === 'GET' && /\btext\/html\b/.test(String(req.headers.accept ?? '')) && !/^\/(?:v1|mcp|__)(?:\/|$)/.test(edgeRest) && !extname(edgeRest)) {
       const st = pool.status(slug), pageKey = `page ${slug} ${edgeRest} ${st.pid ?? ''}:${st.upSince ?? ''} ${req.headers['x-forwarded-host'] ?? ''} ${req.headers['x-forwarded-proto'] ?? ''} ${req.headers.host ?? ''}`;
-      pageStream = cutover?.v2Stream(w) ?? null;
+      pageStream = cutover?.v2Stream(w) ?? null; pageBodies = pageStream ? cutover.v2Bodies(w) : null;
+      // #4177: at route time the old world's static views are published beside the stream (once; cutover.mjs publish)
+      if (pageStream && p) void cutover.publish(w, async (path) => { const r = await fetch(`http://127.0.0.1:${p}${path}`, { signal: AbortSignal.timeout(10_000) }); return { status: r.status, body: Buffer.from(await r.arrayBuffer()) }; }).catch(() => {});
       let kept = c3.peek(pageKey, PAGE_TTL_MS), tag = 'hit';
       if (!kept && !retried && pageFlights.has(pageKey)) { kept = await pageFlights.get(pageKey); tag = 'shared'; if (clientGone(req, res)) return; }
       if (kept) {
         const { 'server-timing': _t, 'x-robots-tag': _r, ...headers } = kept.headers;
         if (headers['x-sim-page'] !== 'index' || req.url.includes('?')) headers['x-robots-tag'] = NOINDEX;   // as apps/server/src/http.ts (INDEXABLE)
-        const body = pageStream ? Buffer.from(withV2Stream(kept.body.toString('utf8'), pageStream)) : kept.body;
+        const body = pageStream ? Buffer.from(withV2Stream(kept.body.toString('utf8'), pageStream, pageBodies)) : kept.body;
         res.writeHead(200, robotsOf(slug, { ...headers, 'content-length': String(body.length), 'server-timing': launcherTiming(res, 'cache'), 'x-sim-cache': tag })).end(body);
         return;
       }
@@ -1235,7 +1237,7 @@ export async function openLauncher(cfg = {}) {
     }
     // #2299: the last event id a resident's stream was sent (the cursor it holds if its world unloads under it)
     const onData = unloadStill && ask?.kind === 'events' ? (c) => { const m = String(c).match(/(?:^|\n)id: ?([^\r\n]*)/g); if (m) res.simLastId = m.at(-1).replace(/^\n?id: ?/, ''); } : undefined;
-    const opts = { tee, path, retry: again, soul: gated?.soul, slug, onData, keep, pageStream, maxBody: rest.startsWith('/v1/edge/') && !rest.startsWith('/v1/edge/body/uploads') ? lim.maxBodyKb * 1024 : 0 };
+    const opts = { tee, path, retry: again, soul: gated?.soul, slug, onData, keep, pageStream, pageBodies, maxBody: rest.startsWith('/v1/edge/') && !rest.startsWith('/v1/edge/body/uploads') ? lim.maxBodyKb * 1024 : 0 };
     // Boot, throttling and pool waits may have crossed the switch. Admission is checked again before forwarding.
     if (cutover?.handle(req, res, w, url)) return;
     // Stage B (lane B-port): a C2 read the world's read workers answer goes to their port (only with read workers on)

@@ -285,13 +285,15 @@ export default defineConfig({
   plugins: [snapshotPrefetch(), cdnPreconnect(), pwa(), phasedEntry(), checkChunks(), changelogPage(), docsSite(), react(), remoteInlineConfig()],
   define: { __BUILD__: JSON.stringify(process.env.BUILD_ID ?? 'dev'), __SIM_ARRIVAL_ENABLED__: process.env.SIM_ARRIVAL_UI_ENABLED==='1', __SIM_GOATCOUNTER__: JSON.stringify(process.env.SIM_GOATCOUNTER ?? 'simeden'),
     __SIM_ASSETS_CDN_ENABLED__: process.env.SIM_ASSETS_CDN_ENABLED==='1',
+    __SIM_V2_REPLICA_SERVED__: !process.env.V2_REPLICA_PKG,   // #4177: the replica is the front door's (replica-served.ts)
     // CDN4: god uploads via the pull-through Worker on assets.eden.art/w/* (default on; needs the CDN switch above)
     __SIM_GOD_UPLOADS_CDN__: process.env.SIM_GOD_UPLOADS_CDN!=='0',
     __SIM_ASSETS_CDN_ORIGIN__: JSON.stringify(process.env.SIM_ASSETS_CDN_ORIGIN ?? 'https://assets.eden.art') },
-  // #4153: the v2 stream reader's worker (v2/web/src/source, reused as it is) imports `replica` (the new engine's WASM,
-  // the package V2_REPLICA_PKG names; a stand-in that refuses when unset, as the default build is) and `cborg` (ours).
+  // #4153: the v2 stream reader's worker (v2/web/src/source, reused as it is) imports `replica` (the new engine's WASM)
+  // and `cborg` (ours). #4177: the default build loads the replica the front door serves for a world routed to v2
+  // (replica-served.ts), so no Rust build is needed and its bytes match the deployed v2; V2_REPLICA_PKG bundles a package.
   resolve: { alias: [
-    { find: /^replica$/, replacement: process.env.V2_REPLICA_PKG ? resolvePath(process.env.V2_REPLICA_PKG, 'replica.js') : fileURLToPath(new URL('./src/v2-engine/replica-missing.ts', import.meta.url)) },
+    { find: /^replica$/, replacement: process.env.V2_REPLICA_PKG ? resolvePath(process.env.V2_REPLICA_PKG, 'replica.js') : fileURLToPath(new URL('./src/v2-engine/replica-served.ts', import.meta.url)) },
     { find: /^cborg$/, replacement: fileURLToPath(new URL('./node_modules/cborg/cborg.js', import.meta.url)) },
   ] },
   server: { port: Number(process.env.WEB_PORT ?? 5173), proxy: devProxy() },

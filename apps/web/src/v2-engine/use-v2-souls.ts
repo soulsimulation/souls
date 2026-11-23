@@ -47,7 +47,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
       // `hour=HH:MM`, as on the v2 page: the light of the picture only, the world's clock unchanged
       const hour = /^([01]\d|2[0-3]):[0-5]\d$/.exec(new URLSearchParams(location.search).get('hour') ?? '')?.[0];
       bridge = new V2Bridge({ rulesVersion: scene?.renderSceneRef?.rulesVersion ?? 'souls-v2/1', ...(scene?.renderSceneRef ? { renderSceneRef: scene.renderSceneRef } : {}) }, hour);
-      bridge.start(stream, makeReader);
+      bridge.start(stream, () => makeReader(new URL(apiPath('/replica.js'), location.href).href));
       // read-only, for checks and proof: what the stream gave (parts played, newest time, the reader's last error)
       (window as unknown as { __soulsV2?: unknown }).__soulsV2 = bridge.view;
      } catch (e) { failed = true; console.warn('v2 stream:', e); }

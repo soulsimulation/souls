@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { openLauncher } from './launcher.mjs';
@@ -19,6 +19,8 @@ const activate = (file) => {
 test('configured binding damage refuses startup; absent initial configuration is disabled', () => {
   assert.equal(cutoverFence({ file: '/etc/souls/cutover-binding.json' }), null);
   assert.throws(() => cutoverFence({ binding: {} }), /cutover.binding-invalid/);
+  const valid = { oldWorldId: 'w', canonicalSlug: 'eden', routesFile: '/synthetic/routes.json', clientDir: '/synthetic/client' };
+  for (const bad of [{ staticDir: 'relative' }, { v2Bodies: '//elsewhere/' }, { v2Bodies: '/a/../b/' }, { v2Bodies: 'https://cdn.example/b/' }]) assert.throws(() => cutoverFence({ binding: { ...valid, ...bad } }), /cutover.binding-invalid/, JSON.stringify(bad));
   assert.throws(() => cutoverFence({ file: new URL('missing-o19c-binding', scratch).pathname }), /cutover.binding-unavailable/);
   const binding = { oldWorldId: '7:stable-world', canonicalSlug: 'eden', routesFile: '/synthetic/routes.json', clientDir: '/synthetic/client' };
   assert.doesNotThrow(() => cutoverFence({ binding }), 'stable identity is not constrained to a public slug');
@@ -38,9 +40,10 @@ test('actual launcher fences stable identity and aliases, preserves reads/other 
   const P = await testPort(3), base = `http://127.0.0.1:${P}`, hits = join(dir, 'hits');
   const fake = new URL('./fake-world.mjs', import.meta.url).pathname;
   const launcher = await openLauncher({ port: P, range: [P + 1, P + 2], dataDir: data, eager: 0, base: '/', log: () => {},
-    cutoverBinding: { oldWorldId: 'eden-original-1', canonicalSlug: 'eden', routesFile, clientDir },
+    cutoverBinding: { oldWorldId: 'eden-original-1', canonicalSlug: 'eden', routesFile, clientDir, staticDir: join(dir, 'origin/s/eden/static'), v2Bodies: '/v2/bodies/' },
     command: (w, port) => ({ cmd: process.execPath, args: [fake], env: { ...process.env, WORLD_KEY: w.slug, PORT: String(port), FAKE_ACT: '1', FAKE_HITS: hits } }) });
   t.after(async () => { await launcher.close(); rmSync(dir, { recursive: true, force: true }); });
+  const staticDir = join(dir, 'origin/s/eden/static');
   const post = path => fetch(base + path, { method: 'POST', headers: { 'content-type': 'application/json', authorization: 'Bearer sim_s_soul1_secret' }, body: '{}' });
   assert.equal((await post('/w/eden/v1/edge/act')).status, 200);
   assert.equal((await fetch(base + '/__sim/op/cutover', { headers: { 'x-forwarded-for': 'forwarded' } })).status, 403);
@@ -52,13 +55,27 @@ test('actual launcher fences stable identity and aliases, preserves reads/other 
     const html = await (await fetch(base + path, { headers: { accept: 'text/html' } })).text();
     return JSON.parse(/<script>window\.__simConfig=(\{.*?\})<\/script>/.exec(html)[1]);
   };
-  assert.equal(Object.hasOwn(await pageConfig('/w/eden/'), 'v2Stream'), false, 'not routed: no v2Stream');
+  const notRouted = await pageConfig('/w/eden/');
+  assert.equal(Object.hasOwn(notRouted, 'v2Stream') || Object.hasOwn(notRouted, 'v2Bodies'), false, 'not routed: no v2Stream, no v2Bodies');
+  assert.equal((await fetch(base + '/w/eden/v1/world/snapshot')).headers.get('x-souls-static'), null, 'not routed: the old world answers');
+  assert.equal(existsSync(staticDir), false, 'not routed: nothing published');
   activate(routesFile);
   for (let i = 0; i < 2; i++) {   // the world's answer, then the launcher's kept page
     const eden = await pageConfig('/w/eden/');
     assert.equal(eden.v2Stream, '/s/eden/', 'routed: the route\'s stream'); assert.equal(eden.worldKey, 'eden', 'the rest of the config kept');
+    assert.equal(eden.v2Bodies, '/v2/bodies/', 'routed: the body catalogue\'s directory');
     assert.equal(Object.hasOwn(await pageConfig('/w/other/'), 'v2Stream'), false, 'another world is never given it');
   }
+  // #4177: the page's arrival published the old world's static views beside the stream; the page's reads get those files
+  for (let i = 0; i < 50 && !existsSync(join(staticDir, 'manifest.json')); i++) await new Promise(r => setTimeout(r, 20));
+  const manifest = JSON.parse(readFileSync(join(staticDir, 'manifest.json')));
+  assert.equal(manifest.stream, '/s/eden/'); assert.deepEqual(Object.keys(manifest.files).sort(), ['config.json', 'snapshot.json'], 'what the old world answered (the fake has no scene, items, platforms or kernel)');
+  const published = readFileSync(join(staticDir, 'snapshot.json'), 'utf8');
+  for (const path of ['/w/eden/v1/world/snapshot', '/w/eden/v1/world/snapshot?defs=ref&cols=1', '/w/eden-2026/v1/world/snapshot']) {
+    const r = await fetch(base + path); assert.equal(r.headers.get('x-souls-static'), 'published', path); assert.equal(await r.text(), published, path);
+  }
+  assert.equal((await fetch(base + '/w/eden/v1/scene')).headers.get('x-souls-static'), null, 'a view not published: the old world answers');
+  assert.equal(JSON.parse(readFileSync(join(staticDir, 'config.json'))).worldKey, 'eden', 'the old config published beside the stream');
   const before = readFileSync(hits, 'utf8');
   for (const path of ['/w/eden/v1/edge/act', '/w/eden-2026/v1/god/edit', '/worlds/w/eden-2026/v1/edge/act', '/worlds/__sim/worlds/eden-2026/unlisted']) {
     const r = await post(path); assert.equal(r.status, 409, path);
@@ -81,7 +98,9 @@ test('actual launcher fences stable identity and aliases, preserves reads/other 
   assert.equal((await post('/w/other/v1/edge/act')).status, 200, 'unrelated world never loads damaged Eden activation');
   writeFileSync(routesFile, JSON.stringify({ schema: 'souls/world-routes/1', worlds: { eden: { gateway: 'http://127.0.0.1:7312', stream: '/s/eden/', canonical: false } } }));
   assert.equal((await post('/w/eden-2026/v1/edge/act')).status, 200, 'rollback restores actual old act path');
-  assert.equal(Object.hasOwn(await pageConfig('/w/eden/'), 'v2Stream'), false, 'rollback: the kept page no longer names the stream');
+  const rolledBack = await pageConfig('/w/eden/');
+  assert.equal(Object.hasOwn(rolledBack, 'v2Stream') || Object.hasOwn(rolledBack, 'v2Bodies'), false, 'rollback: the kept page no longer names the stream or the bodies');
+  assert.equal((await fetch(base + '/w/eden/v1/world/snapshot')).headers.get('x-souls-static'), null, 'rollback: the old world answers its snapshot again');
   const old = await fetch(base + '/w/eden-2026/v1/config');
   assert.equal(old.headers.get('x-souls-engine'), 'old');
   assert.equal((await old.json()).worldId, 'eden-1', 'rollback returns the actual old world config with its engine header');
