@@ -84,7 +84,7 @@ export async function startOldPage({ template = 'worlds/templates/hello-hamlet.j
     const port = await freePorts(world.port ?? undefined), launcher = port + 1, frontPort = port;
     const binding = join(dir, 'binding.json');
     procs.push(await start('launcher', process.execPath, [LAUNCHER, '--port', String(launcher), '--data', join(dir, 'launcher'), '--dev-auth',
-      '--range', `${launcher + 100}-${launcher + 120}`, '--mars-web', marsWeb], /\[launcher\] http/, { dir, env: { BRAIN_MODE: 'fake', SOULS_CUTOVER_BINDING: binding } }));
+      '--range', `${launcher + 100}-${launcher + 120}`, '--mars-web', marsWeb], /\[launcher\] http/, { dir, env: { BRAIN_MODE: 'fake', SOULS_CUTOVER_BINDING: binding, SOULS_V2_DIRECTORY: world.directory } }));   // MS: My Souls reads a moved world's Souls there
     const made = await fetch(`http://127.0.0.1:${launcher}/__sim/worlds`, { method: 'POST', headers: { authorization: 'Bearer dev:Ada', 'content-type': 'application/json' },
       body: JSON.stringify({ name: templateName(template), template: templateName(template) }) }).then((r) => r.json());
     if (!made?.slug) throw new Error(`the launcher made no world from ${templateName(template)}: ${JSON.stringify(made).slice(0, 300)}`);
