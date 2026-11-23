@@ -36,7 +36,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
   if (!s.current) s.current = empty(quietConnection(worldId ?? (window as unknown as { __simConfig?: { worldId?: string } }).__simConfig?.worldId ?? 'v2'));
   useEffect(() => {
     const st = s.current!, conn = st.conn;
-    let bridge: V2Bridge | null = null, failed = false, stopped = false, lastSouls: unknown = null, lastError: string | null = null, lastEntities: unknown = null;
+    let bridge: V2Bridge | null = null, members: { stop(): void } | null = null, failed = false, stopped = false, lastSouls: unknown = null, lastError: string | null = null, lastEntities: unknown = null;
     const startedAt = performance.now();
     // #4176: doors, lamps and the weather as v2 has them, brought to the page's entity layer by its own world diffs
     const world = new WorldState();
@@ -51,6 +51,8 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
       const hour = /^([01]\d|2[0-3]):[0-5]\d$/.exec(new URLSearchParams(location.search).get('hour') ?? '')?.[0];
       bridge = new V2Bridge({ rulesVersion: scene?.renderSceneRef?.rulesVersion ?? 'souls-v2/1', ...(scene?.renderSceneRef ? { renderSceneRef: scene.renderSceneRef } : {}) }, hour);
       bridge.start(stream, () => world.watch(makeReader(new URL(apiPath('/replica.js'), location.href).href)));
+      members = (await import('./member-turns.ts')).memberTurns((h) => bridge?.heard(h), (grants) => bridge?.bodiesOf(grants) ?? []); // R3b: private turns, to their members
+      if (stopped) members.stop();
       // read-only, for checks and proof: what the stream gave (parts played, newest time, the reader's last error)
       (window as unknown as { __soulsV2?: unknown }).__soulsV2 = bridge.view;
       // The world's body catalogue, where its config (or `?bodies=`, as on the v2 page) names the v2 body assets: each
@@ -94,7 +96,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
       st.streamNotice = streamNotice({ failed, error: bridge?.view.error ?? null, errorAtParts, parts: seenParts, startedAt, lastPartAt, now: performance.now() });
       force((n) => n + 1);
     }, 200);
-    return () => { stopped = true; clearInterval(t); bridge?.stop(); };
+    return () => { stopped = true; clearInterval(t); bridge?.stop(); members?.stop(); };
   }, [stream]);
   return s.current;
 }
