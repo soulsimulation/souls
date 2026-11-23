@@ -137,12 +137,7 @@
       ],
       "takes": {
         "extension": {
-          "type": "value",
-          "of": [
-            0,
-            150,
-            300
-          ]
+          "type": "count"
         }
       }
     },

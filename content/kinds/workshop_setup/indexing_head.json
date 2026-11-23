@@ -102,7 +102,7 @@
           "need": "state",
           "field": "index",
           "not": {
-            "arg": "angle"
+            "arg": "position"
           }
         },
         {
@@ -130,19 +130,14 @@
           "change": "set",
           "field": "index",
           "to": {
-            "arg": "angle"
+            "arg": "position"
           },
           "event": "index_head"
         }
       ],
       "takes": {
-        "angle": {
-          "type": "value",
-          "of": [
-            0,
-            45,
-            90
-          ]
+        "position": {
+          "type": "count"
         }
       }
     },
