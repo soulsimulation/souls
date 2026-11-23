@@ -148,6 +148,14 @@ after(async () => {
 test('the verbs make G1 batches, and a refusal names its usage', () => {
   assert.deepEqual(opsOf('place', ['room', '--in', 'aa-0', '--at', '1,0,2']), [{ op: 'place', name: 1, kind: 'room', in: 'aa-0', at: [1, 0, 2] }]);
   assert.deepEqual(opsOf('set', ['aa-3', '1', 'true']), [{ op: 'set', node: 'aa-3', field: 1, value: true }]);
+  // R8a: a row or a grid is one batch of places, centred on --at, named 1..n in order
+  assert.deepEqual(opsOf('place', ['lamp', '--in', 'aa-0', '--at', '0,0,5000', '--row', '3', '--gap', '2000']).map((o) => [o.name, o.at]),
+    [[1, [-2000, 0, 5000]], [2, [0, 0, 5000]], [3, [2000, 0, 5000]]]);
+  assert.deepEqual(opsOf('place', ['lamp', '--in', 'aa-0', '--at', '0,0,0', '--row', '2', '--gap', '1000', '--along', 'z']).map((o) => o.at), [[0, 0, -500], [0, 0, 500]]);
+  assert.deepEqual(opsOf('place', ['lamp', '--in', 'aa-0', '--at', '0,0,0', '--grid', '2x2', '--gap', '1000,3000']).map((o) => o.at),
+    [[-500, 0, -1500], [500, 0, -1500], [-500, 0, 1500], [500, 0, 1500]]);
+  for (const bad of [['--row', '3'], ['--row', '3', '--gap', '0', '--at', '0,0,0'], ['--grid', '9x9', '--gap', '1000', '--at', '0,0,0'], ['--row', '3', '--grid', '2x2', '--gap', '1', '--at', '0,0,0'], ['--grid', '2x2', '--gap', '1000', '--along', 'z', '--at', '0,0,0']])
+    assert.throws(() => opsOf('place', ['lamp', '--in', 'aa-0', ...bad]), (e) => e.code === 'usage', bad.join(' '));
   assert.deepEqual(requestOf(['check', 'remove', 'aa-3']).req, { op: 'check', ops: [{ op: 'remove', node: 'aa-3' }] });
   assert.throws(() => opsOf('move', ['aa-3']), /move <id> --at/);
   assert.deepEqual(opsOf('hours', ['aa-3', '--open', '09:00-13:00@sat,sun']), [{ op: 'set', node: 'aa-3', field: 81, value: [[2, 96, 9 * 3_600_000_000, 13 * 3_600_000_000]] }]);
@@ -905,6 +913,26 @@ test('#3697: a creator uploads a picture through the check and hold point; an al
   assert.equal(bad.ok, false);
   assert.match(bad.code, /^upload\./, JSON.stringify(bad));
   assert.equal((await god('upload', join(dir, 'notes.txt'))).code, 'usage');
+});
+
+test('R8a: a row and a grid are one edit each, all or none, centred on --at; a grid may face a compass point', async () => {
+  await connected();
+  const place = (await god('describe')).nodes.find((x) => x.kind === 'souls:place');
+  const room = await god('place', 'room', '--in', place.id, '--at', '60000,0,60000');
+  assert.equal(room.ok, true, JSON.stringify(room));
+  const roomId = room.names['1'];
+  const row = await god('place', 'lamp', '--in', roomId, '--at', '3000,0,3000', '--row', '3', '--gap', '600');
+  assert.equal(row.ok, true, JSON.stringify(row));
+  assert.equal(Object.keys(row.names).length, 3, 'three lamps, one answer');
+  const grid = await god('place', 'item', '--in', roomId, '--at', '3000,0,5000', '--grid', '2x2', '--gap', '500', '--facing', 's');
+  assert.equal(grid.ok, true, JSON.stringify(grid));
+  const d = await god('describe');
+  const lamps = d.nodes.filter((x) => Object.values(row.names).includes(x.id)), items = d.nodes.filter((x) => Object.values(grid.names).includes(x.id));
+  assert.deepEqual(lamps.map((x) => x.at).sort((a, b) => a[0] - b[0]), [[2400, 0, 3000], [3000, 0, 3000], [3600, 0, 3000]], 'the row, centred on --at');
+  assert.equal(items.length, 4, 'four items in the copy');
+  // too many for one edit: refused by the command, nothing sent
+  const most = await god('place', 'lamp', '--in', roomId, '--at', '0,0,0', '--grid', '9x9', '--gap', '500');
+  assert.equal(most.code, 'usage', JSON.stringify(most));
 });
 
 test('R8d: map reads the world at a glance from the copy: rooms placed show as what stands, with the extent around them', async () => {
