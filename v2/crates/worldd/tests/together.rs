@@ -460,7 +460,11 @@ struct Run {
 }
 
 fn serve(tag: &str) -> Run {
-    let store = Mem::with(Vec::new());
+    serve_on(tag, Mem::with(Vec::new()))
+}
+
+/// [`serve`] from `store`'s log, if it has one: a restart.
+fn serve_on(tag: &str, store: Mem) -> Run {
     let mut cfg = Config::new(LINEAGE, 1);
     cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
     cfg.engine = Some((
@@ -1083,6 +1087,78 @@ fn g2_a_soul_follows_another_over_a_walk_with_two_turns() {
     run.stop();
 }
 
+/// 0.135 G2, review R1 and R2: a follow survives a restart. The follower's order is taken up from the log as it is;
+/// an intent arriving after the restart never takes the order's id (the world made the order on the intents'
+/// counter); and the leader's leave then ends the follow for both and cancels the order, in the same tick.
+#[test]
+fn g2_a_follow_across_a_restart() {
+    let run = serve("follow-restart");
+    let (mut a, mut b) = (run.client(1), run.client(2));
+    let follow = run.created(&b.offer(FOLLOW, 1).expect("Soul 2 offers to follow"));
+    a.act("activity:accept", Some(follow), &[])
+        .expect("Soul 1 accepts");
+    std::thread::sleep(Duration::from_millis(300));
+    let order = |run: &Run, name: &str| -> Vec<Id> {
+        let log = run.store.0.lock().unwrap().bytes.clone();
+        recover(&log)
+            .unwrap()
+            .records
+            .into_iter()
+            .filter(|r| !sim::recorder::is_input(r))
+            .flat_map(|r| Part::read(&r).unwrap().effects)
+            .flat_map(|e| e.events.into_iter().flatten())
+            .filter(|ev| ev.name.as_str() == name)
+            .filter_map(|ev| read_id(&ev.fields[&1]).ok())
+            .collect()
+    };
+    let orders = order(&run, "souls:order");
+    assert_eq!(orders.len(), 1, "the follower's own follow order");
+    let Run { world, store, path } = run;
+    world.stop();
+    let _ = std::fs::remove_file(&path);
+    let run = serve_on("follow-restart-2", store);
+    let mut a = run.client(1);
+    a.2 = 100;
+    // An intent after the restart: its effects name its own id, never the order's.
+    let walked = a
+        .act(
+            "eden:walk",
+            Some(ground()),
+            &[(1, walk_to(-36_000_000, 30_000_000))],
+        )
+        .expect("Soul 1 walks after the restart");
+    let log = run.store.0.lock().unwrap().bytes.clone();
+    let causes: BTreeSet<Id> = recover(&log)
+        .unwrap()
+        .records
+        .into_iter()
+        .filter(|r| !sim::recorder::is_input(r))
+        .flat_map(|r| Part::read(&r).unwrap().effects)
+        .filter(|e| walked.contains(&e.envelope.sequence))
+        .filter_map(|e| match e.envelope.cause {
+            Cause::Intent(i) => Some(i),
+            _ => None,
+        })
+        .collect();
+    assert!(
+        !causes.is_empty() && !causes.contains(&orders[0]),
+        "a fresh id: {causes:?}"
+    );
+    // The order was taken up as it is: no second order, and the leader's leave ends both and cancels it.
+    let lefts = run.lefts();
+    a.act("activity:leave", Some(follow), &[])
+        .expect("Soul 1 leaves");
+    std::thread::sleep(Duration::from_millis(300));
+    assert_eq!(run.lefts(), lefts + 2, "the follow is over for both");
+    assert_eq!(order(&run, "souls:order"), orders, "no second order");
+    assert_eq!(
+        order(&run, "souls:order-ended"),
+        orders,
+        "the order ended with the follow"
+    );
+    run.stop();
+}
+
 impl Run {
     /// Each body row the log holds, in order, with its whole pose.
     fn poses(&self) -> Vec<(Id, Pose)> {
@@ -1119,8 +1195,8 @@ fn ahead(q: Quat) -> (i64, i64) {
 
 /// 0.135 G3: members take their places when a group activity starts. Holding hands: the two end shoulder to
 /// shoulder, 0.5 m apart, facing the same way, across the line between them; the hold's moves begin after. A dance
-/// of four: each walks (never more than 0.2 m a tick) to its place on a 1 m ring round where they stood, faces its
-/// middle, and all four start dancing on the same beat.
+/// of four: each walks (never more than 0.2 m a tick) to its place on a 1 m ring round where its first two members
+/// stood when it started, faces its middle, and all four start dancing on the same beat.
 #[test]
 fn g3_members_take_their_places_then_their_moves_begin() {
     let run = serve("places");
@@ -1166,10 +1242,11 @@ fn g3_members_take_their_places_then_their_moves_begin() {
     // A dance of four.
     let from = run.poses().len();
     let start: Vec<Vec3> = (1..=4).map(|n| run.last(n).0).collect();
+    // The ring's middle is fixed when the dance starts: at the first accept, between its first two members.
     let middle = Vec3::new(
-        start.iter().map(|p| p.x).sum::<i64>() / 4,
+        (start[0].x + start[1].x) / 2,
         0,
-        start.iter().map(|p| p.z).sum::<i64>() / 4,
+        (start[0].z + start[1].z) / 2,
     );
     let asked = Value::Array((2..=4).map(|n| soul(n).to_value()).collect());
     let offered = c[0]

@@ -531,7 +531,7 @@ impl Activities {
         }
         // 0.135 G3: one who joins a started activity takes its place too.
         if driver.is_some() {
-            self.to_places(offer, Some(body));
+            self.mark_places(offer, Some(body));
         }
         if let Some(open) = self.offers.open.get_mut(&offer) {
             open.answered.insert(body);

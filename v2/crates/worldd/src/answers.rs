@@ -3749,10 +3749,10 @@ impl Clock {
                 now,
             );
             // 0.135 G3: members of an activity just started walk to their places; its moves begin once all have.
-            let todo = e.to_take(&b.runner.controller);
+            let todo = e.pending_places(&b.runner.controller);
             if !todo.is_empty() {
                 let done = b.take_places(&todo);
-                e.placed(&done);
+                e.placed(self.replica.tree(), &mut b.runner.controller, &done, now);
             }
         }
     }
@@ -3959,8 +3959,22 @@ impl Clock {
     /// 0.135 G2: each follow activity running keeps its follower's own `souls:follow` order on the leader
     /// (`v2/docs/intents.md` rule 5, `sim::orders`): started when the follow starts (or taken up as it is after a
     /// restart), cancelled when the follow ends. An order that ended by itself (displaced by the follower's own act,
-    /// expired, its leader gone) ends the follow for both. The orders' entries go out with the next step's.
+    /// expired, its leader gone) ends the follow for both. The orders' entries are written in the same tick.
     fn follow_orders(&mut self, now: Micros) {
+        self.keep_follow_orders(now);
+        // In this tick, with the follow's own entries: a stop between two ticks never finds an order without its
+        // activity, or an activity without its order (0.135 G2, review R2).
+        let orders = self
+            .bodies
+            .as_mut()
+            .map(|b| std::mem::take(&mut b.orders.log))
+            .unwrap_or_default();
+        if !orders.is_empty() {
+            self.write_own(orders, "follow orders");
+        }
+    }
+
+    fn keep_follow_orders(&mut self, now: Micros) {
         let (Some(e), Some(b)) = (self.engine.as_mut(), self.bodies.as_mut()) else {
             return;
         };
@@ -4934,6 +4948,20 @@ pub fn start<S: Storage + 'static>(
                         next_intent = next_intent.max(node.counter() + 1);
                     }
                 }
+            }
+        }
+        // An order the world made (0.135 G2: a follow's) took its intent id on the same counter, and its records
+        // carry it in field 1 only: never give one out again.
+        for ev in part.effects.iter().flat_map(|e| e.events.iter().flatten()) {
+            let n = ev.name.as_str();
+            if (n == sim::host::restart::ORDER || n == sim::host::restart::ORDER_ENDED)
+                && let Some(id) = ev
+                    .fields
+                    .get(&1)
+                    .and_then(|v| replica::effects::read_id(v).ok())
+                && id.scope() == cfg.lineage
+            {
+                next_intent = next_intent.max(id.counter() + 1);
             }
         }
         let Some(Value::Array(rows)) = part.rest.get(&ANSWERED) else {

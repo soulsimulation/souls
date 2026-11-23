@@ -27,7 +27,7 @@
 //!   the follower's own walk leaves it ([`Activities::walk_leaves`]); its order ending (displaced by the follower's
 //!   own act, expired, the leader gone) ends it too ([`Activities::following`]).
 //! - **Members take their places (0.135 G3).** A role whose kind says where its members stand has them walk there
-//!   and turn to their facing when the activity starts, before its moves begin ([`places`], [`Activities::to_take`]).
+//!   and turn to their facing when the activity starts, before its moves begin ([`places`], [`Activities::pending_places`]).
 //! - **A held move lasts while both stay (0.134 T2).** A role's move whose last phase holds (`hold_hand`) holds until
 //!   a member leaves: then every member's held move is released, so both hands come free, each release goes out
 //!   for viewers as its record again, ended `released`, and the others leave the hold too ([`Activities::leave`]). A walk sent by a member ends it the same
@@ -618,7 +618,7 @@ impl Activities {
             l.drivers = drivers;
         }
         self.begun.push(activity);
-        self.to_places(activity, None);
+        self.mark_places(activity, None);
         Ok(())
     }
 
@@ -850,7 +850,7 @@ impl Activities {
 
     /// Marks every member of `activity` (or only `only`) whose role says where it stands as still to take its place
     /// (0.135 G3).
-    pub(crate) fn to_places(&mut self, activity: Id, only: Option<Id>) {
+    pub(crate) fn mark_places(&mut self, activity: Id, only: Option<Id>) {
         let Some(l) = self.live.get(&activity) else {
             return;
         };
@@ -871,7 +871,10 @@ impl Activities {
     /// The places still to take (0.135 G3): `(activity, body, Soul, point, facing)`, each on the ground. An
     /// activity's frame is set the first time from where its members stand (`at`); a member with no stand left in
     /// its role keeps where it is and is taken as placed.
-    pub fn to_take(&mut self, at: impl Fn(Id) -> Option<Vec3>) -> Vec<(Id, Id, Id, Vec3, Quat)> {
+    pub fn pending_places(
+        &mut self,
+        at: impl Fn(Id) -> Option<Vec3>,
+    ) -> Vec<(Id, Id, Id, Vec3, Quat)> {
         let mut out = Vec::new();
         let mut none = Vec::new();
         for (activity, bodies) in &self.placing {

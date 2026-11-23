@@ -722,17 +722,27 @@ impl Engine {
 
     /// The places still to take (0.135 G3, `sim::activity::places`), each activity's frame set from where its members
     /// stand in `c`: `(activity, body, Soul, point, facing)`.
-    pub fn to_take(&mut self, c: &Controller) -> Vec<(Id, Id, Id, Vec3, replica::pose::Quat)> {
+    pub fn pending_places(
+        &mut self,
+        c: &Controller,
+    ) -> Vec<(Id, Id, Id, Vec3, replica::pose::Quat)> {
         self.activities
-            .to_take(|b| c.body(b).map(|m| m.pose.position))
+            .pending_places(|b| c.body(b).map(|m| m.pose.position))
     }
 
     /// Members that have taken their places (0.135 G3), by (activity, body): an activity's moves begin once all
-    /// have.
-    pub fn placed(&mut self, done: &[(Id, Id)]) {
+    /// have, at `now` on a copy of `live`. Its entries wait in [`Engine::out`].
+    pub fn placed(&mut self, live: &Tree, c: &mut Controller, done: &[(Id, Id)], now: Micros) {
+        if done.is_empty() {
+            return;
+        }
         for &(a, b) in done {
             self.activities.placed(a, b);
         }
+        let mut tree = live.frozen();
+        self.activities.next = tree.next();
+        self.begin_moves(&mut tree, c, now);
+        self.collect(None);
     }
 
     /// Every follow running (0.135 G2): its activity, the leader's body, and the follower's body and Soul.
