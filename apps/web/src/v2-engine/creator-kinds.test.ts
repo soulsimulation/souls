@@ -84,3 +84,30 @@ test('V2: a creator\'s thing of a kind the world has is drawn with that kind\'s 
   layer.model.entities.delete('e_bench1'); layer.model.entities.delete(entityId('cc22.7'));
   assert.equal(k.next(layer, 4), null, 'nothing more once the layer dropped them');
 });
+
+test('W2: a creator\'s thing of a kind nothing in the world shows is drawn by its library def, sent with the diff', () => {
+  const k = new CreatorKinds();
+  const layer = { seq: 5, model: { entities: new Map<string, { id: string }>(), defs: new Map<string, unknown>() } };
+  // a lamp post placed while the world runs (no origin: not of the captured scene), and the world's node (no thing)
+  k.apply([root, node('dd33.9', 'eden:lamp_post@1220dd', [2_000_000, 0, 3_000_000])], []);
+  const d = k.next(layer, 1)!;
+  assert.equal(d.diff.upserts.length, 1, 'the lamp post, not the world node');
+  const lamp = d.diff.upserts[0] as { id: string; def: string; p: number[] };
+  assert.equal(lamp.id, entityId('dd33.9'));
+  assert.match(lamp.def, /^core-lamp-post@\d+$/);
+  assert.deepEqual(lamp.p, [2, 0, 3]);
+  assert.deepEqual((d.diff.defs as { ref: string }[]).map((x) => x.ref), [lamp.def], 'the layer is sent the def it does not hold');
+});
+
+test('W2: a content kind\'s own shape draws only what no old or library def draws', () => {
+  const k = new CreatorKinds();
+  const stump = { id: 'e_stump1', def: 'mars-stump@2', in: { parent: 'world' }, p: [0, 0, 0] };
+  const layer = { seq: 1, model: { entities: new Map<string, { id: string }>([['e_stump1', stump]]), defs: new Map<string, unknown>() } };
+  const shape = (kind: string) => ({ id: `entry:${kind}`, kind: 'souls:kind', parent: null, pos: [0, 0, 0] as [number, number, number], rot: [Q, 0, 0, 0] as [number, number, number, number], slot: null,
+    defines: kind, entry: bytes({ format: 'souls-entry/1', kind: kind.split('@')[0], geometry: { bounds_mm: [400, 300, 400] } }) });
+  k.apply([root, shape('mars:stump@1220ee'), shape('mars:crate_x@1220ff'),
+    node('aa.1', 'mars:stump@1220ee', [0, 0, 0], { origin: 'e_stump1' }), node('bb.2', 'mars:stump@1220ee', [1_000_000, 0, 0]), node('cc.3', 'mars:crate_x@1220ff', [2_000_000, 0, 0])], []);
+  const ups = k.next(layer, 1)!.diff.upserts as { id: string; def: string }[];
+  assert.equal(ups.find((u) => u.id === entityId('bb.2'))?.def, 'mars-stump@2', 'the world\'s own stumps\' def, not the entry\'s box');
+  assert.match(ups.find((u) => u.id === entityId('cc.3'))?.def ?? '', /^v2-mars-crate-x-/, 'a kind nothing else draws: its entry\'s box');
+});

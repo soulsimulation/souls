@@ -91,6 +91,7 @@ import { WorldSceneHistory } from './WorldSceneHistory.ts';
 import { apiPath, worldKey } from './world-path.ts';
 import { BASE } from './base-path.ts';
 import { newWorld } from './world-kind.ts';
+import { streamBound } from './v2-engine/source/scene-offer.ts';
 import { sceneOwner, type SceneOwnerMemory } from './scene-owner.ts';
 import { marsFork } from './mars-fork.ts';
 import type { ForkLand } from './WorldMarsForkLand.ts';
@@ -689,7 +690,8 @@ export function LiveWorld({ sim, selected, onSelect, onChipNote, onViewerHandle,
       for(const [index,building] of info.buildings.entries())gate.require('Building '+(index+1)+': '+building.file,async()=>{const assetRoot=await buildingRoot();if(assetRoot)owner.setAssetRoot(assetRoot);const failed=await owner.addBuildings([building],loader,assetBytes);if(failed.length)throw Error('Required building could not be loaded.');});}
     };
     let currentScene:Promise<ReturnType<typeof parseSceneInfo>>|null=null;
-    const currentLayout=()=>currentScene??=(async()=>{const response=await fetch(apiPath('/v1/scene'),{signal:abort.signal});if(!response.ok)throw Error('Layout unavailable');return parseSceneInfo(await response.json());})();
+    const currentLayout=()=>currentScene??=(async()=>{const response=await fetch(apiPath('/v1/scene'),{signal:abort.signal});if(response.status===404&&streamBound())return parseSceneInfo({scene:null,ground:'grass'});if(!response.ok)throw Error('Layout unavailable');  // W2: a world made on the new engine has no old layout: its ground and things come from its stream (stream-scene.ts)
+    return parseSceneInfo(await response.json());})();
     const failLayout=(reason:string)=>{initialGate?.cancel();sceneSettled=false;sceneRetryAt=Infinity;renderer.domElement.dataset.sceneBinding='unavailable';sceneryStatus(reason);setInitialProgress({generation:initialGeneration,stage:'failed',required:1,completed:0,failed:['World layout'],bytesLoaded:0,bytesTotal:null});retryInitial.current=()=>{sceneRequest++;sceneKey=null;currentScene=null;sceneRetryAt=0;setInitialProgress({generation:initialGeneration,stage:'waiting',required:0,completed:0,failed:[],bytesLoaded:0,bytesTotal:null});};};
     const ensureScene=(chunk:Chunk,history:boolean,now:number)=>{
       const reference=(chunk.take as Take&{renderSceneRef?:unknown}).renderSceneRef;
