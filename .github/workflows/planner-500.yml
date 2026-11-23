@@ -4,13 +4,16 @@
 # bursts, 120 s, fake minds, loopback only) for each, alternating, even and uneven arms, two repeats. It prints, per
 # rung, the planner thread's cores over the load window (the sampler's per-thread processor seconds) beside the
 # world's ticks on time and acts sent. One rung at a time; the world on every runner core but the last, the driver on
-# that one. Manual, or on a same-repository pull request that changes this file.
+# that one. Manual (other rungs with `rungs`, e.g. `750:burst 1000:every4`; `builds: head` measures the head alone), or
+# on a same-repository pull request that changes this file.
 name: planner-500
 on:
   workflow_dispatch:
     inputs:
       base: { description: 'commit before', required: true }
       head: { description: 'commit after', required: true }
+      rungs: { description: 'rungs, each <agents>:<every4|burst>', default: '500:burst' }
+      builds: { description: 'builds measured: base head, or head alone', default: 'base head' }
   pull_request:
     paths:
       - .github/workflows/planner-500.yml
@@ -19,10 +22,12 @@ permissions:
 concurrency: { group: planner-500, cancel-in-progress: false }
 jobs:
   measure:
-    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    if: github.event_name == 'workflow_dispatch' || (github.event.pull_request.head.repo.full_name == github.repository && github.actor != 'dependabot[bot]')
     runs-on: [self-hosted, souls-timed]
-    timeout-minutes: 120
+    timeout-minutes: 240
     env:
+      RUNGS: ${{ github.event_name == 'workflow_dispatch' && inputs.rungs || '500:burst' }}
+      BUILDS: ${{ github.event_name == 'workflow_dispatch' && inputs.builds || 'base head' }}
       BASE: ${{ github.event_name == 'workflow_dispatch' && inputs.base || github.event.pull_request.base.sha }}
       HEAD: ${{ github.event_name == 'workflow_dispatch' && inputs.head || github.event.pull_request.head.sha }}
     steps:
@@ -70,7 +75,7 @@ jobs:
       # Each build's programs copied out of one shared target folder, as rung.sh reads them: <dir>/release/<program>.
       - name: Build both
         run: |
-          for r in base head; do
+          for r in $BUILDS; do
             (cd "$r/v2" && CARGO_TARGET_DIR="$PER_RUN/target" cargo build --release --locked -q -p worldd -p gatewayd -p driver)
             mkdir -p "$PER_RUN/bin-$r/release"
             cp "$PER_RUN/target/release/"{worldd,gatewayd,driver} "$PER_RUN/bin-$r/release/"
@@ -84,24 +89,37 @@ jobs:
           world=$(echo "$all" | head -n -1 | paste -sd, -)
           echo "runner: $(echo "$all" | wc -l) CPUs; world on $(echo "$all" | head -n -1 | wc -l) of them, the driver on the last"
           export EDEN_FACTS="$PER_RUN/eden.facts.json"
+          OUT=$(mktemp -d /tmp/pl.XXXXXX)
+          echo "OUT=$OUT" >> "$GITHUB_ENV"
+          for rung in $RUNGS; do
+          n=${rung%%:*} rate=${rung#*:}
+          [[ $n =~ ^[0-9]+$ && $rate =~ ^(every4|burst)$ ]] || { echo "::error::rung $rung: <agents>:<every4|burst>"; exit 1; }
           for k in 1 2; do
             for arm in even uneven; do
-              for r in base head; do
-                d="$PER_RUN/out/$r/500-$arm-burst-r$k"
-                mkdir -p "$(dirname "$d")"
-                CARGO_TARGET_DIR="$PER_RUN/bin-$r" bash "$r/v2/tools/bench/stage2a/rung.sh" 500 "$arm" burst "$world" 120 "$d" > "$d.log" 2>&1 || true
-                line=$(grep '^rung ' "$d.log" | tail -1)
-                if [ -z "$line" ]; then echo "$r $arm r$k: no result"; tail -5 "$d.log" || true; continue; fi
+              for r in $BUILDS; do
+                # A short folder: the world's and the gateway's sockets live in it, and a Unix socket's path has
+                # at most 107 bytes (the runner's own folder is too deep for the gateway's control socket).
+                d="$OUT/$r/$n-${arm:0:2}-${rate:0:2}-$k"
+                mkdir -p "$OUT/$r"
+                CARGO_TARGET_DIR="$PER_RUN/bin-$r" bash "$r/v2/tools/bench/stage2a/rung.sh" "$n" "$arm" "$rate" "$world" 120 "$d" > "$d.log" 2>&1 || true
+                line=$(grep '^rung {' "$d.log" | tail -1)
+                if [ -z "$line" ]; then
+                  echo "$r $rung $arm r$k: no result"
+                  for f in "$d.log" "$d/gw.log" "$d/worldd.log"; do tail -4 "$f" 2> /dev/null | sed -E 's#[0-9]+\.[0-9]+\.[0-9]+\.[0-9]+(:[0-9]+)?#<address>#g; s#https?://[^ ]*#<url>#g'; done
+                  continue
+                fi
                 node -e '
-                  const [r, arm, k, line] = process.argv.slice(1); const o = JSON.parse(line.slice(5));
+                  const [r, rung, arm, k, line] = process.argv.slice(1); const o = JSON.parse(line.slice(5));
                   const pl = (o.threads.world.find(([n]) => n === "planner") ?? [, 0])[1];
-                  console.log(`| ${r} | ${arm} | ${k} | ${pl} | ${o.threads.world.slice(0, 4).map(([n, c]) => n + " " + c).join(", ")} | ${(o.tick.onTimeShare * 100).toFixed(2)} | ${o.acts.perS} | ${o.cpu.world} |`);
-                ' "$r" "$arm" "$k" "$line" | tee -a "$PER_RUN/table.md"
+                  const fm = (o.threads.world.find(([n]) => n === "planner-forms") ?? [, 0])[1];
+                  console.log(`| ${r} | ${rung} | ${arm} | ${k} | ${pl} | ${fm} | ${o.threads.world.slice(0, 4).map(([n, c]) => n + " " + c).join(", ")} | ${(o.tick.onTimeShare * 100).toFixed(2)} | ${o.acts.perS} | ${o.cpu.world} | ${o.accepted.p95Ms} | ${o.wait.p50Ms} / ${o.wait.p95Ms} | ${o.stuck?.stuck ?? "-"} |`);
+                ' "$r" "$rung" "$arm" "$k" "$line" | tee -a "$PER_RUN/table.md"
               done
             done
           done
-          { echo "| build | arm | repeat | planner cores | busiest world threads | ticks on time % | acts sent / s | world cores |"
-            echo "|---|---|---|---|---|---|---|---|"; cat "$PER_RUN/table.md"; } >> "$GITHUB_STEP_SUMMARY"
+          done
+          { echo "| build | rung | arm | repeat | planner cores | form threads cores | busiest world threads | ticks on time % | acts sent / s | world cores | accepted p95 ms | viewer delay p50 / p95 ms | stuck |"
+            echo "|---|---|---|---|---|---|---|---|---|---|---|---|---|"; cat "$PER_RUN/table.md"; } >> "$GITHUB_STEP_SUMMARY"
       - name: Clean up
         if: always()
-        run: rm -rf "$PER_RUN"
+        run: rm -rf "$PER_RUN" "${OUT:-/nonexistent}"
