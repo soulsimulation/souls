@@ -609,6 +609,24 @@ fn effects(
                 };
                 (n, audience(*node), change)
             }
+            Op::Rows {
+                node,
+                field: on,
+                rows,
+            } => {
+                // #3728: the field with the rows merged in, as one set (`replica::edit::merged_rows`); the check has
+                // refused rows that do not merge, so the field as it is stands in for none.
+                let n = id(*node);
+                let now = field(tree, &fields, n, *on);
+                let to = replica::edit::merged_rows(Some(&now), rows).unwrap_or(now);
+                let change = Change::Set {
+                    node: n,
+                    field: *on,
+                    to,
+                    by: None,
+                };
+                (n, audience(*node), change)
+            }
             Op::Remove { node } => {
                 let n = id(*node);
                 use crate::ground::scene::{DOORWAY, F_DOORWAYS, F_OPEN_DOOR_LINK};
@@ -817,6 +835,61 @@ mod doorway_lowering_tests {
             }
         }
         assert_eq!(seen, ["link", "row", "door"]);
+    }
+
+    /// #3728: a rows operation lowers to one set of the whole field, each row merged over the one with its first two
+    /// values (a land edit's changed tiles), the other rows kept.
+    #[test]
+    fn rows_lower_to_one_set_of_the_merged_field() {
+        let im = import_eden::load(&testworld::generate(1, 0).unwrap().text).unwrap();
+        let wall = im.nodes["building"];
+        let Value::Array(rows) = im
+            .tree
+            .node(im.tree.handle(wall).unwrap())
+            .unwrap()
+            .fields()[&F_SOLIDS]
+            .clone()
+        else {
+            panic!("solid rows")
+        };
+        let Value::Array(mut first) = rows[0].clone() else {
+            panic!("a row")
+        };
+        first.push(Value::Uint(1));
+        let added = Value::Array(vec![Value::Nint(9_999), Value::Nint(9_999)]);
+        let checked = Checked {
+            edit: Edit {
+                claim: None,
+                intent: Id::new(Scope([0xec; 16]), 1).unwrap(),
+                actor: Actor::Creator(Id::new(Scope([0xed; 16]), 1).unwrap()),
+                planned: 0,
+                ops: vec![Op::Rows {
+                    node: Ref::Node(wall),
+                    field: F_SOLIDS,
+                    rows: vec![Value::Array(first.clone()), added.clone()],
+                }],
+            },
+            reads: Vec::new(),
+            parents: Vec::new(),
+            geometry: BTreeMap::new(),
+        };
+        let lowered = effects(&im.tree, 0, &checked, &BTreeMap::new(), 0);
+        let mut want = rows.clone();
+        want[0] = Value::Array(first);
+        want.push(added);
+        let sets: Vec<_> = lowered
+            .iter()
+            .filter_map(|e| match &e.body {
+                Body::Changes(c) => Some(c),
+                _ => None,
+            })
+            .flatten()
+            .map(|c| c.change.clone())
+            .collect();
+        assert_eq!(sets.len(), 1);
+        assert!(
+            matches!(&sets[0], Change::Set { node, field: F_SOLIDS, to: Value::Array(r), .. } if *node == wall && *r == want)
+        );
     }
 
     #[test]
