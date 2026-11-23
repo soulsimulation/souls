@@ -15,7 +15,8 @@
 //                                             owner, and returns; the pairing finishes in the background (W2)
 //   souls.mjs act <act> [<act>...]            a ranked list: the first is the act, the rest its fallbacks. An act is
 //                                             <verb>:<id> (sit:<seat id>), an id alone (walk there), or a verb; ids
-//                                             or <name>=<id> after an act are its thing arguments (C10)
+//                                             or <name>=<id> after an act are its thing arguments (C10); a walk's
+//                                             gait=walk|jog|run sets its pace (0.135 G1)
 //   souls.mjs act <act> ... --wait            the same, then returns its receipt's final phase (done, refused with the
 //                                             reason, resolved) or, after 60 s, a still-running line saying how to check
 //   souls.mjs inspect <id>                    the thing as the copy holds it and its own offers, each with its parameters

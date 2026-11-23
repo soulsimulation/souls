@@ -3,7 +3,7 @@
 //! hill covers the same distance on the ground as one on the flat; the steep cells it may not stand on are cut from the
 //! open ground (`crate::ground`, [`crate::ground::STEEP`]).
 //!
-//! Starting values are today's (walk 1.35, jog 2.5, run 4.0, wade 0.9, swim 0.8 m/s). Walk, jog and run are used on
+//! Starting values are today's (walk 1.4, jog 2.5, run 4.0, wade 0.9, swim 0.8 m/s). Walk, jog and run are used on
 //! dry ground; wading on ground under at most [`WADE_DEPTH`] of water, swimming on the water's surface where it is
 //! deeper (N11b, #3198: the open ground's water pieces, `crate::ground::OpenGround::cut_water`).
 
@@ -31,7 +31,7 @@ pub struct Gait {
 
 pub const WALK: Gait = Gait {
     name: "walk",
-    speed: 1_350_000,
+    speed: 1_400_000,
     on: &[Ground::Dry],
 };
 pub const JOG: Gait = Gait {

@@ -1554,10 +1554,12 @@ fn bind_spot(s: Box<SpotAct>, body: Id, actor: Actor) -> Result<Asked, String> {
         (Bound::Slot { thing, .. }, false, _) => Ask::Walk {
             node: thing,
             point: None,
+            gait: None,
         },
         (Bound::Stand(t), false, _) => Ask::Walk {
             node: t.node,
             point: Some(t.point()),
+            gait: None,
         },
         (Bound::Stand(_), true, _) => return Err("spot.not-a-slot".into()),
     };
