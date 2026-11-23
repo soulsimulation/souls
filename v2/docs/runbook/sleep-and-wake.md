@@ -82,7 +82,8 @@ agent's wave sent while the world sleeps.
 
 ## Known limits
 
-- **A large world's start is slow.** Imported Eden takes about 10 to 12 s to start on a laptop (7 s reading its
-  facts, 4 s building its town and planner), so an intent to a sleeping Eden is answered only after that, past the
-  gateway's 10 s deadline (`act.timed-out`). Alarms are early enough (the lead above); intents are not.
+- **A world's start is part of an intent's answer.** Imported Eden starts in about 1.5 s on a laptop (0.133 S5: its
+  prepared facts kept in `facts.courses`, the town assembled from one parallel cut, the checkpoint read while the
+  facts load), 2.4 s on a loaded one, so an intent to a sleeping Eden was answered in 2.75 s. A world's first start
+  after its facts or entries change is slower (about 4.5 s for Eden): it prepares them again.
 - "Nothing unshipped" (O3) before a world sleeps is not checked yet.
