@@ -8,7 +8,13 @@
 //! supervisor pin <world> <hash> pin a build in the directory (W8's set_build)
 //! supervisor hash <file>        a build's hash
 //! supervisor directory-get <key> print the directory store's object at <key> (exit 3 when there is none)
+//! supervisor alarms             the machine's alarm daemon (O2, #2731): wakes sleeping worlds, on $WORLDS_ROOT/alarms.sock
+//! supervisor wake <world>       asks the alarm daemon to wake a world now
 //! ```
+//!
+//! The alarm daemon wakes a world with `systemctl start --no-block worldd@<world>.service`, or, with
+//! `$SUPERVISOR_WAKE` set, by running that program with the world's name. Its record is `alarms/$SOULS_MACHINE`
+//! (default `local`) in the directory.
 //!
 //! The machine's folder is `$WORLDS_ROOT`: `builds/<hash>/worldd`, `worlds/<world>/` (each world's state), `cache/`
 //! (the cached copy of each world's record) and `health/`. The directory is the object store `DIRECTORY_STORE_*`
@@ -23,10 +29,12 @@ use directoryd::directory::store::Store;
 use replica::encode::{from_hex, to_hex};
 use supervisor::folder::Folder;
 use supervisor::health::{self, Event};
+use supervisor::wake::{Daemon, Program, Systemd, Waker};
 use supervisor::{
     EXIT_BUILD_MISMATCH, EXIT_BUILD_MISSING, EXIT_PIN_MISSING, World, build_hash, build_path, pin,
     set_pin,
 };
+use supervisor::{alarm, sleep};
 
 // The supervisor is operations, not the engine: its records carry the wall clock's time (the wall-clock rule, K7).
 #[allow(clippy::disallowed_methods)]
@@ -34,6 +42,14 @@ fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_millis() as i64)
+}
+
+// The alarm daemon's clock: alarms are wall-clock times (the wall-clock rule, K7).
+#[allow(clippy::disallowed_methods)]
+fn now_us() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_micros() as i64)
 }
 
 fn root() -> PathBuf {
@@ -215,6 +231,28 @@ fn run(args: &[String]) -> Result<i32, String> {
             with_store(&root, |s| set_pin(s, &world, &build))??;
             Ok(0)
         }
+        Some("alarms") => {
+            let socket = root.join("alarms.sock");
+            let machine = std::env::var("SOULS_MACHINE").unwrap_or_else(|_| "local".into());
+            let mut waker: Box<dyn Waker> = match std::env::var("SUPERVISOR_WAKE") {
+                Ok(p) => Box::new(Program(p)),
+                Err(_) => Box::new(Systemd),
+            };
+            let (tx, rx) = std::sync::mpsc::channel();
+            supervisor::wake::listen(&socket, tx).map_err(|e| format!("alarms: {e}"))?;
+            with_store(&root, |s| {
+                let record = alarm::Record::load(s, &machine)?;
+                let armed = record.alarms.values().filter(|d| d.is_some()).count();
+                println!("alarms: {armed} armed of {}", record.alarms.len());
+                Daemon::new(record).run(&rx, waker.as_mut(), now_us);
+                Ok::<_, String>(())
+            })??;
+            Ok(0)
+        }
+        Some("wake") => {
+            sleep::wake(&root.join("alarms.sock"), &world_arg(args)?.name())?;
+            Ok(0)
+        }
         Some("hash") => {
             let bytes =
                 std::fs::read(args.get(2).ok_or("no file named")?).map_err(|e| e.to_string())?;
@@ -247,7 +285,7 @@ fn run(args: &[String]) -> Result<i32, String> {
             }
         }
         _ => Err(
-            "usage: supervisor launch|ready|exited|health|pin|hash|directory-get ... (see the crate's docs)"
+            "usage: supervisor launch|ready|exited|health|pin|hash|directory-get|alarms|wake ... (see the crate's docs)"
                 .into(),
         ),
     }
