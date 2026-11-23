@@ -161,7 +161,13 @@ async function worldPage(video) {
   // what the world says happened, by name, as the page's v2 reader hands its parts on (the world's own records, such as
   // an act ended at its deadline): counted from the reader worker's messages, read-only
   await page.addInitScript(() => {
-    const W = window.Worker, seen = (window.__happened = {}), parts = (window.__parts = []), pub = (window.__published = []);
+    const W = window.Worker, seen = (window.__happened = {}), parts = (window.__parts = []), pub = (window.__published = []), clock = [];
+    // B3-7: the world's time at page time `pt` (ms, performance.now), from the stream's own timestamps: each part's end
+    // (it is written only after its end) and each pointer's quiet time plus the writer's 250 ms settle (worldd view_out
+    // rule 11: the world's time when it wrote the pointer). Page time less world time is smallest for the sample that
+    // came soonest after its world time; the least over the last minute maps one to the other, early by that sample's
+    // own lag (tens to a few hundred ms). It never assumes the last part ended "now", which a quiet spell breaks.
+    window.__worldAt = (pt) => { const xs = clock.filter((c) => c.at <= pt && c.at > pt - 60_000); return xs.length ? (pt - Math.min(...xs.map((c) => c.at - c.world / 1000))) * 1000 : null; };
     // B3-7: when the page's newest whole chunk moved on (its serverTick), by the page's clock
     const poll = () => { const t = window.__soulsV2?.takes; if (t && t.serverTick !== pub.at(-1)?.tick) { pub.push({ tick: t.serverTick, at: performance.now() }); if (pub.length > 400) pub.shift(); } requestAnimationFrame(poll); };
     requestAnimationFrame(poll);
@@ -171,8 +177,11 @@ async function worldPage(video) {
         this.addEventListener('message', (e) => {
           for (const h of e.data?.p?.happened ?? []) if (h?.name) seen[h.name] = (seen[h.name] ?? 0) + 1;
           // B3-7: each part's world span and when the page had it, with its moves and the things it moved into a frame
-          const p = e.data?.t === 'part' ? e.data.p : null;
-          if (p) parts.push({ from: p.from, to: p.to, at: performance.now(), wall: Date.now(), moves: (p.moves ?? []).map((m) => ({ body: m.body, name: m.name, start: m.start, end: m.ends?.at(-1) })),
+          const p = e.data?.t === 'part' ? e.data.p : null, now = performance.now();
+          if (p) clock.push({ at: now, world: p.to });
+          else if (e.data?.t === 'pointer' && typeof e.data.p?.quietUntil === 'number') clock.push({ at: now, world: e.data.p.quietUntil + 250_000 });
+          if (clock.length > 600) clock.shift();
+          if (p) parts.push({ from: p.from, to: p.to, at: now, moves: (p.moves ?? []).map((m) => ({ body: m.body, name: m.name, start: m.start, end: m.ends?.at(-1) })),
             framed: (p.nodes ?? []).filter((n) => n.parent).map((n) => ({ id: n.id, parent: n.parent, at: n.at })) }), parts.length > 400 && parts.shift();
         });
       }
@@ -204,15 +213,15 @@ const probe = (page, soul, since = 0) => page.evaluate(({ soul, since }) => {
   return { doing: s.doing, activity, acts: [...acts], prop, said, p, tick };
 }, { soul, since });
 
-/** B3-7: where the time went for a step sent at page time `pt0` (ms): the world's time then (the newest part's end and the
- *  time since the page had it), and for this Soul's first move started and first thing put in its frame after that, the
+/** B3-7: where the time went for a step sent at page time `pt0` (ms): the world's time then (window.__worldAt, mapped from
+ *  the stream's own timestamps), and for this Soul's first move started and first thing put in its frame after that, the
  *  world time it happened (ms after the send), when the page had the part saying so, and when the chunk holding it was
  *  whole on the page (each ms after the send). The page then plays it `playDelay` ticks behind that chunk's end. */
 const timeline = (page, soul, pt0) => page.evaluate(({ soul, pt0 }) => {
   const v = window.__soulsV2, parts = window.__parts ?? [], pub = window.__published ?? [];
   const ent = v?.souls.get(soul)?.entityId; if (!ent) return null;
   const mine = (id) => { const e = `v2_${String(id).replace(/[^0-9a-z]/gi, '_')}`; return ent === e || ent.startsWith(`${e}_`); };
-  const before = [...parts].reverse().find((p) => p.at <= pt0), worldAt = before ? before.to + (pt0 - before.at) * 1000 : null;
+  const worldAt = window.__worldAt?.(pt0) ?? null, pageAt = (us) => (worldAt === null ? null : pt0 + (us - worldAt) / 1000);
   const ms = (us) => (worldAt === null ? null : Math.round((us - worldAt) / 1000));
   const shown = (us) => { const end = Math.ceil(us / 50_000 / 10) * 10; const q = pub.find((x) => x.tick >= end && x.at >= pt0); return q ? Math.round(q.at - pt0) : null; };
   const after = parts.filter((p) => p.at >= pt0);
@@ -221,10 +230,8 @@ const timeline = (page, soul, pt0) => page.evaluate(({ soul, pt0 }) => {
     move: of((p) => { const m = p.moves.find((m) => mine(m.body)); return m ? { at: m.start, what: `${m.name} to ${ms(m.end)}` } : undefined; }),
     framed: of((p) => { const n = p.framed.find((n) => mine(n.parent)); return n ? { at: p.from, what: `${n.id}, its record at ${n.at === undefined ? '?' : ms(n.at)}` } : undefined; }),
     playDelayTicks: v.takes.playDelay,
-    // world time is wall-clock µs: how far behind the wall clock each part came, at the send and over the step
-    behindMs: before ? Math.round(before.wall - before.to / 1000) : null,
-    behindAfterMs: after.slice(0, 12).map((p) => Math.round(p.wall - p.to / 1000)),
-    sentWall: before ? Math.round(before.wall + (pt0 - before.at)) : null,
+    // how long after its end each part of the step came, on the same mapping (worldd writes a part 250 ms after its end)
+    partLagMs: worldAt === null ? null : after.slice(0, 12).map((p) => Math.round(p.at - pageAt(p.to))),
   };
 }, { soul, pt0 });
 
@@ -294,10 +301,10 @@ else if (ONLY.has('2')) {
   let soul = null, arrivalT0 = null;
   const step = async (name, send, shown) => {
     const b = soul ? await probe(page, soul) : null, pt0 = await page.evaluate(() => performance.now()), t0 = Date.now();
-    // The world's tick at the send, as the page knows it (its newest part's end and the time since; a little early by
-    // the parts' own lag): a step counts as shown only when the page draws a moment at or after it, never a moment
+    // The world's tick at the send, as the page maps it (window.__worldAt, from the stream's own timestamps; a little
+    // early by the soonest sample's lag): a step counts as shown only when the page draws a moment at or after it, never a moment
     // before the act (B3-7: a carry sent while the page still played the take's slide was seen walking at once).
-    const since = await page.evaluate((pt0) => { const p = [...(window.__parts ?? [])].reverse().find((x) => x.at <= pt0); return p ? Math.floor((p.to + (pt0 - p.at) * 1000) / 50_000) : 0; }, pt0);
+    const since = await page.evaluate((pt0) => { const w = window.__worldAt?.(pt0); return w ? Math.floor(w / 50_000) : 0; }, pt0);
     const sent = send();
     let seenMs = null;
     while (Date.now() - t0 < (soul ? 6000 : 30_000)) { // a Soul not on the page yet: wait longer, to say when it came
