@@ -10,7 +10,7 @@ import { apiPath } from '../world-path.ts';
 import type { Souls } from '../useSouls.ts';
 import type { V2Bridge } from './bridge.ts';
 import { streamNotice } from './stream-health.ts';
-import { WorldState, type LayerLike } from './world-state.ts';
+import { appendEdge, WorldState, type LayerLike } from './world-state.ts';
 
 const STREAM = /^\/s\/[A-Za-z0-9._/-]+\/$/;
 /** The v2 stream this world's page reads, when its inline config names one; else null (the old socket). */
@@ -73,8 +73,8 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
         }
         if (v.error && v.error !== lastError) { lastError = v.error; errorAtParts = v.parts; console.warn('v2 stream:', v.error); }
         if (v.parts !== seenParts) { seenParts = v.parts; lastPartAt = performance.now(); }
-        const diff = world.diff((window as unknown as { __soulsEntity?: { layer?: LayerLike } }).__soulsEntity?.layer, Date.now());
-        if (diff) st.edge = [diff];
+        const diff = world.next((window as unknown as { __soulsEntity?: { layer?: LayerLike } }).__soulsEntity?.layer, Date.now());
+        if (diff) st.edge = appendEdge(st.edge, diff);
       }
       // one visible state for every way the stream can fail or stall: the page's own status line (LiveWorld, ViewerFrame)
       st.streamNotice = streamNotice({ failed, error: bridge?.view.error ?? null, errorAtParts, parts: seenParts, startedAt, lastPartAt, now: performance.now() });

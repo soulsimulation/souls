@@ -21,8 +21,6 @@ const STATE: Record<string, [n: number, key: string, type: 'bool' | 'int'][]> = 
 };
 /** import-eden's field 27: the entry a thing borrows (a Mars chair is an `eden:chair`). */
 const F_ENTRY = 27;
-/** import-eden's field 6: a door, 1 open, 0 shut (`eden:door`'s `open`). */
-const F_OPEN = 6;
 /** E6's weather fields (v2/web/src/sky/record.ts F): the kind, cloud, rain and wind 0 to 100, the next change (µs). */
 const F_WEATHER = 75, F_CLOUD = 76, F_RAIN = 77, F_WIND = 78, F_WEATHER_NEXT = 79, F_DAY = 60, F_LIGHT = 70;
 const KINDS = new Set(['clear', 'cloudy', 'rain', 'wind', 'fog', 'storm']);
@@ -34,8 +32,8 @@ const plainName = (k: string) => k.split('@')[0].split(':').pop() ?? '';
  *  that holds none of its fields yet (it is drawn as the layer has it). */
 export function thingState(n: NodeLike): Record<string, boolean | number> | null {
   const entry = typeof n.fields?.[F_ENTRY] === 'string' ? (n.fields[F_ENTRY] as string) : n.kind;
-  // import-eden writes field 6 on every thing that is a door today, whatever its kind
-  const defs = STATE[plainName(entry)] ?? (n.fields && F_OPEN in n.fields ? STATE.door : undefined);
+  // a door by its kind or entry (`eden:door`, or a `…_door` kind); field 6 alone is not one: another kind may use it
+  const name = plainName(entry), defs = STATE[name] ?? (name.endsWith('_door') ? STATE.door : undefined);
   if (!defs || !n.fields) return null;
   let out: Record<string, boolean | number> | null = null;
   for (const [f, key, type] of defs) {
@@ -99,6 +97,8 @@ export class WorldState {
   private readonly origins = new Map<string, string>();
   /** The take tick each state was read at (a part's end; 0 from a snapshot); '' is the weather's. */
   private readonly ticks = new Map<string, number>();
+  /** The sequence number of the last diff handed to the page: each is sent once (the layer applies the first of a seq). */
+  private sent: number | null = null;
   weather: OldWeather | null = null;
 
   /** Listens to the reader worker beside the bridge (which takes its `onmessage`); returns it. */
@@ -123,4 +123,17 @@ export class WorldState {
 
   /** The diff for the page's entity layer now, or null (see worldDiff). */
   diff(layer: LayerLike | null | undefined, at: number): WorldDiff | null { return worldDiff(layer, this.things, this.weather, at, this.ticks); }
+
+  /** The diff to append to the page's edge log now, or null: once per sequence number (while the layer has not applied
+   *  it, the same seq is not sent again; whatever is still unlike v2 after it goes in the next). */
+  next(layer: LayerLike | null | undefined, at: number): WorldDiff | null {
+    const d = this.diff(layer, at);
+    if (!d || d.seq === this.sent) return null;
+    this.sent = d.seq;
+    return d;
+  }
+}
+
+/** The page's edge log with one message appended, kept as the old socket keeps it (useSouls.ts: the last 300). */
+export function appendEdge<T>(log: readonly T[], m: T): T[] { return [...log, m].slice(-300);
 }

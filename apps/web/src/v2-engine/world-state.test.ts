@@ -4,7 +4,7 @@ import assert from 'node:assert/strict';
 import { setWeatherInForce } from '@souls/world-compiler/weather-rules';
 import { V2Bridge } from './bridge.ts';
 import { TICK_US, TICKS } from './takes.ts';
-import { thingState, weatherOf, WorldState, type LayerLike, type WorldDiff } from './world-state.ts';
+import { appendEdge, thingState, weatherOf, WorldState, type LayerLike, type WorldDiff } from './world-state.ts';
 
 const node = (id: string, kind: string, origin: string, fields: Record<number, unknown>) => ({ id, kind, parent: 'w.1', origin, fields });
 const world = (sky: Record<number, unknown>) => ({ id: 'w.1', kind: 'souls:world', parent: null, sky });
@@ -28,7 +28,8 @@ test('a door\'s and a lamp\'s v2 fields are the state the old page draws them by
   assert.deepEqual(thingState(node('a.1', 'eden:door@ab', 'e_door', { 6: 1, 7: 3 })), { open: true });
   assert.deepEqual(thingState(node('a.2', 'eden:desk_lamp', 'e_lamp', { 28: 0 })), { on: false });
   assert.deepEqual(thingState(node('a.3', 'eden:floor_lamp', 'e_fl', { 28: 2 })), { level: 2 });
-  assert.deepEqual(thingState(node('a.7', 'eden:shop', 'e_shopdoor', { 6: 0, 2: 'x' })), { open: false }, 'any imported door (field 6), whatever its kind');
+  assert.deepEqual(thingState(node('a.7', 'eden:shop_door', 'e_shopdoor', { 6: 0 })), { open: false }, 'a door kind');
+  assert.equal(thingState(node('a.8', 'eden:shelf', 'e_shelf', { 6: 1 })), null, 'field 6 on a thing that is not a door is not a door');
   assert.deepEqual(thingState(node('a.4', 'mars:thing', 'e_m', { 27: 'eden:pendant', 28: 1 })), { on: true }, 'a borrowed entry');
   assert.equal(thingState(node('a.5', 'eden:table', 'e_t', { 28: 1 })), null, 'not a door or a lamp');
   assert.equal(thingState(node('a.6', 'eden:door', 'e_d', {})), null, 'no field yet: drawn as the layer has it');
@@ -99,4 +100,22 @@ test('the sky\'s clock follows v2\'s calendar fields 60-61 in the chunks', () =>
   // the chunks' clock is the newest chunk end's civil time: origin + t · 86,400 / day
   const want = new Date(Date.UTC(2026, 5, 1) + Math.floor((b.view.takes.serverTick * TICK_US * 86_400) / day) / 1000).toISOString();
   assert.equal(env.datetime, want);
+});
+
+test('each diff is appended to the page\'s edge log once, beside the messages already there', () => {
+  const ws = new WorldState(), { l, apply } = layer([{ id: 'e_door', state: { open: false } }]);
+  ws.receive(part([node('a.1', 'eden:door', 'e_door', { 6: 1 })]));
+  let log: unknown[] = [{ type: 'edge', kind: 'said', at: 1 }];
+  const d = ws.next(l, 0)!;
+  log = appendEdge(log, d);
+  assert.equal(ws.next(l, 0), null, 'not applied yet: the same seq is not sent again');
+  ws.receive(part([node('a.1', 'eden:door', 'e_door', { 6: 0 })]));
+  assert.equal(ws.next(l, 0), null, 'nor a newer state under the same seq');
+  apply(d);
+  const d2 = ws.next(l, 0)!;
+  assert.equal(d2.seq, d.seq + 1);
+  assert.deepEqual(d2.diff.upserts, [{ id: 'e_door', state: { open: false } }], 'what is still unlike v2 goes in the next');
+  log = appendEdge(log, d2);
+  assert.deepEqual(log, [{ type: 'edge', kind: 'said', at: 1 }, d, d2], 'other edge messages are kept');
+  assert.equal(appendEdge(Array.from({ length: 300 }, (_, i) => i), 300).length, 300, 'the last 300, as the socket keeps them');
 });
