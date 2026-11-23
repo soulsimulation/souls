@@ -28,6 +28,7 @@ test('a door\'s and a lamp\'s v2 fields are the state the old page draws them by
   assert.deepEqual(thingState(node('a.1', 'eden:door@ab', 'e_door', { 6: 1, 7: 3 })), { open: true });
   assert.deepEqual(thingState(node('a.2', 'eden:desk_lamp', 'e_lamp', { 28: 0 })), { on: false });
   assert.deepEqual(thingState(node('a.3', 'eden:floor_lamp', 'e_fl', { 28: 2 })), { level: 2 });
+  assert.deepEqual(thingState(node('a.7', 'eden:shop', 'e_shopdoor', { 6: 0, 2: 'x' })), { open: false }, 'any imported door (field 6), whatever its kind');
   assert.deepEqual(thingState(node('a.4', 'mars:thing', 'e_m', { 27: 'eden:pendant', 28: 1 })), { on: true }, 'a borrowed entry');
   assert.equal(thingState(node('a.5', 'eden:table', 'e_t', { 28: 1 })), null, 'not a door or a lamp');
   assert.equal(thingState(node('a.6', 'eden:door', 'e_d', {})), null, 'no field yet: drawn as the layer has it');

@@ -21,6 +21,8 @@ const STATE: Record<string, [n: number, key: string, type: 'bool' | 'int'][]> = 
 };
 /** import-eden's field 27: the entry a thing borrows (a Mars chair is an `eden:chair`). */
 const F_ENTRY = 27;
+/** import-eden's field 6: a door, 1 open, 0 shut (`eden:door`'s `open`). */
+const F_OPEN = 6;
 /** E6's weather fields (v2/web/src/sky/record.ts F): the kind, cloud, rain and wind 0 to 100, the next change (µs). */
 const F_WEATHER = 75, F_CLOUD = 76, F_RAIN = 77, F_WIND = 78, F_WEATHER_NEXT = 79, F_DAY = 60, F_LIGHT = 70;
 const KINDS = new Set(['clear', 'cloudy', 'rain', 'wind', 'fog', 'storm']);
@@ -32,7 +34,8 @@ const plainName = (k: string) => k.split('@')[0].split(':').pop() ?? '';
  *  that holds none of its fields yet (it is drawn as the layer has it). */
 export function thingState(n: NodeLike): Record<string, boolean | number> | null {
   const entry = typeof n.fields?.[F_ENTRY] === 'string' ? (n.fields[F_ENTRY] as string) : n.kind;
-  const defs = STATE[plainName(entry)];
+  // import-eden writes field 6 on every thing that is a door today, whatever its kind
+  const defs = STATE[plainName(entry)] ?? (n.fields && F_OPEN in n.fields ? STATE.door : undefined);
   if (!defs || !n.fields) return null;
   let out: Record<string, boolean | number> | null = null;
   for (const [f, key, type] of defs) {
