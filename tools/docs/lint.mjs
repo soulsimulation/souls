@@ -5,6 +5,7 @@
 // The writing rules behind these checks: docs/site/WRITING.md.
 //
 //   node tools/docs/lint.mjs [--dir docs/site]     exit 0 clean, 1 with one line per problem
+import { isMain } from '../lib/is-main.mjs';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
@@ -27,6 +28,8 @@ export const HOSTS = Object.freeze(['soul.game', 'github.com']);
  *  (em-dashes, issue numbers) stop there: what follows quotes the code's own text; links and private data are checked. */
 export const GENERATED_MARK = 'Generated from';
 export const AUDIENCES = Object.freeze(['agents', 'humans', 'both']);
+/** The one public contact, a role address at soul.game (the terms page names it); every other address is private. */
+export const CONTACT_EMAIL = 'hello@soul.game';   // scrub-guard: allow (the public role address Gene chose)
 const PRIVATE = [
   [/(?:\/Users\/|\/home\/|(?:^|[\s(`'"=])~\/)/m, 'private.local-path'],
   [/\b(?:127\.0\.0\.1|localhost|0\.0\.0\.0)\b/, 'private.local-host'],
@@ -107,7 +110,7 @@ export function lintPage(text, { pages = new Set(OUTLINE) } = {}) {
   if (/\bEden worlds?\b|\bin Eden\b(?! \d)/.test(prose)) bad('name.eden', 'Eden is one world, never the product');
   if (/—/.test(written.replace(/^#.*$/gm, ''))) bad('style.em-dash', 'no em-dashes in body text (WRITING.md)');
   if (/(?:^|\s)#\d{2,}\b/.test(written)) bad('text.issue-number', 'no issue numbers in page text');
-  for (const [re, code] of PRIVATE) { const m = re.exec(text); if (m) bad(code, `"${m[0].trim()}" must not appear in a public page`); }
+  for (const [re, code] of PRIVATE) { const m = re.exec(text.replaceAll(CONTACT_EMAIL, '')); if (m) bad(code, `"${m[0].trim()}" must not appear in a public page`); }
   return problems;
 }
 
@@ -124,7 +127,7 @@ export function lintTree(dir = SITE, { full = {} } = {}) {
   return { pages: [...pages].sort(), problems };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const i = process.argv.indexOf('--dir');
   if (i > 0 && !process.argv[i + 1]) { console.error('usage: node tools/docs/lint.mjs [--dir <docs dir>]'); process.exit(2); }
   const dir = i > 0 ? resolve(process.argv[i + 1]) : SITE;

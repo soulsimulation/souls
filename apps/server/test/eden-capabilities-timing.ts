@@ -4,6 +4,7 @@
 // network; creates one Soul through the owner flow and times its capabilities calls, before and after it walks.
 //   node apps/server/test/eden-capabilities-timing.ts [--json out.json] [--walk]
 // Also exports `bootEden` for the regression test (eden-capabilities-budget.test.ts).
+import { isMain } from '../../../tools/lib/is-main.mjs';
 import { readFileSync, writeFileSync } from 'node:fs';
 import { setImmediate } from 'node:timers/promises';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
@@ -67,7 +68,7 @@ function referenceWork(): number {
 /** Stable view of a capability list for before/after comparison (ids, availability, targets, reasons). */
 export function capsDigest(caps: unknown[]): string { return JSON.stringify(caps); }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const out = process.argv.includes('--json') ? process.argv[process.argv.indexOf('--json') + 1] : null;
   const walk = process.argv.includes('--walk');
   const lag = monitorEventLoopDelay({ resolution: 20 }); lag.enable();

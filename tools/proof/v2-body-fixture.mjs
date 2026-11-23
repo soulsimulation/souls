@@ -1,10 +1,10 @@
 // One fixed native body/viewer fixture; operational mappings remain private.
+import { isMain } from '../lib/is-main.mjs';
 import { createHash } from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { createServer } from 'node:http';
 import { mkdirSync, readFileSync, writeFileSync, openSync, closeSync, lstatSync } from 'node:fs';
 import { basename, dirname, isAbsolute, join, relative, resolve, extname } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { createConnection } from 'node:net';
 import { checkPort, portFree } from '../../e2e/local-smoke.mjs';
 const hash = bytes => createHash('sha256').update(bytes).digest('hex');
@@ -85,7 +85,7 @@ export async function startV2BodyFixture({ checkout, data, log, port, artifacts,
   return { child: children[0], children, base, viewer: base + '/?stream=' + encodeURIComponent('/s/' + pointer.stream.replace(/^views\//, '')), dataDir: target, recipe };
 }
 // Fixed static origin: actual built web, actual public view and public archive export only.
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   if (process.argv.length !== 4 || process.argv[2] !== '--origin') fail('entry');
   const c = json(process.argv[3]), views = join(c.data, 'world/views'), history = join(c.data, 'world/history');
   const type = { '.js': 'text/javascript', '.css': 'text/css', '.html': 'text/html', '.json': 'application/json', '.wasm': 'application/wasm', '.png': 'image/png', '.jpg': 'image/jpeg', '.webp': 'image/webp', '.svg': 'image/svg+xml' };

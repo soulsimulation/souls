@@ -1,0 +1,46 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:football_pitch",
+  "owner": "place",
+  "geometry": {
+    "bounds_mm": [
+      50000,
+      2500,
+      30000
+    ]
+  },
+  "areas": {
+    "pitch": {
+      "at_mm": [
+        0,
+        0,
+        0
+      ],
+      "radius_mm": 15000,
+      "allows": {
+        "sit": "on",
+        "lie": "on"
+      }
+    }
+  },
+  "looks": {
+    "model": "look:football_pitch",
+    "shape": {"round":10,"shapes":[{"kind":"box","at":[0,10,0],"size":[50000,20,30000],"round":0,"tint":"grass"},{"kind":"box","at":[-20000,21,0],"size":[5000,2,30000],"round":0,"tint":"stripe"},{"kind":"box","at":[-10000,21,0],"size":[5000,2,30000],"round":0,"tint":"stripe"},{"kind":"box","at":[0,21,0],"size":[5000,2,30000],"round":0,"tint":"stripe"},{"kind":"box","at":[10000,21,0],"size":[5000,2,30000],"round":0,"tint":"stripe"},{"kind":"box","at":[20000,21,0],"size":[5000,2,30000],"round":0,"tint":"stripe"},{"kind":"box","at":[0,25,-14950],"size":[50000,4,100],"round":0,"tint":"line"},{"kind":"box","at":[0,25,14950],"size":[50000,4,100],"round":0,"tint":"line"},{"kind":"box","at":[-24950,25,0],"size":[100,4,30000],"round":0,"tint":"line"},{"kind":"box","at":[24950,25,0],"size":[100,4,30000],"round":0,"tint":"line"},{"kind":"box","at":[0,25,0],"size":[100,4,30000],"round":0,"tint":"line"},{"kind":"cyl","at":[0,25,0],"r":300,"h":4,"segments":12,"tint":"line"},{"kind":"cyl","at":[-25000,1220,-3660],"r":60,"h":2440,"segments":6,"tint":"post"},{"kind":"cyl","at":[-25000,1220,3660],"r":60,"h":2440,"segments":6,"tint":"post"},{"kind":"box","at":[-25000,2440,0],"size":[120,120,7440],"round":0,"tint":"post"},{"kind":"cyl","at":[25000,1220,-3660],"r":60,"h":2440,"segments":6,"tint":"post"},{"kind":"cyl","at":[25000,1220,3660],"r":60,"h":2440,"segments":6,"tint":"post"},{"kind":"box","at":[25000,2440,0],"size":[120,120,7440],"round":0,"tint":"post"}],"palette":{"grass":"#4f8a3c","stripe":"#5a9846","line":"#f4f4f0","post":"#f4f4f0"},"tags":["sport","football","pitch","grass"]}
+  },
+  "text": {
+    "card": "A grass football pitch with goals at each end and mowing stripes.",
+    "sport": "sport",
+    "football": "football",
+    "soccer": "soccer",
+    "pitch": "pitch"
+  },
+  "card": {
+    "text": "card",
+    "category": "sport",
+    "synonyms": [
+      "football",
+      "soccer",
+      "pitch"
+    ]
+  }
+}

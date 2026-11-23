@@ -11,10 +11,10 @@
 //
 // --apply needs CF_ACCOUNT_ID (environment or deploy.env; SIM_DEPLOY_ENV names another deploy.env). Existing objects are
 // verified and skipped, never overwritten. Receipts hold keys, hashes and dispositions, never credentials.
+import { isMain } from '../lib/is-main.mjs';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, statSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { CACHE, validKey } from '../cdn/inventory.mjs';
 import { loadCredentials, requireAccount, signRequest } from '../cdn/publish.mjs';
 import { withNewReceipt } from '../cdn/receipt.mjs';
@@ -114,4 +114,4 @@ async function main() {
     console.log(JSON.stringify({ dryRun: true, ...p.totals, index: INDEX }));
   }
 }
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) main().catch((e) => { console.error(e.message); process.exitCode = 1; });
+if (isMain(import.meta.url)) main().catch((e) => { console.error(e.message); process.exitCode = 1; });

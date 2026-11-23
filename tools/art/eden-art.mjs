@@ -11,6 +11,7 @@
 // (4 slots, 0–3); place them first with the god CLI (`place core/gallery-wall@1 …`). A local file is uploaded
 // (PNG/JPEG/WebP/GIF ≤ 4 MB, MP4/WebM ≤ 16 MB) and then hung. A web link is drawn only if its host sends a CORS header
 // (Access-Control-Allow-Origin); `hang` warns when it does not — the frame then reads "Can't show this link here". Residents may fill empty slots and change their own art.
+import { isMain } from '../lib/is-main.mjs';
 import { existsSync, readFileSync } from 'node:fs';
 
 /** Browsers draw a web link on a frame only if its host sends a CORS header (WebGL needs it); a link from a host
@@ -69,4 +70,4 @@ export async function run(argv, { fetch: f = fetch, env = process.env, log = con
   throw new Error(`unknown command ${cmd}`);
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) run(process.argv.slice(2)).catch((e) => { console.error(e.message); process.exit(1); });
+if (isMain(import.meta.url)) run(process.argv.slice(2)).catch((e) => { console.error(e.message); process.exit(1); });

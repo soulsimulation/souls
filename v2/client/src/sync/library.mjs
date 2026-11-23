@@ -13,10 +13,10 @@
 // As a command, for the `resync` bench (v2/tools/bench/resync): loads one build and prints what it took, as JSON.
 //   node v2/client/src/sync/library.mjs --cache <dir> --build <1220...> --store <dir> [--ms 1000]
 
+import { isMain } from '../../../../tools/lib/is-main.mjs';
 import { createHash } from 'node:crypto';
 import { mkdir, readFile, rename, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { Worker } from 'node:worker_threads';
 
 /** A refusal, named as the world names them. */
@@ -119,7 +119,7 @@ async function main(argv) {
   console.log(JSON.stringify({ from: got.from, downloaded: got.downloaded, size: got.bytes.length, exports: exports.length, ms }));
 }
 
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) {
+if (isMain(import.meta.url)) {
   main(process.argv.slice(2)).catch((e) => {
     console.log(JSON.stringify({ refused: e.code ?? 'error', detail: e.message }));
     process.exit(1);

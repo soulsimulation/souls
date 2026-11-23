@@ -23,6 +23,7 @@
 // [{seed, url, bytes, sha256}]), with the CDN URL each file will have once tools/score/publish-playlist-audio.mjs has
 // uploaded it. Verified performances in the index or renders.json are skipped unless --force. Media never enters git:
 // <out> is under the ignored .local/.
+import { isMain } from '../lib/is-main.mjs';
 import { createHash } from 'node:crypto';
 import { createServer } from 'node:http';
 import { existsSync, mkdirSync, readFileSync, renameSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -267,4 +268,4 @@ async function main() {
     concurrency: +value('--concurrency', 4), force: args.includes('--force'), dryRun: args.includes('--dry-run'), indexFile: resolve(value('--index', INDEX)),
   });
 }
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) main().catch((e) => { console.error(e.message); process.exitCode = 1; });
+if (isMain(import.meta.url)) main().catch((e) => { console.error(e.message); process.exitCode = 1; });

@@ -2,10 +2,10 @@
 // Opt-in managed controller for an already paired folder. Never pairs, takes
 // ownership, or changes a CLI credential. Stop any other controller first.
 import {parseArgs} from 'node:util';
-import {readFileSync,mkdirSync,writeFileSync,renameSync,lstatSync,openSync,closeSync,fstatSync,fchmodSync,fsyncSync,appendFile,constants} from 'node:fs';
+import {readFileSync,mkdirSync,writeFileSync,renameSync,lstatSync,openSync,realpathSync,closeSync,fstatSync,fchmodSync,fsyncSync,appendFile,constants} from 'node:fs';
 import {randomUUID} from 'node:crypto';
 import {resolve,join} from 'node:path';
-import {pathToFileURL} from 'node:url';
+import {fileURLToPath} from 'node:url';
 import {performance} from 'node:perf_hooks';
 import {CodexHost} from './codex-host.mjs';
 import {openControllerInventory} from './controller-ownership.mjs';
@@ -209,4 +209,6 @@ export async function main(argv=process.argv.slice(2),{signal,leaseWaitMs=65000,
   if(evidenceCloseError)throw evidenceCloseError;
  }
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href)main().catch(e=>{console.error(JSON.stringify({state:'blocked',code:e.code??'runtime.failure',reason:e.message}));process.exitCode=1;});
+// tools/lib/is-main.mjs, inlined: this file is bundled or copied alone. A start through a symlink still runs main.
+const startedAsScript = () => { try { return !!process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url)); } catch { return false; } };
+if(startedAsScript())main().catch(e=>{console.error(JSON.stringify({state:'blocked',code:e.code??'runtime.failure',reason:e.message}));process.exitCode=1;});
