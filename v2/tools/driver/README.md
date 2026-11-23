@@ -120,7 +120,9 @@ and its own gatewayd.
   every 0.5 s of world time and writes it 0.25 s after (`worldd::view_out`, rules 3 and 11), so a viewer's wait has
   that floor whatever the load.
 - **`stuck`** in the report, per agent from its own socket: `stuck` counts agents that had an act unanswered for 60 s
-  or more with no answer of any kind meanwhile; `refusedOnly` those that acted for 60 s or more with nothing but
+  or more with no answer of any kind meanwhile (and `accuracy`: 15 s after the last act the first agent reads its copy
+  again and each agent's last act naming a place is checked by where its body is; the position check composes frame
+  positions without their rotations and is not yet trustworthy); `refusedOnly` those that acted for 60 s or more with nothing but
   refusals back; `stallMaxMs` and the last answer's age at the end of the schedule.
 - **The mix** (`loads.mjs`, `mix-<n>-<even|uneven>-<every4|burst>`, n of the ladder's counts): every act's kind is
   drawn from `MIX` (say 22 %, walk 14, gesture 10, take 10, go_to 8, sit 8, look_at 7, point 6, touch 6, lean_on 5,
