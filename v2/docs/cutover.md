@@ -176,6 +176,18 @@ committed or attached): `scp <production host>:/var/lib/souls/saved/eden-owners-
 a real browser, and prints the table above. Its last run: every step passed, and the old page was back 7 s after
 the switch back.
 
+### A fresh Eden on a new build (0.132)
+
+A build whose header differs from the one Eden's log was written under cannot read that log (`worldd serve:
+header-mismatch`), so release-v2's rehearsal refuses it. Pre-release, Eden starts fresh instead, under the same world
+name, so its name, routes, gateway and pairing stay as they are: `bash v2/tools/ops/cutover/reseed-eden.sh check`,
+then `run` (root on the host, before release-v2; `reseed-eden-undo.sh <label> check|run` undoes it). It sets the world's
+folder aside, sets its objects in the directory's bucket aside with `world-aside` (`v2/tools/ops/src/world_aside.rs`:
+each object copied to `aside/<label>/`, read back and compared before any original is deleted), seeds the same facts
+with the release's `worldd`, pins it, and leaves the world stopped for release-v2 to start. Without the bucket step
+the fresh log is refused `restart-gap`: the store's record still holds the old log's mark. Run `save-wipe.sh` before
+it and `switch-eden.sh` after release-v2.
+
 ## One writer
 
 - **In the directory.** The new Eden is one world with one claim (its epoch) in the store, made when it was first
