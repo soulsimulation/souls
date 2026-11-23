@@ -321,6 +321,9 @@ pub struct Track {
     pub to: Id,
     /// Where on `to` it stands (that node's frame) when the line is in another frame; else the line's last point.
     pub arrive: Option<Vec3>,
+    /// Whether the carry waits at its end, for at most [`LANDING_WAIT`] ticks, while another body stands where it
+    /// lands (#4215): a link not taken in turns, whose far end nobody keeps clear.
+    pub hold: bool,
 }
 
 fn dist2(a: Vec3, b: Vec3) -> i128 {
@@ -396,6 +399,8 @@ struct Slot {
     /// Whether the input may differ from the one logged: set by every change, so an unchanged body costs no compare.
     touched: bool,
     track: Option<Track>,
+    /// Ticks its carry has stood at the last point of its track, held while another body stands where it lands (#4215).
+    landing: u32,
     voice: Voice,
 }
 
@@ -630,6 +635,7 @@ impl Controller {
                 logged: None,
                 touched: true,
                 track: None,
+                landing: 0,
                 voice: Voice::default(),
             },
         );
@@ -951,6 +957,29 @@ impl Controller {
         Some((&s.moved, s.track.as_ref().and_then(|t| t.link)))
     }
 
+    /// Whether a body other than `body` and those in `leaving`, not carried, stands within `room` (x and z) of where
+    /// `track` lands it (#4215): a crossing waits rather than land one body on another.
+    pub fn landing_taken(
+        &self,
+        body: Id,
+        track: &Track,
+        room: i64,
+        leaving: &BTreeSet<Id>,
+    ) -> bool {
+        let Some(at) = track.arrive.or_else(|| track.line.last().copied()) else {
+            return false;
+        };
+        let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+        self.bodies.iter().any(|(id, s)| {
+            let p = s.moved.pose.position;
+            *id != body
+                && !leaving.contains(id)
+                && s.track.is_none()
+                && crate::walk::node_of(&s.moved) == track.to
+                && d(p.x, at.x) + d(p.z, at.z) < i128::from(room) * i128::from(room)
+        })
+    }
+
     /// The link `body` is being carried across, if any.
     pub fn carrying(&self, body: Id) -> Option<Id> {
         self.bodies.get(&body)?.track.as_ref().and_then(|t| t.link)
@@ -1156,12 +1185,57 @@ impl Controller {
                 s.log(id, at, &mut self.log);
             }
         }
+        // A carry about to land waits at its track's end while another body stands where it would land, for at most
+        // LANDING_WAIT ticks (#4215): never one body set down on another while it can be helped, never held for good.
+        let mut hold: BTreeSet<Id> = BTreeSet::new();
+        for (id, s) in &self.bodies {
+            let Some(t) = s.track.as_ref().filter(|t| t.hold) else {
+                continue;
+            };
+            if s.landing >= LANDING_WAIT {
+                continue;
+            }
+            let reach = i128::from(t.speed) * i128::from(dt) / 1_000_000;
+            let mut left = 0i128;
+            let mut from = s.moved.pose.position;
+            for &q in &t.line {
+                left += dist2(from, q).isqrt();
+                from = q;
+            }
+            let Some(at) = t.arrive.or_else(|| t.line.last().copied()) else {
+                continue;
+            };
+            if left <= reach
+                && self
+                    .near
+                    .bodies_within(t.to, [at.x, at.z], LANDING_ROOM)
+                    .iter()
+                    .any(|(o, _)| o != id)
+            {
+                hold.insert(*id);
+            }
+        }
+        for (id, s) in self.bodies.iter_mut() {
+            if hold.contains(id) {
+                s.landing += 1;
+            } else if s.track.is_none() {
+                s.landing = 0;
+            }
+        }
         let mut slots: Vec<(Id, &mut Slot)> =
             self.bodies.iter_mut().map(|(&id, s)| (id, s)).collect();
+        let hold = &hold;
         let step_run = |run: &mut [(Id, &mut Slot)]| {
             let mut o = Gave::default();
             for (id, s) in run.iter_mut() {
                 match surfaces(*id, s.build.size) {
+                    Some(_) if hold.contains(id) => {
+                        // Held at its track's end: it stands there, still carried, out of "who is near".
+                        s.speak(*id, at, &mut o.said);
+                        s.log(*id, at, &mut o.log);
+                        s.moved.linear = Vec3::ZERO;
+                        o.put.push(false);
+                    }
                     Some(on) => {
                         let put = s.step_one(*id, on, dt, at, &mut o);
                         o.put.push(put);
@@ -1206,6 +1280,12 @@ impl Controller {
         out
     }
 }
+
+/// A carry waits at its track's end while another body stands within this of where it lands, µm: two personal radii
+/// and slack, as the walk skill keeps them apart (`skills::route`, `ROOM` and `SLACK`, #4215).
+pub const LANDING_ROOM: i64 = 315_000;
+/// The most ticks a carry waits at its track's end for a body standing where it lands (2 s at 20 ticks a second).
+pub const LANDING_WAIT: u32 = 40;
 
 /// The most bodies one thread steps at a time in [`Controller::step_on`].
 const BODIES: usize = 256;
@@ -1541,6 +1621,7 @@ mod class_tests {
                         speed: 1,
                         to: id,
                         arrive: None,
+                        hold: false,
                     })
                 }
                 _ => slot.moved.pose.frame.node = Id::new(Scope([0x66; 16]), 2).unwrap(),

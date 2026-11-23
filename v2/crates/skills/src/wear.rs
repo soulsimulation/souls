@@ -10,6 +10,9 @@
 //! - **The intent** `life:wear` names the body in parameter 1 as T8's words shape, `{23: bytes}`: the preset's name
 //!   or its 64-hex hash. The world resolves it here and logs only the hash.
 //! - A body with no [`BODY`] field wears the world's default ([`DEFAULT`], today's walking body).
+//! - **A look** (#3998): a body with no [`BODY`] may carry a humanoid look made in today's editor, its core/humanoid@2
+//!   params as UTF-8 JSON (one object, at most [`LOOK_MOST`] bytes), in [`LOOK`]. The world does not read it; the page
+//!   draws it over the default body. The Soul's own [`LOOK_VERB`] writes it ([`look`]), only while it wears no hash.
 //!
 //! The fit check (`sim::ground::sizes::change_size`) is the world's: this crate cannot name `sim`.
 
@@ -25,6 +28,12 @@ use replica::rules::json::{self, Value as Json};
 pub const VERB: &str = "life:wear";
 /// The body node's field holding the content hash of the body it wears (32 bytes).
 pub const BODY: u64 = 32;
+/// The body node's field holding its humanoid look's params (#3998): a costume over the default body.
+pub const LOOK: u64 = 33;
+/// The most bytes a look's params take.
+pub const LOOK_MOST: usize = 2048;
+/// The Soul's intent that puts a look on its default body: parameter 1 is the params' bytes.
+pub const LOOK_VERB: &str = "life:look";
 /// T8's words key: parameter 1 of a wear is `{23: bytes}`.
 const WORDS: u64 = 23;
 /// The body a node with no [`BODY`] field wears: the standard class, 1.75 m, standing.
@@ -149,6 +158,55 @@ pub fn change(body: Id, hash: &[u8; 32]) -> Change {
     }
 }
 
+/// Where a body stands for a look, from its node's fields.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Look {
+    /// It wears a body by hash: a look is not put on it.
+    WearsBody,
+    /// It already carries these very params.
+    Worn,
+    /// The look is written.
+    Write,
+}
+
+/// A look's params from parameter 1, checked: one JSON object as UTF-8, at most [`LOOK_MOST`] bytes. Parameter 1 is
+/// the bytes, or T8's words shape `{23: bytes}` as a client sends words (a wear's own shape).
+pub fn look_params(parameters: &BTreeMap<u64, Value>) -> Result<&[u8], &'static str> {
+    let b = match parameters.get(&1) {
+        Some(Value::Bytes(b)) => b,
+        Some(Value::Map(m)) if m.len() == 1 => match m.get(&WORDS) {
+            Some(Value::Bytes(b)) => b,
+            _ => return Err("look.malformed"),
+        },
+        _ => return Err("look.malformed"),
+    };
+    let text = std::str::from_utf8(b).map_err(|_| "look.malformed")?;
+    let object = json::parse(text).is_ok_and(|v| v.obj().is_some());
+    if b.len() > LOOK_MOST || !object {
+        return Err("look.malformed");
+    }
+    Ok(b)
+}
+
+/// What a look `params` does to a body whose node holds `fields`.
+pub fn look(fields: &BTreeMap<u64, Value>, params: &[u8]) -> Look {
+    match (fields.get(&BODY), fields.get(&LOOK)) {
+        (Some(_), _) => Look::WearsBody,
+        (None, Some(Value::Bytes(b))) if b == params => Look::Worn,
+        _ => Look::Write,
+    }
+}
+
+/// The one write of a look: `body` carries `params`.
+pub fn look_change(body: Id, params: &[u8]) -> Change {
+    Change::Set {
+        node: body,
+        field: LOOK,
+        to: Value::Bytes(params.to_vec()),
+        by: None,
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -197,6 +255,31 @@ mod tests {
         )]);
         assert_eq!(asked(&p).as_deref(), Some("pip"));
         assert_eq!(asked(&BTreeMap::new()), None);
+    }
+
+    #[test]
+    fn a_look_is_one_object_and_goes_only_on_a_default_body() {
+        let params = br##"{"frame":"fem","hair":"bob","skin":"#a0785a"}"##;
+        let p = |b: &[u8]| BTreeMap::from([(1, Value::Bytes(b.to_vec()))]);
+        assert_eq!(look_params(&p(params)), Ok(&params[..]));
+        let long = format!("{{\"a\":\"{}\"}}", "x".repeat(LOOK_MOST));
+        for bad in [&b"[1]"[..], b"nope", &[0xff], long.as_bytes()] {
+            assert_eq!(look_params(&p(bad)), Err("look.malformed"));
+        }
+        assert_eq!(look_params(&BTreeMap::new()), Err("look.malformed"));
+        let mut fields = BTreeMap::new();
+        assert_eq!(look(&fields, params), Look::Write);
+        fields.insert(LOOK, Value::Bytes(b"{}".to_vec()));
+        assert_eq!(look(&fields, params), Look::Write);
+        fields.insert(LOOK, Value::Bytes(params.to_vec()));
+        assert_eq!(look(&fields, params), Look::Worn);
+        fields.insert(BODY, Value::Bytes(vec![1; 32]));
+        assert_eq!(look(&fields, params), Look::WearsBody);
+        let body = Id::new(Scope([1; 16]), 7).unwrap();
+        assert!(matches!(
+            look_change(body, params),
+            Change::Set { field: LOOK, .. }
+        ));
     }
 
     #[test]

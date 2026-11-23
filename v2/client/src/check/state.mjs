@@ -36,7 +36,7 @@ export const textValue = (v) => (v instanceof Map && v.has(21) ? idText(v.get(21
 
 /** The copy (R5's `Copy`) as `{actor, nodes}` for `me`, walked from its roots. */
 export function stateOf(copy, kinds, me) {
-  const nodes = { [me]: {} };
+  const nodes = { [me]: {} }, parents = new Map();
   const todo = Object.values(JSON.parse(copy.roots()));
   while (todo.length) {
     const bytes = copy.record(todo.pop());
@@ -49,7 +49,18 @@ export function stateOf(copy, kinds, me) {
     const valueOf = (def, v) => (def?.type === 'enum' && typeof v === 'string' && def.values?.includes(v.replace(/^[^:]*:/, '')) ? v.replace(/^[^:]*:/, '') : v);
     if (m.get(6) instanceof Map) for (const [n, v] of m.get(6)) if (byN[n]) fields[byN[n]] = state[byN[n]].type === 'text' ? textValue(v) : valueOf(state[byN[n]], plain(v));
     nodes[id] = { ...nodes[id], kind, ...(Object.keys(fields).length ? { fields } : {}) };
+    if (m.has(3)) parents.set(id, idText(m.get(3)));
     for (const c of m.get(10) ?? []) todo.push(Buffer.from(c).toString('hex'));
+  }
+  // D8: a body taken into a seat or a bed by the thing's own form (a reparent into its slot) holds no posture field;
+  // its posture is the slot's, when the thing's body slots all give one (an armchair's `sit`, a bed's `lie`).
+  // D10: nor does that form write over a `stand` a rise wrote before, so a seat's posture wins over a written `stand`.
+  for (const [id, parent] of parents) {
+    const n = nodes[id], def = kinds[n.kind]?.state?.posture;
+    if (!def || (n.fields?.posture !== undefined && n.fields.posture !== 'stand')) continue;
+    const slots = Object.values(kinds[nodes[parent]?.kind]?.slots ?? {}).filter((t) => t?.admits === 'body' && typeof t.posture === 'string');
+    const postures = [...new Set(slots.map((t) => t.posture))];
+    if (postures.length === 1 && (def.values ?? []).includes(postures[0])) n.fields = { ...n.fields, posture: postures[0] };
   }
   return { actor: me, nodes };
 }

@@ -687,6 +687,19 @@ impl Bodies {
     }
 
     /// Where each body is now, a seated one with its stance: what a checkpoint carries (K18c, #3176).
+    /// No body moving for an intent or for the wind-down, and no sit or rise waiting for its reach (O2).
+    pub fn still(&self) -> bool {
+        self.live.is_empty() && self.wind_moves.is_empty() && self.waiting.is_empty()
+    }
+
+    /// The earliest due time of the bodies (O2): a move's phase timers and the wind-down's next step.
+    pub fn next_due(&self) -> Option<Micros> {
+        [self.due.next_due(), self.wind.next()]
+            .into_iter()
+            .flatten()
+            .min()
+    }
+
     pub fn placed(&self) -> Placed {
         self.every()
     }
