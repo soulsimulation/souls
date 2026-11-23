@@ -157,12 +157,25 @@ async function worldPage(video) {
   return { ctx, page };
 }
 /** What the page's v2 reader shows of one Soul now: its activity and held prop in the newest chunk, and its speech. */
+/** What the page draws of one Soul now: the moment LiveWorld plays (serverTick and the time since it came, less the
+ *  source's play delay, at most the newest chunk's end), not the newest chunk's end. Its activity, held prop and walking
+ *  from the chunk changes up to that tick, and its words said by then. */
 const probe = (page, soul) => page.evaluate((soul) => {
   const v = window.__soulsV2; if (!v) return null;
-  const s = v.souls.get(soul), chunk = v.takes.chunks.at(-1);
-  const e = s && chunk ? chunk.take.finalState.entities[s.entityId] : null;
-  const acts = new Set(); for (const c of v.takes.chunks.slice(-3)) for (const ch of c.take.changes ?? []) if (s && ch[1] === s.entityId && ch[2] === 'activity') acts.add(ch[3]);
-  return { doing: s?.doing ?? null, activity: e?.human?.activity ?? null, acts: [...acts], prop: e?.human?.prop ?? null, said: v.speech.filter((x) => x.from?.soulId === soul).length, p: e?.pose?.p ?? null };
+  const s = v.souls.get(soul), t = v.takes, chunks = t.chunks; if (!s || !chunks.length) return { doing: s?.doing ?? null, activity: null, acts: [], prop: null, said: 0, p: null };
+  const tick = Math.min(chunks.at(-1).toTick, t.serverTick + Math.min(2, (performance.now() - t.receivedAt) / 1000) * 20 - (t.playDelay ?? 30));
+  let activity = null, prop = null, said = 0, p = null; const acts = new Set();
+  for (const c of chunks) {
+    if (c.fromTick > tick) break;
+    const e = c.take.finalState.entities[s.entityId];
+    if (c.toTick <= tick) { activity = e?.human?.activity ?? activity; prop = e?.human?.prop ?? null; p = e?.pose?.p ?? p; }
+    for (const ch of c.take.changes ?? []) if (ch[1] === s.entityId && c.fromTick + ch[0] <= tick) {
+      if (ch[2] === 'activity') { activity = ch[3]; if (c.toTick + 20 > tick) acts.add(ch[3]); }
+      if (ch[2] === 'prop') prop = ch[3] ?? null;
+    }
+    for (const ev of c.take.events ?? []) if (ev.data?.from === soul && c.fromTick + ev.t <= tick) said++;
+  }
+  return { doing: s.doing, activity, acts: [...acts], prop, said, p, tick };
 }, soul);
 
 // ---- 2: a freshly paired agent ----
@@ -222,20 +235,20 @@ if (ONLY.has('2')) {
     row(2, name, pass, `${sent?.ok === false ? `refused: ${JSON.stringify(sent).slice(0, 160)}` : `world: ${answers || 'no answer yet'}`}; on the page ${seenMs === null ? `not within 6 s (it shows ${last ? `${last.doing ?? '?'}, ${last.activity ?? '?'}${last.prop ? `, holding ${last.prop}` : ''}` : 'no such Soul'})` : `after ${seenMs} ms`}`);
     return sent;
   };
-  const walking = (s) => s.doing === 'walking' || s.acts.includes('walk') || s.activity === 'walk';
+  const walking = (s) => s.activity === 'walk'; // drawn walking at the moment the page plays
   if (connected) {
     const bench = offering('sit', 'bench', 'chair'), bed = offering('lie', 'bed', 'hammock'), cup = offering('take', 'cup', 'book', 'apple', 'mug');
     report.lines[2].targets = { bench, bed, cup };
     // walk (the first act also brings the new Soul into the world: no join is taught or needed)
     let r = await step('walk', () => bench ? cli('act', bench) : { ok: false, detail: 'no seat found' }, walking);
     if (r?.sequence) await ended(r.sequence);
-    r = await step('sit', () => bench ? cli('act', `sit:${bench}`) : { ok: false, detail: 'no seat found' }, (s) => s.activity === 'sit' || s.acts.includes('sit') || s.doing === 'seated');
+    r = await step('sit', () => bench ? cli('act', `sit:${bench}`) : { ok: false, detail: 'no seat found' }, (s) => s.activity === 'sit');
     if (r?.sequence) await ended(r.sequence, 15_000);
     // seated, a Soul stands up before it goes anywhere (the skill: `act <ns>:rise`), in the world's namespace or the seat's
     const rise = () => { const ns = [...new Set([bench, bed].filter(Boolean).map((id) => JSON.stringify(cli('inspect', id)).match(/"([a-z0-9_-]+):rise:/)?.[1]).filter(Boolean))]; const w = cli('act', ...(ns.length ? ns : ['eden', SLUG]).map((n) => `${n}:rise`)); return w.sequence ? ended(w.sequence, 15_000) : null; };
     await rise();
     if (bed) { const w = cli('act', bed); if (w.sequence) await ended(w.sequence); }
-    r = await step('lie', () => bed ? cli('act', `lie:${bed}`) : { ok: false, detail: 'no bed found' }, (s) => s.activity === 'lie' || s.acts.includes('lie'));
+    r = await step('lie', () => bed ? cli('act', `lie:${bed}`) : { ok: false, detail: 'no bed found' }, (s) => s.activity === 'lie');
     if (r?.sequence) await ended(r.sequence, 15_000);
     await rise();
     if (cup) { const w = cli('act', cup); if (w.sequence) await ended(w.sequence); }
