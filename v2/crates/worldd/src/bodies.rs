@@ -1265,6 +1265,7 @@ impl Bodies {
             wants.forms = fresh_forms(
                 &mut self.forms_out,
                 std::mem::take(&mut self.form_questions),
+                &self.form_answers,
                 self.taken,
                 self.sent,
             );
@@ -1727,10 +1728,13 @@ fn refusal(name: &'static str, node: Id) -> Refusal {
 /// is out (sent in a batch at or after `taken`), the cursor's question is not sent, whatever its generation: a body
 /// nudged while it waits asks a new generation every tick, and each would be a full search. Once that batch has been
 /// taken, the cursor's current question goes (its form queues it each tick until answered); a stale generation's
-/// answer is refused where it is read (`Planning::receive`).
+/// answer is refused where it is read (`Planning::receive`). A question whose answer of the same generation has come
+/// back and waits in `answered` for its form to read it (later in the tick: the form's queue is last tick's) is not
+/// sent again either.
 pub(crate) fn fresh_forms(
     out: &mut BTreeMap<FormKey, (u64, u64)>,
     questions: BTreeMap<FormKey, FormQuestion>,
+    answered: &BTreeMap<FormKey, FormAnswer>,
     taken: u64,
     next: u64,
 ) -> Vec<FormQuestion> {
@@ -1738,7 +1742,11 @@ pub(crate) fn fresh_forms(
     questions
         .into_values()
         .filter(|q| {
-            if out.contains_key(&q.key) {
+            if out.contains_key(&q.key)
+                || answered
+                    .get(&q.key)
+                    .is_some_and(|a| a.generation == q.generation)
+            {
                 return false;
             }
             out.insert(q.key, (q.generation, next));

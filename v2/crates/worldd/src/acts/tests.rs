@@ -360,8 +360,14 @@ fn s8_a_form_walk_question_is_sent_once_while_it_is_out() {
     // One tick: the form asks (its question queued until answered), the queue goes in batch `next`.
     let mut tick = |planning: &mut Planning, x: i64, taken: u64, next: u64| {
         planning.ask(key, body, walk(x), &map);
-        crate::bodies::fresh_forms(&mut out, std::mem::take(&mut planning.queued), taken, next)
-            .len()
+        crate::bodies::fresh_forms(
+            &mut out,
+            std::mem::take(&mut planning.queued),
+            &BTreeMap::new(),
+            taken,
+            next,
+        )
+        .len()
     };
     let sent: usize = (0..10).map(|k| tick(&mut planning, 0, 0, k)).sum();
     assert_eq!(sent, 1, "sent once in ten ticks while out, not once a tick");
@@ -381,6 +387,89 @@ fn s8_a_form_walk_question_is_sent_once_while_it_is_out() {
         "then the current generation goes"
     );
     assert_eq!(tick(&mut planning, 18, 11, 18), 0);
+}
+
+/// S8 review: in a tick the answers are taken first, then the questions the forms queued last tick are sent, and only
+/// then do the forms read the answers. A question whose answer has just come back is not sent again: one search
+/// per question when the planner keeps up, not two.
+#[test]
+fn s8_an_answered_form_walk_question_is_not_sent_again_before_its_form_reads_it() {
+    let generated = testworld::generate(1, 0).unwrap();
+    let imported = import_eden::load(&generated.text).unwrap();
+    let ground = imported.nodes["ground"];
+    let header = import_eden::header(imported.nodes["world"], &imported.rules).unwrap();
+    let town = Town::new(imported.tree, ground, Doors::new(header, imported.rules, 0)).unwrap();
+    let id = Id::new(Scope([0xc9; 16]), 1).unwrap();
+    let body = town.surfaces[&ground]
+        .place(
+            id,
+            Frame {
+                node: ground,
+                slot: None,
+            },
+            Vec3::new(0, 0, 40_000_000),
+            Quat::IDENTITY,
+        )
+        .unwrap();
+    let key = FormKey {
+        body: id,
+        intent: Id::new(Scope([0xc9; 16]), 2).unwrap(),
+        stage: 1,
+        step: 2,
+        kind: FormKind::Walk,
+    };
+    let map = Arc::new(town.versions.clone());
+    let walk = FormQuery::Walk {
+        node: ground,
+        at: Vec3::ZERO,
+        reach: 0,
+        door: None,
+        ring: None,
+    };
+    let mut planning = Planning::default();
+    let (mut out, mut answers, mut sent) = (BTreeMap::new(), BTreeMap::new(), 0);
+    // Tick 0: the form asks; its question goes in batch 0.
+    planning.ask(key, body, walk.clone(), &map);
+    let first = crate::bodies::fresh_forms(
+        &mut out,
+        std::mem::take(&mut planning.queued),
+        &answers,
+        0,
+        0,
+    );
+    sent += first.len();
+    // Tick 1: batch 0 is taken with the answer (`Bodies::take`), then last tick's queue is sent, then the form reads.
+    answers.insert(
+        key,
+        FormAnswer {
+            generation: first[0].generation,
+            map: Arc::clone(&map),
+            result: FormResult::Walk(Vec::new()),
+        },
+    );
+    planning.ask(key, body, walk.clone(), &map);
+    sent += crate::bodies::fresh_forms(
+        &mut out,
+        std::mem::take(&mut planning.queued),
+        &answers,
+        1,
+        1,
+    )
+    .len();
+    planning.receive(std::mem::take(&mut answers));
+    assert!(
+        planning.ask(key, body, walk, &map).is_some(),
+        "the form has its answer"
+    );
+    sent += crate::bodies::fresh_forms(
+        &mut out,
+        std::mem::take(&mut planning.queued),
+        &answers,
+        2,
+        2,
+    )
+    .len();
+    assert_eq!(sent, 1, "one search for the question");
 }
 
 /// C34 (#3599) A1: a walk to a building's named area is planned on the building's own room and floor: the area
