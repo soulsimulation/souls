@@ -2943,6 +2943,7 @@ impl Town {
                 return Ok((near as u8, None));
             }
         }
+        let hold = self.read_link(link).is_none();
         Ok((
             near as u8,
             Some(Track {
@@ -2951,6 +2952,7 @@ impl Town {
                 speed,
                 to,
                 arrive,
+                hold,
             }),
         ))
     }
@@ -3020,6 +3022,10 @@ impl Links for Town {
             self.crossings.insert(body.id, Crossing { from, start });
         }
         Ok(track)
+    }
+
+    fn in_turns(&self, link: Id) -> bool {
+        self.read_link(link).is_some()
     }
 }
 
