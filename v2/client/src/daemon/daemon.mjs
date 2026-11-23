@@ -317,6 +317,29 @@ const INTENT_MOST = 4096;
 
 /** A creator's bulk edit (#3695) by the gateway's `POST /v2/creator-edit`: null when it was taken (its answer comes on
  *  the socket), else the refusal's name. Its bytes are never logged. */
+/** #3697: a creator's upload, by the gateway's `POST /v2/creator-upload`: G6's check in a child process, metadata
+ *  stripped, the hold point. The answer `{hash, state: allowed|held}` or the refusal; the token never leaves here. */
+async function upload(req) {
+  if (seat.grant.actor !== 'creator') return { ok: false, code: 'upload.not-the-creator', detail: 'this home holds a Soul\'s token, not a creator\'s' };
+  let body;
+  try { body = readFileSync(String(req.path ?? '')); } catch (e) { return { ok: false, code: 'file-unreadable', detail: `${req.path}: ${e.code ?? e.message}` }; }
+  const u = new URL(seat.gateway);
+  u.protocol = u.protocol === 'wss:' ? 'https:' : u.protocol === 'ws:' ? 'http:' : u.protocol;
+  const base = u.pathname.replace(/\/v2\/ws$/, '');
+  u.pathname = `${base}/v2/creator-upload`;
+  u.search = ''; u.hash = '';
+  try {
+    const r = await fetch(u, { method: 'POST', headers: { authorization: `Bearer ${seat.token}`, 'content-type': 'application/octet-stream' }, body, signal: AbortSignal.timeout(30_000) });
+    let a = {};
+    try { a = await r.json(); } catch { /* not JSON */ }
+    if (r.status !== 200) return { ok: false, code: a.refused ?? `upload.http-${r.status}`, ...(a.detail ? { detail: a.detail } : {}) };
+    u.pathname = `${base}/v2/uploads/${a.hash}`;
+    return { ok: true, ...a, ...(a.state === 'allowed' ? { url: u.href } : {}) };
+  } catch {
+    return { ok: false, code: 'upload.unreachable', detail: 'the gateway did not answer' };
+  }
+}
+
 async function sendBulk(bytes, sequence) {
   state.unanswered.push(sequence);
   save();
@@ -797,6 +820,7 @@ const OPS = new Set([
   'stop',
   'trace',
   'undo',
+  'upload',
   'wait',
   'wake',
   'wear',
@@ -1284,6 +1308,7 @@ async function answer(req) {
       return closing({ ok: true, sequence, sent, verb: f.verb, basis: sequenceOf(basis), ...(toward ? { to: toward } : {}) }, null, { now: true });
     }
     case 'inspect': return inspect(req);
+    case 'upload': return upload(req);
     case 'whatson': case 'calendar': return calendar(req);
     // #3704 (today's `query`, `catalog`, `context` and `batch`): reads from the copy, asking the world nothing.
     case 'query': { const rows = rowsOf(copy), me = [...rows.values()].find((r) => r.id === ME || r.soul === ME)?.id ?? null; const q = query(rows, req.questions, { budget: req.budget, me }); return q.ok ? closing(q, null, { now: true }) : { ...q, ...ageNow() }; }
