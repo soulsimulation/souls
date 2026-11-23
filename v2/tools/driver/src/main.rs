@@ -1913,6 +1913,42 @@ async fn main() {
 mod tests {
     use super::*;
 
+    /// S11: an act unanswered for 60 s is stuck only while its Soul stays where it is; a Soul that walked on in that
+    /// window is on its way. With fewer than two reads of where it is in the window, it counts as stuck.
+    #[test]
+    fn s11_a_soul_on_its_way_is_not_stuck() {
+        let agent = |stall_ms, window| Sent {
+            stall_ms,
+            stall_window: window,
+            stall_act: "eden:go_to accepted 70000ms".into(),
+            ..Sent::default()
+        };
+        let agents = [
+            agent(70_000, (1_000, 71_000)),
+            agent(70_000, (1_000, 71_000)),
+            agent(70_000, (100_000, 170_000)),
+            agent(5_000, (1_000, 6_000)),
+        ];
+        let places: Vec<Places> = (0..8)
+            .map(|i| {
+                let t = 1_000 + i * 10_000;
+                (
+                    t,
+                    vec![
+                        Some((i as i64 * 14_000_000, 0)),
+                        Some((0, 0)),
+                        Some((0, 0)),
+                        Some((0, 0)),
+                    ],
+                )
+            })
+            .collect();
+        let json = stuck_report(&agents, &places).json();
+        assert!(json.contains("\"stuck\": 2"), "{json}");
+        assert!(json.contains("\"onTheirWay\": 1"), "{json}");
+        assert!(json.contains("\"stuckAgents\": [1, 2]"), "{json}");
+    }
+
     #[test]
     fn a5_an_unmapped_kind_is_kept_with_no_verb() {
         let s =
