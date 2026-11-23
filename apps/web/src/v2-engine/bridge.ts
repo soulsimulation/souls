@@ -122,7 +122,13 @@ export class V2Bridge {
     // completes are made, and a line said just before the world went still is shown, not held until something moves.
     if (m.t === 'pointer') {
       const q = m.p.quietUntil;
-      if (typeof q === 'number' && this.liveFrom !== null && q > (this.view.newestTo ?? -Infinity)) { this.view.newestTo = q; this.publish(); }
+      if (typeof q !== 'number' || q <= (this.view.newestTo ?? -Infinity)) return;
+      // B2-4: a world already still when the page opens plays no part (the reader posts a quiet time only once it has
+      // played every part there is): its first quiet time makes the current chunk from the snapshot, once, so its Souls
+      // and things are drawn where they are, not when something next moves
+      if (this.liveFrom === null) { if (!this.nodes.size) return; this.liveFrom = (chunkEnd(q - BEHIND_US) - TICKS) * TICK_US; }
+      this.view.newestTo = q;
+      this.publish();
       return;
     }
     if (m.t === 'snapshot') { this.nodesChanged(m.s.nodes, m.s.removed, this.view.newestTo ?? 0); this.publish(); return; }
