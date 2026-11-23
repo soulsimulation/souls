@@ -6,6 +6,7 @@ import { chunkEnd, chunkOf, TICKS, TICK_US, type Body, type Frame, type Recorded
 import { defaultLookOf, entityWithLook, legacyBodyOf, lookBodyOf, propOf, seatOf, type CatalogueBody, type Held, type Seat } from './take-bodies.ts';
 import { isPublic, saidKey, speechOf, talkOf, type Said, type Talk } from './take-speech.ts';
 import { cut as cutGestures, gestureFrom, type Gesture } from './take-gestures.ts';
+import { privateTurnOf, tickerOf } from './take-talk.ts';
 
 /** What the reader's worker posts (v2/web/src/source/source.ts: NodeRec, PartRec, Pointer; only the fields read here). */
 type NodeRec = { id: string; kind: string; parent: string | null; slot: number | null; pos: [number, number, number]; rot: [number, number, number, number];
@@ -39,6 +40,9 @@ export type V2View = {
   /** What the Souls said aloud, as the old socket's edge `speech` messages (the dock and the speech layer read them as
    *  public, with the speaker's name), once each, in order, as their chunks come in (take-speech.ts). */
   speech: ReturnType<typeof speechOf>[];
+  /** R3 (take-talk.ts): private turns as the dock shows them to anyone (members, a `…` line a turn), and the ticker. */
+  conversations: NonNullable<ReturnType<typeof privateTurnOf>>;
+  ticker: { tick: number; text: string }[];
 };
 
 /** One Soul as the old page's card shows it (B3-3): its public name and description, and what it is doing now. */
@@ -81,7 +85,7 @@ const KEEP = 12;
 const KEEP_US = (KEEP * TICKS * TICK_US) + 60_000_000;
 
 export class V2Bridge {
-  readonly view: V2View = { unplaced: 0, unplacedFrames: [], takes: { serverTick: 0, chunks: [], receivedAt: 0 }, souls: new Map(), newestTo: null, error: null, parts: 0, speech: [] };
+  readonly view: V2View = { unplaced: 0, unplacedFrames: [], takes: { serverTick: 0, chunks: [], receivedAt: 0 }, souls: new Map(), newestTo: null, error: null, parts: 0, speech: [], conversations: [], ticker: [] };
   private readonly nodes = new Map<string, NodeRec>();
   /** Each body's samples, its last record and, while the public copy cannot draw it (a frame that is not public, or it
    *  left), since when: it is not drawn from then until it is back. */
@@ -161,6 +165,7 @@ export class V2Bridge {
     }
     this.said = [...this.said, ...(p.said ?? []).filter((x) => x.words !== null)].filter((x) => x.at + x.length > p.to - 60_000_000);
     for (const s of p.said ?? []) if (isPublic(s) && !this.saidSeen.has(saidKey(s))) { this.saidSeen.add(saidKey(s)); this.pendingSaid.push(s); }
+    this.talk(p);
     this.view.newestTo = Math.max(this.view.newestTo ?? p.to, p.to);
     this.view.parts++;
     this.publish();
@@ -301,6 +306,26 @@ export class V2Bridge {
     }
     this.view.takes = { serverTick: end, chunks: [...this.built.values()].sort((a, b) => a.fromTick - b.fromTick), receivedAt: performance.now() };
   }
+
+  /** R3: a part's private turns (take-talk.ts) and what its bodies did (the ticker), each once. */
+  private talk(p: PartRec): void {
+    const who = (id: string) => { const n = this.nodes.get(id) ?? this.tracks.get(id)?.node; return n ? { soulId: soulIdOf(n.soul ?? id), name: nameOf(id, n) } : null; };
+    for (const s of p.said ?? []) {
+      if (!s.private || this.saidSeen.has(saidKey(s))) continue;
+      this.saidSeen.add(saidKey(s));
+      const turn = privateTurnOf(s, Math.floor(s.at / TICK_US), Date.now(), who);
+      if (turn) this.view.conversations = [...this.view.conversations, ...turn].slice(-300);
+    }
+    const did = [...(p.moves ?? []).map((m) => ({ node: m.body, name: m.name, at: m.start })), ...(p.happened ?? []).filter((h) => h.name).map((h) => ({ node: h.node, name: h.name!, at: h.at }))];
+    for (const d of did) {
+      const n = this.nodes.get(d.node), key = `${d.node}|${d.name}|${d.at}`;
+      if (!n || !isBody(n) || this.tickerSeen.has(key)) continue;
+      this.tickerSeen.add(key);
+      const line = tickerOf(Math.floor(d.at / TICK_US), nameOf(d.node, n), d.name);
+      if (line) this.view.ticker = [...this.view.ticker, line].slice(-40);
+    }
+  }
+  private readonly tickerSeen = new Set<string>();
 
   /** The saids before chunk tick `end` become talk lines, in world-time order, each once: on its speaker's body (the
    *  take's events) and in the page's talk, timed by the wall clock at which the page draws its tick. */
