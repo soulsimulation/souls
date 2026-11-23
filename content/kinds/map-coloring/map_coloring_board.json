@@ -1,0 +1,4077 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:map_coloring_board",
+  "owner": "thing",
+  "state": {
+    "c": {
+      "n": 28,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 3,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "n": {
+      "n": 29,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 3,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "e": {
+      "n": 30,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 3,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "s": {
+      "n": 31,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 3,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "w": {
+      "n": 32,
+      "type": "int",
+      "unit": "count",
+      "default": 0,
+      "min": 0,
+      "max": 3,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        1050
+      ],
+      "yaw_mdeg": 180000
+    },
+    "board": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        850,
+        570
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1420,
+      900,
+      1320
+    ]
+  },
+  "forms": {
+    "place_c_red": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "c",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "n",
+          "not": 1,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "e",
+          "not": 1,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "s",
+          "not": 1,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "w",
+          "not": 1,
+          "says": "shared_color"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "c",
+          "to": 1,
+          "event": "region_colored"
+        }
+      ]
+    },
+    "place_c_blue": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "c",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "n",
+          "not": 2,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "e",
+          "not": 2,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "s",
+          "not": 2,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "w",
+          "not": 2,
+          "says": "shared_color"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "c",
+          "to": 2,
+          "event": "region_colored"
+        }
+      ]
+    },
+    "place_c_gold": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "c",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "n",
+          "not": 3,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "e",
+          "not": 3,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "s",
+          "not": 3,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "w",
+          "not": 3,
+          "says": "shared_color"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "c",
+          "to": 3,
+          "event": "region_colored"
+        }
+      ]
+    },
+    "clear_c": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "c",
+          "not": 0,
+          "says": "already_blank"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "c",
+          "to": 0,
+          "event": "region_cleared"
+        }
+      ]
+    },
+    "place_n_red": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "n",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "c",
+          "not": 1,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "e",
+          "not": 1,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "w",
+          "not": 1,
+          "says": "shared_color"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "n",
+          "to": 1,
+          "event": "region_colored"
+        }
+      ]
+    },
+    "place_n_blue": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "n",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "c",
+          "not": 2,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "e",
+          "not": 2,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "w",
+          "not": 2,
+          "says": "shared_color"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "n",
+          "to": 2,
+          "event": "region_colored"
+        }
+      ]
+    },
+    "place_n_gold": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "n",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "c",
+          "not": 3,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "e",
+          "not": 3,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "w",
+          "not": 3,
+          "says": "shared_color"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "n",
+          "to": 3,
+          "event": "region_colored"
+        }
+      ]
+    },
+    "clear_n": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "n",
+          "not": 0,
+          "says": "already_blank"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "n",
+          "to": 0,
+          "event": "region_cleared"
+        }
+      ]
+    },
+    "place_e_red": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "e",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "c",
+          "not": 1,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "n",
+          "not": 1,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "s",
+          "not": 1,
+          "says": "shared_color"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "e",
+          "to": 1,
+          "event": "region_colored"
+        }
+      ]
+    },
+    "place_e_blue": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "e",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "c",
+          "not": 2,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "n",
+          "not": 2,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "s",
+          "not": 2,
+          "says": "shared_color"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "e",
+          "to": 2,
+          "event": "region_colored"
+        }
+      ]
+    },
+    "place_e_gold": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "e",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "c",
+          "not": 3,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "n",
+          "not": 3,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "s",
+          "not": 3,
+          "says": "shared_color"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "e",
+          "to": 3,
+          "event": "region_colored"
+        }
+      ]
+    },
+    "clear_e": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "e",
+          "not": 0,
+          "says": "already_blank"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "e",
+          "to": 0,
+          "event": "region_cleared"
+        }
+      ]
+    },
+    "place_s_red": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "s",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "c",
+          "not": 1,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "e",
+          "not": 1,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "w",
+          "not": 1,
+          "says": "shared_color"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "s",
+          "to": 1,
+          "event": "region_colored"
+        }
+      ]
+    },
+    "place_s_blue": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "s",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "c",
+          "not": 2,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "e",
+          "not": 2,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "w",
+          "not": 2,
+          "says": "shared_color"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "s",
+          "to": 2,
+          "event": "region_colored"
+        }
+      ]
+    },
+    "place_s_gold": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "s",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "c",
+          "not": 3,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "e",
+          "not": 3,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "w",
+          "not": 3,
+          "says": "shared_color"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "s",
+          "to": 3,
+          "event": "region_colored"
+        }
+      ]
+    },
+    "clear_s": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "s",
+          "not": 0,
+          "says": "already_blank"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "s",
+          "to": 0,
+          "event": "region_cleared"
+        }
+      ]
+    },
+    "place_w_red": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "w",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "c",
+          "not": 1,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "n",
+          "not": 1,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "s",
+          "not": 1,
+          "says": "shared_color"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "w",
+          "to": 1,
+          "event": "region_colored"
+        }
+      ]
+    },
+    "place_w_blue": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "w",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "c",
+          "not": 2,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "n",
+          "not": 2,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "s",
+          "not": 2,
+          "says": "shared_color"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "w",
+          "to": 2,
+          "event": "region_colored"
+        }
+      ]
+    },
+    "place_w_gold": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "w",
+          "is": 0,
+          "says": "occupied"
+        },
+        {
+          "need": "state",
+          "field": "c",
+          "not": 3,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "n",
+          "not": 3,
+          "says": "shared_color"
+        },
+        {
+          "need": "state",
+          "field": "s",
+          "not": 3,
+          "says": "shared_color"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "w",
+          "to": 3,
+          "event": "region_colored"
+        }
+      ]
+    },
+    "clear_w": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "w",
+          "not": 0,
+          "says": "already_blank"
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "w",
+          "to": 0,
+          "event": "region_cleared"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:map_coloring_board",
+    "table": [
+      {
+        "part": "region_c_0",
+        "field": "c",
+        "do": "show",
+        "at": {
+          "0": 1,
+          "1": 0,
+          "2": 0,
+          "3": 0
+        }
+      },
+      {
+        "part": "region_c_1",
+        "field": "c",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 1,
+          "2": 0,
+          "3": 0
+        }
+      },
+      {
+        "part": "region_c_2",
+        "field": "c",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 1,
+          "3": 0
+        }
+      },
+      {
+        "part": "region_c_3",
+        "field": "c",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 1
+        }
+      },
+      {
+        "part": "region_n_0",
+        "field": "n",
+        "do": "show",
+        "at": {
+          "0": 1,
+          "1": 0,
+          "2": 0,
+          "3": 0
+        }
+      },
+      {
+        "part": "region_n_1",
+        "field": "n",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 1,
+          "2": 0,
+          "3": 0
+        }
+      },
+      {
+        "part": "region_n_2",
+        "field": "n",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 1,
+          "3": 0
+        }
+      },
+      {
+        "part": "region_n_3",
+        "field": "n",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 1
+        }
+      },
+      {
+        "part": "region_e_0",
+        "field": "e",
+        "do": "show",
+        "at": {
+          "0": 1,
+          "1": 0,
+          "2": 0,
+          "3": 0
+        }
+      },
+      {
+        "part": "region_e_1",
+        "field": "e",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 1,
+          "2": 0,
+          "3": 0
+        }
+      },
+      {
+        "part": "region_e_2",
+        "field": "e",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 1,
+          "3": 0
+        }
+      },
+      {
+        "part": "region_e_3",
+        "field": "e",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 1
+        }
+      },
+      {
+        "part": "region_s_0",
+        "field": "s",
+        "do": "show",
+        "at": {
+          "0": 1,
+          "1": 0,
+          "2": 0,
+          "3": 0
+        }
+      },
+      {
+        "part": "region_s_1",
+        "field": "s",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 1,
+          "2": 0,
+          "3": 0
+        }
+      },
+      {
+        "part": "region_s_2",
+        "field": "s",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 1,
+          "3": 0
+        }
+      },
+      {
+        "part": "region_s_3",
+        "field": "s",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 1
+        }
+      },
+      {
+        "part": "region_w_0",
+        "field": "w",
+        "do": "show",
+        "at": {
+          "0": 1,
+          "1": 0,
+          "2": 0,
+          "3": 0
+        }
+      },
+      {
+        "part": "region_w_1",
+        "field": "w",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 1,
+          "2": 0,
+          "3": 0
+        }
+      },
+      {
+        "part": "region_w_2",
+        "field": "w",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 1,
+          "3": 0
+        }
+      },
+      {
+        "part": "region_w_3",
+        "field": "w",
+        "do": "show",
+        "at": {
+          "0": 0,
+          "1": 0,
+          "2": 0,
+          "3": 1
+        }
+      }
+    ],
+    "shape": {
+      "round": 2,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            790,
+            0
+          ],
+          "size": [
+            1400,
+            40,
+            1300
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -630,
+            385,
+            -580
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -630,
+            385,
+            580
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            630,
+            385,
+            -580
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            630,
+            385,
+            580
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            817,
+            0
+          ],
+          "size": [
+            1350,
+            14,
+            1250
+          ],
+          "tint": "paper"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            824,
+            0
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              -150,
+              -150
+            ],
+            [
+              150,
+              -150
+            ],
+            [
+              150,
+              150
+            ],
+            [
+              -150,
+              150
+            ]
+          ],
+          "tint": "blank",
+          "role": "region_c_0"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            824,
+            0
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              -150,
+              -150
+            ],
+            [
+              150,
+              -150
+            ],
+            [
+              150,
+              150
+            ],
+            [
+              -150,
+              150
+            ]
+          ],
+          "tint": "red",
+          "role": "region_c_1"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            35,
+            832,
+            0
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -15,
+              -15
+            ],
+            [
+              -5,
+              -15
+            ],
+            [
+              -5,
+              -25
+            ],
+            [
+              5,
+              -25
+            ],
+            [
+              5,
+              15
+            ],
+            [
+              15,
+              15
+            ],
+            [
+              15,
+              25
+            ],
+            [
+              -15,
+              25
+            ],
+            [
+              -15,
+              15
+            ],
+            [
+              -5,
+              15
+            ],
+            [
+              -5,
+              -5
+            ],
+            [
+              -15,
+              -5
+            ]
+          ],
+          "tint": "ink",
+          "role": "region_c_1"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            824,
+            0
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              -150,
+              -150
+            ],
+            [
+              150,
+              -150
+            ],
+            [
+              150,
+              150
+            ],
+            [
+              -150,
+              150
+            ]
+          ],
+          "tint": "blue",
+          "role": "region_c_2"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            35,
+            832,
+            0
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -15,
+              -25
+            ],
+            [
+              15,
+              -25
+            ],
+            [
+              15,
+              5
+            ],
+            [
+              -5,
+              5
+            ],
+            [
+              -5,
+              15
+            ],
+            [
+              15,
+              15
+            ],
+            [
+              15,
+              25
+            ],
+            [
+              -15,
+              25
+            ],
+            [
+              -15,
+              -5
+            ],
+            [
+              5,
+              -5
+            ],
+            [
+              5,
+              -15
+            ],
+            [
+              -15,
+              -15
+            ]
+          ],
+          "tint": "ink",
+          "role": "region_c_2"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            824,
+            0
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              -150,
+              -150
+            ],
+            [
+              150,
+              -150
+            ],
+            [
+              150,
+              150
+            ],
+            [
+              -150,
+              150
+            ]
+          ],
+          "tint": "gold",
+          "role": "region_c_3"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            35,
+            832,
+            0
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -15,
+              -25
+            ],
+            [
+              15,
+              -25
+            ],
+            [
+              15,
+              25
+            ],
+            [
+              -15,
+              25
+            ],
+            [
+              -15,
+              15
+            ],
+            [
+              5,
+              15
+            ],
+            [
+              5,
+              5
+            ],
+            [
+              -15,
+              5
+            ],
+            [
+              -15,
+              -5
+            ],
+            [
+              5,
+              -5
+            ],
+            [
+              5,
+              -15
+            ],
+            [
+              -15,
+              -15
+            ]
+          ],
+          "tint": "ink",
+          "role": "region_c_3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -45,
+            835,
+            -25
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -65,
+            835,
+            0
+          ],
+          "size": [
+            8,
+            6,
+            50
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -45,
+            835,
+            25
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            824,
+            0
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              -450,
+              -450
+            ],
+            [
+              450,
+              -450
+            ],
+            [
+              150,
+              -150
+            ],
+            [
+              -150,
+              -150
+            ]
+          ],
+          "tint": "blank",
+          "role": "region_n_0"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            824,
+            0
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              -450,
+              -450
+            ],
+            [
+              450,
+              -450
+            ],
+            [
+              150,
+              -150
+            ],
+            [
+              -150,
+              -150
+            ]
+          ],
+          "tint": "red",
+          "role": "region_n_1"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            35,
+            832,
+            -315
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -15,
+              -15
+            ],
+            [
+              -5,
+              -15
+            ],
+            [
+              -5,
+              -25
+            ],
+            [
+              5,
+              -25
+            ],
+            [
+              5,
+              15
+            ],
+            [
+              15,
+              15
+            ],
+            [
+              15,
+              25
+            ],
+            [
+              -15,
+              25
+            ],
+            [
+              -15,
+              15
+            ],
+            [
+              -5,
+              15
+            ],
+            [
+              -5,
+              -5
+            ],
+            [
+              -15,
+              -5
+            ]
+          ],
+          "tint": "ink",
+          "role": "region_n_1"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            824,
+            0
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              -450,
+              -450
+            ],
+            [
+              450,
+              -450
+            ],
+            [
+              150,
+              -150
+            ],
+            [
+              -150,
+              -150
+            ]
+          ],
+          "tint": "blue",
+          "role": "region_n_2"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            35,
+            832,
+            -315
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -15,
+              -25
+            ],
+            [
+              15,
+              -25
+            ],
+            [
+              15,
+              5
+            ],
+            [
+              -5,
+              5
+            ],
+            [
+              -5,
+              15
+            ],
+            [
+              15,
+              15
+            ],
+            [
+              15,
+              25
+            ],
+            [
+              -15,
+              25
+            ],
+            [
+              -15,
+              -5
+            ],
+            [
+              5,
+              -5
+            ],
+            [
+              5,
+              -15
+            ],
+            [
+              -15,
+              -15
+            ]
+          ],
+          "tint": "ink",
+          "role": "region_n_2"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            824,
+            0
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              -450,
+              -450
+            ],
+            [
+              450,
+              -450
+            ],
+            [
+              150,
+              -150
+            ],
+            [
+              -150,
+              -150
+            ]
+          ],
+          "tint": "gold",
+          "role": "region_n_3"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            35,
+            832,
+            -315
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -15,
+              -25
+            ],
+            [
+              15,
+              -25
+            ],
+            [
+              15,
+              25
+            ],
+            [
+              -15,
+              25
+            ],
+            [
+              -15,
+              15
+            ],
+            [
+              5,
+              15
+            ],
+            [
+              5,
+              5
+            ],
+            [
+              -15,
+              5
+            ],
+            [
+              -15,
+              -5
+            ],
+            [
+              5,
+              -5
+            ],
+            [
+              5,
+              -15
+            ],
+            [
+              -15,
+              -15
+            ]
+          ],
+          "tint": "ink",
+          "role": "region_n_3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -65,
+            835,
+            -315
+          ],
+          "size": [
+            8,
+            6,
+            50
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -45,
+            835,
+            -315
+          ],
+          "size": [
+            8,
+            6,
+            64
+          ],
+          "tint": "ink",
+          "yaw": 38660
+        },
+        {
+          "kind": "box",
+          "at": [
+            -25,
+            835,
+            -315
+          ],
+          "size": [
+            8,
+            6,
+            50
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            824,
+            0
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              450,
+              -450
+            ],
+            [
+              450,
+              450
+            ],
+            [
+              150,
+              150
+            ],
+            [
+              150,
+              -150
+            ]
+          ],
+          "tint": "blank",
+          "role": "region_e_0"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            824,
+            0
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              450,
+              -450
+            ],
+            [
+              450,
+              450
+            ],
+            [
+              150,
+              150
+            ],
+            [
+              150,
+              -150
+            ]
+          ],
+          "tint": "red",
+          "role": "region_e_1"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            350,
+            832,
+            35
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -15,
+              -15
+            ],
+            [
+              -5,
+              -15
+            ],
+            [
+              -5,
+              -25
+            ],
+            [
+              5,
+              -25
+            ],
+            [
+              5,
+              15
+            ],
+            [
+              15,
+              15
+            ],
+            [
+              15,
+              25
+            ],
+            [
+              -15,
+              25
+            ],
+            [
+              -15,
+              15
+            ],
+            [
+              -5,
+              15
+            ],
+            [
+              -5,
+              -5
+            ],
+            [
+              -15,
+              -5
+            ]
+          ],
+          "tint": "ink",
+          "role": "region_e_1"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            824,
+            0
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              450,
+              -450
+            ],
+            [
+              450,
+              450
+            ],
+            [
+              150,
+              150
+            ],
+            [
+              150,
+              -150
+            ]
+          ],
+          "tint": "blue",
+          "role": "region_e_2"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            350,
+            832,
+            35
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -15,
+              -25
+            ],
+            [
+              15,
+              -25
+            ],
+            [
+              15,
+              5
+            ],
+            [
+              -5,
+              5
+            ],
+            [
+              -5,
+              15
+            ],
+            [
+              15,
+              15
+            ],
+            [
+              15,
+              25
+            ],
+            [
+              -15,
+              25
+            ],
+            [
+              -15,
+              -5
+            ],
+            [
+              5,
+              -5
+            ],
+            [
+              5,
+              -15
+            ],
+            [
+              -15,
+              -15
+            ]
+          ],
+          "tint": "ink",
+          "role": "region_e_2"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            824,
+            0
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              450,
+              -450
+            ],
+            [
+              450,
+              450
+            ],
+            [
+              150,
+              150
+            ],
+            [
+              150,
+              -150
+            ]
+          ],
+          "tint": "gold",
+          "role": "region_e_3"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            350,
+            832,
+            35
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -15,
+              -25
+            ],
+            [
+              15,
+              -25
+            ],
+            [
+              15,
+              25
+            ],
+            [
+              -15,
+              25
+            ],
+            [
+              -15,
+              15
+            ],
+            [
+              5,
+              15
+            ],
+            [
+              5,
+              5
+            ],
+            [
+              -15,
+              5
+            ],
+            [
+              -15,
+              -5
+            ],
+            [
+              5,
+              -5
+            ],
+            [
+              5,
+              -15
+            ],
+            [
+              -15,
+              -15
+            ]
+          ],
+          "tint": "ink",
+          "role": "region_e_3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            260,
+            835,
+            -35
+          ],
+          "size": [
+            8,
+            6,
+            50
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            280,
+            835,
+            -60
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            278,
+            835,
+            -35
+          ],
+          "size": [
+            8,
+            6,
+            35
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            280,
+            835,
+            -10
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            824,
+            0
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              450,
+              450
+            ],
+            [
+              -450,
+              450
+            ],
+            [
+              -150,
+              150
+            ],
+            [
+              150,
+              150
+            ]
+          ],
+          "tint": "blank",
+          "role": "region_s_0"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            824,
+            0
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              450,
+              450
+            ],
+            [
+              -450,
+              450
+            ],
+            [
+              -150,
+              150
+            ],
+            [
+              150,
+              150
+            ]
+          ],
+          "tint": "red",
+          "role": "region_s_1"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            35,
+            832,
+            315
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -15,
+              -15
+            ],
+            [
+              -5,
+              -15
+            ],
+            [
+              -5,
+              -25
+            ],
+            [
+              5,
+              -25
+            ],
+            [
+              5,
+              15
+            ],
+            [
+              15,
+              15
+            ],
+            [
+              15,
+              25
+            ],
+            [
+              -15,
+              25
+            ],
+            [
+              -15,
+              15
+            ],
+            [
+              -5,
+              15
+            ],
+            [
+              -5,
+              -5
+            ],
+            [
+              -15,
+              -5
+            ]
+          ],
+          "tint": "ink",
+          "role": "region_s_1"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            824,
+            0
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              450,
+              450
+            ],
+            [
+              -450,
+              450
+            ],
+            [
+              -150,
+              150
+            ],
+            [
+              150,
+              150
+            ]
+          ],
+          "tint": "blue",
+          "role": "region_s_2"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            35,
+            832,
+            315
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -15,
+              -25
+            ],
+            [
+              15,
+              -25
+            ],
+            [
+              15,
+              5
+            ],
+            [
+              -5,
+              5
+            ],
+            [
+              -5,
+              15
+            ],
+            [
+              15,
+              15
+            ],
+            [
+              15,
+              25
+            ],
+            [
+              -15,
+              25
+            ],
+            [
+              -15,
+              -5
+            ],
+            [
+              5,
+              -5
+            ],
+            [
+              5,
+              -15
+            ],
+            [
+              -15,
+              -15
+            ]
+          ],
+          "tint": "ink",
+          "role": "region_s_2"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            824,
+            0
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              450,
+              450
+            ],
+            [
+              -450,
+              450
+            ],
+            [
+              -150,
+              150
+            ],
+            [
+              150,
+              150
+            ]
+          ],
+          "tint": "gold",
+          "role": "region_s_3"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            35,
+            832,
+            315
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -15,
+              -25
+            ],
+            [
+              15,
+              -25
+            ],
+            [
+              15,
+              25
+            ],
+            [
+              -15,
+              25
+            ],
+            [
+              -15,
+              15
+            ],
+            [
+              5,
+              15
+            ],
+            [
+              5,
+              5
+            ],
+            [
+              -15,
+              5
+            ],
+            [
+              -15,
+              -5
+            ],
+            [
+              5,
+              -5
+            ],
+            [
+              5,
+              -15
+            ],
+            [
+              -15,
+              -15
+            ]
+          ],
+          "tint": "ink",
+          "role": "region_s_3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -45,
+            835,
+            290
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -65,
+            835,
+            302
+          ],
+          "size": [
+            8,
+            6,
+            25
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -45,
+            835,
+            315
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -25,
+            835,
+            328
+          ],
+          "size": [
+            8,
+            6,
+            25
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -45,
+            835,
+            340
+          ],
+          "size": [
+            8,
+            6,
+            40
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            824,
+            0
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              -450,
+              450
+            ],
+            [
+              -450,
+              -450
+            ],
+            [
+              -150,
+              -150
+            ],
+            [
+              -150,
+              150
+            ]
+          ],
+          "tint": "blank",
+          "role": "region_w_0"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            824,
+            0
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              -450,
+              450
+            ],
+            [
+              -450,
+              -450
+            ],
+            [
+              -150,
+              -150
+            ],
+            [
+              -150,
+              150
+            ]
+          ],
+          "tint": "red",
+          "role": "region_w_1"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            -280,
+            832,
+            35
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -15,
+              -15
+            ],
+            [
+              -5,
+              -15
+            ],
+            [
+              -5,
+              -25
+            ],
+            [
+              5,
+              -25
+            ],
+            [
+              5,
+              15
+            ],
+            [
+              15,
+              15
+            ],
+            [
+              15,
+              25
+            ],
+            [
+              -15,
+              25
+            ],
+            [
+              -15,
+              15
+            ],
+            [
+              -5,
+              15
+            ],
+            [
+              -5,
+              -5
+            ],
+            [
+              -15,
+              -5
+            ]
+          ],
+          "tint": "ink",
+          "role": "region_w_1"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            824,
+            0
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              -450,
+              450
+            ],
+            [
+              -450,
+              -450
+            ],
+            [
+              -150,
+              -150
+            ],
+            [
+              -150,
+              150
+            ]
+          ],
+          "tint": "blue",
+          "role": "region_w_2"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            -280,
+            832,
+            35
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -15,
+              -25
+            ],
+            [
+              15,
+              -25
+            ],
+            [
+              15,
+              5
+            ],
+            [
+              -5,
+              5
+            ],
+            [
+              -5,
+              15
+            ],
+            [
+              15,
+              15
+            ],
+            [
+              15,
+              25
+            ],
+            [
+              -15,
+              25
+            ],
+            [
+              -15,
+              -5
+            ],
+            [
+              5,
+              -5
+            ],
+            [
+              5,
+              -15
+            ],
+            [
+              -15,
+              -15
+            ]
+          ],
+          "tint": "ink",
+          "role": "region_w_2"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            824,
+            0
+          ],
+          "h": 8,
+          "polygon": [
+            [
+              -450,
+              450
+            ],
+            [
+              -450,
+              -450
+            ],
+            [
+              -150,
+              -150
+            ],
+            [
+              -150,
+              150
+            ]
+          ],
+          "tint": "gold",
+          "role": "region_w_3"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            -280,
+            832,
+            35
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -15,
+              -25
+            ],
+            [
+              15,
+              -25
+            ],
+            [
+              15,
+              25
+            ],
+            [
+              -15,
+              25
+            ],
+            [
+              -15,
+              15
+            ],
+            [
+              5,
+              15
+            ],
+            [
+              5,
+              5
+            ],
+            [
+              -15,
+              5
+            ],
+            [
+              -15,
+              -5
+            ],
+            [
+              5,
+              -5
+            ],
+            [
+              5,
+              -15
+            ],
+            [
+              -15,
+              -15
+            ]
+          ],
+          "tint": "ink",
+          "role": "region_w_3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -370,
+            835,
+            -35
+          ],
+          "size": [
+            8,
+            6,
+            51
+          ],
+          "tint": "ink",
+          "yaw": 11310
+        },
+        {
+          "kind": "box",
+          "at": [
+            -358,
+            835,
+            -22
+          ],
+          "size": [
+            8,
+            6,
+            29
+          ],
+          "tint": "ink",
+          "yaw": 149036
+        },
+        {
+          "kind": "box",
+          "at": [
+            -342,
+            835,
+            -22
+          ],
+          "size": [
+            8,
+            6,
+            29
+          ],
+          "tint": "ink",
+          "yaw": 30964
+        },
+        {
+          "kind": "box",
+          "at": [
+            -330,
+            835,
+            -35
+          ],
+          "size": [
+            8,
+            6,
+            51
+          ],
+          "tint": "ink",
+          "yaw": 168690
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            833,
+            -450
+          ],
+          "size": [
+            6,
+            2,
+            900
+          ],
+          "tint": "border",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            450,
+            833,
+            0
+          ],
+          "size": [
+            6,
+            2,
+            900
+          ],
+          "tint": "border"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            833,
+            450
+          ],
+          "size": [
+            6,
+            2,
+            900
+          ],
+          "tint": "border",
+          "yaw": -90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -450,
+            833,
+            0
+          ],
+          "size": [
+            6,
+            2,
+            900
+          ],
+          "tint": "border",
+          "yaw": 180000
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            833,
+            -150
+          ],
+          "size": [
+            6,
+            2,
+            300
+          ],
+          "tint": "border",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            150,
+            833,
+            0
+          ],
+          "size": [
+            6,
+            2,
+            300
+          ],
+          "tint": "border"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            833,
+            150
+          ],
+          "size": [
+            6,
+            2,
+            300
+          ],
+          "tint": "border",
+          "yaw": -90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -150,
+            833,
+            0
+          ],
+          "size": [
+            6,
+            2,
+            300
+          ],
+          "tint": "border",
+          "yaw": 180000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -300,
+            833,
+            -300
+          ],
+          "size": [
+            6,
+            2,
+            424
+          ],
+          "tint": "border",
+          "yaw": 45000
+        },
+        {
+          "kind": "box",
+          "at": [
+            300,
+            833,
+            -300
+          ],
+          "size": [
+            6,
+            2,
+            424
+          ],
+          "tint": "border",
+          "yaw": -45000
+        },
+        {
+          "kind": "box",
+          "at": [
+            300,
+            833,
+            300
+          ],
+          "size": [
+            6,
+            2,
+            424
+          ],
+          "tint": "border",
+          "yaw": -135000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -300,
+            833,
+            300
+          ],
+          "size": [
+            6,
+            2,
+            424
+          ],
+          "tint": "border",
+          "yaw": 135000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -240,
+            827,
+            -555
+          ],
+          "size": [
+            130,
+            6,
+            80
+          ],
+          "tint": "red"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            -240,
+            830,
+            -555
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -15,
+              -15
+            ],
+            [
+              -5,
+              -15
+            ],
+            [
+              -5,
+              -25
+            ],
+            [
+              5,
+              -25
+            ],
+            [
+              5,
+              15
+            ],
+            [
+              15,
+              15
+            ],
+            [
+              15,
+              25
+            ],
+            [
+              -15,
+              25
+            ],
+            [
+              -15,
+              15
+            ],
+            [
+              -5,
+              15
+            ],
+            [
+              -5,
+              -5
+            ],
+            [
+              -15,
+              -5
+            ]
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            827,
+            -555
+          ],
+          "size": [
+            130,
+            6,
+            80
+          ],
+          "tint": "blue"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            0,
+            830,
+            -555
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -15,
+              -25
+            ],
+            [
+              15,
+              -25
+            ],
+            [
+              15,
+              5
+            ],
+            [
+              -5,
+              5
+            ],
+            [
+              -5,
+              15
+            ],
+            [
+              15,
+              15
+            ],
+            [
+              15,
+              25
+            ],
+            [
+              -15,
+              25
+            ],
+            [
+              -15,
+              -5
+            ],
+            [
+              5,
+              -5
+            ],
+            [
+              5,
+              -15
+            ],
+            [
+              -15,
+              -15
+            ]
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            240,
+            827,
+            -555
+          ],
+          "size": [
+            130,
+            6,
+            80
+          ],
+          "tint": "gold"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            240,
+            830,
+            -555
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -15,
+              -25
+            ],
+            [
+              15,
+              -25
+            ],
+            [
+              15,
+              25
+            ],
+            [
+              -15,
+              25
+            ],
+            [
+              -15,
+              15
+            ],
+            [
+              5,
+              15
+            ],
+            [
+              5,
+              5
+            ],
+            [
+              -15,
+              5
+            ],
+            [
+              -15,
+              -5
+            ],
+            [
+              5,
+              -5
+            ],
+            [
+              5,
+              -15
+            ],
+            [
+              -15,
+              -15
+            ]
+          ],
+          "tint": "ink"
+        }
+      ],
+      "palette": {
+        "wood": "#75543b",
+        "paper": "#eee2c3",
+        "ink": "#142833",
+        "blank": "#d8d2bf",
+        "red": "#da6f68",
+        "blue": "#76a3ce",
+        "gold": "#d9b356",
+        "border": "#526369"
+      },
+      "tags": [
+        "puzzle",
+        "map",
+        "coloring",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "puzzle": "puzzle",
+    "card": "Color five fixed regions so shared borders never have the same color.",
+    "map": "five-region map-coloring board",
+    "constraint": "shared-edge coloring and backtracking",
+    "hands_empty": "Put down what you hold before changing a region.",
+    "occupied": "That region already has a color. Clear it individually before choosing another.",
+    "shared_color": "A region across a shared border already has that color. Choose a different color or clear a region to backtrack.",
+    "already_blank": "That region is already blank. Choose a color or clear a colored region.",
+    "coordinates": "The map is an original square divided into center C and four outer trapezoids: N at the far/top edge, E at the right, S near/bottom and W at the left. Adjacent means a shared positive-length border, not a corner alone. C borders all four outer regions; outer borders are N-E, E-S, S-W and W-N. N/S and E/W are nonneighbors and may have the same color.",
+    "colors": "Blank is value0 and has no numeral. Value1 is red, value2 blue and value3 gold. Each region shows its fixed letter plus the selected color numeral; the three numbered swatches match these codes. Three place forms require that region blank and no neighbor already showing the selected color. One clear form returns just that region to blank.",
+    "solutions": "All six complete solutions in C,N,E,S,W order are (1,2,3,2,3), (1,3,2,3,2), (2,1,3,1,3), (2,3,1,3,1), (3,1,2,1,2), and (3,2,1,2,1). Each uses one center color and alternates the other two around the outer cycle. These are ordinary actions, not a solver.",
+    "backtrack": "A legal dead end has C blank, N blue2, E gold3, S red1 and W gold3. Center C sees all three colors and cannot be colored. Clear S and place blue2 there; then C can be red1. This is individual backtracking, not an automatic reset. Any occupied region may be cleared.",
+    "limits": "Five original fixed planar silhouettes each have mutually exclusive blank/red/blue/gold appearances. Changing a field selects one appearance without paint stock, portable pieces or custody. No fluid painting, precise region finger contact, solver, score, reset, four-color-theorem proof or physical repainting process is claimed."
+  },
+  "card": {
+    "text": "card",
+    "category": "puzzle",
+    "synonyms": [
+      "map",
+      "constraint"
+    ]
+  },
+  "howtos": {
+    "regions": {
+      "text": "coordinates",
+      "steps": [
+        {
+          "form": "place_c_red"
+        },
+        {
+          "form": "clear_c"
+        }
+      ]
+    },
+    "color_codes": {
+      "text": "colors",
+      "steps": [
+        {
+          "form": "place_n_blue"
+        },
+        {
+          "form": "clear_n"
+        }
+      ]
+    },
+    "dead_end_and_backtrack": {
+      "text": "backtrack",
+      "steps": [
+        {
+          "form": "place_n_blue"
+        },
+        {
+          "form": "place_e_gold"
+        },
+        {
+          "form": "place_s_red"
+        },
+        {
+          "form": "place_w_gold"
+        },
+        {
+          "form": "clear_s"
+        },
+        {
+          "form": "place_s_blue"
+        },
+        {
+          "form": "place_c_red"
+        },
+        {
+          "form": "clear_c"
+        },
+        {
+          "form": "clear_n"
+        },
+        {
+          "form": "clear_e"
+        },
+        {
+          "form": "clear_s"
+        },
+        {
+          "form": "clear_w"
+        }
+      ]
+    },
+    "fixed_indicators": {
+      "text": "limits",
+      "steps": [
+        {
+          "form": "place_c_red"
+        },
+        {
+          "form": "clear_c"
+        }
+      ]
+    },
+    "solution_1": {
+      "text": "solutions",
+      "steps": [
+        {
+          "form": "place_c_red"
+        },
+        {
+          "form": "place_n_blue"
+        },
+        {
+          "form": "place_e_gold"
+        },
+        {
+          "form": "place_s_blue"
+        },
+        {
+          "form": "place_w_gold"
+        },
+        {
+          "form": "clear_w"
+        },
+        {
+          "form": "clear_s"
+        },
+        {
+          "form": "clear_e"
+        },
+        {
+          "form": "clear_n"
+        },
+        {
+          "form": "clear_c"
+        }
+      ]
+    },
+    "solution_2": {
+      "text": "solutions",
+      "steps": [
+        {
+          "form": "place_c_red"
+        },
+        {
+          "form": "place_n_gold"
+        },
+        {
+          "form": "place_e_blue"
+        },
+        {
+          "form": "place_s_gold"
+        },
+        {
+          "form": "place_w_blue"
+        },
+        {
+          "form": "clear_w"
+        },
+        {
+          "form": "clear_s"
+        },
+        {
+          "form": "clear_e"
+        },
+        {
+          "form": "clear_n"
+        },
+        {
+          "form": "clear_c"
+        }
+      ]
+    },
+    "solution_3": {
+      "text": "solutions",
+      "steps": [
+        {
+          "form": "place_c_blue"
+        },
+        {
+          "form": "place_n_red"
+        },
+        {
+          "form": "place_e_gold"
+        },
+        {
+          "form": "place_s_red"
+        },
+        {
+          "form": "place_w_gold"
+        },
+        {
+          "form": "clear_w"
+        },
+        {
+          "form": "clear_s"
+        },
+        {
+          "form": "clear_e"
+        },
+        {
+          "form": "clear_n"
+        },
+        {
+          "form": "clear_c"
+        }
+      ]
+    },
+    "solution_4": {
+      "text": "solutions",
+      "steps": [
+        {
+          "form": "place_c_blue"
+        },
+        {
+          "form": "place_n_gold"
+        },
+        {
+          "form": "place_e_red"
+        },
+        {
+          "form": "place_s_gold"
+        },
+        {
+          "form": "place_w_red"
+        },
+        {
+          "form": "clear_w"
+        },
+        {
+          "form": "clear_s"
+        },
+        {
+          "form": "clear_e"
+        },
+        {
+          "form": "clear_n"
+        },
+        {
+          "form": "clear_c"
+        }
+      ]
+    },
+    "solution_5": {
+      "text": "solutions",
+      "steps": [
+        {
+          "form": "place_c_gold"
+        },
+        {
+          "form": "place_n_red"
+        },
+        {
+          "form": "place_e_blue"
+        },
+        {
+          "form": "place_s_red"
+        },
+        {
+          "form": "place_w_blue"
+        },
+        {
+          "form": "clear_w"
+        },
+        {
+          "form": "clear_s"
+        },
+        {
+          "form": "clear_e"
+        },
+        {
+          "form": "clear_n"
+        },
+        {
+          "form": "clear_c"
+        }
+      ]
+    },
+    "solution_6": {
+      "text": "solutions",
+      "steps": [
+        {
+          "form": "place_c_gold"
+        },
+        {
+          "form": "place_n_blue"
+        },
+        {
+          "form": "place_e_red"
+        },
+        {
+          "form": "place_s_blue"
+        },
+        {
+          "form": "place_w_red"
+        },
+        {
+          "form": "clear_w"
+        },
+        {
+          "form": "clear_s"
+        },
+        {
+          "form": "clear_e"
+        },
+        {
+          "form": "clear_n"
+        },
+        {
+          "form": "clear_c"
+        }
+      ]
+    }
+  }
+}
