@@ -19,7 +19,11 @@ gateway: [gateway-upgrade.md](runbook/gateway-upgrade.md) (O16); the machine's l
 change it here.
 
 <!-- release-checks -->
-- `v2`: the whole of `v2/tools/ci.sh` (build, types, fmt, clippy, tests, the page's and client's tests)
+- `v2-rust`: one of the five CI legs that together run `v2/tools/ci.sh` (`.github/scripts/ci-scope.mjs` `V2_LEGS`)
+- `v2-sim`: another of those legs
+- `v2-worldd`: another of those legs
+- `v2-wasm`: another of those legs
+- `v2-client`: another of those legs
 - `ci-ok`: the light set of every change (build and types, bundle, smoke, affected tests)
 - `scrub-guard`: no device details, secrets or personal data in the tree
 - `gitleaks`: no secrets
