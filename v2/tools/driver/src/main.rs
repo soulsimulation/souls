@@ -375,7 +375,7 @@ fn stuck_report(
 ) -> serde_like::Obj {
     const STUCK_MS: u64 = 60_000;
     // S11: a Soul whose act is unanswered for 60 s is on its way, not stuck, when the public stream shows its body
-    // moving within the window (a motion sample with a speed that arrived in it), or a metre or more on, net, from
+    // moving at the window's end (its latest motion sample in the window has a speed), or a metre or more on, net, from
     // where it was at the window's start (its last sample by then) to where it was at its end. A Soul moved by others
     // (pushed, stepped aside) counts as on its way too. With no stream, or no sample of its body, it counts as stuck.
     let moved = |k: usize, (from, to): (u64, u64)| -> bool {
@@ -387,7 +387,12 @@ fn stuck_report(
         else {
             return false;
         };
-        if samples.iter().any(|x| x.0 >= from && x.0 <= to && x.3) {
+        // Moving at the window's end: its latest sample in the window has a speed (one nudge earlier does not count).
+        if samples
+            .iter()
+            .rfind(|x| x.0 >= from && x.0 <= to)
+            .is_some_and(|x| x.3)
+        {
             return true;
         }
         let at = |t: u64| samples.iter().rfind(|x| x.0 <= t);
@@ -431,7 +436,7 @@ fn stuck_report(
     serde_like::Obj::new()
         .raw(
             "rule",
-            "\"stuck: an act unanswered for 60 s while its Soul, as the public stream shows it, neither moved within that time nor ended it 1 m or more from where it began it; a Soul moved by others counts as moving\"".into(),
+            "\"stuck: an act unanswered for 60 s while its Soul, as the public stream shows it, was neither moving at its end nor 1 m or more, net, from where it was at its start; a Soul moved by others counts as moving\"".into(),
         )
         .n("stuck", stuck.len() as f64)
         .n("onTheirWay", on_way.len() as f64)
@@ -1584,6 +1589,7 @@ async fn main() {
     let mut own_bodies: BTreeMap<Id, Id> =
         aimed.as_ref().map(|t| t.bodies.clone()).unwrap_or_default();
     if aimed.is_some() {
+        let began = Instant::now();
         let gate = Arc::new(Semaphore::new(BODY_READS));
         let mut reads = Vec::new();
         for (k, x) in actors.iter().enumerate() {
@@ -1610,9 +1616,10 @@ async fn main() {
             }
         }
         println!(
-            "bodies: {} of {} Souls' bodies known ({asked} read from their own copies)",
+            "bodies: {} of {} Souls' bodies known ({asked} read from their own copies in {} ms, before the run)",
             own_bodies.len(),
-            actors.len()
+            actors.len(),
+            began.elapsed().as_millis()
         );
     }
 

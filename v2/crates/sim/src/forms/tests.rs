@@ -639,7 +639,6 @@ fn effecting() -> (json::Value, String) {
         .expect("a kind whose effects bind")
 }
 
-/// `entry` with every `move` step taken out of its forms: a form with no hand step.
 /// `v` with every `walk_to` step taken out of its forms (S11).
 fn without_walks(v: &json::Value) -> json::Value {
     match v {
@@ -665,6 +664,7 @@ fn without_walks(v: &json::Value) -> json::Value {
     }
 }
 
+/// `entry` with every `move` step taken out of its forms: a form with no hand step.
 fn without_moves(v: &json::Value) -> json::Value {
     match v {
         json::Value::Obj(o) => json::Value::Obj(

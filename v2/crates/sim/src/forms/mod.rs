@@ -1798,15 +1798,17 @@ impl Forms {
             self.wake(w, run, Woke::Planning, now);
         }
         // A run whose walk is running (an entry in the walks) and lost its claim on the legs (its Soul's own walk took
-        // them, intents rule 10) ends `claim-taken`, as one waiting for its plan does (S11). A run in any other step
-        // holds no route claim (`handle` gives it back), so a move in progress is left at its phase end instead. Its walk's inputs went nowhere, it asked no way, so
-        // C21's watch never saw it, and the run stood at its walk step, its act never answered.
+        // them, intents rule 10) ends `claim-taken`, as one waiting for its plan does (S11): its walk's inputs went
+        // nowhere, it asked no way, so C21's watch never saw it, and the run stood at its walk step, its act never
+        // answered. A run in any other step holds no route claim (`handle` gives it back), so a move in progress is
+        // left at its phase end instead.
+        let walking: BTreeSet<Id> = self.walks.iter().map(|r| r.body).collect();
         let lost: Vec<RunId> = self
             .runs
             .iter()
             .filter(|(run, fr)| {
                 !self.planning.contains(run)
-                    && self.walks.iter().any(|r| r.body == fr.body)
+                    && walking.contains(&fr.body)
                     && fr.walk.is_some_and(|driver| {
                         !w.controller
                             .claims(fr.body)

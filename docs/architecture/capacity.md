@@ -37,8 +37,9 @@ no result before, because the gateway's control socket path was too long in the 
 the workflow.
 
 **Stuck Souls (S11).** The driver's rule is now: *stuck is an act unanswered for 60 s while its Soul, as the public
-stream shows it, neither moved within that time (a motion sample with a speed in it) nor ended it 1 m or more, net,
-from where it began it* (`stuck.rule` in its report, with `onTheirWay` and `unseen`). A Soul moved by others (pushed,
+stream shows it, was neither moving at the window's end (its latest motion sample in the window has a speed) nor
+1 m or more, net, from where it was at the window's start* (`stuck.rule` in its report, with `onTheirWay` and
+`unseen`). A Soul moved by others (pushed,
 stepped aside) counts as moving. Before,
 any act unanswered for 60 s counted. On the uneven arm that was 19–22 Souls at 1,000 `every4`, and 18–19 of them were
 long walks still going at walking speed, their agents otherwise silent (the uneven arm's heavy-tailed rates). S11 also
