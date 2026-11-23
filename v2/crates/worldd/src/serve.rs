@@ -296,11 +296,42 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
                     Some(Name::new(&format!("souls:{m}")).ok_or("a role's move")?)
                 }
             };
+            // 0.135 G3: where its members stand, from its slots in the activity's own frame (a slot's stand point,
+            // else the slot itself), mm to µm, in the order its places list them.
+            let mm = |v: Option<&Json>| match v {
+                Some(Json::Int(n)) => i64::try_from(*n).ok().map(|n| n * 1000),
+                _ => None,
+            };
+            let stands = match v.get("places") {
+                Some(p) if p.get("in").and_then(Json::str) == Some("this") => p
+                    .get("slots")
+                    .and_then(Json::arr)
+                    .unwrap_or(&[])
+                    .iter()
+                    .filter_map(Json::str)
+                    .filter_map(|slot| {
+                        let s = entry.get("slots")?.get(slot)?;
+                        let at = s
+                            .get("stand")
+                            .and_then(Json::str)
+                            .and_then(|n| entry.get("points")?.get(n))
+                            .unwrap_or(s);
+                        let a = at.get("at_mm")?.arr()?;
+                        let yaw = match at.get("yaw_mdeg") {
+                            Some(Json::Int(n)) => i64::try_from(*n).ok()?,
+                            _ => 0,
+                        };
+                        Some((Vec3::new(mm(a.first())?, mm(a.get(1))?, mm(a.get(2))?), yaw))
+                    })
+                    .collect(),
+                _ => Vec::new(),
+            };
             out.push(Role {
                 name: Name::new(&format!("{ns}:{role}")).ok_or("a role's name")?,
                 place: Name::new(&place).ok_or("a role's place")?,
                 claims: vec![Want::One(Class::Manipulator)],
                 mv,
+                stands,
             });
         }
         let pin = to_hex(&sha256(
@@ -2890,6 +2921,17 @@ mod tests {
                 continue;
             }
             assert_eq!(k.follows, None);
+            // 0.135 G3: hold hands' two stand shoulder to shoulder, facing one way; the dance's eight in a ring.
+            if mv == "hold_hand" {
+                let s: Vec<(Vec3, i64)> = k.roles.iter().flat_map(|r| r.stands.clone()).collect();
+                assert_eq!(
+                    s,
+                    vec![(Vec3::new(-250_000, 0, 0), 0), (Vec3::new(250_000, 0, 0), 0)]
+                );
+            }
+            if mv == "dance" {
+                assert_eq!(k.roles.iter().map(|r| r.stands.len()).sum::<usize>(), 8);
+            }
             // 0.134 T3: the dance takes up to eight, on the beat; each touch is a pair.
             let dance = mv == "dance";
             assert_eq!((k.most, k.beat), if dance { (8, true) } else { (2, false) });

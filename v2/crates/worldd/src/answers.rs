@@ -3748,6 +3748,12 @@ impl Clock {
             );
             // 0.135 G2: each follower walks to its place behind its leader, by walks the world sends.
             b.follow(&e.following());
+            // 0.135 G3: members of an activity just started walk to their places; its moves begin once all have.
+            let todo = e.to_take(&b.runner.controller);
+            if !todo.is_empty() {
+                let done = b.take_places(&todo);
+                e.placed(&done);
+            }
         }
     }
 

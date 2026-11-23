@@ -109,6 +109,7 @@ fn touch(plain: &str, lasts: Micros, mv: &str) -> ActivityKind {
         place: name("souls:here"),
         claims: vec![Want::One(Class::Manipulator)],
         mv: Some(name(mv)),
+        stands: Vec::new(),
     };
     ActivityKind {
         name: name(&full(plain)),

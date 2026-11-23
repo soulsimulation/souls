@@ -679,6 +679,21 @@ impl Engine {
         self.collect(Some((intent, soul)));
     }
 
+    /// The places still to take (0.135 G3, `sim::activity::places`), each activity's frame set from where its members
+    /// stand in `c`: `(activity, body, Soul, point, facing)`.
+    pub fn to_take(&mut self, c: &Controller) -> Vec<(Id, Id, Id, Vec3, replica::pose::Quat)> {
+        self.activities
+            .to_take(|b| c.body(b).map(|m| m.pose.position))
+    }
+
+    /// Members that have taken their places (0.135 G3), by (activity, body): an activity's moves begin once all
+    /// have.
+    pub fn placed(&mut self, done: &[(Id, Id)]) {
+        for &(a, b) in done {
+            self.activities.placed(a, b);
+        }
+    }
+
     /// Every follow running (0.135 G2): its activity, the leader's body, and the follower's body and Soul.
     pub fn following(&self) -> Vec<(Id, Id, Id, Id)> {
         self.activities.following()

@@ -60,7 +60,7 @@ use replica::intents::Intent;
 use replica::kinds::sizes::{Build, Size};
 use replica::move_check::{self, Seen, Verdict};
 use replica::moves::{Effector, Move};
-use replica::pose::{Frame, HandOff, Owner, Pose, Support, Vec3};
+use replica::pose::{Frame, HandOff, Owner, Pose, Quat, Support, Vec3};
 use replica::select::{self, Spot};
 use replica::speech::Said;
 use replica::time::Micros;
@@ -236,6 +236,8 @@ pub struct Bodies {
     wind_moves: BTreeMap<Id, Id>,
     /// Each follower's walk the world sent (0.135 G2): its id and where it is going.
     follow_moves: BTreeMap<Id, (Id, Vec3)>,
+    /// Each member's walk to its place in an activity (0.135 G3), by (activity, body).
+    place_moves: BTreeMap<(Id, Id), Id>,
     /// Each body the rule put to sleep on the ground: the driver holding it lying.
     sleeping: BTreeMap<Id, Driver>,
 }
@@ -405,6 +407,7 @@ impl Bodies {
             unstuck: crate::unstick::Unstuck::default(),
             wind_moves: BTreeMap::new(),
             follow_moves: BTreeMap::new(),
+            place_moves: BTreeMap::new(),
             sleeping: BTreeMap::new(),
         })
     }
@@ -1642,6 +1645,64 @@ impl Bodies {
                 self.follow_moves.insert(follower, (id, to));
             }
         }
+    }
+
+    /// Members taking their places (0.135 G3, `sim::activity::places`): `(activity, body, Soul, place, facing)`. Each
+    /// walks there by the path every walk intent takes ([`Bodies::start`]), as its Soul's own, then turns to its
+    /// facing; one already within 0.15 m only turns. The place is a target, never a constraint: a walk that ends
+    /// short still ends the taking. Returns the members that have taken their places, by (activity, body).
+    pub fn take_places(&mut self, todo: &[(Id, Id, Id, Vec3, Quat)]) -> Vec<(Id, Id)> {
+        let mut done = Vec::new();
+        for &(activity, body, soul, to, facing) in todo {
+            let Some(at) = self.runner.controller.body(body).map(|m| m.pose.position) else {
+                done.push((activity, body));
+                continue;
+            };
+            let (dx, dz) = (i128::from(at.x - to.x), i128::from(at.z - to.z));
+            let near = dx * dx + dz * dz <= 150_000i128.pow(2);
+            if let Some(&id) = self.place_moves.get(&(activity, body)) {
+                let moving = self.live.values().any(|(i, _)| *i == id)
+                    || self.waiting.iter().any(|w| w.id == id);
+                if moving {
+                    continue;
+                }
+                self.place_moves.remove(&(activity, body));
+            } else if !near {
+                let Ok(id) = self.mint.mint() else { continue };
+                let ask = Ask::Walk {
+                    node: self.town.ground,
+                    point: Some(Vec3::new(to.x, 0, to.z)),
+                };
+                let started = self.start(vec![(
+                    id,
+                    Asked {
+                        body,
+                        actor: Actor::Soul(soul),
+                        ask,
+                        fallbacks: Vec::new(),
+                    },
+                )]);
+                if started.iter().all(|(_, r)| r.is_ok()) {
+                    self.place_moves.insert((activity, body), id);
+                    continue;
+                }
+            }
+            // Arrived (or the walk could not start): turn to the place's facing, by a driver of its legs.
+            let c = &mut self.runner.controller;
+            let turn = SkillShape {
+                name: Name::new("souls:take-place").unwrap_or_else(|| unreachable!("a name")),
+                claims: vec![Want::All(Class::Locomotion)],
+                blocks: Vec::new(),
+                cancelled_by: Vec::new(),
+            };
+            if let Ok(d) = c.claim(body, &turn) {
+                let _ = c.set(body, d, Part::Facing(facing));
+                let _ = c.release(body, d);
+                self.logged.remove(&body);
+            }
+            done.push((activity, body));
+        }
+        done
     }
 
     /// One move of the rule's, by the path every move intent takes ([`Bodies::start`]), under a fresh id.
