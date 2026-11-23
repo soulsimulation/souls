@@ -3,7 +3,7 @@
 //! two roles each name content's `handshake` move (B2's, `content/moves/handshake.json`).
 //!
 //! - An accepted handshake writes both members' moves for viewers (`souls:form-move`), each aimed at the other, with
-//!   their contact times within 50 ms of each other; when the moves are done both leave.
+//!   their contact times within 50 ms of each other; when the moves are done the handshake ends, both leaving it.
 //! - A declined offer, and one left to lapse, move nobody. An accept from 2.6 m away is refused `together.too-far`
 //!   (nothing walks a member to its place yet) and leaves the offer open.
 //!
@@ -51,6 +51,9 @@ const BRIEF: &str = "test:brief_handshake";
 const HOLD: &str = "test:hold_hands";
 /// Dancing together (0.134 T3).
 const DANCE: &str = "test:dance";
+/// A hug and a high-five, as the handshake: each ends with its moves.
+const HUG: &str = "test:hug";
+const HIGH_FIVE: &str = "test:high_five";
 const GIVER: &str = "test:giver";
 const TAKER: &str = "test:taker";
 
@@ -71,6 +74,8 @@ fn kinds() -> Vec<(&'static str, String)> {
         (BRIEF, pinned(BRIEF, 4)),
         (HOLD, pinned(HOLD, 5)),
         (DANCE, pinned(DANCE, 6)),
+        (HUG, pinned(HUG, 7)),
+        (HIGH_FIVE, pinned(HIGH_FIVE, 8)),
     ]
 }
 
@@ -213,13 +218,18 @@ fn tree_rules() -> TreeRules {
         kinds: BTreeMap::from([
             (
                 full(PLACE),
-                k("place", &["body", HANDSHAKE, BRIEF, HOLD, DANCE]),
+                k(
+                    "place",
+                    &["body", HANDSHAKE, BRIEF, HOLD, DANCE, HUG, HIGH_FIVE],
+                ),
             ),
             (full(WALKER), k("family", &[])),
             (full(HANDSHAKE), k("activity", &[])),
             (full(BRIEF), k("activity", &[])),
             (full(HOLD), k("activity", &[])),
             (full(DANCE), k("activity", &[])),
+            (full(HUG), k("activity", &[])),
+            (full(HIGH_FIVE), k("activity", &[])),
         ]),
         souls: [soul(1), soul(2), soul(3), soul(4)].into(),
         audiences: BTreeMap::new(),
@@ -396,6 +406,8 @@ fn serve(tag: &str) -> Run {
             handshake(BRIEF, 500_000),
             touch(HOLD, 60_000_000, "souls:hold_hand"),
             dance(),
+            touch(HUG, 60_000_000, "souls:hug"),
+            touch(HIGH_FIVE, 60_000_000, "souls:high_five"),
         ],
     ));
     let rules = Rules {
@@ -444,7 +456,7 @@ impl Run {
             if let Body::Changes(cs) = &e.body {
                 for c in cs {
                     if let Change::Create { node, kind, .. } = &c.change
-                        && [HANDSHAKE, BRIEF, HOLD, DANCE]
+                        && [HANDSHAKE, BRIEF, HOLD, DANCE, HUG, HIGH_FIVE]
                             .iter()
                             .any(|k| kind.as_str() == full(k))
                     {
@@ -578,12 +590,9 @@ fn t1_an_accepted_handshake_writes_both_moves_touching_together() {
         (c1 - c2).abs() <= 50_000,
         "contacts within 50 ms: {c1} and {c2} µs"
     );
-    // The moves take 2.3 s; then both leave.
+    // The moves take 2.3 s; then the handshake ends by itself, both leaving it.
     std::thread::sleep(Duration::from_millis(2_600));
-    a.act("activity:leave", Some(offer), &[])
-        .expect("Soul 1 leaves");
-    b.act("activity:leave", Some(offer), &[])
-        .expect("Soul 2 leaves");
+    assert_eq!(run.lefts(), 2, "both left when the moves ended");
     println!("t1: contacts at {c1} and {c2} µs; both left");
     run.stop();
 }
@@ -773,6 +782,41 @@ fn t3_four_souls_dance_on_one_beat_in_20_runs() {
     }
     println!(
         "t3: 20 runs, four Souls on one beat each; accepts spread over {spreads:?} ms; leaves accepted"
+    );
+    run.stop();
+}
+
+/// Lane B's find on 0.134 T1: a touch kept running after its moves ended, holding both arms, so a later point or
+/// wave was refused and a later touch between the same two never started. Each touch now ends with its moves: both
+/// members leave it by themselves (`souls:activity-left`), and the same touch again between the same two plays both
+/// moves.
+#[test]
+fn t1_each_touch_ends_with_its_moves_and_the_next_one_plays() {
+    let run = serve("again");
+    let (mut a, mut b) = (run.client(1), run.client(2));
+    for kind in [HANDSHAKE, HUG, HIGH_FIVE] {
+        for round in 1..=2 {
+            let moved = run.touches().len();
+            let lefts = run.lefts();
+            let touch = run.created(&a.offer(kind, 2).expect("offered"));
+            b.act("activity:accept", Some(touch), &[])
+                .unwrap_or_else(|r| panic!("{kind} {round}: accepted: {r}"));
+            assert_eq!(
+                run.touches().len(),
+                moved + 2,
+                "{kind} {round}: both moves written"
+            );
+            // The longest (a hug) takes 2.8 s; then the touch ends by itself.
+            std::thread::sleep(Duration::from_millis(3_300));
+            assert_eq!(
+                run.lefts(),
+                lefts + 2,
+                "{kind} {round}: both left when the moves ended"
+            );
+        }
+    }
+    println!(
+        "t1: a handshake, a hug and a high-five each ended with its moves, and each played again"
     );
     run.stop();
 }

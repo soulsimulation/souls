@@ -198,9 +198,20 @@ fn t1_an_accepted_handshake_writes_both_moves_touching_together() {
     assert_eq!(r.name, "target-outside-activity");
     assert_eq!(w.acts.stream.len(), written);
 
-    // The moves end, the members take their roles back, and either may leave.
+    // The moves end, and the touch ends with them: both members leave it, and both are held by nothing.
     let _ = w.run(LASTS);
     assert!(w.moves.is_empty(), "both moves ended");
+    let refused = w.acts.finish(
+        &mut w.tree,
+        &mut w.c,
+        &mut w.moves,
+        &mut w.due,
+        &mut w.mint,
+        LASTS,
+    );
+    assert!(refused.is_empty(), "{refused:?}");
+    assert!(w.acts.members(pair).is_none(), "the touch ended");
+    assert!(w.free(b0) && w.free(b1), "both arms free");
     let ask = w.ask(0, LASTS);
     w.acts
         .leave(

@@ -533,6 +533,17 @@ impl Engine {
             self.begin_moves(tr, c, now);
         }
         let _ = self.activities.settle(c, &self.moves, &mut self.due);
+        // A handshake, a hug or a high-five whose moves have ended ends: both arms free (0.134 T1).
+        if self.activities.finishing() {
+            let tr = tree.get_or_insert_with(|| live.frozen());
+            self.activities.next = tr.next();
+            for (body, r) in
+                self.activities
+                    .finish(tr, c, &mut self.moves, &mut self.due, &mut self.mint, now)
+            {
+                eprintln!("worldd: {} did not leave its touch: {r}", show(body));
+            }
+        }
         if !self.carries.is_empty() {
             let tr = tree.get_or_insert_with(|| live.frozen());
             let mut gone = Vec::new();
