@@ -21,6 +21,7 @@
 // The repeat rule's map ban (K12, v2/clippy.toml) is `sim`'s; the driver's maps are lookups.
 #![allow(clippy::disallowed_types)]
 
+mod stream;
 mod targets;
 
 use std::collections::{BTreeMap, HashMap};
@@ -135,13 +136,27 @@ struct Sent {
     duplicates: u64,
     resent: u64,
     restarting: u64,
+    /// Acts answered accepted (kind 3) and not yet ended when the drain ran out: answered, so not an error (W11).
+    unfinished: u64,
     /// X10's trace lines (`--trace`): `ack|dup <agent> <sequence> <unix ms>`, `first <agent> <sequence> <sent unix ms>
     /// <answer unix ms> <receipt or refusal name>`, `gone|back <agent> <unix ms>`.
     trace: Vec<String>,
+    /// #4154: each act the world took (a receipt or an acceptance naming its intent's id): the id, its send in Unix ms
+    /// its first answer (accepted or receipt) in Unix ms and its verb, joined with the public stream's first sight of it.
+    taken: Vec<(Id, u64, u64, String)>,
+    /// #4154's stuck measure: the longest time this agent had an act sent and unanswered with no answer at all, and
+    /// the longest time it acted with only refusals back (its Soul moves nowhere); ms. Its last answer's age at the
+    /// end of the schedule, ms.
+    stall_ms: u64,
+    refused_only_ms: u64,
+    last_answer_age_ms: u64,
+    /// #4154's accuracy check: the sequences the world took (accepted or receipted) and those it said were done.
+    took: std::collections::HashSet<u64>,
+    done: std::collections::HashSet<u64>,
 }
 
-/// One minute of the run's answers: receipts (a receipt, or a move's acceptance), refusals and errors by name, and
-/// each answered act's latency from its send to its first answer, in microseconds.
+/// One minute of the run's answers: receipts (an act's end, kind 1), refusals and errors by name, and each answered
+/// act's latency from its send to its first answer (an acceptance, a receipt or a refusal), in microseconds.
 #[derive(Default)]
 struct Minute {
     receipts: u64,
@@ -255,6 +270,203 @@ fn by_tenth(agents: &[Sent], late_ms: u64) -> Vec<serde_like::Obj> {
         .collect()
 }
 
+/// #4154: act wait to the public stream. Every act the world took (its receipt or acceptance named the intent's id)
+/// joined with the arrival of the first part showing an effect it caused: how many were seen, the wait's quantiles
+/// (ms, from the send), the same per verb, and the stream's own lag per part.
+fn visible_report(agents: &[Sent], seen: &stream::Seen) -> serde_like::Obj {
+    let q = |v: &[u64], s: f64| at_share(v, s) as f64;
+    let (mut all, mut accepted) = (Vec::new(), Vec::new());
+    let mut by_verb: BTreeMap<&str, (u64, Vec<u64>)> = BTreeMap::new();
+    // #4154: whether a move shows on the public stream before the world's answer (sent once its tick is durable),
+    // and by how much after it: the visible arrival less the answer's, signed.
+    let (mut before, mut after) = (0u64, Vec::new());
+    for (id, sent_ms, answered_ms, verb) in agents.iter().flat_map(|a| a.taken.iter()) {
+        accepted.push(answered_ms.saturating_sub(*sent_ms));
+        let e = by_verb.entry(verb.as_str()).or_default();
+        e.0 += 1;
+        if let Some(at) = seen.first.get(id) {
+            if at < answered_ms {
+                before += 1;
+            }
+            after.push(at.saturating_sub(*answered_ms));
+            let w = at.saturating_sub(*sent_ms);
+            all.push(w);
+            e.1.push(w);
+        }
+    }
+    all.sort_unstable();
+    accepted.sort_unstable();
+    after.sort_unstable();
+    let taken: u64 = by_verb.values().map(|v| v.0).sum();
+    let verbs: Vec<String> = by_verb
+        .iter_mut()
+        .map(|(k, (n, w))| {
+            w.sort_unstable();
+            format!(
+                "{k:?}: {{\"taken\": {n}, \"seen\": {}, \"p50Ms\": {}, \"p95Ms\": {}}}",
+                w.len(),
+                q(w, 0.5),
+                q(w, 0.95)
+            )
+        })
+        .collect();
+    let mut lag: Vec<u64> = seen.lag_ms.iter().map(|&l| l.max(0) as u64).collect();
+    lag.sort_unstable();
+    let mut writer: Vec<u64> = seen
+        .writer_lag_ms
+        .iter()
+        .map(|&l| l.max(0) as u64)
+        .collect();
+    writer.sort_unstable();
+    let within = |ms: u64| {
+        ratio(
+            all.iter().filter(|&&w| w <= ms).count() as u64,
+            all.len() as u64,
+        )
+    };
+    serde_like::Obj::new()
+        .n("taken", taken as f64)
+        .n("seen", all.len() as f64)
+        .n("seenShare", ratio(all.len() as u64, taken))
+        // Send to the world's first answer taking the act (accepted, or its receipt), over the same acts: a fast
+        // answer with a slow start shows as the gap between these and the act wait below.
+        .n("acceptedP50Ms", q(&accepted, 0.5))
+        .n("acceptedP95Ms", q(&accepted, 0.95))
+        .n("acceptedP99Ms", q(&accepted, 0.99))
+        .n("visibleBeforeAnswerShare", ratio(before, all.len() as u64))
+        .n("visibleAfterAnswerP50Ms", q(&after, 0.5))
+        .n("visibleAfterAnswerP95Ms", q(&after, 0.95))
+        .n("p50Ms", q(&all, 0.5))
+        .n("p95Ms", q(&all, 0.95))
+        .n("p99Ms", q(&all, 0.99))
+        .n("maxMs", all.last().copied().unwrap_or(0) as f64)
+        .n("within100Ms", within(100))
+        .n("within300Ms", within(300))
+        .n("streamParts", seen.parts as f64)
+        .n("streamReadsFailed", seen.failed as f64)
+        .n("streamLagP50Ms", q(&lag, 0.5))
+        .n("streamLagP95Ms", q(&lag, 0.95))
+        .n("streamLagMaxMs", lag.last().copied().unwrap_or(0) as f64)
+        .n("writerLagP50Ms", q(&writer, 0.5))
+        .n("writerLagP95Ms", q(&writer, 0.95))
+        .raw("byVerb", format!("{{{}}}", verbs.join(", ")))
+}
+
+/// #4154's stuck measure, per agent from its own answers (not the gateway's receipts file, which logs few Souls):
+/// stuck is an act outstanding with no answer for 60 s or more; refused-only is 60 s or more of acting with nothing
+/// but refusals back. Also the agents' last answer's age at the end of the schedule.
+fn stuck_report(agents: &[Sent]) -> serde_like::Obj {
+    const STUCK_MS: u64 = 60_000;
+    let who = |f: &dyn Fn(&Sent) -> bool| -> Vec<String> {
+        agents
+            .iter()
+            .enumerate()
+            .filter(|(_, a)| f(a))
+            .map(|(k, _)| k.to_string())
+            .collect()
+    };
+    let stuck = who(&|a| a.stall_ms >= STUCK_MS);
+    let refused = who(&|a| a.refused_only_ms >= STUCK_MS);
+    let mut ages: Vec<u64> = agents.iter().map(|a| a.last_answer_age_ms).collect();
+    ages.sort_unstable();
+    let mut stalls: Vec<u64> = agents.iter().map(|a| a.stall_ms).collect();
+    stalls.sort_unstable();
+    serde_like::Obj::new()
+        .n("stuck", stuck.len() as f64)
+        .n("refusedOnly", refused.len() as f64)
+        .n("stallMaxMs", stalls.last().copied().unwrap_or(0) as f64)
+        .n("lastAnswerAgeP50Ms", at_share(&ages, 0.5) as f64)
+        .n(
+            "lastAnswerAgeMaxMs",
+            ages.last().copied().unwrap_or(0) as f64,
+        )
+        .raw("stuckAgents", format!("[{}]", stuck.join(", ")))
+        .raw("refusedOnlyAgents", format!("[{}]", refused.join(", ")))
+}
+
+/// #4154, Gene's accuracy measure, by position in the world and not by receipt: each agent's last act that names a
+/// place (walk or sit: its target; a body form: its thing; a look or a point left out), as the copy read 15 s after
+/// the last act holds it. A body within 4 m of the place (frames' positions composed, `targets::world_xz`), or seated
+/// in it, counts as there. Acts the world did not take, and those it took but has not said are done, are counted apart.
+/// #4193: how many Souls were sent to one place over the run (walks, sits and takes): the most, and how many places
+/// more than [`targets::SHARE_MOST`] Souls were sent to, of the places sent to.
+fn same_target(sent_to: &BTreeMap<Id, std::collections::BTreeSet<usize>>) -> String {
+    let most = sent_to.values().map(|s| s.len()).max().unwrap_or(0);
+    let over = sent_to
+        .values()
+        .filter(|s| s.len() > targets::SHARE_MOST)
+        .count();
+    format!(
+        "{{\"places\": {}, \"mostSouls\": {most}, \"placesOverShare\": {over}}}",
+        sent_to.len()
+    )
+}
+
+/// #4193: how near its place a body counts as there, in micrometres (positions are micrometres, `v2/docs/pose.md`).
+const NEAR_PLACE_UM: i128 = 4_000_000;
+
+fn accuracy_report(
+    agents: &[Sent],
+    last: &[Option<(u64, String, Id)>],
+    actors: &[Actor],
+    seen: &targets::Seen,
+) -> serde_like::Obj {
+    let mut by: BTreeMap<String, [u64; 5]> = BTreeMap::new();
+    for (k, l) in last.iter().enumerate() {
+        let (Some((seq, verb, place)), Actor::Soul(soul)) = (l, actors[k]) else {
+            continue;
+        };
+        let e = by.entry(verb.clone()).or_default();
+        e[0] += 1;
+        if !agents[k].took.contains(seq) {
+            e[1] += 1;
+            continue;
+        }
+        let body = seen.bodies.get(&soul);
+        let seated = body
+            .and_then(|b| seen.places.get(b))
+            .is_some_and(|p| p.frame == *place);
+        let near = match (
+            body.and_then(|b| targets::world_xz(seen, b)),
+            targets::world_xz(seen, place),
+        ) {
+            (Some((x, z)), Some((px, pz))) => {
+                i128::from(x - px).pow(2) + i128::from(z - pz).pow(2) <= NEAR_PLACE_UM.pow(2)
+            }
+            _ => false,
+        };
+        let done = agents[k].done.contains(seq);
+        e[match (seated || near, done) {
+            (true, _) => 2,
+            (false, true) => 3,
+            (false, false) => 4,
+        }] += 1;
+    }
+    let mut total = [0u64; 5];
+    for v in by.values() {
+        for (t, x) in total.iter_mut().zip(v) {
+            *t += x;
+        }
+    }
+    let row = |v: &[u64; 5]| {
+        format!(
+            "{{\"checked\": {}, \"notTaken\": {}, \"atPlace\": {}, \"doneButElsewhere\": {}, \"underWay\": {}}}",
+            v[0], v[1], v[2], v[3], v[4]
+        )
+    };
+    let verbs: Vec<String> = by
+        .iter()
+        .map(|(k, v)| format!("{k:?}: {}", row(v)))
+        .collect();
+    serde_like::Obj::new()
+        .n("checked", total[0] as f64)
+        .n("atPlaceShare", ratio(total[2], total[0]))
+        .n("doneButElsewhereShare", ratio(total[3], total[0]))
+        .n("underWayShare", ratio(total[4], total[0]))
+        .n("notTakenShare", ratio(total[1], total[0]))
+        .raw("byVerb", format!("{{{}}}", verbs.join(", ")))
+}
+
 /// A tiny JSON writer, so the report needs no dependency.
 mod serde_like {
     pub struct Obj(Vec<(String, String)>);
@@ -325,11 +537,23 @@ fn basis(remote: bool) -> Value {
 /// served world (`targets.rs`), none on the driver's own.
 const WORDS: &str = "(load test)";
 
-fn intent(actor: Actor, verb: &Name, target: Option<Id>, sequence: u64, basis: &Value) -> Vec<u8> {
+fn intent(
+    actor: Actor,
+    verb: &Name,
+    target: Option<Id>,
+    arg: Option<&(String, Id)>,
+    sequence: u64,
+    basis: &Value,
+) -> Vec<u8> {
     let mut parameters = BTreeMap::new();
     if verb.as_str().ends_with(":say") {
         let words = Value::Map([(23, Value::Bytes(WORDS.as_bytes().to_vec()))].into());
         parameters.insert(1, words);
+    }
+    // A body form's thing argument (#4154): parameter 1 as C2's `[[name, id]]`, as the client's `wireIntent` sends it.
+    if let Some((name, id)) = arg {
+        let pair = Value::Array(vec![Value::Bytes(name.as_bytes().to_vec()), id.to_value()]);
+        parameters.insert(1, Value::Array(vec![pair]));
     }
     let i = Intent {
         actor,
@@ -352,8 +576,12 @@ fn intent(actor: Actor, verb: &Name, target: Option<Id>, sequence: u64, basis: &
 /// What a frame from the gateway says about the acts.
 #[derive(Debug, PartialEq)]
 enum Heard {
-    /// An act's receipt, or a move's acceptance (`replica::intents::Answer` kinds 1 and 3), by its sequence and kind.
-    Receipt(u64, u64),
+    /// An act's receipt (`replica::intents::Answer` kind 1), by its sequence: its end. With the intent's id the world
+    /// minted (field 4), which its effects name as their cause (#4154).
+    Receipt(u64, Option<Id>),
+    /// An act accepted and still going (kind 3, C20's progress answer; W11 #4087), by its sequence: its first answer,
+    /// not its end, which a receipt or a refusal brings later. With the minted intent id, as a receipt.
+    Accepted(u64, Option<Id>),
     /// An act refused, by its sequence and the refusal's name (kind 2).
     Refused(u64, String),
     /// Bytes the gateway could not read (kind 5), or a gateway's own word (`{4: name}`, a token refused): an error.
@@ -377,7 +605,14 @@ fn heard(bytes: &[u8]) -> Heard {
         return Heard::Other;
     };
     match (a.get(&2), a.get(&3)) {
-        (Some(Value::Uint(s)), Some(Value::Uint(k @ (1 | 3)))) => Heard::Receipt(*s, *k),
+        (Some(Value::Uint(s)), Some(Value::Uint(k @ (1 | 3)))) => {
+            let iid = a.get(&4).and_then(|v| replica::effects::read_id(v).ok());
+            if *k == 1 {
+                Heard::Receipt(*s, iid)
+            } else {
+                Heard::Accepted(*s, iid)
+            }
+        }
         (Some(Value::Uint(s)), Some(Value::Uint(2))) => Heard::Refused(*s, name(a.get(&4))),
         (_, Some(Value::Uint(5))) => Heard::Error(name(a.get(&4))),
         _ => Heard::Other,
@@ -397,6 +632,7 @@ struct Due {
     sequence: u64,
     start: Instant,
     verb: Name,
+    target: Option<Id>,
 }
 
 /// How long an agent waits for its answers after its last act: a form's receipt comes when it ends, seconds later.
@@ -482,7 +718,9 @@ async fn come_back(url: &str, token: &str, k: u32, jitter: bool) -> Option<(Tx, 
 }
 
 /// One agent: first frame and sign-in, then each intent the schedule hands it, sent at once; then its answers, each
-/// act's first answer timed from its send. Acts still unanswered 5 s after the last is sent are errors (`unanswered`).
+/// act's first answer timed from its send (an accepted act's acceptance, W11 #4087), each act kept until its end (its
+/// receipt or refusal). Acts still unanswered at the drain's end are errors (`unanswered`); accepted ones not yet
+/// ended are counted as `unfinished`, not as errors.
 /// With [`Faults`] it comes back after a lost or dropped socket and sends again, under its old sequence, every intent
 /// it has no answer for (the runbook's client, `v2/docs/runbook/gateway-upgrade.md`). A second receipt for one
 /// sequence is counted as a duplicate.
@@ -495,6 +733,7 @@ async fn agent(
     gate: Arc<Semaphore>,
     ready: Arc<AtomicU64>,
     seated: Arc<std::sync::atomic::AtomicBool>,
+    holding: Arc<std::sync::Mutex<Option<Id>>>,
     warm: Option<(Vec<u8>, u64)>,
     faults: Faults,
     mut acts: mpsc::UnboundedReceiver<Job>,
@@ -538,12 +777,39 @@ async fn agent(
     let mut newest = 0u64;
     // Sequences with a receipt (kind 1): a second is a duplicate.
     let mut receipted: std::collections::HashSet<u64> = std::collections::HashSet::new();
+    // Pending sequences answered accepted (kind 3): their first answer is timed; their end is still to come.
+    let mut accepted: std::collections::HashSet<u64> = std::collections::HashSet::new();
     // Intents answered `world.restarting`: sent again at their time.
     let mut retry: std::collections::VecDeque<(Instant, u64)> = std::collections::VecDeque::new();
     let mut start: Option<Instant> = None;
     let mut drain_until: Option<Instant> = None;
     let mut drop_at: Option<Instant> = None;
+    // #4154: a take's thing, by sequence, held once its receipt comes; the last answer of any kind, the last receipt
+    // or acceptance, and the last act sent.
+    let mut takes: HashMap<u64, Id> = HashMap::new();
+    let (mut last_answer, mut last_ok, mut last_sent): (
+        Option<Instant>,
+        Option<Instant>,
+        Option<Instant>,
+    ) = (None, None, None);
     loop {
+        // #4154's stuck measure, at every step: acts outstanding with no answer since the later of the last answer and
+        // the oldest outstanding send; acts sent with only refusals since the last receipt.
+        let now = Instant::now();
+        if let Some(oldest) = pending.values().map(|p| p.0).min() {
+            let since = last_answer.map_or(oldest, |l| l.max(oldest));
+            out.stall_ms = out
+                .stall_ms
+                .max(now.duration_since(since).as_millis() as u64);
+        }
+        if let (Some(sent), Some(first)) = (last_sent, start) {
+            let since = last_ok.unwrap_or(first);
+            if sent > since {
+                out.refused_only_ms = out
+                    .refused_only_ms
+                    .max(sent.duration_since(since).as_millis() as u64);
+            }
+        }
         if drain_until
             .is_some_and(|u| Instant::now() >= u || (pending.is_empty() && retry.is_empty()))
         {
@@ -568,7 +834,11 @@ async fn agent(
                     }
                     start = Some(d.start);
                     let now = Instant::now();
+                    last_sent = Some(now);
                     pending.insert(d.sequence, (now, unix_ms(), d.bytes.clone()));
+                    if let (true, Some(t)) = (d.verb.as_str().ends_with(":take"), d.target) {
+                        takes.insert(d.sequence, t);
+                    }
                     newest = newest.max(d.sequence);
                     verb_of.insert(d.sequence, d.verb);
                     out.late_us.push(now.duration_since(d.at).as_micros() as u64);
@@ -577,18 +847,57 @@ async fn agent(
                         lost = Some(true);
                     }
                 }
-                None => drain_until = Some(Instant::now() + Duration::from_secs(DRAIN_S)),
+                None => {
+                    let now = Instant::now();
+                    out.last_answer_age_ms = now
+                        .duration_since(last_answer.or(start).unwrap_or(now))
+                        .as_millis() as u64;
+                    drain_until = Some(now + Duration::from_secs(DRAIN_S));
+                }
             },
             m = rx.next() => match m {
                 Some(Ok(Message::Binary(b))) => {
                     let now = Instant::now();
                     let s0 = start.unwrap_or(now);
-                    match heard(&b) {
-                        Heard::Receipt(s, kind) => {
-                            if kind == 1 && !receipted.insert(s) {
+                    let h = heard(&b);
+                    if matches!(h, Heard::Receipt(..) | Heard::Accepted(..) | Heard::Refused(..)) {
+                        last_answer = Some(now);
+                    }
+                    if matches!(h, Heard::Receipt(..) | Heard::Accepted(..)) {
+                        last_ok = Some(now);
+                    }
+                    match h {
+                        // Accepted: the act's first answer, timed; it stays pending until its receipt or refusal.
+                        // #4154: the world took it.
+                        Heard::Accepted(s, iid) if pending.contains_key(&s) => {
+                            if accepted.insert(s) {
+                                let (sent_at, sent_ms, _) = pending[&s];
+                                if let Some(id) = iid {
+                                    let verb = verb_of.get(&s).map_or("?".into(), |v| v.as_str().to_owned());
+                                    out.taken.push((id, sent_ms, unix_ms(), verb));
+                                }
+                                let m = out.minute(s0, now);
+                                m.latency_us.push(now.duration_since(sent_at).as_micros() as u64);
+                                out.trace.push(format!("first {k} {s} {sent_ms} {} accepted", unix_ms()));
+                            }
+                            out.took.insert(s);
+                            out.other += 1;
+                        }
+                        // A receipt: the act's end; #4154: taken and done.
+                        Heard::Receipt(s, iid) => {
+                            if let Some(t) = takes.remove(&s) {
+                                *holding.lock().unwrap_or_else(|e| e.into_inner()) = Some(t);
+                            }
+                            if let (Some(id), Some((_, sent_ms, _)), false) = (iid, pending.get(&s), accepted.contains(&s)) {
+                                let verb = verb_of.get(&s).map_or("?".into(), |v| v.as_str().to_owned());
+                                out.taken.push((id, *sent_ms, unix_ms(), verb));
+                            }
+                            out.took.insert(s);
+                            out.done.insert(s);
+                            if !receipted.insert(s) {
                                 out.duplicates += 1;
                                 out.trace.push(format!("dup {k} {s} {}", unix_ms()));
-                            } else if kind == 1 {
+                            } else {
                                 out.trace.push(format!("ack {k} {s} {}", unix_ms()));
                             }
                             if let Some((sent_at, sent_ms, _)) = pending.remove(&s) {
@@ -596,11 +905,13 @@ async fn agent(
                                 if verb_of.remove(&s).is_some_and(|v| v.as_str().ends_with(":sit")) {
                                     seated.store(true, Ordering::Relaxed);
                                 }
+                                out.receipts += 1;
                                 let m = out.minute(s0, now);
                                 m.receipts += 1;
-                                m.latency_us.push(now.duration_since(sent_at).as_micros() as u64);
-                                out.receipts += 1;
-                                out.trace.push(format!("first {k} {s} {sent_ms} {} receipt", unix_ms()));
+                                if !accepted.remove(&s) {
+                                    m.latency_us.push(now.duration_since(sent_at).as_micros() as u64);
+                                    out.trace.push(format!("first {k} {s} {sent_ms} {} receipt", unix_ms()));
+                                }
                             } else {
                                 out.other += 1;
                             }
@@ -616,9 +927,12 @@ async fn agent(
                         {
                             verb_of.remove(&s);
                             let (sent_at, sent_ms, _) = pending.remove(&s).expect("pending");
-                            let ms = unix_ms();
-                            out.trace.push(format!("first {k} {s} {sent_ms} {ms} claim-taken replaced-by {newest}"));
-                            out.minute(s0, now).latency_us.push(now.duration_since(sent_at).as_micros() as u64);
+                            // An accepted act's first answer was timed at its acceptance.
+                            if !accepted.remove(&s) {
+                                let ms = unix_ms();
+                                out.trace.push(format!("first {k} {s} {sent_ms} {ms} claim-taken replaced-by {newest}"));
+                                out.minute(s0, now).latency_us.push(now.duration_since(sent_at).as_micros() as u64);
+                            }
                             out.replaced += 1;
                             out.other += 1;
                         }
@@ -626,10 +940,15 @@ async fn agent(
                             let verb = verb_of.remove(&s).map_or("?".into(), |v| v.as_str().to_owned());
                             *out.refused_by.entry(format!("{verb} {reason}")).or_default() += 1;
                             let (sent_at, sent_ms, _) = pending.remove(&s).expect("pending");
-                            out.trace.push(format!("first {k} {s} {sent_ms} {} {reason}", unix_ms()));
+                            let first = !accepted.remove(&s);
+                            if first {
+                                out.trace.push(format!("first {k} {s} {sent_ms} {} {reason}", unix_ms()));
+                            }
                             let m = out.minute(s0, now);
                             *m.refusals.entry(reason).or_default() += 1;
-                            m.latency_us.push(now.duration_since(sent_at).as_micros() as u64);
+                            if first {
+                                m.latency_us.push(now.duration_since(sent_at).as_micros() as u64);
+                            }
                             out.other += 1;
                         }
                         Heard::Error(name) => out.error(s0, now, &name),
@@ -691,7 +1010,12 @@ async fn agent(
     }
     if let Some(s0) = start {
         for (s, (at, sent_ms, _)) in pending {
-            out.error(s0, at, "unanswered");
+            // Accepted and still going at the drain's end: answered, not ended, so counted apart, not an error.
+            if accepted.contains(&s) {
+                out.unfinished += 1;
+            } else {
+                out.error(s0, at, "unanswered");
+            }
             out.trace.push(format!("open {k} {s} {sent_ms}"));
         }
     }
@@ -796,6 +1120,9 @@ struct Args {
     viewers: Option<(u32, f64, PathBuf)>,
     slow_read_ms: u64,
     trace: Option<PathBuf>,
+    /// #4154: the public stream's folder as the viewers' origin serves it (`http://host:port/path/`), read as a page
+    /// reads it, for act wait to the first thing a viewer can see (`stream.rs`).
+    stream: Option<String>,
 }
 
 /// `<share>@<second>+<seconds away>`, as `--drop` takes it.
@@ -848,6 +1175,7 @@ fn args() -> Option<Args> {
         },
         slow_read_ms: num("--slow-read-ms", 2000)?,
         trace: get("--trace").map(PathBuf::from),
+        stream: get("--stream").cloned(),
     })
 }
 
@@ -1093,9 +1421,10 @@ async fn main() {
             gate.clone(),
             ready.clone(),
             c.seated.clone(),
+            c.holding.clone(),
             entries
                 .is_some()
-                .then(|| (intent(actors[k], &rise, None, first, &based), first)),
+                .then(|| (intent(actors[k], &rise, None, None, first, &based), first)),
             faults,
             rx,
         )));
@@ -1116,8 +1445,16 @@ async fn main() {
         match seen {
             Ok(seen) => {
                 let t = targets::Targets::of(&seen, e);
+                let mut body_kinds: Vec<&str> = seen
+                    .nodes
+                    .iter()
+                    .filter(|(id, _)| seen.bodies.values().any(|b| b == id))
+                    .map(|(_, k)| k.as_str())
+                    .collect();
+                body_kinds.sort_unstable();
+                body_kinds.dedup();
                 println!(
-                    "targets: {} nodes in the copy; {}",
+                    "targets: {} nodes in the copy; bodies' kinds {body_kinds:?}; {}",
                     seen.nodes.len(),
                     t.json()
                 );
@@ -1132,6 +1469,18 @@ async fn main() {
 
     // The run: each act at its due time (plus its agent's thinking delay), whatever came back before it.
     let (cpu0, start) = (cpu_us(), Instant::now());
+    // #4154: the public stream read as a viewer reads it, on a thread of its own so it never delays a send.
+    let stop_reading = Arc::new(std::sync::atomic::AtomicBool::new(false));
+    let reader = a.stream.clone().map(|base| {
+        let stop = stop_reading.clone();
+        std::thread::spawn(move || {
+            tokio::runtime::Builder::new_current_thread()
+                .enable_all()
+                .build()
+                .expect("a runtime")
+                .block_on(stream::read(base, stop))
+        })
+    });
     // X10: the viewers, each following one Soul's body (viewer i the i-th Soul's, round the agents), until the run's
     // answers are in.
     let mut watching = Vec::new();
@@ -1164,9 +1513,13 @@ async fn main() {
     }
     let think = |agent: u32| a.think_ms * ((u64::from(agent) * 7919) % 1000) / 1000;
     let mut sequence = vec![first; s.agents as usize];
+    // #4154: each agent's last act that names a place: its sequence, verb and the place.
+    let mut last_place: Vec<Option<(u64, String, Id)>> = vec![None; s.agents as usize];
     let mut intended = vec![0u64; s.agents as usize];
     let mut unmapped: BTreeMap<&str, u64> = BTreeMap::new();
     let mut by_verb: BTreeMap<String, u64> = BTreeMap::new();
+    // #4193: the Souls sent to each place (a walk's, a sit's or a take's target), for the same-target count.
+    let mut sent_to: BTreeMap<Id, std::collections::BTreeSet<usize>> = BTreeMap::new();
     let (mut withheld, mut stand_ins) = (BTreeMap::new(), BTreeMap::new());
     for act in &s.acts {
         let Some(v) = act.verb else {
@@ -1175,8 +1528,8 @@ async fn main() {
         };
         let k = act.agent as usize;
         // On a served world: the act's target from the world's ids, a rise first when seated, a say withheld.
-        let (verb, target) = match &aimed {
-            None => (verbs[v].clone(), None),
+        let (verb, target, arg) = match &aimed {
+            None => (verbs[v].clone(), None, None),
             Some(t) => {
                 let body = match actors[k] {
                     Actor::Soul(b) => b,
@@ -1191,22 +1544,54 @@ async fn main() {
                 if let Some(x) = c.stand_in {
                     *stand_ins.entry(x).or_insert(0u64) += 1;
                 }
-                (Name::new(&c.verb).expect("a verb is a name"), c.target)
+                (
+                    Name::new(&c.verb).expect("a verb is a name"),
+                    c.target,
+                    c.arg,
+                )
             }
         };
         let due = start + Duration::from_millis(act.at_ms + think(act.agent));
         tokio::time::sleep_until(due.into()).await;
         sequence[k] += 1;
         intended[k] += 1;
+        let v = verb.as_str();
+        let place = if v.ends_with(":walk") || v.ends_with(":sit") {
+            target
+        } else {
+            arg.as_ref().map(|x| x.1)
+        };
+        if let (Some(t), true) = (
+            target,
+            v.ends_with(":walk") || v.ends_with(":sit") || v.ends_with(":take"),
+        ) {
+            sent_to.entry(t).or_default().insert(k);
+        }
+        if let (Some(p), false) = (place, v.ends_with(":look_at") || v.ends_with(":point")) {
+            last_place[k] = Some((sequence[k], v.to_owned(), p));
+        }
         *by_verb.entry(verb.as_str().to_owned()).or_default() += 1;
         let _ = chans[k].send(Job::Act(Due {
             at: due,
-            bytes: intent(actors[k], &verb, target, sequence[k], &based),
+            bytes: intent(actors[k], &verb, target, arg.as_ref(), sequence[k], &based),
             sequence: sequence[k],
             start,
             verb,
+            target,
         }));
     }
+    // #4154, Gene's accuracy measure: 15 s after the last act, the first agent reads its copy again, and each agent's
+    // last act that names a place (a walk, a sit, or a body form on a thing) is checked by where its body is.
+    let after = if a.remote.is_some() && aimed.is_some() {
+        tokio::time::sleep(Duration::from_secs(15)).await;
+        let (back, seen) = tokio::sync::oneshot::channel();
+        match chans.first().map(|c| c.send(Job::Read(back))) {
+            Some(Ok(())) => seen.await.ok().and_then(Result::ok),
+            _ => None,
+        }
+    } else {
+        None
+    };
     drop(chans);
     let mut sent = Vec::new();
     for (k, t) in tasks.into_iter().enumerate() {
@@ -1215,6 +1600,13 @@ async fn main() {
         sent.push(x);
     }
     let (wall, cpu) = (start.elapsed(), cpu_us() - cpu0);
+    stop_reading.store(true, Ordering::Relaxed);
+    let seen = reader.map(|r| r.join().unwrap_or_default());
+    let visible = seen.as_ref().map(|v| visible_report(&sent, v));
+    let stuck = stuck_report(&sent);
+    let accuracy = after
+        .as_ref()
+        .map(|seen| accuracy_report(&sent, &last_place, &actors, seen));
     for mut c in children {
         let _ = c.kill();
         let _ = c.wait();
@@ -1232,6 +1624,7 @@ async fn main() {
     let resent: u64 = sent.iter().map(|x| x.resent).sum();
     let restarting: u64 = sent.iter().map(|x| x.restarting).sum();
     let replaced: u64 = sent.iter().map(|x| x.replaced).sum();
+    let unfinished: u64 = sent.iter().map(|x| x.unfinished).sum();
     let mut viewers = Vec::new();
     for v in watching {
         if let Ok(v) = v.await {
@@ -1285,12 +1678,47 @@ async fn main() {
         .raw("withheld", counts(&withheld))
         .raw("standIns", counts(&stand_ins))
         .raw("refusedBy", counts(&refused_by))
+        .raw("sameTarget", same_target(&sent_to))
         .n("replacedByOwnAct", replaced as f64)
         .raw("perMinute", serde_like::list(&minutes))
         .n("duplicateReceipts", duplicates as f64)
         .n("resent", resent as f64)
         .n("restartingAnswers", restarting as f64)
-        .raw("viewers", serde_like::list(&viewers));
+        .n("unfinished", unfinished as f64)
+        .raw("viewers", serde_like::list(&viewers))
+        .raw(
+            "visible",
+            visible
+                .as_ref()
+                .map_or("null".into(), serde_like::Obj::json),
+        )
+        .raw("stuck", stuck.json())
+        .raw(
+            "accuracy",
+            accuracy
+                .as_ref()
+                .map_or("null".into(), serde_like::Obj::json),
+        );
+    if let Some(v) = &visible {
+        println!(
+            "Visible on the public stream: {} of {} acts the world took; send to accepted p50 {} ms, p95 {} ms; \
+             send to first visible move p50 {} ms, p95 {} ms, p99 {} ms; the stream's own lag p50 {} ms, p95 {} ms",
+            v.get("seen").unwrap_or(0.0),
+            v.get("taken").unwrap_or(0.0),
+            v.get("acceptedP50Ms").unwrap_or(0.0),
+            v.get("acceptedP95Ms").unwrap_or(0.0),
+            v.get("p50Ms").unwrap_or(0.0),
+            v.get("p95Ms").unwrap_or(0.0),
+            v.get("p99Ms").unwrap_or(0.0),
+            v.get("streamLagP50Ms").unwrap_or(0.0),
+            v.get("streamLagP95Ms").unwrap_or(0.0),
+        );
+    }
+    println!(
+        "Stuck: {} agents with an act unanswered 60 s or more; {} acting 60 s or more with only refusals",
+        stuck.get("stuck").unwrap_or(0.0),
+        stuck.get("refusedOnly").unwrap_or(0.0),
+    );
     let on_time = total.get("onTimeShare").unwrap_or(0.0);
     println!(
         "Acts: {} achieved of {} intended ({:.1} %){}; {:.1} % sent within {} ms of due (p50 {} ms, p99 {} ms, max {} ms); \
@@ -1326,8 +1754,13 @@ async fn main() {
     }
     println!("  refused by verb {}", counts(&refused_by));
     println!(
+        "  same target (Souls sent to one place) {}",
+        same_target(&sent_to)
+    );
+    println!(
         "  replaced by the agent's own next act (claim-taken, not counted as refused): {replaced}"
     );
+    println!("  accepted, not ended by the drain's end: {unfinished}");
     if a.reconnect || a.drop.is_some() || !viewers.is_empty() {
         println!(
             "  faults: duplicate receipts {duplicates}, sent again {resent}, world.restarting answers {restarting}"

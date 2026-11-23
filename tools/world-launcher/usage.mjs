@@ -11,6 +11,7 @@
 // Per Soul and day, from each world's own operations tables: acts (edge_receipts_v1 rows created that day), refusals
 // (edge_refusals_v1), requests and the client of the latest one (edge_clients_v1, #1936), and the owning account id
 // (souls.owner). Nothing else: no token, email, name or text. Operator data; nothing in it is published.
+import { isMain } from '../lib/is-main.mjs';
 import { execFile } from 'node:child_process';
 import { existsSync } from 'node:fs';
 import { join } from 'node:path';
@@ -169,7 +170,7 @@ export function usageRollup({ dataDir, log = () => {}, startMs = 30_000, everyMs
   return { run, report: (days, exclude) => [200, usageReport(file, { days: days ?? 7, exclude })] };
 }
 
-if (process.argv[1] === SELF) {
+if (isMain(import.meta.url)) {
   const argv = process.argv.slice(2), flag = (k) => { const i = argv.indexOf(`--${k}`); return i >= 0 ? argv[i + 1] : undefined; };
   const dataDir = flag('data'), day = flag('day');
   if (!dataDir || (day !== undefined && !/^\d{4}-\d{2}-\d{2}$/.test(day))) { console.error('usage: usage.mjs --data <launcher data dir> [--day YYYY-MM-DD] [--tries N] [--wait-ms N]'); process.exit(2); }

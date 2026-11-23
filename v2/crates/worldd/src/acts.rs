@@ -107,11 +107,12 @@ pub fn limits() -> Limits {
 }
 
 /// A gateway walk's route deadline and C21 progress watch. The route is read once N9 grants its actual spot;
-/// unrelated ticks do no route search. Waiting for a link or being carried is not a stalled walking tick.
+/// unrelated ticks do no route search. Waiting for a link or being carried is not a stalled walking tick. The deadline
+/// counts from the tick the route is read, not from the move's start, so a walk whose planning or spot waited still
+/// gets its whole route's time (W11, #4087).
 pub(crate) struct Walk {
     body: Id,
     order: Id,
-    started: Micros,
     planned: bool,
     watch: Watch,
     /// The leg's end last seen on the walk's line.
@@ -136,11 +137,10 @@ fn walk_span(length_mm: u64, links: usize) -> Micros {
 }
 
 impl Walk {
-    pub(crate) fn new(body: Id, order: Id, started: Micros) -> Self {
+    pub(crate) fn new(body: Id, order: Id) -> Self {
         Self {
             body,
             order,
-            started,
             planned: false,
             watch: Watch::new(),
             leg: None,
@@ -159,10 +159,7 @@ impl Walk {
         if !self.planned
             && let Some(metrics) = b.runner.route_metrics(self.body, self.order)
         {
-            due = Some(
-                self.started
-                    .saturating_add(walk_span(metrics.length_mm, metrics.links)),
-            );
+            due = Some(now.saturating_add(walk_span(metrics.length_mm, metrics.links)));
             self.planned = true;
         }
         let fields = b.runner.fields.get(&self.body);
@@ -343,6 +340,8 @@ struct Sight<'a> {
     sit_walks: BTreeMap<Id, (usize, Id, Vec3)>,
     /// The bodies whose walk in progress is to be there, not to act from there ([`Forms::goal_walks`]).
     goals: BTreeSet<Id>,
+    /// The reach of the move each walk in progress comes right before ([`Forms::walk_moves`]), µm.
+    walk_moves: BTreeMap<Id, i64>,
     planning: &'a RefCell<Planning>,
     map: Arc<Versions>,
 }
@@ -750,6 +749,55 @@ impl Sight<'_> {
         );
         nearest_on_drawn_shape(&n, [frame.x + p.x - parent.x, frame.z + p.z - parent.z])
     }
+
+    /// The footprint of the thing argument a body walks to at step `step` (#4072), when the thing is a child of `node`,
+    /// not a body, names no point of its entry (a base form's `go_to`, `wait_by`, `touch`, `lean_on`) and its entry
+    /// gives bounds ([`sim::spots::footprint`], the rule [`Sight::to_thing`] judges reach by): the floor it stands
+    /// over, its corners and its middle carried onto that floor, whether the walk ends on it, and how near its outline
+    /// it ends.
+    ///
+    /// - A walk to be at a walkable thing ([`sim::spots::walkable`]: a stage, a rug, a deck, a court) ends on it.
+    /// - A walk right before a move ends within that move's own reach of the outline, as [`Sight::to_thing`] measures
+    ///   it from the body's edge, less how near a walk comes to its end ([`skills::route::AT_GOAL`]): so a `touch`
+    ///   after it is in reach.
+    /// - Any other walk ends within `reach` (the form's) of the outline.
+    fn footprint_walk(
+        &self,
+        body: Id,
+        step: usize,
+        node: Id,
+        reach: i64,
+    ) -> Option<(Id, [Vec3; 4], Vec3, bool, i64)> {
+        let &(at_step, thing, ref point) = self.walks.get(&body)?;
+        if at_step != step || self.bodies.contains_key(&thing) {
+            return None;
+        }
+        let n = self.tree.node(self.tree.handle(thing)?)?;
+        if n.parent() != Some(node) {
+            return None;
+        }
+        let entry = self.kinds.get(entry_of(&n))?;
+        let named = ["points", "slots", "areas"]
+            .iter()
+            .any(|s| entry.get(s).and_then(|x| x.get(point.as_str())).is_some());
+        if named {
+            return None;
+        }
+        let (corners, _) = sim::spots::footprint(entry)?;
+        let on = self.goals.contains(&body) && sim::spots::walkable(entry);
+        let reach = match self.walk_moves.get(&body) {
+            Some(&r) => {
+                let radius = self.builds.get(&body)?.size.radius_mm() * 1000;
+                (r + radius - skills::route::AT_GOAL).clamp(sim::spots::REACH_PITCH, reach)
+            }
+            None => reach,
+        };
+        let place = n.place()?;
+        let (floor, ring, middle) = self.with_view(body, |v| {
+            v.footprint_on_floor(node, place.position, place.orientation, &corners)
+        })??;
+        Some((floor, ring, middle, on, reach))
+    }
 }
 
 /// Point `point` of entry `entry` laid on thing `n`'s own shape, when `n` is drawn in its parent's frame (placed at its
@@ -963,10 +1011,22 @@ impl Geometry for Sight<'_> {
         let Some(me) = self.bodies.get(&body) else {
             return WalkPlan::Legs(Vec::new());
         };
-        let at = self.on_shape(body, step, node).unwrap_or(at);
+        let shape = self.on_shape(body, step, node);
+        // A thing argument with a footprint and no drawn shape (#4072): the walk ends within reach of its outline, or
+        // on it.
+        let foot = shape
+            .is_none()
+            .then(|| self.footprint_walk(body, step, node, reach))
+            .flatten();
+        let at = shape.unwrap_or(at);
+        let (node, at, ring, reach) = match foot {
+            Some((floor, ring, middle, on, near)) => (floor, middle, Some((ring, on)), near),
+            None => (node, at, None, reach),
+        };
         // A walk to be in an area ends within reach of the area's circle, not of its middle.
         let reach = reach.saturating_add(self.area_radius(body, step).unwrap_or(0));
         // A walk before a sit goes to the seat's own stand point, the one its sit is measured from.
+        let sat = matches!(self.sit_walks.get(&body), Some(&(at_step, ..)) if at_step == step);
         let (node, at) = match self.sit_walks.get(&body) {
             Some(&(at_step, floor, stand)) if at_step == step => (floor, stand),
             _ => (node, at),
@@ -1011,6 +1071,7 @@ impl Geometry for Sight<'_> {
             at,
             reach,
             door,
+            ring: ring.filter(|_| !self.approaches.contains(&body) && !sat),
         };
         match planning.ask(key, *me, query, &self.map) {
             Some(FormResult::Walk(legs)) => {
@@ -1155,6 +1216,13 @@ impl Sight<'_> {
                     .position
                     .plus(place.orientation.rotate(p).ok()?)
                     .ok()?;
+                // A loose thing the view's tree does not hold (a bench a world placed, #4072): carried from its parent.
+                if let Some(on) = view
+                    .on_floor(n.parent()?, up)
+                    .filter(|(f, ..)| self.same_frame(*f, floor))
+                {
+                    return Some(on.1);
+                }
                 self.floor_of(n.parent()?, up)
                     .filter(|(f, _)| self.same_frame(*f, floor))
                     .map(|(_, p)| p)
@@ -1172,16 +1240,14 @@ impl Sight<'_> {
                 .and_then(|p| p.get("at_mm")))
             .and_then(on)
             .map(|p| gap(flat(q, [p.x, p.z]), p.y, p.y));
-            let surface =
-                um(entry.get("geometry").and_then(|g| g.get("bounds_mm"))).and_then(|b| {
-                    let (x, z) = (b.x / 2, b.z / 2);
-                    let c = |u: i64, v: i64| on(Vec3::new(u, 0, v));
-                    let corners = [c(-x, -z)?, c(x, -z)?, c(x, z)?, c(-x, z)?];
-                    let ring = corners.map(|p| [p.x, p.z]);
-                    let lo = corners.iter().map(|p| p.y).min()?;
-                    let hi = corners.iter().map(|p| p.y).max()? + b.y.max(0);
-                    Some(gap(to_ring(q, &ring), lo, hi))
-                });
+            let surface = sim::spots::footprint(entry).and_then(|(corners, height)| {
+                let [a, b, c, d] = corners;
+                let corners = [on(a)?, on(b)?, on(c)?, on(d)?];
+                let ring = corners.map(|p| [p.x, p.z]);
+                let lo = corners.iter().map(|p| p.y).min()?;
+                let hi = corners.iter().map(|p| p.y).max()? + height.max(0);
+                Some(gap(to_ring(q, &ring), lo, hi))
+            });
             match (named, surface) {
                 (Some(a), Some(b)) => Some(a.min(b)),
                 (a, b) => a.or(b),
@@ -1688,9 +1754,10 @@ impl Acts {
         let Some(Target::Node(node)) = &intent.target else {
             return false;
         };
+        // By the entry the node goes by (#3980): a thing that borrows `eden:chair` (field 27) sits as a chair does.
         tree.handle(*node)
             .and_then(|h| tree.node(h))
-            .and_then(|n| self.kinds.get(plain(n.kind())))
+            .and_then(|n| self.kinds.get(entry_of(&n)))
             .is_some_and(|entry| fixture_seat(entry, "sit").is_some())
     }
 }
@@ -1867,6 +1934,12 @@ impl Acts {
             approaches,
             sit_walks,
             goals: self.forms.goal_walks(),
+            walk_moves: self
+                .forms
+                .walk_moves()
+                .into_iter()
+                .filter_map(|(b, mv)| Some((b, self.library.iter().find(|m| m.name == mv)?.reach)))
+                .collect(),
             planning: &self.planning,
             map,
         };

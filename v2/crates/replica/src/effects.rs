@@ -1308,6 +1308,10 @@ impl NodeState {
 }
 
 impl LinkState {
+    /// A link in the state layout (`State::to_value`), as [`LinkState::read`] reads it.
+    pub fn to_value(&self) -> Value {
+        link_value(self)
+    }
     /// A link in the state layout (`State::to_value`).
     pub fn read(v: &Value) -> R<LinkState> {
         let mut r = Rec::of(v.clone(), "a link")?;

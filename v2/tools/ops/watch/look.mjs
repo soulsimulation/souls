@@ -21,10 +21,10 @@
 //   node look.mjs --root <worlds root> [--alarms <directory>/alarms/<machine>] [--lag-bound-ms 5000] [--port 8091] [--host 127.0.0.1]
 // With WATCH_TOKEN set, a look needs `Authorization: Bearer $WATCH_TOKEN`. The answer carries world ids and trouble
 // codes only: no Soul, account, token or words.
+import { isMain } from '../../../../tools/lib/is-main.mjs';
 import { readFileSync, renameSync, writeFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { AWAKE, healthFile, worlds } from '../health/read.mjs';
 
 export const PATH = '/ops/watch';
@@ -83,7 +83,7 @@ export function serve({ root, alarms, lagBoundMs, token = process.env.WATCH_TOKE
   });
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const argv = process.argv.slice(2), opt = (k, d) => { const i = argv.indexOf(`--${k}`); return i < 0 ? d : argv[i + 1]; };
   const root = opt('root', process.env.WORLDS_ROOT ?? '/var/lib/souls/worlds');
   const server = serve({ root, alarms: opt('alarms', join(root, 'directory', 'alarms', process.env.SOULS_MACHINE ?? 'local')), lagBoundMs: Number(opt('lag-bound-ms', LAG_BOUND_MS)) });
