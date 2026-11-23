@@ -5,7 +5,8 @@
 //! - **Its copy is kept the way K8's frozen copies are** (`sim::frozen`): a whole copy of the zone taken at start,
 //!   before the clock runs, then each tick's parts handed over (a send, nothing copied) and applied on this thread.
 //!   K8's published copies are shared and never sealed, so they cannot answer by hash; this copy is sealed here, on a
-//!   hash request after a change (only what changed is hashed), and every record a seal gave is kept.
+//!   hash request after a change (only what changed is hashed), and each node's record as last sealed is kept, with
+//!   the records lately replaced, for a descent still under way (#1960; `replica::sync::Records`).
 //! - **It holds only what is on the disk:** the answers thread hands over a tick's parts once the tick's records are
 //!   durable, so an answer never shows a change before it is on the disk and goes to the asker at once.
 //! - **It is never behind an answer the asker holds:** the parts are handed over before the tick's answers are sent,

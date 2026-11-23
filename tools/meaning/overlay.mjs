@@ -1,7 +1,6 @@
 #!/usr/bin/env node
+import { isMain } from '../lib/is-main.mjs';
 import{readFileSync,writeFileSync}from'node:fs';
-import{resolve}from'node:path';
-import{pathToFileURL}from'node:url';
 import{hashOf}from'../../packages/world-compiler/src/index.ts';
 import{aboutSchema,worldAboutSchema}from'../../packages/world-compiler/src/schemas.ts';
 import{materialize,applyOps}from'./materialize.mjs';
@@ -49,7 +48,7 @@ export function enrich(name,overlay){
  if(physicalGenesisSha256(template)!==physical)throw Error('meaning changed physical fixture hash');
  return{...m,report:{name,entities:Object.keys(overlay.about).length,parts:Object.values(overlay.about).reduce((n,a)=>n+(a.parts?.length??0),0),warnings,diagnostics,sourceSha:sha,physicalSha256:physical}};
 }
-if(process.argv[1]&&pathToFileURL(resolve(process.argv[1])).href===import.meta.url){
+if(isMain(import.meta.url)){
  const[command,name,out]=process.argv.slice(2);if(!['lint','apply'].includes(command)||!name)throw Error('overlay.mjs lint <name> | apply <name> <output.json>');
  const o=JSON.parse(readFileSync(new URL(`../../worlds/meaning/${name}.json`,import.meta.url),'utf8')),r=enrich(name,o);
  if(command==='apply'){if(!out)throw Error('explicit output path required');writeFileSync(out,JSON.stringify(r.template,null,2)+'\n');}

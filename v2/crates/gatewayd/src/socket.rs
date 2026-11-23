@@ -35,6 +35,19 @@ pub const VIEW_RENEWED: &str = "view.renewed";
 pub const VIEW_EXPIRED: &str = "view.expired";
 /// A view socket was sent something other than a subscribe or a renewal: it watches and never acts.
 pub const VIEW_ONLY: &str = "view.only";
+/// A view socket fell further behind its stream than [`VIEW_BEHIND_MOST`] and was let go (#4078).
+pub const VIEW_BEHIND: &str = "view.behind";
+
+/// How far a view socket may fall behind its stream before it is let go, as [`VIEW_BEHIND`] (#4078). Measured by a
+/// probe, a WebSocket ping its client answers only once it has read everything sent before it: a backlog held in the
+/// kernel's buffers, which the socket's item queue never sees, counts. A send that waits this long counts too.
+pub const VIEW_BEHIND_MOST: Duration = Duration::from_secs(10);
+/// How often a view socket is probed, once its last probe was answered.
+const VIEW_PROBE_EVERY: Duration = Duration::from_secs(2);
+/// How long a view socket that fell behind is given to take its reason and close frame before it is dropped.
+const VIEW_BEHIND_GRACE: Duration = Duration::from_secs(1);
+/// The close code of a view socket that fell behind: 1013, Try Again Later. It rejoins as any new viewer does.
+const VIEW_BEHIND_CODE: u16 = 1013;
 
 /// A presented sign-in: an agent's token, or a page's view token (V13b, #3407).
 enum Presented {
@@ -200,6 +213,64 @@ async fn next_binary(socket: &mut WebSocket) -> Option<Vec<u8>> {
 
 async fn send(socket: &mut WebSocket, frame: Vec<u8>) -> bool {
     socket.send(Message::Binary(frame.into())).await.is_ok()
+}
+
+/// A view socket's probe (#4078): the ping out and when it was sent, or when the next goes.
+struct Probe {
+    sent: u64,
+    out: Option<tokio::time::Instant>,
+    next: tokio::time::Instant,
+}
+
+impl Probe {
+    fn new() -> Self {
+        Probe {
+            sent: 0,
+            out: None,
+            next: tokio::time::Instant::now() + VIEW_PROBE_EVERY,
+        }
+    }
+
+    /// By when everything sent now must be read: the probe out's bound, else this send's own.
+    fn by(&self) -> tokio::time::Instant {
+        self.out
+            .unwrap_or_else(tokio::time::Instant::now)
+            .checked_add(VIEW_BEHIND_MOST)
+            .unwrap_or_else(tokio::time::Instant::now)
+    }
+
+    /// When the probe needs the socket's task: to send the next, or to let the socket go.
+    fn wake(&self) -> tokio::time::Instant {
+        self.out.map_or(self.next, |_| self.by())
+    }
+
+    /// A pong: the probe is answered if it carries the number of the one out.
+    fn answered(&mut self, payload: &[u8]) {
+        if self.out.is_some() && payload == self.sent.to_be_bytes() {
+            self.out = None;
+            self.next = tokio::time::Instant::now() + VIEW_PROBE_EVERY;
+        }
+    }
+}
+
+/// Sends on a view socket within its probe's bound; one that cannot take it by then fell behind.
+async fn send_view(
+    socket: &mut WebSocket,
+    probe: &Probe,
+    behind: &mut bool,
+    message: Message,
+) -> bool {
+    match tokio::time::timeout_at(probe.by(), socket.send(message)).await {
+        Ok(sent) => sent.is_ok(),
+        Err(_) => {
+            *behind = true;
+            false
+        }
+    }
+}
+
+fn binary(frame: Vec<u8>) -> Message {
+    Message::Binary(frame.into())
 }
 
 /// Where a client resumes from: its cursor, and how many frames at the cursor's version it applied.
@@ -427,21 +498,28 @@ async fn serve_view(gw: Arc<Gateway>, mut socket: WebSocket, presented: ViewToke
     let mut sub: Option<(u64, tokio::sync::mpsc::Receiver<Vec<u8>>)> = None;
     // W10 (#2802): the owner's box. Its grants' messages are told on `mail`, and its own puts answered there too.
     let (watching, reply, mut mail) = gw.watch(&view.grants);
+    // #4078: how far behind its stream the socket is, and whether it fell further than the bound.
+    let (mut probe, mut behind) = (Probe::new(), false);
+    let refuse = binary(control(token::REFUSED));
     while ok {
         let left = Duration::from_millis((view.expires * 1000).saturating_sub(crate::unix_ms()));
         tokio::select! {
             incoming = socket.recv() => {
                 let bytes = match incoming {
                     Some(Ok(Message::Binary(b))) => b.to_vec(),
-                    Some(Ok(Message::Ping(_) | Message::Pong(_))) => continue,
+                    Some(Ok(Message::Pong(p))) => {
+                        probe.answered(&p);
+                        continue;
+                    }
+                    Some(Ok(Message::Ping(_))) => continue,
                     Some(Ok(Message::Text(t))) => {
-                        if !allowed(&view,&authority) { let _=send(&mut socket,control(token::REFUSED)).await;break; }
+                        if !allowed(&view,&authority) { send_view(&mut socket,&probe,&mut behind,refuse.clone()).await;break; }
                         crate::mailbox::on_view_text(&gw, &view.grants, t.as_str(), reply.clone());
                         continue;
                     }
                     _ => break,
                 };
-                if !allowed(&view,&authority) { let _=send(&mut socket,control(token::REFUSED)).await;break; }
+                if !allowed(&view,&authority) { send_view(&mut socket,&probe,&mut behind,refuse.clone()).await;break; }
                 if let Some(request) = views::request(&bytes) {
                     if let Some((n, _)) = sub.take() {
                         gw.views.end(n);
@@ -458,11 +536,11 @@ async fn serve_view(gw: Arc<Gateway>, mut socket: WebSocket, presented: ViewToke
                     Ok(f) => f,
                     // A failed renewal keeps the token it has, until it expires.
                     Err(name) => {
-                        ok = send(&mut socket, control(name)).await;
+                        ok = send_view(&mut socket, &probe, &mut behind, binary(control(name))).await;
                         continue;
                     }
                 };
-                let Ok(fresh_authority)=capture(&fresh) else { let _=send(&mut socket,control(token::REFUSED)).await;break; };
+                let Ok(fresh_authority)=capture(&fresh) else { send_view(&mut socket,&probe,&mut behind,refuse.clone()).await;break; };
                 // What it may watch changed (a Soul given away): the subscription is made again for the new grants.
                 if audiences(&fresh) != audiences(&view)
                     && let (Some(request), Some((n, _))) = (&asked, sub.take())
@@ -473,15 +551,26 @@ async fn serve_view(gw: Arc<Gateway>, mut socket: WebSocket, presented: ViewToke
                 view = fresh;
                 authority = fresh_authority;
                 gw.rewatch(watching, &view.grants);
-                ok = send(&mut socket, control(VIEW_RENEWED)).await;
+                ok = send_view(&mut socket, &probe, &mut behind, binary(control(VIEW_RENEWED))).await;
             }
             Some(text) = mail.recv() => {
-                if !allowed(&view,&authority) { let _=send(&mut socket,control(token::REFUSED)).await;break; }
-                ok = socket.send(Message::Text(text.into())).await.is_ok();
+                if !allowed(&view,&authority) { send_view(&mut socket,&probe,&mut behind,refuse.clone()).await;break; }
+                ok = send_view(&mut socket, &probe, &mut behind, Message::Text(text.into())).await;
             }
             _ = tokio::time::sleep(left) => {
-                let _ = send(&mut socket, control(VIEW_EXPIRED)).await;
+                let _ = send_view(&mut socket, &probe, &mut behind, binary(control(VIEW_EXPIRED))).await;
                 break;
+            }
+            // The probe: past its bound unanswered, the socket fell behind; else the next one goes.
+            _ = tokio::time::sleep_until(probe.wake()) => {
+                if probe.out.is_some() {
+                    behind = true;
+                    break;
+                }
+                probe.sent += 1;
+                probe.out = Some(tokio::time::Instant::now());
+                let ping = Message::Ping(probe.sent.to_be_bytes().to_vec().into());
+                ok = send_view(&mut socket, &probe, &mut behind, ping).await;
             }
             item = async {
                 match sub.as_mut() {
@@ -490,8 +579,8 @@ async fn serve_view(gw: Arc<Gateway>, mut socket: WebSocket, presented: ViewToke
                 }
             } => match item {
                 Some(frame) => {
-                    if !allowed(&view,&authority) { let _=send(&mut socket,control(token::REFUSED)).await;break; }
-                    ok = send(&mut socket, frame).await;
+                    if !allowed(&view,&authority) { send_view(&mut socket,&probe,&mut behind,refuse.clone()).await;break; }
+                    ok = send_view(&mut socket, &probe, &mut behind, binary(frame)).await;
                 },
                 None => break,
             },
@@ -501,6 +590,23 @@ async fn serve_view(gw: Arc<Gateway>, mut socket: WebSocket, presented: ViewToke
         gw.views.end(n);
     }
     gw.unwatch(watching);
+    if behind {
+        (gw.log)(&format!(
+            "a view socket fell more than {} s behind its stream ({VIEW_BEHIND}); it was let go",
+            VIEW_BEHIND_MOST.as_secs()
+        ));
+        // Its reason and close frame, if it can still take them; either way the socket is dropped.
+        let close = CloseFrame {
+            code: VIEW_BEHIND_CODE,
+            reason: VIEW_BEHIND.into(),
+        };
+        let _ = tokio::time::timeout(VIEW_BEHIND_GRACE, async {
+            if send(&mut socket, control(VIEW_BEHIND)).await {
+                let _ = socket.send(Message::Close(Some(close))).await;
+            }
+        })
+        .await;
+    }
 }
 
 /// Returns once the gateway is stopping (at once if it already is).

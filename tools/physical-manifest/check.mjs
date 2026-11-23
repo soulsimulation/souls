@@ -7,6 +7,7 @@
 // - an unresolved row is never presented as qualified;
 // - the source pin and the reachable research baselines are commits here, and no missing-source ref is (fail closed).
 // Usage: node tools/physical-manifest/check.mjs [manifest.json]
+import { isMain } from '../lib/is-main.mjs';
 import {execFileSync} from 'node:child_process';
 import {existsSync, readdirSync, readFileSync} from 'node:fs';
 import {join, resolve} from 'node:path';
@@ -89,7 +90,7 @@ export function check(manifest, facts) {
   return errors;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const manifest = JSON.parse(readFileSync(process.argv[2] ?? MANIFEST, 'utf8'));
   const errors = check(manifest, await treeFacts());
   for (const e of errors) console.error(e);

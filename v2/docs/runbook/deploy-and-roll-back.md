@@ -10,12 +10,15 @@ the machine, not a person. The code is `v2/crates/supervisor/src/deploy.rs`; the
    `world.json`, `facts.json`, `moves.json` and `entries/`, and all but the last `--records` records of its `log` (the
    first, the import's part, always), are copied to `$WORLDS_ROOT/rehearsals/<build>/`, and the new build is started
    on that copy as the launcher starts it, `worldd serve --dir <scratch> --socket <scratch>/gateway.sock`, with
-   `WORLDD_REHEARSAL=1` (its output goes to `<scratch>/worldd.err`). It must serve within 30 s. It is then fed the intents the last records took (I4's answered rows), one tick's group at a time, and must give every
+   `WORLDD_REHEARSAL=1` (its output goes to `<scratch>/worldd.err`). It must serve within the world's start bound
+   (below). It is then fed the intents the last records took (I4's answered rows), one tick's group at a time, and must give every
    one a named end, then answer the probe (below). Invariants, not hashes: two builds fed the same intents need not
    write the same bytes. A failed rehearsal leaves the pin where it was.
 2. **Canary.** The pin in the world's directory record is set to the new build (one conditional write, W8) and the
-   world is restarted (`systemctl restart --no-block worldd@<world>`). It must serve its socket within 30 s (as
-   `worldd@`'s start timeout: a real world loads its facts and replays its log) and give
+   world is restarted (`systemctl restart --no-block worldd@<world>`). It must serve its socket within the world's start bound
+   (a real world loads its facts and replays its log): `start_within_s` from `world-limits.json`, which the install
+   writes into the world's `limits.conf` as `WORLD_START_WITHIN_S` (Eden 600 s), else 30 s, `worldd@`'s start
+   timeout. A world that hangs fails at that bound as `canary.not-serving`. It must then
    answer the probe within 2 s, every 0.5 s, for `--window-s` (default 60). The first miss is the fault, by name:
    `canary.not-serving` (it does not start, or dies), `canary.unanswered` (its clock does not tick),
    `canary.refused: <reason>` (it refuses the probe).
@@ -76,7 +79,7 @@ a build that reads only an older schema is refused. It prints the timelines, soc
 ## Known limits
 
 - A rehearsal replays the copied log from its start (the folder's checkpoints are not copied): a long-lived world's
-  rehearsal start grows with its log, and must stay under 30 s.
+  rehearsal start grows with its log, and must stay under the world's start bound.
 - `deploy` against systemd has not been run on a Linux machine: it was proved on `scratch.sh`'s machine (O18, O18b).
   `o7-run`'s builds were renamed to `worldd serve`'s socket and log, and it has not been run again since.
 - The canary watches the world through the probe; there is no auditor to watch yet.

@@ -14,9 +14,8 @@
 //   { "owner": "<who coordinates>", "paused": false, "bindings": { ...private, free-form... },
 //     "rules": [{ "rule": "<one standing rule>", "anchor": "#1960 or a github.com issue/PR/comment URL" }],
 //     "updated_at": "<ISO time>" }
+import { isMain } from '../lib/is-main.mjs';
 import { readFileSync } from 'node:fs';
-import { resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { publicationFindings } from '../proof/publication.mjs';
 import { collectAgenda, formatAgenda, repoFromGit } from './status.mjs';
 
@@ -88,4 +87,4 @@ async function main(argv) {
   return 0;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = await main(process.argv.slice(2));
+if (isMain(import.meta.url)) process.exitCode = await main(process.argv.slice(2));
