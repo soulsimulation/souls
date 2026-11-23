@@ -31,8 +31,16 @@
 //! #4087: in the tick it starts, not at [`DEADLINE`]): the gateway passes it on to the actor and moves the intent's
 //! deadline to the world's, so it answers in-flight acts with progress, not `act.timed-out`. The intent stays kept
 //! until its answer comes; an intent the world has said nothing of still has [`DEADLINE`].
+//!
+//! **Turns** (S2, 0.133). The world reads its link as fast as it comes and takes intents first come, first served, so
+//! one agent's flood would stand in front of everyone's. The gateway keeps each agent's place: at most [`TURN`] of an
+//! agent's intents are in the world's line at a time, from when they are sent until the world first answers them
+//! (progress, a receipt or a refusal); the agent's next ones wait in its own queue, in order, and go as those are
+//! answered. A flooding agent waits behind its own intents; one that sends now and then finds its place free. Nothing
+//! is refused or dropped for speed: a waiting intent keeps its deadline (C8) like any other. Sync requests are not
+//! intents and go at once.
 
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::path::PathBuf;
 use std::sync::{Arc, Mutex};
 use std::time::Duration;
@@ -130,6 +138,9 @@ fn delivery_metadata(frame: &[u8]) -> Option<DeliveryTrace> {
     })
 }
 
+/// How many of one agent's intents may be in the world's line at a time, sent and not yet answered (S2).
+pub const TURN: usize = 4;
+
 /// The answer to an intent sent while the world restarts.
 pub const RESTARTING: &str = "world.restarting";
 
@@ -181,6 +192,8 @@ struct Pending {
     sequence: u64,
     due: u64,
     reason: &'static str,
+    /// In the world's line: sent on this connection and not yet answered at all (S2).
+    flying: bool,
 }
 
 #[derive(Default)]
@@ -197,6 +210,59 @@ struct State {
     /// How to wake a sleeping world, and whether it was asked since the world was last reachable.
     wake: Option<Wake>,
     asked: bool,
+    /// S2: each agent's intents in the world's line now, and those waiting their turn, by number, oldest first.
+    flying: BTreeMap<Vec<u8>, usize>,
+    waiting: BTreeMap<Vec<u8>, VecDeque<u64>>,
+}
+
+impl State {
+    /// Sends kept intent `n` now if its agent has a place in the world's line, else queues it behind the agent's own.
+    fn turn(&mut self, n: u64) {
+        let Some(p) = self.pending.get(&n) else {
+            return;
+        };
+        let key = p.key.clone();
+        let Some(out) = self.out.clone() else {
+            return;
+        };
+        let line = self.flying.entry(key.clone()).or_insert(0);
+        if *line >= TURN {
+            self.waiting.entry(key).or_default().push_back(n);
+            return;
+        }
+        *line += 1;
+        let p = self
+            .pending
+            .get_mut(&n)
+            .unwrap_or_else(|| unreachable!("looked up above"));
+        p.flying = true;
+        p.handed = times::stamp();
+        // A send to a writer that has just ended is not lost: the intent stays kept and goes again on reconnect.
+        let _ = out.send(p.bytes.clone());
+    }
+
+    /// Intent `n` (taken from `pending` already when `flying` is given) left the world's line: its agent's next
+    /// waiting intent goes.
+    fn landed(&mut self, key: &[u8], was_flying: bool) {
+        if !was_flying {
+            return;
+        }
+        if let Some(line) = self.flying.get_mut(key) {
+            *line = line.saturating_sub(1);
+        }
+        while self.flying.get(key).copied().unwrap_or(0) < TURN {
+            let Some(next) = self.waiting.get_mut(key).and_then(VecDeque::pop_front) else {
+                break;
+            };
+            self.turn(next);
+        }
+        if self.waiting.get(key).is_some_and(VecDeque::is_empty) {
+            self.waiting.remove(key);
+        }
+        if self.flying.get(key) == Some(&0) {
+            self.flying.remove(key);
+        }
+    }
 }
 
 impl Link {
@@ -229,10 +295,6 @@ impl Link {
         let n = s.next;
         s.next += 1;
         s.index.insert((key.clone(), sequence), n);
-        // A send to a writer that has just ended is not lost: the intent stays kept and goes again on reconnect.
-        if let Some(out) = out {
-            let _ = out.send(bytes.clone());
-        }
         let left = u64::try_from(left).unwrap_or(0);
         let (wait, reason) = if left <= DEADLINE {
             (left, EXPIRED)
@@ -250,8 +312,11 @@ impl Link {
                 sequence,
                 due: received.saturating_add(wait),
                 reason,
+                flying: false,
             },
         );
+        drop(out);
+        s.turn(n);
         Sent::Sent
     }
 
@@ -307,7 +372,9 @@ impl Link {
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
         s.now = Some(now.clone());
         let n = s.index.remove(&(key.to_vec(), sequence))?;
-        s.pending.remove(&n).map(|p| (p.received, p.handed))
+        let p = s.pending.remove(&n)?;
+        s.landed(&p.key, p.flying);
+        Some((p.received, p.handed))
     }
 
     /// The world said the intent is in progress, with `left` µs until its deadline (C20): it stays kept, now due
@@ -319,7 +386,10 @@ impl Link {
         let p = s.pending.get_mut(&n)?;
         p.due = now.saturating_add(left);
         p.reason = TIMED_OUT;
-        Some((p.received, p.handed))
+        let (received, handed, key, was) = (p.received, p.handed, p.key.clone(), p.flying);
+        p.flying = false;
+        s.landed(&key, was);
+        Some((received, handed))
     }
 
     /// Takes every kept intent past its deadline at `now` (the steady clock) while the world is away, or [`WEDGED`]
@@ -337,6 +407,10 @@ impl Link {
         for n in late {
             if let Some(p) = s.pending.remove(&n) {
                 s.index.remove(&(p.key.clone(), p.sequence));
+                if let Some(q) = s.waiting.get_mut(&p.key) {
+                    q.retain(|w| *w != n);
+                }
+                s.landed(&p.key, p.flying);
                 out.push((p.key, p.actor, p.sequence, p.reason));
             }
         }
@@ -366,15 +440,24 @@ impl Link {
         }))
     }
 
-    /// Connected: the writer's queue, with every unanswered intent already in it, in first-sent order.
+    /// Connected: the writer's queue, with every unanswered intent in it or waiting its agent's turn (S2), in
+    /// first-sent order.
     fn connected(&self) -> mpsc::UnboundedReceiver<Vec<u8>> {
         let (tx, rx) = mpsc::unbounded_channel();
         let mut s = self.state.lock().unwrap_or_else(|e| e.into_inner());
-        for p in s.pending.values() {
-            let _ = tx.send(p.bytes.clone());
-        }
         s.out = Some(tx);
         s.asked = false;
+        s.flying.clear();
+        s.waiting.clear();
+        let kept: Vec<u64> = s.pending.keys().copied().collect();
+        for n in &kept {
+            if let Some(p) = s.pending.get_mut(n) {
+                p.flying = false;
+            }
+        }
+        for n in kept {
+            s.turn(n);
+        }
         rx
     }
 
