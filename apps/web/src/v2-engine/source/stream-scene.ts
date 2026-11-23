@@ -9,11 +9,12 @@
 // - things, buildings, paths and areas: every node that is an imported thing (its `origin`, today's id, with no `/` or
 //   `.`: a building's floors, rooms and windows and a place derived from a thing are drawn by the thing), at its world
 //   pose, with its shape (an area's outline, a path's line and width) and the def it was imported from (field 2) out of
-//   the core library the page already carries (`coreLibrary`); a building's size and storeys from its floors' surfaces.
+//   the core library the page already carries (`coreLibrary`), with its def's params (field 19, W3); from a world imported
+//   before W3, a building's size and storeys from its floors' surfaces.
 //
 // What the stream does not carry is drawn plain and named in `plain` (the hatch): a def the library does not have is
-// drawn from the thing's own solids (field 12) as boxes; a def's other params (colours, roof, a door's size) are the
-// def's defaults. Things a creator places later are not here: creator-kinds.ts sends them as the stream shows them.
+// drawn from the thing's own solids (field 12) as boxes; from a world imported before W3, a def's other params (colours,
+// roof, a door's size) are the def's defaults. Things a creator places later are not here: creator-kinds.ts sends them as the stream shows them.
 // The snapshot reaches the layer through scene-offer.ts.
 import { coreLibrary, type Entity, type StoredDef } from '@souls/world-compiler';
 import { TILE_M, TILE_N, tileKey, type Ground } from '@souls/ground';
@@ -138,10 +139,12 @@ export function streamSnapshot(nodes: readonly NodeRec[], worldId: string, lib: 
       e.p = at.p; e.r = at.yaw;
       if (n.scale && n.scale !== 1_000_000) e.s = n.scale / 1e6;
     }
-    if (def.make.kind === 'gen' && def.make.gen === 'building/1') { const bp = buildingParams(o, nodes); if (bp) e.params = bp; }
+    // its recorded params (W3) by the def it was imported from; else, from an older import, a building's size from its floors
+    if (n.params && !def.name.startsWith('v2-')) e.params = n.params as Entity['params'];
+    else if (def.make.kind === 'gen' && def.make.gen === 'building/1') { const bp = buildingParams(o, nodes); if (bp) e.params = bp; }
     entities.push(e);
   }
-  if (entities.some((e) => !e.params) && defs.size) plain.add("params the stream does not carry (colours, roofs, a door's size): the def's defaults");
+  if (entities.length && !nodes.some((n) => n.params)) plain.add("params this world's import does not carry (before W3: colours, roofs, a door's size): the def's defaults");
   return {
     contract: 'world/1', worldId, seq: 0, counter: 0, seed: `v2:${worldId}`, constants: { extent: Math.max(ext[2] - ext[0], ext[3] - ext[1]), ground: 'land', base: 0 },
     state: stateOf(nodes.find((n) => n.parent === null)), ground: { schema: 'ground/1', base: 0, extent: ext, landforms: [], waters } as Ground,

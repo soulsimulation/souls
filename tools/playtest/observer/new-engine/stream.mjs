@@ -5,7 +5,7 @@
 //
 //   const v = await streamViewer({ world, pkg });   // world: arena/new-engine/world.mjs startWorld's answer
 //   v.bodies(), v.said(), v.node(clientId), v.errors; v.close()
-import { existsSync, readFileSync } from 'node:fs';
+import { existsSync, readFileSync, statSync } from 'node:fs';
 import { registerHooks } from 'node:module';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
@@ -24,8 +24,8 @@ export const streamUrl = (page, advert) => new URL(String(advert.stream).replace
 
 let hooked = null;
 const timers = new Set();
-/** Once per process: `replica` resolves to the package, a file: fetch reads the file (the WASM), timers are kept. */
-function hookOnce(pkg) {
+/** Once per process: `replica` resolves to the package, a file: fetch reads the file (the WASM, a world's history), timers are kept. */
+export function hookOnce(pkg) {
   if (hooked) { if (hooked !== pkg) throw new Error(`one replica package per process: ${hooked} already loaded`); return; }
   if (!existsSync(join(pkg, 'replica.js'))) throw new Error(`no replica package at ${pkg} (v2/tools/dev/run.sh builds one)`);
   const url = pathToFileURL(join(pkg, 'replica.js')).href;
@@ -33,7 +33,10 @@ function hookOnce(pkg) {
   const realFetch = globalThis.fetch;
   globalThis.fetch = (input, init) => {
     const u = String(input instanceof Request ? input.url : input);
-    return u.startsWith('file:') ? Promise.resolve(new Response(readFileSync(new URL(u)), { headers: { 'content-type': 'application/wasm' } })) : realFetch(input, init);
+    if (!u.startsWith('file:')) return realFetch(input, init);
+    // a file: a world's folder read in place (its history), or the WASM; a missing file answers 404, as the origin does
+    const f = new URL(u);
+    return Promise.resolve(existsSync(f) && statSync(f).isFile() ? new Response(readFileSync(f), { headers: { 'content-type': 'application/wasm' } }) : new Response(null, { status: 404 }));
   };
   const realSetInterval = globalThis.setInterval;
   globalThis.setInterval = (f, ms, ...a) => { const t = realSetInterval(f, ms, ...a); timers.add(t); return t; };
@@ -41,12 +44,15 @@ function hookOnce(pkg) {
 }
 
 let n = 0;
-/** A fresh viewer from now on. Resolves once its worker is started; `ready()` waits for the first state it plays. */
-export async function streamViewer({ world, pkg = REPLICA_PKG }) {
+/** A fresh viewer from now on, of `world`'s stream or of the `stream` address given. Resolves once its worker is started. */
+export async function streamViewer({ world = null, stream = null, pkg = REPLICA_PKG }) {
   hookOnce(pkg);
-  const advert = await fetch(`${world.page}views/world.json`, { signal: AbortSignal.timeout(10_000) }).then((r) => (r.ok ? r.json() : null), () => null)
-    ?? JSON.parse(readFileSync(join(world.dir, 'world/views/world.json'), 'utf8'));
-  const stream = streamUrl(world.page, advert);
+  // a stream's address given (a world's old page names it, as soul.game's does), else the world's advert
+  if (!stream) {
+    const advert = await fetch(`${world.page}views/world.json`, { signal: AbortSignal.timeout(10_000) }).then((r) => (r.ok ? r.json() : null), () => null)
+      ?? JSON.parse(readFileSync(join(world.dir, 'world/views/world.json'), 'utf8'));
+    stream = streamUrl(world.page, advert);
+  }
   const v = { stream, nodes: new Map(), parts: 0, saidRecs: [], errors: [], played: null };
   const self = {
     onmessage: null,

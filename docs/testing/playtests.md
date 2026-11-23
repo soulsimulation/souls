@@ -78,7 +78,23 @@ node tools/launch-video/scene.mjs tools/launch-video/scenes/hamlet-stroll.json [
 A scene file names its genesis and the things it places, its Souls (paired and joined as above), commands before the take
 and beats during it (the new client's words), and the camera; the head of `tools/launch-video/scene.mjs` has its format
 and known limits. `tools/launch-video/capture.mjs` records one take of any local world page (the canvas and its sound),
-including a past span of its history (`--shot` with a range).
+including a past span of its history (`--shot` with a range). A scene's camera may also be `{"plan": {...}}`: the scene
+plays, `tools/launch-video/shoot.mjs` plans the best move with `@souls/camera`'s pathfinder (`packages/camera`) from the
+world's own folder (its solids from `facts.json`, its people from its history), and the take replays the span with that
+camera (`tools/launch-video/scenes/hamlet-planned.json`). `shoot.mjs --recording <scene dir> --describe` shows who moves
+when, for choosing a shot by hand.
+
+The same command records a past span of a world's history on its old page, at ×1 to ×8, from a fixed or path camera,
+or a follow or planned one. A planned camera reads the world's people from its public history and its solids from its
+public stream, over the network, as soul.game serves a world (0.135 P7), so it serves a live world's highlights;
+`--world-dir` reads a local world's folder instead:
+
+```sh
+node tools/launch-video/scene.mjs --span --page <old page url> --from '<old page url>#t=<µs>' --to '<…#t=<µs>>' \
+  --camera '{"follow":"<body id>"}' --speed 2
+```
+
+`--from first` (a local world's folder) starts at the first moment the world ran.
 
 Everything prints JSON on stdout and logs to stderr. `--server-root` is the Souls checkout whose server the dev worlds
 run from (it needs a built `apps/web/dist`). Pass it explicitly, and pass `--out` or `--runs-root` for where runs go.

@@ -26,6 +26,22 @@ export default function v2Transport({build = true} = {}) {
   const call = async q => { const a = await ask(q); if (a.error) throw new Error(`v2 ${q.op}: ${a.error}`); return a; };
   const t = {
     name: 'v2', stepped: true, timers: false, events: false, reads: [],
+    // It decides on the case's own state (sceneOf), so a case's hands, links and slots are its scene as they stand,
+    // and it defines every kind it is started with, a case's things from outside the family too.
+    scene: ['hands', 'links', 'slots'], defines: true,
+    // Its world keeps no tree of the placed things and no places (the runner's own doc), so a form that takes or puts a
+    // thing, sits in a slot, or that only a linked Soul may do, cannot run here; its refusals are still the rules', on
+    // the case's state.
+    treeGap(entry, form) {
+      const f = entry?.forms?.[form];
+      const link = typeof f?.who === 'object' ? f.who.link : null;
+      if (f?.who === 'holder' || link) return `${form} is for ${link ? `the ${link} link` : 'its holder'} only, and this world keeps no tree to check who may`;
+      const step = (f?.steps ?? []).find(s => ['take', 'put', 'sit', 'use_held'].includes(s.step));
+      if (step) return `${form}'s ${step.step} step needs the things where the case puts them, and this world keeps no tree of them`;
+      const change = (f?.effects ?? []).find(e => ['reparent', 'transfer', 'create', 'remove'].includes(e.change) || (e.change === 'set' && 'by' in e));
+      if (change?.change === 'set') return `${form} adds to ${change.field}, which the runner reads from the world's tree, and this world keeps none`;
+      return change ? `${form}'s ${change.change} reads or moves a thing in the world's tree, and this world keeps none` : null;
+    },
     async start(loaded) {
       if (build !== 'no') {
         const r = spawnSync('cargo', ['build', '--release', '--quiet', '--manifest-path', '../tools/entry/v2/Cargo.toml', '--target-dir', 'target'], {cwd: V2, encoding: 'utf8', stdio: ['ignore', 'ignore', 'pipe']});
@@ -36,7 +52,7 @@ export default function v2Transport({build = true} = {}) {
       lines = createInterface({input: child.stdout});
       lines.on('line', l => waiting.shift()?.ok(JSON.parse(l)));
       child.on('exit', code => { for (const w of waiting.splice(0)) w.no(new Error(`the v2 world ended (${code})`)); });
-      const kinds = Object.fromEntries(loaded.filter(r => r.kind && r.entry?.forms).map(r => [r.kind, r.entry]));
+      const kinds = Object.fromEntries(loaded.filter(r => r.kind && r.entry).map(r => [r.kind, r.entry]));
       await call({op: 'define', kinds});
     },
     async stop() { child?.stdin.end(); },
