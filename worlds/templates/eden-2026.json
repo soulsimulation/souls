@@ -109809,6 +109809,63 @@
           }
         }
       ]
+    },
+    {
+      "note": "Useful facilities in existing places: classroom conference podium, office living-room television, commons shared kitchen stove and performance-stage speaker. Existing games, gardens, campfire seating, instruments and computers are reused.",
+      "group": "eden-4385-facilities",
+      "ops": [
+        {
+          "op": "place",
+          "def": "core/podium@1",
+          "name": "classroom-conference-podium",
+          "in": {
+            "parent": "eden-classroom-1",
+            "slot": "classroom"
+          },
+          "p": [
+            0,
+            0,
+            -7
+          ],
+          "r": 3.141592653589793
+        },
+        {
+          "op": "place",
+          "def": "core/television@1",
+          "name": "office-lounge-television",
+          "in": {
+            "parent": "eden-office-1",
+            "slot": "reception"
+          },
+          "p": [
+            4.1,
+            0,
+            -1.6
+          ]
+        },
+        {
+          "op": "place",
+          "def": "core/stove@1",
+          "name": "commons-shared-kitchen-stove",
+          "p": [
+            -24,
+            0,
+            2.7
+          ],
+          "r": 3.141592653589793
+        },
+        {
+          "op": "place",
+          "def": "core/speaker@1",
+          "name": "performance-stage-speaker",
+          "p": [
+            96.2,
+            0,
+            -31.5
+          ],
+          "r": 3.141592653589793
+        }
+      ]
     }
   ]
 }

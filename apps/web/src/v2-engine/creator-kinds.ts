@@ -17,6 +17,7 @@
 // gatewayd #3930). A record with neither draws its bounds as one box, so the thing is never invisible.
 import { defSchema, hashOf, type StoredDef } from '@souls/world-compiler';
 import { placedOf, type LayerLike, type WorldDiff } from './world-state.ts';
+import { placedDef } from './source/stream-scene.ts';
 
 /** The reader's node record, the fields read here (v2/web/src/source/source.ts NodeRec). */
 type NodeLike = { id: string; kind: string; parent: string | null; pos?: [number, number, number]; rot?: [number, number, number, number];
@@ -29,6 +30,8 @@ export const DEFINITION = 'souls:kind';
 const obj = (v: unknown): Json | null => (v && typeof v === 'object' && !Array.isArray(v) ? (v as Json) : null);
 const point = (v: unknown): v is [number, number, number] => Array.isArray(v) && v.length === 3 && v.every((x) => typeof x === 'number' && Number.isFinite(x));
 const UPLOAD = /^upload:(1220([0-9a-f]{64}))$/;
+/** A body (bridge.ts isBody): the bodies' adapter draws it. */
+const isBody = (n: NodeLike) => !!n.soul || /:(humanoid|body)$/.test(plain(n.kind));
 /** A kind's plain name: `ns:name`, without its revision. */
 const plain = (k: string) => k.split('@')[0];
 
@@ -112,6 +115,8 @@ export class CreatorKinds {
    *  whose nodes a creator removed. */
   private oldDefs = new Map<string, string>();
   private gone = new Set<string>();
+  /** W2: content kinds' own shapes (take-parts.ts), by full and plain name: after the old and library defs. */
+  private shapes = new Map<string, { def: StoredDef; model: string | null }>();
   /** Where a model's bytes are, by its upload hash (gatewayd's `/v2/uploads/<hash>`, same origin). */
   private readonly uploadUrl: (hash: string) => string;
   private readonly onModel: (sha: string, url: string) => void;
@@ -137,9 +142,11 @@ export class CreatorKinds {
       const d = kindDef(n.defines, n.entry);
       if (!d) continue;
       this.definers.set(n.id, n.defines);
-      // a thing names its kind by the full name, or (as the creator places it) by the plain one: the newest definition
-      this.defs.set(n.defines, d);
-      this.defs.set(n.defines.split('@')[0], d);
+      // a thing names its kind by the full name, or (as the creator places it) by the plain one: the newest definition.
+      // W2: a content kind's own shape (take-parts.ts, `entry:` definers) is kept apart: it draws only what nothing else does
+      const into = n.id.startsWith('entry:') ? this.shapes : this.defs;
+      into.set(n.defines, d);
+      into.set(n.defines.split('@')[0], d);
       if (d.model && d.def.make.kind === 'mesh') this.onModel(d.def.make.asset, this.uploadUrl(d.model));
     }
   }
@@ -170,7 +177,11 @@ export class CreatorKinds {
     const live = new Set<string>();
     for (const [id, n] of this.nodes) {
       if (n.origin) continue; // the world's own scene: the layer has it, and world-state.ts moves it
-      const d = this.defs.get(n.kind), old = d ? undefined : this.oldDefs.get(plain(n.kind));
+      // W2 (0.135): a kind neither defined by a creator nor shown by the world's own things draws by its library def,
+      // else by its content entry's own shape
+      const own = this.defs.get(n.kind), old = own ? undefined : this.oldDefs.get(plain(n.kind));
+      const lib = own || old || isBody(n) ? undefined : placedDef(n.kind);
+      const d = own ?? (lib ? { def: lib, model: null } : old ? undefined : this.shapes.get(n.kind));
       if (!d && !old) continue;
       const to = placedOf(this.nodes, id);
       if (!to) continue;
