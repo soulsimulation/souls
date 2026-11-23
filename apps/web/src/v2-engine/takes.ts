@@ -8,7 +8,7 @@
 // extrapolation), faces the way it moves (the old take's yaw: atan2(dz, dx)), and walks while it moves.
 
 import { heldAt, postureOf, type Held, type Seat } from './take-bodies.ts';
-import { gestureAt, type Gesture } from './take-gestures.ts';
+import { gestureAt, towardAt, type Gesture } from './take-gestures.ts';
 import { markOf, type Talk } from './take-speech.ts';
 
 /** Seconds a tick, as the old engine's takes. */
@@ -110,6 +110,9 @@ export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame,
       const m = motionAt(b.samples, t, heading);
       heading = m.heading;
       const walking = m.speed >= WALKING;
+      // an aimed gesture turns the standing body toward its target, so the old pose (a point, a wave, a bow) faces it
+      const aim = walking ? null : towardAt(b.gestures, t);
+      if (aim && !seatAt(b.samples, t) && Math.hypot(aim[0] - p[0], aim[1] - p[2]) > 1) heading = Math.atan2(aim[1] - p[2], aim[0] - p[0]);
       track.push([k, Math.round(p[0]), Math.round(p[1]), Math.round(p[2]), Math.round(heading * ANG_Q)]);
       if (k === 0) { changes.push([0, b.entity, 'present', true], [0, b.entity, 'level', 0]); if (b.look) changes.push([0, b.entity, 'body', b.look]); }
       const seat = walking ? null : seatAt(b.samples, t), nextSeat = seat ? seat.height / POS_Q : null, nextProp = heldAt(b.held, t);

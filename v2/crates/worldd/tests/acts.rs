@@ -280,7 +280,12 @@ fn entries() -> Json {
         "stock": { "who": "anyone", "steps": [],
           "effects": [{ "change": "create", "kind": "PLANK", "into": "rest", "event": "stocked" }] },
         "overstock": { "who": "anyone", "steps": [],
-          "effects": [{ "change": "create", "kind": "GHOST", "into": "rest", "event": "haunted" }] } } }"#
+          "effects": [{ "change": "create", "kind": "GHOST", "into": "rest", "event": "haunted" }] },
+        "haunt": { "who": "anyone", "steps": [],
+          "effects": [{ "change": "timer", "form": "haunt_again", "after_us": 1, "event": "haunting" }] },
+        "haunt_again": { "who": "anyone", "steps": [],
+          "effects": [{ "change": "create", "kind": "GHOST", "into": "rest", "event": "haunted" },
+            { "change": "timer", "form": "haunt_again", "after_us": 1, "event": "again" }] } } }"#
             .replace("PLANK", &fullname(PLANK))
             .replace("GHOST", &full("test:ghost", 0xff)),
     )
@@ -1094,10 +1099,15 @@ const WALK_AT: i64 = 2;
 
 /// The test world in lockstep (no socket): intents arrive at the ticks they name, and nothing waits on a clock.
 fn lockstep() -> Run {
+    lockstep_with(bodies)
+}
+
+/// [`lockstep`], its bodies made by `make`.
+fn lockstep_with(make: fn() -> Result<Bodies, replica::effects::Refusal>) -> Run {
     let store = Mem::with(Vec::new());
     let mut cfg = Config::new(LINEAGE, 1);
     cfg.lockstep = true;
-    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
+    cfg.bodies = Some(Box::new(move |_: &worldd::bodies::Placed| make()));
     cfg.engine = Some((
         tree_rules(),
         vec![
@@ -1182,4 +1192,341 @@ fn i4187_a_form_act_sent_during_an_open_form_run() {
         "the can in the body's hand"
     );
     run.stop();
+}
+
+// --- 0.133 N1: the never-stuck ladder in a served world ---------------------------------------------------------------
+
+/// Where the first walker is sent: 5 m east, the only way out of its ring (below).
+fn east() -> Vec3 {
+    Vec3::new(at1().x + 5_000_000, 0, at1().z)
+}
+
+/// Where the second body stands in the ring's gap: 0.6 m east of the first.
+fn in_the_gap() -> Vec3 {
+    Vec3::new(at1().x + 600_000, 0, at1().z)
+}
+
+/// The first walker ringed 0.6 m round by bodies staying by their own orders (E3), every way but east; east, when
+/// `gap`, the second body stands still in the ring's gap (staying too when `staying`); else the ring is closed.
+fn ringed(gap: bool, staying: bool) -> Result<Bodies, replica::effects::Refusal> {
+    let (town, ground) = town();
+    let frame = Frame {
+        node: ground,
+        slot: None,
+    };
+    let p1 = town.surfaces[&ground].place(w1(), frame, at1(), Quat::IDENTITY)?;
+    let p2 = town.surfaces[&ground].place(
+        w2(),
+        frame,
+        if gap { in_the_gap() } else { at2() },
+        Quat::IDENTITY,
+    )?;
+    let mut ring = vec![
+        (424_264, 424_264),
+        (0, 600_000),
+        (-424_264, 424_264),
+        (-600_000, 0),
+        (-424_264, -424_264),
+        (0, -600_000),
+        (424_264, -424_264),
+    ];
+    if !gap {
+        ring.push((600_000, 0));
+    }
+    let mut places = Vec::new();
+    for (k, (dx, dz)) in ring.into_iter().enumerate() {
+        let who = id(40 + k as u64);
+        let at = Vec3::new(at1().x + dx, 0, at1().z + dz);
+        places.push((
+            who,
+            town.surfaces[&ground].place(who, frame, at, Quat::IDENTITY)?,
+        ));
+    }
+    let mut b = Bodies::new(town, 50_000)?;
+    b.add_body(humanoid(), p1)?;
+    b.add_body(humanoid(), p2)?;
+    for (who, placed) in places {
+        b.add_body(humanoid(), placed)?;
+        b.runner.staying.insert(who);
+    }
+    if staying {
+        b.runner.staying.insert(w2());
+    }
+    Ok(b)
+}
+
+fn ring_with_a_still_body() -> Result<Bodies, replica::effects::Refusal> {
+    ringed(true, false)
+}
+fn ring_with_a_staying_body() -> Result<Bodies, replica::effects::Refusal> {
+    ringed(true, true)
+}
+fn ring_closed() -> Result<Bodies, replica::effects::Refusal> {
+    ringed(false, false)
+}
+
+/// One walk of the first walker to `to`, sent at tick 1, run to tick `ticks` in lockstep: its final answer, and the
+/// world's ladder entries in order (world time, event name, node, fields).
+/// An answer: its sequence and its receipt's entries, or its refusal's reason.
+type Answered = (u64, Result<Vec<u64>, String>);
+
+fn walk_in(run: &Run, to: Vec3, ticks: i64) -> (Answered, Vec<Rungs>) {
+    let (tx, rx) = std::sync::mpsc::channel();
+    let bytes = intent_bytes(w1(), 1, "test:walk", Some(ground()), point(to));
+    run.world
+        .events
+        .send(answers::Event::ArrivalAt {
+            tick: 1,
+            bytes,
+            reply: tx,
+        })
+        .unwrap();
+    let (done, ran) = std::sync::mpsc::channel();
+    run.world
+        .events
+        .send(answers::Event::RunTo { tick: ticks, done })
+        .unwrap();
+    ran.recv().unwrap();
+    let ends: Vec<_> = rx
+        .try_iter()
+        .filter(|f| answers::progress_of(f).is_none())
+        .collect();
+    assert_eq!(ends.len(), 1, "one final answer");
+    let log = run.store.0.lock().unwrap().bytes.clone();
+    let mut rungs = Vec::new();
+    for rec in recover(&log).unwrap().records {
+        if sim::recorder::is_input(&rec) {
+            continue;
+        }
+        for e in Part::read(&rec).unwrap().effects {
+            for v in e.events.iter().flatten() {
+                if v.name.as_str().starts_with("souls:")
+                    && [
+                        "reroute",
+                        "make-way",
+                        "step-aside",
+                        "shoulder-turn",
+                        "order-ended",
+                        "walk-out",
+                        "walked-out",
+                    ]
+                    .contains(&&v.name.as_str()["souls:".len()..])
+                {
+                    assert_eq!(e.envelope.actor, Actor::World, "the world's own entry");
+                    rungs.push((
+                        e.envelope.at,
+                        v.name.as_str().to_owned(),
+                        e.envelope.node,
+                        v.fields.clone(),
+                    ));
+                }
+            }
+        }
+    }
+    (answer_in(&ends[0]), rungs)
+}
+
+/// A ladder entry: world time, event name, node, fields.
+type Rungs = (i64, String, Id, BTreeMap<u64, Value>);
+
+fn names(rungs: &[Rungs]) -> Vec<(i64, &str)> {
+    rungs
+        .iter()
+        .map(|r| (r.0 / 100_000, r.1.as_str()))
+        .collect()
+}
+
+/// 0.133 N1 with A2-3's rule, end to end: the first walker's only way out of its ring is through the second body,
+/// which stands still with no order to stay. It is routed again at 3 s, the world steps the second body aside at 5 s
+/// (its entry the world's, on the body moved), and the walk arrives.
+#[test]
+fn n1_a_still_body_in_the_only_way_is_stepped_aside_and_the_walker_arrives() {
+    let run = lockstep_with(ring_with_a_still_body);
+    let (answer, rungs) = walk_in(&run, east(), 400);
+    let r = run.replay();
+    println!(
+        "N1 make-way: {answer:?}; rungs {:?}; w2 at {:?}",
+        names(&rungs),
+        at(&r, w2())
+    );
+    let when = |n: &str| rungs.iter().find(|r| r.1 == n);
+    let reroute = when("souls:reroute").expect("routed again").0;
+    assert!(reroute >= 3_000_000, "routed again at 3 s: {reroute}");
+    let aside = when("souls:step-aside").expect("a step aside");
+    assert!(
+        aside.0 >= 5_000_000,
+        "after 5 s without progress: {}",
+        aside.0
+    );
+    assert_eq!(
+        (aside.2, &aside.3[&3]),
+        (w2(), &w2().to_value()),
+        "on the body moved"
+    );
+    assert_eq!(
+        aside.3[&4],
+        ladder_point(in_the_gap()),
+        "from where it stood"
+    );
+    assert_eq!(
+        ladder_point(at(&r, w2())),
+        aside.3[&5],
+        "where the world put it"
+    );
+    assert!(matches!(answer, (1, Ok(_))), "the walk arrives: {answer:?}");
+    assert_eq!(at(&r, w1()), east(), "the walker arrived");
+    run.world.stop();
+}
+
+/// 0.133 N1: the same ring, the second body staying by its own order. Nothing makes way: routed again at 3 s, then a
+/// shoulder turn at 9 s; the staying body is never moved.
+#[test]
+fn n1_a_staying_body_is_never_moved_and_the_walker_turns_its_shoulder_at_9_s() {
+    let run = lockstep_with(ring_with_a_staying_body);
+    let (answer, rungs) = walk_in(&run, east(), 500);
+    let r = run.replay();
+    println!("N1 shoulder: {answer:?}; rungs {:?}", names(&rungs));
+    let when = |n: &str| rungs.iter().find(|r| r.1 == n).map(|r| r.0);
+    let reroute = when("souls:reroute").expect("routed again");
+    let shoulder = when("souls:shoulder-turn").expect("a shoulder turn");
+    assert!(reroute >= 3_000_000, "routed again at 3 s: {reroute}");
+    assert!(shoulder >= 9_000_000, "a shoulder turn at 9 s: {shoulder}");
+    assert!(
+        when("souls:step-aside").is_none(),
+        "a staying body is never moved"
+    );
+    assert_eq!(at(&r, w2()), in_the_gap(), "never moved");
+    run.world.stop();
+}
+
+/// 0.133 N1: a walker in a closed ring of bodies staying by their own orders gets nowhere: routed again at 3 s, a
+/// shoulder turn at 9 s, and at 15 s its order ends by name, `goal-unreachable`, the entry naming how far it is from
+/// its leg's end; the walk's receipt is that refusal.
+#[test]
+fn n1_a_walker_that_gets_nowhere_ends_goal_unreachable_at_15_s() {
+    let run = lockstep_with(ring_closed);
+    let (answer, rungs) = walk_in(&run, east(), 500);
+    println!("N1 unreachable: {answer:?}; rungs {:?}", names(&rungs));
+    assert_eq!(answer, (1, Err("goal-unreachable".to_owned())));
+    let when = |n: &str| rungs.iter().find(|r| r.1 == n);
+    assert!(when("souls:reroute").expect("routed again").0 >= 3_000_000);
+    assert!(when("souls:shoulder-turn").expect("a shoulder turn").0 >= 9_000_000);
+    let ended = when("souls:order-ended").expect("its order ended");
+    assert!(ended.0 >= 15_000_000, "at 15 s: {}", ended.0);
+    assert_eq!(ended.3[&3], Value::Bytes(b"goal-unreachable".to_vec()));
+    let Value::Bytes(why) = &ended.3[&4] else {
+        panic!("what it waited for")
+    };
+    let why = String::from_utf8_lossy(why);
+    println!("N1 unreachable: {why}");
+    assert!(why.contains("no progress for"), "{why}");
+    run.world.stop();
+}
+
+/// A point as the ladder's entries write it: `[x, y, z]` µm.
+fn ladder_point(p: Vec3) -> Value {
+    let i =
+        |n: i64| u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint);
+    Value::Array(vec![i(p.x), i(p.y), i(p.z)])
+}
+
+/// 0.133 N1, the last rung, on the bodies of a served world: the ground under a body on the building's ground floor
+/// changes (a box set down over it, an edit the builder let through), the runner finds it off the ground, and it
+/// walks out to the nearest point it may stand on, at walking speed, no tick further than a walking step; the world's
+/// entries name the walk-out and where it stands again.
+#[test]
+fn n1_a_body_found_off_the_ground_walks_out() {
+    use sim::ground::{HUMAN_RADIUS, Scene as GroundScene, Solid, Turn as GroundTurn, cut_floor};
+    use sim::mover::Surface;
+    let w = testworld::generate(1, 0).expect("the test world");
+    let floor = import_eden::load(&w.text)
+        .expect("the test world loads")
+        .nodes["building/floor-0"];
+    let (town, _) = town();
+    let from = Vec3::new(0, 0, -3_000_000);
+    let frame = Frame {
+        node: floor,
+        slot: None,
+    };
+    let placed = town.surfaces[&floor]
+        .place(w2(), frame, from, Quat::IDENTITY)
+        .expect("on the floor");
+    let mut b = Bodies::new(town, 50_000).expect("the bodies");
+    b.add_body(humanoid(), placed).expect("the body");
+    let tick = b.runner.tick;
+    let mut now = 0;
+    for _ in 0..4 {
+        now += tick;
+        b.step(now);
+    }
+    let mut scene = GroundScene::of(&b.town.tree, floor).expect("the floor's scene");
+    scene.solids.push(Solid {
+        ring: [
+            [-600_000, -3_600_000],
+            [600_000, -3_600_000],
+            [600_000, -2_400_000],
+            [-600_000, -2_400_000],
+        ],
+        y0: 0,
+        y1: 2_000_000,
+    });
+    let patch = cut_floor(&scene, HUMAN_RADIUS, GroundTurn::NONE).expect("the new ground");
+    b.town
+        .surfaces
+        .insert(floor, Surface::new(floor, patch.pieces.clone()));
+    b.town.versions.bump([&floor]);
+    let (mut was, mut largest) = (from, 0);
+    let mut entries = Vec::new();
+    for _ in 0..200 {
+        now += tick;
+        b.step(now);
+        entries.extend(std::mem::take(&mut b.wind_log));
+        let p = b
+            .runner
+            .controller
+            .body(w2())
+            .expect("the body")
+            .pose
+            .position;
+        let d = |u: i64, v: i64| i128::from(u - v) * i128::from(u - v);
+        largest = largest.max((d(p.x, was.x) + d(p.z, was.z)).isqrt() as i64);
+        was = p;
+        if entries.iter().any(|e| named(e, "souls:walked-out")) {
+            break;
+        }
+    }
+    let to = b
+        .runner
+        .controller
+        .body(w2())
+        .expect("the body")
+        .pose
+        .position;
+    println!("N1 walk-out: from {from:?} to {to:?}, largest step {largest} um");
+    let out = entries
+        .iter()
+        .find(|e| named(e, "souls:walk-out"))
+        .expect("a walk-out");
+    assert_eq!(
+        (out.envelope.actor, out.envelope.node),
+        (Actor::World, w2())
+    );
+    assert!(
+        entries.iter().any(|e| named(e, "souls:walked-out")),
+        "walked out"
+    );
+    assert!(
+        b.town.surfaces[&floor]
+            .place(w2(), frame, to, Quat::IDENTITY)
+            .is_ok(),
+        "on ground it may stand on"
+    );
+    assert!(
+        largest <= worldd::bodies::WALK * tick / 1_000_000 + 1,
+        "no jump: {largest} um in a tick"
+    );
+}
+
+fn named(e: &Effect, name: &str) -> bool {
+    e.events.iter().flatten().any(|v| v.name.as_str() == name)
 }

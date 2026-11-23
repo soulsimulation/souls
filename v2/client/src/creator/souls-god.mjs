@@ -8,6 +8,8 @@
 //   souls-god.mjs describe                       what is there (id, kind, parent) and what each kind admits
 //   souls-god.mjs describe <id>                  one thing: its kind and card, each frame it is in, its spot, its fields
 //                                                by name, its slots and what holds each, what is in it, its marks (R8b)
+//   souls-god.mjs map                            the world at a glance: the extent of what stands, its buildings, named
+//                                                things, roads and zones, each with its centre and size in metres (R8d)
 //   souls-god.mjs place <kind> --in <id> [--at x,y,z] [--slot n] [--field n=v ...]   a new thing; mm in the parent
 //   souls-god.mjs move <id> --at x,y,z [--slot n]                                     to another spot, same parent
 //   souls-god.mjs set <id> <field> <value>       one numbered field: an integer, true, false or a name
@@ -26,6 +28,9 @@
 //   souls-god.mjs land water <id> --level m | --by m      the land and its water, as today's `land` (terrain/land.mjs):
 //                                                one edit; what rests on changed ground moves with it, and a Soul
 //                                                standing there refuses it (edit.terrain-under-soul)
+//   souls-god.mjs land extend --toward n|s|e|w|ne|nw|se|sw --metres m | --bounds x0,z0,x1,z1
+//   souls-god.mjs expand <m>                     the world's ground grows (that way, or to a centred square m a side),
+//                                                flat from its edge; it only grows
 //   souls-god.mjs define <record.json>          a kind of your own (#3697): a souls-entry/1 record (the format of
 //                                                content/kinds), kept in the world under the full name it answers
 //                                                (`defines`); a changed record is a new revision, and old things keep
@@ -38,6 +43,8 @@
 //   souls-god.mjs upload <file.glb|png|jpg>     a model or a picture, through the world's check and hold point:
 //                                                {hash, state: allowed|held}; an allowed one is served at `url`
 //   souls-god.mjs check <any of these, or batch> ...   the same, checked on the copy only; nothing is sent
+//   souls-god.mjs export [file]                  every node of the world (not its Souls) to a file, world.souls.json
+//   souls-god.mjs import <file>                  such a file's nodes into this world, as edits, parents first
 //   place <kind> --in <id> --beside <id> [--dir n|ne|e|se|s|sw|w|nw] [--dist mm]   beside another (default e, 1000)
 //   place <kind> --on <id>                       in or on another: its first free slot for a thing, if it has one
 //   place|move ... --facing <id|n|e|s|w>         turned to face another, or a compass point
@@ -117,6 +124,7 @@ import { parseShoot, runShoot } from '../shoot/shoot.mjs';
 import { parseSpace, runSpace } from './space.mjs';
 import { TRACE_MOST } from './trace.mjs';
 import { describeThing } from './thing.mjs';
+import { mapOf } from './map.mjs';
 import { kindsIn } from '../check/state.mjs';
 import { inSession, recordEdit, sessionAct } from './session.mjs';
 /** R8e: the build acts answered from the home's sessions. */
@@ -135,13 +143,17 @@ export const VERBS = [
   'define-kit',
   'describe',
   'event',
+  'expand',
+  'export',
   'find',
   'free',
   'hours',
+  'import',
   'land',
   'layers',
   'listen',
   'look',
+  'map',
   'move',
   'own',
   'pair',
@@ -169,7 +181,7 @@ export const VERBS = [
   'zone-suggest',
 ];
 /** The world's verbs (#3695): the daemon makes their sets on the world node from its copy (`world.mjs`). */
-export const WORLD_VERBS = ['weather', 'sky', 'strike', 'land', 'time'];
+export const WORLD_VERBS = ['weather', 'sky', 'strike', 'land', 'time', 'expand'];
 /** The verbs answered from the home's library of kinds, on this machine (#3696). */
 export const LIBRARY = new Set(['catalog', 'find', 'recommend', 'taxonomy']);
 const PAIR = join(dirname(fileURLToPath(import.meta.url)), '../pair/pair.mjs');
@@ -180,7 +192,7 @@ export const FIX = {
   'edit.kind-unknown': 'use a kind describe lists under kinds (your own kinds too, once defined)',
   'kind.invalid': 'a souls-entry/1 record as content/kinds holds them: whole numbers, sections it can hold (no roles), its kind loads',
   'kind.too-large': 'a record is at most 64 KiB and its bounds_mm at most 1 km: fewer parts, a shorter text or smaller bounds',
-  'kind.effects': 'a form creates only a kind describe lists (its full name) into a slot that admits it, and timers that start each other wait 50 ms or more',
+  'kind.effects': 'a form creates only a kind describe lists (its full name) into a slot that admits it (a kind with solids only into a hand), and timers that start each other wait 50 ms or more',
   'kind.audience': 'define a kind for everyone (no audience)',
   'kind.namespace': 'name it in your own namespace (not souls: or eden:, nor one the world\'s own kinds use)',
   'kind.collision': 'that kind is defined already: place it by the full name describe lists',
@@ -236,7 +248,13 @@ export const FIX = {
   'land.nothing': 'shape the land on the world\'s ground',
   'land.smooth': 'use flatten',
   'land.unavailable': 'use Node 22.18 or later, and the client a world serves (it carries the ground model) or a checkout with packages/ground and zod installed',
+  'expand.nothing': 'the world already reaches that far: give a larger size',
+  'expand.too-large': 'grow it less: one edit carries the whole ground',
   'strike.off-the-ground': 'strike somewhere on the world\'s ground',
+  'import.file': 'import <file>: a file export wrote, readable here',
+  'import.format': 'import a souls-world/1 file, as export writes it',
+  'import.unplaced': 'some nodes name a parent or support that was not placed: export the source again and import that',
+  'export.file': 'export [file]: a file path to write',
   'edit.off-ground': 'put it somewhere on the world\'s ground: describe shows where things stand',
   'not-a-creator': 'pair with --creator <the world\'s creator grant>',
   'edit.claimed': 'that is inside a live claim: send it with --claim <that claim>, or build release <claim>',
@@ -391,13 +409,18 @@ export function worldVerbOf(verb, words) {
   const args = [...words], out = { verb };
   const flags = {
     weather: ['kind', 'clouds', 'rain', 'wind', 'minutes'], sky: ['palette', 'sun'], strike: ['at'], time: ['speed'],
-    land: ['at', 'radius', 'amount', 'level', 'height', 'peak', 'path', 'area', 'rect', 'circle', 'edge', 'step', 'depth', 'width', 'side', 'face', 'steps', 'by'],
+    land: ['at', 'radius', 'amount', 'level', 'height', 'peak', 'path', 'area', 'rect', 'circle', 'edge', 'step', 'depth', 'width', 'side', 'face', 'steps', 'by', 'toward', 'metres', 'bounds'],
+    expand: [],
   }[verb];
   for (const f of flags) { const v = takeOpt(args, `--${f}`); if (v !== undefined) out[f] = v; }
   if (verb === 'strike' && out.at === undefined && args[0] !== undefined) out.at = args.shift();
   if (verb === 'time') {
     for (const f of ['--pause', '--resume']) { const k = args.indexOf(f); if (k >= 0) { args.splice(k, 1); out.pause = true; } }
     if (args[0] !== undefined) out.hour = args.shift();
+  }
+  if (verb === 'expand') {
+    if (args[0] === undefined) throw usage('expand <metres>: the side of the centred square the world grows to');
+    out.extent = args.shift();
   }
   if (verb === 'land') {
     if (!args[0]) throw usage('land <raise|lower|flatten|knoll|hill|mountain|plateau|terrace|valley|ditch|cliff|pond|lake|water> [flags]');
@@ -446,7 +469,13 @@ export function requestOf(argv) {
   if (verb === 'visitors') return { directory: '/v1/worlds/visitors', body: {}, creator };
   // R8b: one thing, read from the copy (thing.mjs)
   if (verb === 'describe' && rest.length) { if (rest.length !== 1) throw usage('describe [<id>]'); return { thing: rest[0], creator }; }
+  // R8d: the world at a glance, read from the copy (map.mjs)
+  if (verb === 'map') { if (rest.length) throw usage('map'); return { map: true, creator }; }
   if (verb === 'status' || verb === 'stop' || verb === 'describe' || verb === 'redo') return { req: { op: verb }, creator };
+  if (verb === 'export' || verb === 'import') {
+    if (rest.length > 1 || (verb === 'import' && !rest[0])) throw usage(`${verb} ${verb === 'import' ? '<file>' : '[file]'}`);
+    return { req: { op: verb, file: absolute(rest[0] ?? 'world.souls.json') }, creator };
+  }
   if (verb === 'upload') {
     if (rest.length !== 1 || !/\.(glb|png|jpe?g)$/i.test(rest[0])) throw usage('upload <file.glb|png|jpg>');
     return { req: { op: 'upload', path: absolute(rest[0]) }, creator };
@@ -890,7 +919,7 @@ if (isMain(import.meta.url)) {
       if (!asked.req) { out(withFix(when)); process.exit(1); }
     }
     const pkg = process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG;
-    const ask = (req, ms = 60_000) => call(home, creator, req, { pkg, ms: req.world?.verb === 'land' ? 130_000 : ms });
+    const ask = (req, ms = 60_000) => call(home, creator, req, { pkg, ms: req.op === 'import' ? 3_600_000 : req.op === 'export' ? 120_000 : ['land', 'expand'].includes(req.world?.verb) ? 130_000 : ms });
     // A relation is resolved on the daemon's copy: describe first, then the batch with its places filled in.
     let req = asked.relation ? resolve(asked.req, asked.relation, await ask({ op: 'describe' }, 15_000)) : asked.req;
     // A helper's home sends every edit under its claim (#3727).
@@ -899,6 +928,13 @@ if (isMain(import.meta.url)) {
     if (asked.thing !== undefined) {
       const d = await ask({ op: 'describe' }, 15_000), f = d.ok === false ? null : await ask({ op: 'fields', node: asked.thing }, 15_000);
       const said = d.ok === false ? d : f.ok === false ? f : describeThing(asked.thing, d, f.fields, kindsIn(join(home, 'kinds')));
+      out(withFix(said));
+      if (said.ok === false) process.exitCode = 1;
+      process.exit();
+    }
+    if (asked.map) {
+      const d = await ask({ op: 'describe' }, 15_000), root = d.ok === false ? null : await ask({ op: 'fields' }, 15_000);
+      const said = d.ok === false ? d : mapOf(d, root?.ok === false ? {} : root?.fields ?? {}, kindsIn(join(home, 'kinds')));
       out(withFix(said));
       if (said.ok === false) process.exitCode = 1;
       process.exit();

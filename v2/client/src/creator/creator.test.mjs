@@ -28,6 +28,7 @@ const WORLDD = process.env.WORLDD ?? join(v2, 'target/debug/worldd');
 const ASSETS_CHECK = process.env.ASSETS_CHECK ?? join(dirname(GATEWAYD), 'assets-check');
 const PKG = process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG;
 const GOD = join(here, 'souls-god.mjs');
+const SOULS = join(here, '../cli/souls.mjs');
 // The world `worldd gateway-link --creator` pins (`worldd::checkers::toggles::kinds`): the creator's kinds text.
 const KINDS = `{1: "souls:place", 2: "place", 11: ["souls:room"]}
 {1: "souls:room", 2: "place", 11: ["body", "thing"]}
@@ -43,6 +44,10 @@ const secret = randomBytes(32).toString('hex'); // the canary: the token's secre
 const grant = `creator-${creatorScope}-1`;
 const token = `${grant}.${secret}`;
 const ME = `c_${creatorScope}-1`;
+// #3697 gap 2: a Soul of the same world, its first body (the toggles world mints from scope 2b: place, room, then each
+// body and its lamp), in a home of its own.
+const soulHome = join(dir, 'soul', '.souls');
+const soulToken = `soul-${'2b'.repeat(16)}-2.${randomBytes(32).toString('hex')}`;
 const procs = [];
 const printed = []; // every line a command printed
 let relay;
@@ -88,6 +93,16 @@ function god(...args) {
   });
 }
 
+/** One run of the Soul's thin command (`souls.mjs`) in the Soul's home; its answer. */
+function soul(...args) {
+  return new Promise((ok) => {
+    execFile(process.execPath, [SOULS, ...args], { env: { PATH: process.env.PATH, SOULS_HOME: soulHome, SOULS_REPLICA_PKG: PKG } }, (_, stdout) => {
+      printed.push(stdout);
+      ok(JSON.parse(stdout.trim().split('\n').at(-1)));
+    });
+  });
+}
+
 async function connected() {
   for (const until = Date.now() + 15_000; Date.now() < until;) {
     const s = await god('status');
@@ -100,7 +115,7 @@ async function connected() {
 before(async () => {
   const world = join(dir, 'w.sock');
   const tokens = join(dir, 'tokens.txt');
-  writeFileSync(tokens, `${grant} ${createHash('sha256').update(token).digest('hex')}\n`);
+  writeFileSync(tokens, [token, soulToken].map((t) => `${t.split('.')[0]} ${createHash('sha256').update(t).digest('hex')}\n`).join(''));
   const lineage = randomBytes(16).toString('hex');
   procs.push(spawn(WORLDD, ['gateway-link', '--socket', world, '--lineage', lineage, '--epoch', '1', '--rooms', '1', '--bodies', '1', '--creator', `${creatorScope}-1`, '--sky', String(Date.UTC(2026, 10, 21) * 1000), '3695', '--no-measures', '--www', join(dir, 'www')], { stdio: 'ignore' }));
   for (const until = Date.now() + 10_000; ;) {
@@ -116,10 +131,15 @@ before(async () => {
   writeFileSync(join(home, 'credentials.json'), JSON.stringify({ souls: { [ME]: { local: { token } } } }), { mode: 0o600 });
   chmodSync(join(home, 'credentials.json'), 0o600);
   writeFileSync(join(home, 'kinds', 'local.kinds'), KINDS);
+  mkdirSync(soulHome, { recursive: true });
+  writeFileSync(join(soulHome, 'config.json'), JSON.stringify({ worlds: { local: { url: 'http://127.0.0.1/', gateway: `ws://127.0.0.1:${relay.port}/v2/ws` } } }));
+  writeFileSync(join(soulHome, 'credentials.json'), JSON.stringify({ souls: { s_bell: { local: { token: soulToken } } } }), { mode: 0o600 });
+  chmodSync(join(soulHome, 'credentials.json'), 0o600);
 });
 
 after(async () => {
   await god('stop').catch(() => {});
+  await soul('quit').catch(() => {});
   for (const p of procs) p.kill();
   relay?.server.close();
   rmSync(dir, { recursive: true, force: true });
@@ -152,6 +172,12 @@ test('the verbs make G1 batches, and a refusal names its usage', () => {
   assert.deepEqual(requestOf(['check', 'strike', '12,-4']).req, { op: 'check', world: { verb: 'strike', at: '12,-4' } });
   assert.deepEqual(requestOf(['sky', '--palette', 'dusk']).req, { op: 'edit', world: { verb: 'sky', palette: 'dusk' } });
   assert.throws(() => requestOf(['weather', '--fog', '1']), /unknown words/);
+  // #3728: the ground grows, as today's `expand <m>` and `land extend`.
+  assert.deepEqual(requestOf(['expand', '1200']).req, { op: 'edit', world: { verb: 'expand', extent: '1200' } });
+  assert.deepEqual(requestOf(['land', 'extend', '--toward', 'n', '--metres', '100']).req, { op: 'edit', world: { verb: 'land', land: 'extend', toward: 'n', metres: '100' } });
+  assert.throws(() => requestOf(['expand']), /expand <metres>/);
+  // Its edit goes to the world's claims judge as any edit does: under a claim when one is named (#3701).
+  assert.equal(requestOf(['expand', '1200', '--claim', 'k1a2b3c4d']).req.claim, 'c:k1a2b3c4d');
 });
 
 test('#3695: a creator sets the weather and the sky palette and strikes lightning; each has a dry run and a refusal', async () => {
@@ -741,6 +767,84 @@ test('#3697: a creator defines a kind and a kit of its own, places one and is re
   assert.equal(d3.kinds[full], undefined, 'a removed definition is no longer a kind here');
 });
 
+test('#3697 gap 2: a Soul finds a creator\'s kind, its inspect lists the form, act runs it, and a wrong act is refused by name', async () => {
+  await connected();
+  const d = await god('describe');
+  const room = d.nodes.find((n) => n.kind === 'souls:room');
+  // The creator defines a bell with one form, ring, which sets its field rung, and places one in the Soul's room.
+  const record = join(dir, 'chime.json');
+  writeFileSync(record, JSON.stringify({ format: 'souls-entry/1', kind: 'garden:chime', owner: 'thing',
+    state: { rung: { n: 1, type: 'bool', default: false, audience: { rule: 'everyone' } } },
+    geometry: { bounds_mm: [300, 400, 300] },
+    forms: { ring: { who: 'anyone', starts: 'act', needs: [{ need: 'state', field: 'rung', is: false }], effects: [{ change: 'set', field: 'rung', to: true, event: 'rang' }] } },
+    text: { name: 'chime', description: 'a garden chime' } }));
+  const defined = await god('define', record);
+  assert.equal(defined.ok, true, JSON.stringify(defined));
+  const placed = await god('place', 'garden:chime', '--in', room.id, '--at', '500,0,500');
+  assert.equal(placed.ok, true, JSON.stringify(placed));
+  const chime = placed.names['1'];
+
+  // The Soul's daemon signs in; its copy holds the chime and the record that defines it.
+  for (const until = Date.now() + 20_000; ;) {
+    const s = await soul('status');
+    if (s.connected && !s.syncing) break;
+    if (Date.now() > until) throw new Error(`the Soul did not connect: ${JSON.stringify(s)}`);
+    await new Promise((r) => setTimeout(r, 200));
+  }
+  const found = await soul('find', 'chime');
+  assert.ok(found.found?.some((f) => f.id === chime), JSON.stringify(found));
+  const seen = await soul('inspect', chime);
+  assert.equal(seen.ok, true, JSON.stringify(seen));
+  assert.equal(seen.kind, 'garden:chime');
+  const ring = seen.offers.find((o) => o.name === 'ring');
+  assert.ok(ring, JSON.stringify(seen.offers));
+  assert.equal(ring.act, `ring:${chime}`);
+  console.log(`inspect ${chime}: ${JSON.stringify(seen.offers)}; state ${JSON.stringify(seen.state)}`);
+  // The Soul's own check reads the creator's kind as the world does: ring is allowed while rung is false.
+  const can = await soul('can', `ring:${chime}`);
+  assert.equal(can.can, 'yes', JSON.stringify(can));
+
+  // act runs it: the receipt is done, and the field is set.
+  const sent = await soul('act', ring.act);
+  assert.equal(sent.ok, true, JSON.stringify(sent));
+  const receipt = async (sequence) => {
+    for (const until = Date.now() + 20_000; ;) {
+      const r = await soul('receipt', String(sequence));
+      const end = r.receipt?.answers?.find((a) => a.answer === 'receipt' || a.answer === 'refused');
+      if (end || Date.now() > until) return { ...r, end };
+      await new Promise((ok) => setTimeout(ok, 200));
+    }
+  };
+  const done = await receipt(sent.sequence);
+  console.log(`act ${ring.act}: ${JSON.stringify(done)}`);
+  assert.equal(done.end?.answer, 'receipt', `the receipt is done: ${JSON.stringify(done)}`);
+  for (const until = Date.now() + 10_000; ;) {
+    await soul('look'); // brings the copy current; inspect reads it as it is
+    const after = await soul('inspect', chime);
+    if (after.state?.rung === true || after.state?.rung === 1) { console.log(`after the ring: state ${JSON.stringify(after.state)}`); break; }
+    if (Date.now() > until) assert.fail(`rung not set: ${JSON.stringify(after)}`);
+    await new Promise((r) => setTimeout(r, 200));
+  }
+
+  // Refused by name, exactly as a built-in form is: a form the kind does not have, and a form whose need fails.
+  const lamp = `${'2b'.repeat(16)}-3`;
+  const names = [];
+  for (const act of [`toll:${chime}`, `toll:${lamp}`]) {
+    const s = await soul('act', act);
+    const r = await receipt(s.sequence);
+    console.log(`act ${act}: ${JSON.stringify(r)}`);
+    names.push(`${r.end?.answer} ${r.end?.reason}`);
+  }
+  assert.equal(names[0], names[1], `an unknown form is refused as a built-in kind's is: ${JSON.stringify(names)}`);
+  assert.match(names[0], /^refused \S+/);
+  // The Soul's own check (the rules port) reads the creator's kind too: a second ring, its need failed, is stopped
+  // before it is sent, by the need's name.
+  const again = await soul('act', ring.act);
+  console.log(`act ${ring.act} again: ${JSON.stringify(again)}`);
+  assert.equal(again.code, 'stopped-locally', JSON.stringify(again));
+  assert.equal(again.dropped?.[0]?.reason, 'field_differs');
+});
+
 /** An 8 by 8 RGBA PNG whose tEXt chunk carries `text`. */
 function png(text) {
   const chunk = (type, data) => {
@@ -791,6 +895,19 @@ test('R8b: describe <id> reads one thing from the copy: its frames, spot, fields
   assert.deepEqual(t.at, [1500, 0, 2500]);
   assert.deepEqual((await god('describe', roomId)).holds.map((h) => h.id), [lampId], 'the room holds the lamp');
   assert.equal((await god('describe', `${place.id.split('-')[0]}-99999`)).code, 'edit.node-missing');
+});
+
+test('R8d: map reads the world at a glance from the copy: rooms placed show as what stands, with the extent around them', async () => {
+  await connected();
+  const place = (await god('describe')).nodes.find((x) => x.kind === 'souls:place');
+  const room = await god('place', 'room', '--in', place.id, '--at', '80000,0,90000');
+  assert.equal(room.ok, true, JSON.stringify(room));
+  const map = await god('map');
+  assert.equal(map.ok, true, JSON.stringify(map));
+  assert.ok(map.extent && map.extent.things >= 1, JSON.stringify(map.extent));
+  assert.ok(map.extent.east >= 80 && map.extent.south >= 90, 'the extent reaches the room placed at (80, 90) m');
+  for (const k of ['buildings', 'named', 'roads', 'zones']) assert.ok(Array.isArray(map[k].shown), k);
+  assert.equal((await god('map', 'extra')).code, 'usage');
 });
 
 test('R8e: a build session carries its name and step on every edit, shows its steps with their edits, and closes', async () => {
