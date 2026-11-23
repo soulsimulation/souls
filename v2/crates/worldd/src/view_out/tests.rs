@@ -4031,3 +4031,27 @@ fn s4_a_sleeping_worlds_pointer_says_it_is_still_until_its_next_due_change() {
     assert_eq!(p.quiet_until, Some(7_000_000 - SETTLE_US));
     assert_eq!(asleep, None);
 }
+
+/// B1-5: a writer killed mid-write leaves its `.tmp`, never a short or zero-filled file under the final name, so the
+/// next start writes the name whole instead of refusing `stream-immutable` for ever (a world that could not restart).
+#[test]
+fn an_immutable_file_killed_mid_write_leaves_only_its_tmp_and_the_next_write_completes_it() {
+    let dir = scratch("immutable-tmp");
+    let path = dir.join("g").join("baseline");
+    fs::create_dir_all(path.parent().unwrap()).unwrap();
+    // What a kill between create and write left before: a torn temporary, and no final name.
+    fs::write(dir.join("g").join("baseline.tmp"), [0u8; 3]).unwrap();
+    immutable(&path, b"the whole baseline").unwrap();
+    assert_eq!(fs::read(&path).unwrap(), b"the whole baseline");
+    assert!(
+        !dir.join("g").join("baseline.tmp").exists(),
+        "no temporary is left"
+    );
+    // The same bytes again are fine; other bytes under a written name are still refused.
+    immutable(&path, b"the whole baseline").unwrap();
+    assert_eq!(
+        immutable(&path, b"other bytes").unwrap_err().name,
+        "stream-immutable"
+    );
+    fs::remove_dir_all(&dir).unwrap();
+}
