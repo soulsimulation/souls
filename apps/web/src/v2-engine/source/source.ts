@@ -31,6 +31,11 @@ export type NodeRec = {
   outline?: number[][];
   /** A floor's surfaces `[y, [[x, z] …]]` mm in its thing's frame (field 14). */
   surfaces?: [number, number[][]][];
+  /** Today's def ref of an imported thing (import-eden's field 2, `name@version`). */
+  def?: string;
+  /** A path thing's or a river's line `[x, z]` mm, world (field 16), and its width mm (field 17). */
+  line?: number[][];
+  lineWidth?: number;
   /** A water's level, mm (field 18). */
   waterLevel?: number;
   /** Scale in parts per million (field 23). */

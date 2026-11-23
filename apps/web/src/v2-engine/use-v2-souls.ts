@@ -12,6 +12,8 @@ import type { V2Bridge } from './bridge.ts';
 import { streamNotice } from './stream-health.ts';
 import { EdgeLog, WorldState, type LayerLike } from './world-state.ts';
 import { CreatorKinds } from './creator-kinds.ts';
+import { entryLooks, SceneFromStream } from './source/stream-scene.ts';
+import { KIND_BOUNDS } from './source/kind-bounds.ts';
 import { bundledEntries, CarriedParts } from './take-parts.ts';
 import { TICK_US } from './takes.ts';
 import { setAssetSource } from '../gen-mesh/gltf-assets.ts';
@@ -49,7 +51,10 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
     // 0.133 V1: a creator's kinds that exist only in the new format, drawn by the entity layer from their records
     const kinds = new CreatorKinds((h) => apiPath(`/v2/uploads/${h}`), setAssetSource); // K3: the world's own uploads, through the front door
     // K1 (0.135): a carried load moves with its carry's samples; construction parts draw from their own entries
-    const parts = new CarriedParts(kinds, bundledEntries(import.meta.glob('../../../../content/kinds/construction/*.json', { eager: true })));
+    // W2: every content kind's bounds, for a placed thing no library def draws (stream-scene.ts entryLooks)
+    const looks = entryLooks(KIND_BOUNDS);
+    for (const [k, v] of bundledEntries(import.meta.glob('../../../../content/kinds/construction/*.json', { eager: true }))) looks.set(k, v);
+    const parts = new CarriedParts(kinds, looks);
     let seenParts = 0, lastPartAt: number | null = null, errorAtParts: number | null = null, seenTo: number | null = null;
     // The scenery the page binds is the world's own (/v1/scene, published with the world); takes carry its rules version.
     void (async () => {
@@ -64,7 +69,9 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
       // R2: the old page's rewind reads this world's past from its history export (history.ts)
       const past = historyBase(stream, (window as unknown as { __simConfig?: unknown }).__simConfig);
       if (past) setV2History(new V2History(past, () => makeHistoryReader(new URL(apiPath('/replica.js'), location.href).href), frame, hour));
-      bridge.start(stream, () => parts.watch(kinds.watch(world.watch(makeReader(new URL(apiPath('/replica.js'), location.href).href)))));
+      // W2: the world's first picture from the stream, for a world with no captured snapshot (stream-scene.ts)
+      const fromStream = new SceneFromStream(conn.welcome?.worldId ?? 'v2');
+      bridge.start(stream, () => fromStream.watch(parts.watch(kinds.watch(world.watch(makeReader(new URL(apiPath('/replica.js'), location.href).href))))));
       members = (await import('./member-turns.ts')).memberTurns((h) => bridge?.heard(h), (grants) => bridge?.bodiesOf(grants) ?? []); // R3b: private turns, to their members
       if (stopped) members.stop();
       // read-only, for checks and proof: what the stream gave (parts played, newest time, the reader's last error)
