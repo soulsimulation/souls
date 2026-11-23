@@ -73,3 +73,23 @@ export function accountSouls(worlds, account, { file, worldId, url, photo, curre
   }
   return [...out.values()].sort((a, b) => a.bornAt - b.bornAt);
 }
+
+/** The page's public Soul id for a new-engine Soul's grant (`soul-<scope>-<n>` is `s_<scope>-<n>`), as a moved world's
+ *  page keys its Souls (apps/web/src/v2-engine/bridge.ts `soulIdOf`), so `#soul/<id>` follows it there. */
+export const v2SoulId = (grant) => `s_${grant.replace(/^soul-/, '').replace(/[^0-9a-z_-]/gi, '_')}`;
+const PICTURE = /^data:image\/(?:png|jpeg);base64,[A-Za-z0-9+/]+=*$/;
+/** MS (0.132.1): a moved world's Souls for My Souls, from the directory's own list of the signed-in account's Souls
+ *  (`POST /v1/account/souls`, v2/crates/directoryd/src/pairing/route.rs: `[{soul, world, name, description, picture}]`).
+ *  `moved` maps a new-engine world name to its launcher world; a Soul of any other world is not listed. Only public
+ *  fields leave: never its device or the account. A new-engine Soul has no birth time here (`bornAt` null). */
+export function directorySouls(listed, moved, url) {
+  const out = [];
+  for (const s of Array.isArray(listed) ? listed : []) {
+    const w = typeof s?.soul === 'string' && s.soul.startsWith('soul-') && typeof s.world === 'string' ? moved.get(s.world) : null;
+    if (!w) continue;
+    const id = v2SoulId(s.soul);
+    out.push({ id, name: typeof s.name === 'string' && s.name ? s.name : 'Unnamed Soul', description: typeof s.description === 'string' ? s.description : '', bornAt: null,
+      photoUrl: typeof s.picture === 'string' && PICTURE.test(s.picture) ? s.picture : null, body: null, worlds: [{ slug: w.slug, name: w.name, url: url(w) }] });
+  }
+  return out;
+}
