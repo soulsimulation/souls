@@ -44,7 +44,7 @@ use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use worldd::answers::{self, BODIES, Config, STATE};
-use worldd::bodies::{Bodies, read_row};
+use worldd::bodies::{Bodies, Placed, read_row};
 use worldd::checkers::Rules;
 
 type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
@@ -64,6 +64,8 @@ const UPRIGHT: &str = "mars:rack_upright";
 const CRATE: &str = "test:crate";
 const WALL: &str = "test:wall";
 const CARRY: &str = "test:carry";
+/// A carry whose offer lapses in half a second (0.135 C3).
+const BRIEF: &str = "test:brief_carry";
 const FRONT: &str = "test:front";
 const BACK: &str = "test:back";
 
@@ -73,11 +75,13 @@ fn name(s: &str) -> Name {
 
 /// The kinds in pinned order: (plain name, full name).
 fn kinds() -> Vec<(&'static str, String)> {
-    [PLACE, GROUND, WALKER, BEAM, UPRIGHT, CRATE, WALL, CARRY]
-        .iter()
-        .enumerate()
-        .map(|(i, k)| (*k, format!("{k}@1220{}{:02x}", "00".repeat(31), i + 1)))
-        .collect()
+    [
+        PLACE, GROUND, WALKER, BEAM, UPRIGHT, CRATE, WALL, CARRY, BRIEF,
+    ]
+    .iter()
+    .enumerate()
+    .map(|(i, k)| (*k, format!("{k}@1220{}{:02x}", "00".repeat(31), i + 1)))
+    .collect()
 }
 
 fn full(plain: &str) -> String {
@@ -276,7 +280,7 @@ fn tree_rules() -> TreeRules {
             (full(PLACE), k("place", &[GROUND], &[], None)),
             (
                 full(GROUND),
-                k("place", &["body", "thing", CARRY], &[], None),
+                k("place", &["body", "thing", CARRY, BRIEF], &[], None),
             ),
             (full(WALKER), k("family", &[], &[1, 2], None)),
             (full(BEAM), k("thing", &[], &[], Some(2))),
@@ -284,6 +288,7 @@ fn tree_rules() -> TreeRules {
             (full(CRATE), k("thing", &[], &[], Some(2))),
             (full(WALL), k("thing", &[], &[], None)),
             (full(CARRY), k("activity", &[], &[1], None)),
+            (full(BRIEF), k("activity", &[], &[1], None)),
         ]),
         souls: [soul(1), soul(2)].into(),
         audiences: BTreeMap::new(),
@@ -292,6 +297,11 @@ fn tree_rules() -> TreeRules {
 
 /// The carry's kind: two roles that claim only the voice, so its members walk while in it.
 fn carry_kind() -> ActivityKind {
+    carry_of(CARRY, 60_000_000)
+}
+
+/// A carry's kind of plain name `plain`, whose offer lasts `lasts` µs.
+fn carry_of(plain: &str, lasts: u64) -> ActivityKind {
     let role = |r: &str| {
         Value::Map(BTreeMap::from([
             (1, Value::Text(name(r))),
@@ -306,10 +316,10 @@ fn carry_kind() -> ActivityKind {
         ]))
     };
     ActivityKind::from_value(&Value::Map(BTreeMap::from([
-        (1, Value::Text(name(&full(CARRY)))),
+        (1, Value::Text(name(&full(plain)))),
         (2, Value::Uint(1)),
         (3, Value::Array(vec![role(FRONT), role(BACK)])),
-        (4, Value::Uint(60_000_000)),
+        (4, Value::Uint(lasts)),
         (5, Value::Uint(400_000)),
     ])))
     .expect("the carry's kind")
@@ -406,7 +416,8 @@ fn world() -> Replica {
     r
 }
 
-fn bodies() -> Result<Bodies, replica::effects::Refusal> {
+/// The bodies, each where the log last had it on a restart (`placed`), else at its start.
+fn bodies(placed: &Placed) -> Result<Bodies, replica::effects::Refusal> {
     let (town, ground) = town();
     let frame = Frame {
         node: ground,
@@ -415,8 +426,8 @@ fn bodies() -> Result<Bodies, replica::effects::Refusal> {
     let p1 = town.surfaces[&ground].place(soul(1), frame, start(1), Quat::IDENTITY)?;
     let p2 = town.surfaces[&ground].place(soul(2), frame, start(2), Quat::IDENTITY)?;
     let mut b = Bodies::new(town, 50_000)?;
-    b.add_body(humanoid(), p1)?;
-    b.add_body(humanoid(), p2)?;
+    b.add_body_at(humanoid(), p1, placed)?;
+    b.add_body_at(humanoid(), p2, placed)?;
     Ok(b)
 }
 
@@ -588,7 +599,11 @@ impl Logged {
     /// the bodies' poses from the world's start and each part's rows), beside the one the last part holds.
     fn replay(&self) -> (Replica, [u8; 32], Vec<u8>) {
         let mut r = world();
-        let mut poses: BTreeMap<Id, Pose> = bodies().unwrap().poses().into_iter().collect();
+        let mut poses: BTreeMap<Id, Pose> = bodies(&Placed::new())
+            .unwrap()
+            .poses()
+            .into_iter()
+            .collect();
         let mut last = Vec::new();
         for p in &self.parts {
             if !p.effects.is_empty() {
@@ -623,22 +638,24 @@ fn nodes(r: &Replica) -> BTreeSet<Id> {
     out
 }
 
-#[tokio::test(flavor = "multi_thread")]
-async fn rungs_0_and_1_two_souls_carry_loads_as_their_entries_state_through_the_gateway() {
-    let store = Mem::with(Vec::new());
+fn socket_path(tag: &str) -> PathBuf {
+    PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
+        .join(format!("team-{tag}-{}.sock", std::process::id()))
+}
+
+/// The world, from `store`'s log if it has one, serving the gateway's link on `path`.
+fn start_world(store: &Mem, path: &std::path::Path) -> answers::World {
     let mut cfg = Config::new(LINEAGE, 1);
     cfg.measures = false;
-    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
-    cfg.engine = Some((tree_rules(), vec![carry_kind()]));
+    cfg.bodies = Some(Box::new(|p: &Placed| bodies(p)));
+    cfg.engine = Some((tree_rules(), vec![carry_kind(), carry_of(BRIEF, 500_000)]));
     let rules = Rules {
         kinds: entries(),
         moves: Json::Obj(Vec::new()),
     };
     let served = answers::start(world(), rules, store.clone(), cfg).expect("the world starts");
-    let path = PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
-        .join(format!("team-c1-{}.sock", std::process::id()));
-    let _ = std::fs::remove_file(&path);
-    let listener = UnixListener::bind(&path).unwrap();
+    let _ = std::fs::remove_file(path);
+    let listener = UnixListener::bind(path).unwrap();
     let door = served.door();
     std::thread::spawn(move || {
         for stream in listener.incoming().flatten() {
@@ -646,7 +663,16 @@ async fn rungs_0_and_1_two_souls_carry_loads_as_their_entries_state_through_the_
             std::thread::spawn(move || answers::serve(d, stream));
         }
     });
-    // One token each, and the gateway in front of the world.
+    served
+}
+
+/// The gateway in front of the world on `path`, and one token for each Soul.
+struct Gate {
+    url: String,
+    issued: Vec<Token>,
+}
+
+async fn gate(path: &std::path::Path) -> Gate {
     let mut tokens = Tokens::default();
     let issued: Vec<Token> = [1, 2]
         .iter()
@@ -659,13 +685,22 @@ async fn rungs_0_and_1_two_souls_carry_loads_as_their_entries_state_through_the_
         .collect();
     let log: Log = std::sync::Arc::new(|_: &str| {});
     let gw = Gateway::with_receipts(tokens, BUILD.to_vec(), log, Receipts::off());
-    tokio::spawn(world_link::run(gw.clone(), path.clone()));
+    tokio::spawn(world_link::run(gw.clone(), path.to_path_buf()));
     let tcp = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
     let url = format!("ws://{}{}", tcp.local_addr().unwrap(), socket::PATH);
     tokio::spawn(axum::serve(tcp, socket::router(gw.clone())).into_future());
     while !gw.link.up() {
         tokio::time::sleep(Duration::from_millis(5)).await;
     }
+    Gate { url, issued }
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn rungs_0_and_1_two_souls_carry_loads_as_their_entries_state_through_the_gateway() {
+    let store = Mem::with(Vec::new());
+    let path = socket_path("c1");
+    let served = start_world(&store, &path);
+    let Gate { url, issued } = gate(&path).await;
     let mut a = Soul::connect(&url, soul(1), &issued[0]).await;
     let mut b = Soul::connect(&url, soul(2), &issued[1]).await;
     let g = ground();
@@ -838,19 +873,24 @@ async fn rungs_0_and_1_two_souls_carry_loads_as_their_entries_state_through_the_
 
 /// Soul `from` offers a carry, in front, to Soul `to`, on the ground: the offer's activity.
 async fn offer(from: &mut Soul, to: u64, store: &Mem) -> Id {
+    offer_of(from, CARRY, to, store).await
+}
+
+/// [`offer`] of the carry kind `kind`.
+async fn offer_of(from: &mut Soul, kind: &str, to: u64, store: &Mem) -> Id {
     let offered = from
         .act(
             "activity:offer",
             Some(ground()),
             BTreeMap::from([
-                (1, pinned(CARRY)),
+                (1, pinned(kind)),
                 (2, Value::Text(name(FRONT))),
                 (3, Value::Array(vec![soul(to).to_value()])),
             ]),
         )
         .await
         .expect("offered");
-    Logged::read(store).created(&offered, CARRY)
+    Logged::read(store).created(&offered, kind)
 }
 
 /// A lift of `load`, naming where its front goes if `to` (the engine sweeps the way there before the lift).
@@ -860,4 +900,255 @@ fn lift(load: Id, to: Option<Vec3>) -> BTreeMap<u64, Value> {
         p.insert(2, Value::Array(vec![int(to.x), int(to.y), int(to.z)]));
     }
     p
+}
+
+impl Logged {
+    /// Each event named `event` the log holds: its fields.
+    fn events(&self, event: &str) -> Vec<BTreeMap<u64, Value>> {
+        self.parts
+            .iter()
+            .flat_map(|p| p.effects.iter())
+            .flat_map(|e| e.events.iter().flatten())
+            .filter(|ev| ev.name.as_str() == event)
+            .map(|ev| ev.fields.clone())
+            .collect()
+    }
+
+    /// Why each carry was set down where it was (`souls:carry-set-down`, field 3), in order.
+    fn set_downs(&self) -> Vec<String> {
+        self.events("souls:carry-set-down")
+            .iter()
+            .map(|f| match f.get(&3) {
+                Some(Value::Text(t)) => t.as_str().to_owned(),
+                other => panic!("why: {other:?}"),
+            })
+            .collect()
+    }
+}
+
+/// Where a load lies now: its parent and its place there.
+fn lies(store: &Mem, load: Id) -> (Option<Id>, replica::tree::Place) {
+    let (r, _, _) = Logged::read(store).replay();
+    let t = r.tree();
+    let n = t.node(t.handle(load).expect("the load")).unwrap();
+    (n.parent(), n.place().unwrap())
+}
+
+/// Each walks to its place at the beam where it lies now, heading east: Soul 1 in front.
+async fn to_the_beam(a: &mut Soul, b: &mut Soul, store: &Mem) {
+    let (_, at) = lies(store, beam());
+    let [back, front] = places(&beam_entry());
+    let g = ground();
+    a.send("eden:walk", Some(g), point(place(at.position, front, true)))
+        .await;
+    b.send("eden:walk", Some(g), point(place(at.position, back, true)))
+        .await;
+    let (wa, wb) = (a.answer().await, b.answer().await);
+    wa.expect("Soul 1 walks to the beam's front place");
+    wb.expect("Soul 2 walks to the beam's back place");
+}
+
+/// Both walk on east by `by` µm from where they stand now; neither waits for the answer.
+async fn walk_on(s: &mut Soul, store: &Mem, by: i64) {
+    let at = start_of(store, s.id);
+    s.send(
+        "eden:walk",
+        Some(ground()),
+        point(Vec3::new(at.x + by, 0, at.z)),
+    )
+    .await;
+}
+
+/// Where the log last had body `body`.
+fn start_of(store: &Mem, body: Id) -> Vec3 {
+    let mut at = bodies(&Placed::new())
+        .unwrap()
+        .poses()
+        .into_iter()
+        .find(|(b, _)| *b == body)
+        .map(|(_, p)| p.position)
+        .expect("a body");
+    for p in &Logged::read(store).parts {
+        if let Some(Value::Array(rows)) = p.rest.get(&BODIES) {
+            for (b, pose, _) in rows.iter().filter_map(read_row) {
+                if b == body {
+                    at = pose.position;
+                }
+            }
+        }
+    }
+    at
+}
+
+/// Rung 2 (0.135 C3): a carry that breaks off. A decline and a lapsed offer move nothing, and the asker is told
+/// (`souls:offer-declined`, `souls:offer-lapsed`). A partner who leaves mid-carry, a partner whose connection is gone
+/// mid-carry, and a world restarted mid-carry each leave the beam set down on the ground where the carry had it,
+/// and the world says why (`souls:carry-set-down`: `souls:partner-left`, `souls:carriers-apart`, `souls:world-restarted`). Every leave
+/// after is accepted at once, so no Soul is held; every id is conserved, and the log replays to its state hash.
+#[tokio::test(flavor = "multi_thread")]
+async fn rung_2_a_carry_that_breaks_off_sets_its_load_down() {
+    let store = Mem::with(Vec::new());
+    let path = socket_path("c3");
+    let mut served = start_world(&store, &path);
+    let Gate { url, issued } = gate(&path).await;
+    let mut a = Soul::connect(&url, soul(1), &issued[0]).await;
+    let mut b = Soul::connect(&url, soul(2), &issued[1]).await;
+    let none = BTreeMap::new;
+    let mut held = std::time::Duration::ZERO;
+    let mut cases = Vec::new();
+
+    // A decline, and a lapsed offer: the beam never moves, and the asker is told.
+    let declined = offer(&mut a, 2, &store).await;
+    b.act("activity:decline", Some(declined), none())
+        .await
+        .expect("declined");
+    let lapsing = offer_of(&mut a, BRIEF, 2, &store).await;
+    tokio::time::sleep(Duration::from_millis(1_000)).await;
+    let late = b.act("activity:accept", Some(lapsing), none()).await;
+    assert!(late.is_err(), "a lapsed offer: {late:?}");
+    let logged = Logged::read(&store);
+    let offers = |event: &str| -> Vec<Id> {
+        logged
+            .events(event)
+            .iter()
+            .filter_map(|f| f.get(&1).and_then(|v| replica::effects::read_id(v).ok()))
+            .collect()
+    };
+    assert!(
+        offers("souls:offer-declined").contains(&declined),
+        "told of the decline"
+    );
+    assert!(
+        offers("souls:offer-lapsed").contains(&lapsing),
+        "told of the lapse"
+    );
+    assert_eq!(
+        lies(&store, beam()).1.position,
+        beam_at(),
+        "the beam never moved"
+    );
+    cases.push("declined");
+    cases.push("lapsed");
+
+    // A partner who leaves mid-carry.
+    to_the_beam(&mut a, &mut b, &store).await;
+    let carry = offer(&mut a, 2, &store).await;
+    b.act("activity:accept", Some(carry), none())
+        .await
+        .expect("accepted");
+    let before = lies(&store, beam()).1;
+    a.act("carry:lift", Some(carry), lift(beam(), None))
+        .await
+        .expect("lifted");
+    walk_on(&mut a, &store, 6 * M).await;
+    walk_on(&mut b, &store, 6 * M).await;
+    tokio::time::sleep(Duration::from_millis(2_000)).await;
+    // The partner leaves while both walk (its own walk goes on, without the beam).
+    held = held.max(leave(&mut b, carry, "the partner leaves").await);
+    a.answer().await.expect("the front's walk ends");
+    held = held.max(leave(&mut a, carry, "the front leaves").await);
+    assert_eq!(Logged::read(&store).set_downs(), vec!["souls:partner-left"]);
+    let (on, at) = lies(&store, beam());
+    assert_eq!(on, Some(ground()), "set down on the ground");
+    assert!(
+        at.position.x > before.position.x + 1_000_000
+            && at.position.x < before.position.x + 6_000_000,
+        "set down where the carry had it, a little way east: {:?}",
+        at.position
+    );
+    cases.push("partner left");
+
+    // A partner whose connection is gone mid-carry: it stops; the front walks on.
+    to_the_beam(&mut a, &mut b, &store).await;
+    let carry = offer(&mut a, 2, &store).await;
+    b.act("activity:accept", Some(carry), none())
+        .await
+        .expect("accepted");
+    a.act("carry:lift", Some(carry), lift(beam(), None))
+        .await
+        .expect("lifted");
+    drop(b);
+    walk_on(&mut a, &store, 6 * M).await;
+    a.answer().await.expect("the front walks on alone");
+    let mut b = Soul::connect(&url, soul(2), &issued[1]).await;
+    b.sequence = 2_000;
+    held = held.max(leave(&mut b, carry, "back again, the partner leaves").await);
+    held = held.max(leave(&mut a, carry, "the front leaves").await);
+    assert_eq!(
+        Logged::read(&store).set_downs(),
+        vec!["souls:partner-left", "souls:carriers-apart"]
+    );
+    assert_eq!(
+        lies(&store, beam()).0,
+        Some(ground()),
+        "set down on the ground"
+    );
+    cases.push("partner gone");
+
+    // A world restarted mid-carry: the load is set down where the carry had it at the first tick after.
+    to_the_beam(&mut a, &mut b, &store).await;
+    let carry = offer(&mut a, 2, &store).await;
+    b.act("activity:accept", Some(carry), none())
+        .await
+        .expect("accepted");
+    a.act("carry:lift", Some(carry), lift(beam(), None))
+        .await
+        .expect("lifted");
+    walk_on(&mut a, &store, 6 * M).await;
+    walk_on(&mut b, &store, 6 * M).await;
+    tokio::time::sleep(Duration::from_millis(1_500)).await;
+    served.stop();
+    served = start_world(&store, &path);
+    let _ = a.answer().await;
+    let _ = b.answer().await;
+    held = held.max(leave(&mut a, carry, "the front leaves").await);
+    held = held.max(leave(&mut b, carry, "the back leaves").await);
+    assert_eq!(
+        Logged::read(&store).set_downs(),
+        vec![
+            "souls:partner-left",
+            "souls:carriers-apart",
+            "souls:world-restarted"
+        ]
+    );
+    assert_eq!(
+        lies(&store, beam()).0,
+        Some(ground()),
+        "set down on the ground"
+    );
+    cases.push("world restarted");
+
+    tokio::time::sleep(Duration::from_millis(300)).await;
+    served.stop();
+    let logged = Logged::read(&store);
+    let (replayed, hash, held_hash) = logged.replay();
+    assert_eq!(
+        nodes(&replayed),
+        nodes(&world()),
+        "every id conserved, and no other"
+    );
+    assert_eq!(
+        hash.to_vec(),
+        held_hash,
+        "the log replays to the state hash it holds"
+    );
+    assert!(
+        held < Duration::from_secs(15),
+        "no Soul held 15 s: {held:?}"
+    );
+    println!(
+        "team gate: rung 2 reached ({}): each set down where it was, the reason said; no Soul held over {} ms; ids \
+         conserved; the log replays to its state hash",
+        cases.join(", "),
+        held.as_millis()
+    );
+}
+
+/// Soul `s` leaves `carry`, which is always accepted: how long its answer took.
+async fn leave(s: &mut Soul, carry: Id, what: &str) -> Duration {
+    let t = std::time::Instant::now();
+    s.act("activity:leave", Some(carry), BTreeMap::new())
+        .await
+        .unwrap_or_else(|r| panic!("{what}: {r}"));
+    t.elapsed()
 }
