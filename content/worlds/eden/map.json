@@ -8,7 +8,8 @@
     "state: entry field <- today's field. {from} takes the placed copy's value (its place state, else today's default); values maps it where the types differ; 'default' takes the entry's own default.",
     "dropped: today's fields with no place in the entry. with: entries placed beside or in each copy (at_mm and yaw_mdeg in the copy's frame, or its slot).",
     "base rows with card 'description' take their card from today's def. Waiting rows name the content task that writes their entry, or none.",
-    "A copy keeps its position, turn and parent. A thing set in a surface slot an entry dropped stands on that surface where it is (Engine v2 E4)."
+    "A copy keeps its position, turn and parent. A thing set in a surface slot an entry dropped stands on that surface where it is (Engine v2 E4).",
+    "live rows: kinds the world's god made on the live world, which the template does not place; placed is the live count (#3980). A borrowed seat is the copy's own slot of the same number."
   ],
   "reads": [
     {"pr": 3003, "branch": "agent/2882-base-forms", "task": "SA-F (base forms)"},
@@ -244,6 +245,11 @@
     {"def": "eden-stage-floor@1", "placed": 1, "entry": "eden:stage_floor", "forms": "base", "pr": 3068},
     {"def": "eden-volleyball-net@1", "placed": 1, "waiting": "SA-X32", "issue": 2922, "note": "handed back on #3042 as the next batch"},
     {"def": "eden-weight-bench@1", "placed": 1, "entry": "eden:weight_bench", "forms": "own", "pr": 3042},
-    {"def": "eden-yoga-mat@1", "placed": 1, "entry": "eden:yoga_mat", "forms": "own", "pr": 3068}
+    {"def": "eden-yoga-mat@1", "placed": 1, "entry": "eden:yoga_mat", "forms": "own", "pr": 3068},
+    {"def": "radio-desk@1", "placed": 1, "live": "made by the god on live Eden, not in the template", "entry": "eden:chair", "forms": "own", "state": {"tucked": "default"}, "dropped": {"onAir": "going on and off air is no form of eden:chair; the desk's host seat (its slot 1) is the chair's seat"}, "issue": 3980},
+    {"def": "listening-counter@1", "placed": 1, "live": "made by the god on live Eden, not in the template", "entry": "eden:record_player", "forms": "own", "state": {"playing": {"from": "playing", "values": [[false, "off"], [true, "waltz"]]}}, "issue": 3980},
+    {"def": "record-bin@1", "placed": 4, "live": "made by the god on live Eden, not in the template", "waiting": "none: its own entry (#3980 option B), and the base forms served on things", "note": "another kind's card would misname it", "issue": 3980},
+    {"def": "alpine-shrine@1", "placed": 1, "live": "made by the god on live Eden, not in the template", "waiting": "none: its own entry (#3980 option B), and the base forms served on things", "note": "another kind's card would misname it", "issue": 3980},
+    {"def": "rainbow@1", "placed": 1, "live": "made by the god on live Eden, not in the template", "waiting": "none: a 221 m arc in the sky, nothing a body reaches", "issue": 3980}
   ]
 }

@@ -10,6 +10,7 @@ import { apiPath } from '../world-path.ts';
 import type { Souls } from '../useSouls.ts';
 import type { V2Bridge } from './bridge.ts';
 import { streamNotice } from './stream-health.ts';
+import { appendEdge, WorldState, type LayerLike } from './world-state.ts';
 
 const STREAM = /^\/s\/[A-Za-z0-9._/-]+\/$/;
 /** The v2 stream this world's page reads, when its inline config names one; else null (the old socket). */
@@ -37,6 +38,8 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
     const st = s.current!, conn = st.conn;
     let bridge: V2Bridge | null = null, failed = false, stopped = false, lastSouls: unknown = null, lastError: string | null = null, lastEntities: unknown = null;
     const startedAt = performance.now();
+    // #4176: doors, lamps and the weather as v2 has them, brought to the page's entity layer by its own world diffs
+    const world = new WorldState();
     let seenParts = 0, lastPartAt: number | null = null, errorAtParts: number | null = null;
     // The scenery the page binds is the world's own (/v1/scene, published with the world); takes carry its rules version.
     void (async () => {
@@ -47,7 +50,7 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
       // `hour=HH:MM`, as on the v2 page: the light of the picture only, the world's clock unchanged
       const hour = /^([01]\d|2[0-3]):[0-5]\d$/.exec(new URLSearchParams(location.search).get('hour') ?? '')?.[0];
       bridge = new V2Bridge({ rulesVersion: scene?.renderSceneRef?.rulesVersion ?? 'souls-v2/1', ...(scene?.renderSceneRef ? { renderSceneRef: scene.renderSceneRef } : {}) }, hour);
-      bridge.start(stream, makeReader);
+      bridge.start(stream, () => world.watch(makeReader()));
       // read-only, for checks and proof: what the stream gave (parts played, newest time, the reader's last error)
       (window as unknown as { __soulsV2?: unknown }).__soulsV2 = bridge.view;
       // The world's body catalogue, where its config (or `?bodies=`, as on the v2 page) names the v2 body assets: each
@@ -78,6 +81,8 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
         }
         if (v.error && v.error !== lastError) { lastError = v.error; errorAtParts = v.parts; console.warn('v2 stream:', v.error); }
         if (v.parts !== seenParts) { seenParts = v.parts; lastPartAt = performance.now(); }
+        const diff = world.next((window as unknown as { __soulsEntity?: { layer?: LayerLike } }).__soulsEntity?.layer, Date.now());
+        if (diff) st.edge = appendEdge(st.edge, diff);
       }
       // one visible state for every way the stream can fail or stall: the page's own status line (LiveWorld, ViewerFrame)
       st.streamNotice = streamNotice({ failed, error: bridge?.view.error ?? null, errorAtParts, parts: seenParts, startedAt, lastPartAt, now: performance.now() });
