@@ -7,9 +7,12 @@ import {VisitorsLine} from './SoulTravel.tsx';
 import {ApprovalCard} from './god-ui/ApprovalDialog.tsx';
 import {useCardOpen,useShownApproval} from './pairing-slot.ts';
 import {bodiesFromEvents} from './soul-state.ts';
+import {useV2OwnedSouls} from './v2-engine/owner-mailbox.ts';
 type FocusProps={sim:Souls;api:Api;auth:AuthCtx;selected:string|null;select(id:string|null):void;manage():void;active?:boolean;camera?:{following:boolean;follow():void;stop():void}};
 export function SoulFocus(props:FocusProps){
- const own=!!props.selected&&!!approvedMe(props.auth,props.sim.me)?.souls.includes(props.selected);
+ // B3-2: on a v2 world the Souls the signed-in person owns come from the directory's view token (sim.me is null there)
+ const v2Owned=useV2OwnedSouls();
+ const own=!!props.selected&&(!!approvedMe(props.auth,props.sim.me)?.souls.includes(props.selected)||(props.auth.authed&&v2Owned.includes(props.selected)));
  const key=JSON.stringify([props.sim.privateAuthorityGeneration??0,props.sim.conn.welcome?.worldId,props.sim.conn.welcome?.epoch,props.selected,authIdentity(props.auth),own]);
  return <FocusCard key={key} {...props} own={own}/>;
 }
