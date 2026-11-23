@@ -29,7 +29,10 @@
 //   souls-god.mjs define <record.json>          a kind of your own (#3697): a souls-entry/1 record (the format of
 //                                                content/kinds), kept in the world under the full name it answers
 //                                                (`defines`); a changed record is a new revision, and old things keep
-//                                                theirs. Your own namespace only (not souls: or eden:)
+//                                                theirs. Your own namespace only (not souls: or eden:). Its look may be
+//                                                a model you uploaded: `"looks": {"model": "upload:<hash>"}`, the hash
+//                                                `upload` answered; a hash that is not an allowed upload is refused
+//                                                (kind.model-unknown) and nothing is sent
 //   souls-god.mjs define-kit <kit.json> [--ns <namespace>]   today's kit (a name and shapes in metres) as a record
 //                                                with geometry.parts (kit.mjs), then defined; namespace `kit` unless given
 //   souls-god.mjs upload <file.glb|png|jpg>     a model or a picture, through the world's check and hold point:
@@ -175,6 +178,8 @@ export const FIX = {
   'kind.audience': 'define a kind for everyone (no audience)',
   'kind.namespace': 'name it in your own namespace (not souls: or eden:, nor one the world\'s own kinds use)',
   'kind.collision': 'that kind is defined already: place it by the full name describe lists',
+  'kind.model': 'looks.model names an upload as "upload:1220<64 hex>", the hash upload answered',
+  'kind.model-unknown': 'upload the model first (souls-god upload <file>) and name the hash it answers; a held upload cannot be used until it is released',
   'kind.in-use': 'remove the things of that kind first, and change or remove a kind whose form creates it, or do it in the same batch',
   'upload.size': 'a model is at most 3 MB and a picture 2 MB: make it smaller first',
   'upload.format': 'a GLB 2.0 model, a PNG or a JPEG',
