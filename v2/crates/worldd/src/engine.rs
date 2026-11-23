@@ -1140,7 +1140,7 @@ impl Engine {
                 }
             }
             self.activities.next = tree.next();
-            if let Err(r) = self.activities.leave(
+            let mut left = self.activities.leave(
                 &mut tree,
                 c,
                 &mut self.moves,
@@ -1149,7 +1149,90 @@ impl Engine {
                 ask,
                 body,
                 activity,
-            ) {
+            );
+            // The last holder of a part B18 would leave hanging: the part is laid down beside its bay as its retire's
+            // first step, or, with no room there, set down where it stands (C3), and named in the retire's entries;
+            // then it leaves. B18 is never broken by a Soul going.
+            if left.as_ref().is_err_and(|r| r.name == "support.none")
+                && let Some(part) = tree
+                    .handle(activity)
+                    .and_then(|h| tree.node(h))
+                    .and_then(|n| n.parent())
+            {
+                let audience = tree
+                    .handle(activity)
+                    .and_then(|h| tree.node(h))
+                    .map(|n| n.audience());
+                let laid = self.lay_place(&tree, c, body, part);
+                if let (Some(audience), Some(ground)) =
+                    (audience, stands(c, body).ok().map(|s| s.0))
+                {
+                    let mut carry = Carry::new(
+                        activity,
+                        part,
+                        ground,
+                        audience,
+                        self.header.clone(),
+                        self.rules.clone(),
+                    );
+                    let (here, why) = match laid {
+                        Ok((_, place, yaw, load)) => {
+                            carry.load = load;
+                            carry.track.push((now, place, yaw));
+                            (None, "souls:holder-left")
+                        }
+                        Err(_) => {
+                            let held = self.held_load(&tree, part);
+                            if let Some(l) = held {
+                                carry.load = l;
+                            }
+                            let stand = tree
+                                .handle(part)
+                                .zip(tree.handle(ground))
+                                .and_then(|(p, g)| sim::ground::scene::xform_to(&tree, p, g).ok());
+                            let here = stand.map(|s| {
+                                (
+                                    Vec3::new(
+                                        s.pos.x,
+                                        s.pos.y + sim::activity::carry::HEIGHT,
+                                        s.pos.z,
+                                    ),
+                                    s.rot,
+                                )
+                            });
+                            (here, "souls:holder-left-in-place")
+                        }
+                    };
+                    match break_off(
+                        &mut carry,
+                        &mut self.activities,
+                        &mut self.mint,
+                        &mut tree,
+                        now,
+                        here,
+                        why,
+                        Some((intent, soul)),
+                    ) {
+                        Ok(()) => {
+                            self.activities.next = tree.next();
+                            left = self.activities.leave(
+                                &mut tree,
+                                c,
+                                &mut self.moves,
+                                &mut self.due,
+                                &mut self.mint,
+                                ask,
+                                body,
+                                activity,
+                            );
+                        }
+                        Err(r) => {
+                            eprintln!("worldd: a retiring holder's part was not set down: {r}")
+                        }
+                    }
+                }
+            }
+            if let Err(r) = left {
                 eprintln!(
                     "worldd: {} did not leave {} as it retired: {r}",
                     show(body),
@@ -1173,9 +1256,192 @@ impl Engine {
             .collect()
     }
 
-    /// A lone holder `holder` of crew `activity` lays its seated `part` down beside its bay, 2 m out toward where it
-    /// stands, at rest as its kind's entry lays it (C3's set-down, C4's load); written through the walkers' maps as a
-    /// seating is, and refused by B18 when another part hangs by it. Then its holder may leave.
+    /// Where a lone holder `holder` lays its seated `part` down beside its bay (0.135 A2): its ground, the middle of
+    /// its resting place at carrying height (C3's set-down takes it down from there), its turn, and its load. The holder
+    /// must be within reach of it. The sides of the part in its bay's frame are tried out of the bay first, then the
+    /// free side nearest the holder, never into the bay: each a resting place [`LAY_OUT`] out, the part lying along
+    /// that side. A side is taken when the plan area the part sweeps from where it stands to where it rests (their
+    /// hull, as C4's route check sweeps a lift) is clear of fixed geometry (`carry::Fixed`), of every other part the
+    /// joined-part rule reads at any height, and of every body but its holder's, and its resting outline of its holder
+    /// too; else `laydown.no-room`.
+    fn lay_place(
+        &self,
+        tree: &Tree,
+        c: &Controller,
+        holder: Id,
+        part: Id,
+    ) -> R<(Id, Vec3, replica::pose::Quat, Load)> {
+        use sim::activity::carry::{Fixed, Quad, outline, overlap};
+        let node = |id: Id| tree.handle(id).and_then(|h| tree.node(h));
+        let pn = node(part).ok_or_else(|| refusal("part-missing", show(part)))?;
+        let load = self
+            .loads
+            .get(plain(pn.kind().as_str()))
+            .copied()
+            .unwrap_or_else(Load::board);
+        let (ground, at) = stands(c, holder)?;
+        let (ph, gh) = match (tree.handle(part), tree.handle(ground)) {
+            (Some(p), Some(g)) => (p, g),
+            _ => return Err(refusal("part-missing", show(part))),
+        };
+        let x = sim::ground::scene::xform_to(tree, ph, gh).map_err(|e| refusal("part-pose", e))?;
+        if apart(at, x.pos) > crate::assembly::GRASP {
+            return Err(refusal("part.out-of-reach", show(part)));
+        }
+        let fixed = Fixed::of(tree, ground).map_err(|e| refusal("laydown.geometry", e))?;
+        // Every other part the rule reads, at any height, as a square about its middle as wide as it is long.
+        let is_part = |k: &str| self.asm.as_ref().is_some_and(|s| s.is_part(k));
+        let mut others: Vec<Quad> = Vec::new();
+        let mut stack = vec![tree.root()];
+        while let Some(h) = stack.pop() {
+            stack.extend(tree.children(h).unwrap_or(&[]).iter().copied());
+            let Some(n) = tree.node(h) else { continue };
+            if n.id() == part || !is_part(n.kind().as_str()) {
+                continue;
+            }
+            let Ok(o) = sim::ground::scene::xform_to(tree, h, gh) else {
+                continue;
+            };
+            let l = self
+                .loads
+                .get(plain(n.kind().as_str()))
+                .copied()
+                .unwrap_or_else(Load::board);
+            let m = o
+                .rot
+                .rotate(l.middle)
+                .map_or(o.pos, |v| Vec3::new(o.pos.x + v.x, 0, o.pos.z + v.z));
+            let r = l.half_length;
+            others.push([
+                [m.x - r, m.z - r],
+                [m.x + r, m.z - r],
+                [m.x + r, m.z + r],
+                [m.x - r, m.z + r],
+            ]);
+        }
+        // Bodies on this ground, in its frame (`place_of`), each a square of a body's radius; its holder apart.
+        let radius = sim::ground::HUMAN_RADIUS * 1000;
+        let square = |p: [i64; 2]| -> Quad {
+            [
+                [p[0] - radius, p[1] - radius],
+                [p[0] + radius, p[1] - radius],
+                [p[0] + radius, p[1] + radius],
+                [p[0] - radius, p[1] + radius],
+            ]
+        };
+        let (mut bodies, mut own) = (Vec::new(), None);
+        for id in c.ids() {
+            let Some(m) = c.body(id) else { continue };
+            let (on, p) = sim::index::place_of(m);
+            if on != ground {
+                continue;
+            }
+            match id == holder {
+                true => own = Some(square(p)),
+                false => bodies.push(square(p)),
+            }
+        }
+        // The part's own footprint where it stands, and its own fixed outlines, which it leaves.
+        let (lx, lz) = (
+            load.half_length.max(load.half_width),
+            load.half_width.min(load.half_length),
+        );
+        let unit = |v: Vec3| x.rot.rotate(v).map(|r| [r.x, r.z]);
+        let to_holder = [at.x - x.pos.x, at.z - x.pos.z];
+        let bay_at = pn
+            .parent()
+            .and_then(|b| tree.handle(b))
+            .and_then(|bh| sim::ground::scene::xform_to(tree, bh, gh).ok())
+            .map_or(x.pos, |b| b.pos);
+        let outward = [x.pos.x - bay_at.x, x.pos.z - bay_at.z];
+        let dot = |d: &[i64; 2], v: [i64; 2]| {
+            i128::from(d[0]) * i128::from(v[0]) + i128::from(d[1]) * i128::from(v[1])
+        };
+        // Each side as a vector LAY_OUT long, along the part's own axes (exact, not rounded to a diagonal).
+        let mut sides: Vec<[i64; 2]> = [
+            Vec3::new(LAY_OUT, 0, 0),
+            Vec3::new(-LAY_OUT, 0, 0),
+            Vec3::new(0, 0, LAY_OUT),
+            Vec3::new(0, 0, -LAY_OUT),
+        ]
+        .into_iter()
+        .filter_map(|v| unit(v).ok())
+        .collect();
+        sides.retain(|d| dot(d, outward) >= 0);
+        sides.sort_by_key(|d| (dot(d, outward) <= 0, -dot(d, to_holder)));
+        // Its own fixed outlines: those lying wholly within its plan footprint where it stands.
+        let hw = load.half_width + 10_000;
+        let own_box = [x.pos.x - hw, x.pos.z - hw, x.pos.x + hw, x.pos.z + hw];
+        let mine = |q: &Quad| {
+            q.iter().all(|p| {
+                p[0] >= own_box[0] && p[0] <= own_box[2] && p[1] >= own_box[1] && p[1] <= own_box[3]
+            })
+        };
+        let scaled = |d: [i64; 2], by: i64| {
+            [
+                (i128::from(d[0]) * i128::from(by) / i128::from(LAY_OUT)) as i64,
+                (i128::from(d[1]) * i128::from(by) / i128::from(LAY_OUT)) as i64,
+            ]
+        };
+        let free = sides.into_iter().find_map(|d| {
+            let c0 = [x.pos.x + d[0], x.pos.z + d[1]];
+            let along = [-d[1], d[0]];
+            let a = scaled(along, load.half_length);
+            let rest = outline(
+                [c0[0] + a[0], c0[1] + a[1]],
+                [c0[0] - a[0], c0[1] - a[1]],
+                &load,
+            );
+            // The sweep: from the part's far edge behind where it stands to the far edge of where it rests, as wide as
+            // the larger of the two.
+            let (from, to) = (scaled(d, -lz), scaled(d, LAY_OUT + load.half_width));
+            let mid = [
+                x.pos.x + (from[0] + to[0]) / 2,
+                x.pos.z + (from[1] + to[1]) / 2,
+            ];
+            let half_d = (LAY_OUT + load.half_width + lz) / 2;
+            let e = scaled(d, half_d);
+            let sweep_load = Load {
+                half_length: half_d,
+                half_width: load.half_length.max(lx),
+                ..load
+            };
+            let sweep = outline(
+                [mid[0] + e[0], mid[1] + e[1]],
+                [mid[0] - e[0], mid[1] - e[1]],
+                &sweep_load,
+            );
+            let fixed_hit = fixed
+                .within([
+                    sweep.iter().map(|p| p[0]).min().unwrap_or(0),
+                    sweep.iter().map(|p| p[1]).min().unwrap_or(0),
+                    sweep.iter().map(|p| p[0]).max().unwrap_or(0),
+                    sweep.iter().map(|p| p[1]).max().unwrap_or(0),
+                ])
+                .into_iter()
+                .filter(|q| !mine(q))
+                .any(|q| overlap(&sweep, q));
+            let clear = !fixed_hit
+                && !others.iter().any(|q| overlap(&sweep, q))
+                && !bodies.iter().any(|b| overlap(&sweep, b))
+                && !own.as_ref().is_some_and(|b| overlap(&rest, b));
+            clear.then_some((c0, along))
+        });
+        let Some((c0, along)) = free else {
+            return Err(refusal("laydown.no-room", show(part)));
+        };
+        let place = Vec3::new(c0[0], sim::activity::carry::HEIGHT, c0[1]);
+        Ok((
+            ground,
+            place,
+            sim::activity::carry::yaw_toward(along)?,
+            load,
+        ))
+    }
+
+    /// A lone holder `holder` of crew `activity` lays its seated `part` down beside its bay ([`Engine::lay_place`]), at
+    /// rest as its kind's entry lays it (C3's set-down, C4's load); written through the walkers' maps as a seating is,
+    /// and refused by B18 when another part hangs by it. Then its holder may leave.
     #[allow(clippy::too_many_arguments)]
     fn lay_down(
         &mut self,
@@ -1192,7 +1458,6 @@ impl Engine {
         if node(activity).and_then(|n| n.parent()) != Some(part) {
             return Err(refusal("part.not-held", show(activity)));
         }
-        let kind = pn.kind().clone();
         let in_bay = pn.parent().and_then(&node).is_some_and(|b| {
             self.asm
                 .as_ref()
@@ -1204,80 +1469,7 @@ impl Engine {
         let audience = node(activity)
             .map(|n| n.audience())
             .ok_or_else(|| refusal("activity-missing", show(activity)))?;
-        let (ground, at) = stands(c, holder)?;
-        let (ph, gh) = match (tree.handle(part), tree.handle(ground)) {
-            (Some(p), Some(g)) => (p, g),
-            _ => return Err(refusal("part-missing", show(part))),
-        };
-        let x = sim::ground::scene::xform_to(tree, ph, gh).map_err(|e| refusal("part-pose", e))?;
-        if apart(at, x.pos) > crate::assembly::GRASP {
-            return Err(refusal("part.out-of-reach", show(part)));
-        }
-        let load = self
-            .loads
-            .get(plain(kind.as_str()))
-            .copied()
-            .unwrap_or_else(Load::board);
-        // The sides of the part in its bay's frame, out of the bay first: each a resting place LAY_OUT out,
-        // the part lying along that side. The first whose resting outline is clear of fixed geometry (walls, other
-        // parts, as E4's set-down asks of a free surface) and of every body is taken; else `laydown.no-room`.
-        let fixed = sim::activity::carry::Fixed::of(tree, ground)
-            .map_err(|e| refusal("laydown.geometry", e))?;
-        let to_holder = [at.x - x.pos.x, at.z - x.pos.z];
-        let mut sides: Vec<[i64; 2]> = [[1, 0], [-1, 0], [0, 1], [0, -1]]
-            .into_iter()
-            .filter_map(|[a, b]| {
-                let v = x.rot.rotate(Vec3::new(a, 0, b)).ok()?;
-                Some([v.x.signum(), v.z.signum()])
-            })
-            .collect();
-        // Out of the bay first (away from its middle), then the free side nearest the holder; never into the bay.
-        let bay_at = pn
-            .parent()
-            .and_then(|b| tree.handle(b))
-            .and_then(|bh| sim::ground::scene::xform_to(tree, bh, gh).ok())
-            .map_or(x.pos, |b| b.pos);
-        let outward = [x.pos.x - bay_at.x, x.pos.z - bay_at.z];
-        let dot = |d: &[i64; 2], v: [i64; 2]| {
-            i128::from(d[0]) * i128::from(v[0]) + i128::from(d[1]) * i128::from(v[1])
-        };
-        sides.retain(|d| dot(d, outward) >= 0);
-        sides.sort_by_key(|d| (dot(d, outward) <= 0, -dot(d, to_holder)));
-        let bodies: Vec<sim::activity::carry::Quad> = c
-            .bodies()
-            .map(|m| {
-                let (p, r) = (m.pose.position, sim::ground::HUMAN_RADIUS * 1000);
-                [
-                    [p.x - r, p.z - r],
-                    [p.x + r, p.z - r],
-                    [p.x + r, p.z + r],
-                    [p.x - r, p.z + r],
-                ]
-            })
-            .collect();
-        let free = sides.into_iter().find_map(|d| {
-            let c0 = [x.pos.x + d[0] * LAY_OUT, x.pos.z + d[1] * LAY_OUT];
-            let along = [-d[1], d[0]];
-            let (front, back) = (
-                [
-                    c0[0] + along[0] * load.half_length,
-                    c0[1] + along[1] * load.half_length,
-                ],
-                [
-                    c0[0] - along[0] * load.half_length,
-                    c0[1] - along[1] * load.half_length,
-                ],
-            );
-            let q = sim::activity::carry::outline(front, back, &load);
-            let clear = fixed.hit(&q).is_none()
-                && !bodies.iter().any(|b| sim::activity::carry::overlap(&q, b));
-            clear.then_some((c0, along))
-        });
-        let Some((c0, along)) = free else {
-            return Err(refusal("laydown.no-room", show(part)));
-        };
-        let place = Vec3::new(c0[0], sim::activity::carry::HEIGHT, c0[1]);
-        let yaw = sim::activity::carry::yaw_toward(along)?;
+        let (ground, place, yaw, load) = self.lay_place(tree, c, holder, part)?;
         let mut carry = Carry::new(
             activity,
             part,

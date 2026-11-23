@@ -2780,16 +2780,47 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     one(
         &mut hands,
         3,
+        v3(ub.x, 0, ub.z - 2_000_000),
+        "Soul 4 2 m from frame B",
+    );
+    let got = hands[3].act("part:unseat", crew_b, part(fb));
+    refused(
+        &got,
+        "part.out-of-reach",
+        "Soul 4 lays frame B down from 2 m",
+    );
+    one(
+        &mut hands,
+        3,
         v3(ub.x, 0, ub.z - 1_200_000),
         "Soul 4 between the frames",
     );
-    let wall_at = v3(ub.x, 0, ub.z + 2_200_000);
-    let got = creator_edit(wall(&w, wall_at.x, wall_at.z));
-    println!("the creator puts a wall outside frame B: {got:?}");
-    assert_eq!(got.kind, 1, "a wall");
-    let wall_id = got.names[&1];
+    let mut walls = Vec::new();
+    for (x, z, what) in [
+        (ub.x, ub.z + 2_200_000, "outside frame B"),
+        (ub.x + 1_000_000, ub.z, "between frame B and its +x side"),
+        (ub.x - 1_000_000, ub.z, "between frame B and its -x side"),
+    ] {
+        let got = creator_edit(wall(&w, x, z));
+        println!("the creator puts a wall {what}: {got:?}");
+        assert_eq!(got.kind, 1, "a wall");
+        walls.push(got.names[&1]);
+    }
     let got = leave(&mut hands, 3, crew_b);
     refused(&got, "support.none", "Soul 4, alone, lets go of frame B");
+    let got = hands[3].act("part:unseat", crew_b, part(fb));
+    refused(
+        &got,
+        "laydown.no-room",
+        "every way out for frame B passes through a wall",
+    );
+    for side in walls.drain(1..) {
+        let got = creator_edit(Op::Remove {
+            node: Ref::Node(side),
+        });
+        assert_eq!(got.kind, 1, "a side wall taken away: {got:?}");
+    }
+    let wall_id = walls[0];
     let got = hands[3].act("part:unseat", crew_b, part(fb));
     println!("Soul 4 lays frame B down beside the bay: {got:?}");
     assert_eq!(got.kind, 1, "frame B laid down");
@@ -2814,6 +2845,42 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     assert_eq!(got.kind, 1, "the wall taken away: {got:?}");
     // Crew B again (Souls 3, 4) takes it up and puts it back; Soul 3 lets go, Soul 4 holds it.
     let (p, q) = ends(laid, 0);
+    both(&mut hands, (2, 3), p, q, "Souls 3 and 4 to frame B");
+    let crew_b = crew(&mut hands, (2, 3), g);
+    assert_eq!(
+        hands[2].act("part:take", crew_b, part(fb)).kind,
+        1,
+        "frame B taken up"
+    );
+    let (p, q) = ends(ub, 0);
+    both(&mut hands, (2, 3), p, q, "frame B back to upright_b");
+    let got = hands[2].act("part:put", crew_b, into("upright_b"));
+    assert_eq!(got.kind, 1, "frame B back in: {got:?}");
+    assert_eq!(
+        leave(&mut hands, 2, crew_b).kind,
+        1,
+        "Soul 3 lets go of frame B"
+    );
+    // Soul 4, frame B's last holder, leaves the world: frame B is set down as its retire's first step (laid beside
+    // the bay, or where it stands when there is no room), never left hanging; a crew puts it back.
+    one(
+        &mut hands,
+        3,
+        v3(ub.x + 1_000_000, 0, ub.z),
+        "Soul 4 beside frame B",
+    );
+    hands[3].send_to(answers::LEAVE, None, BTreeMap::new());
+    let got = socket_end(&mut hands[3].s);
+    println!("Soul 4, frame B's last holder, leaves the world: {got:?}");
+    assert_eq!(got.kind, 1, "Soul 4 leaves the world");
+    let (parent, _, down) = where_is(&w, fb);
+    println!(
+        "frame B set down at ({}, {}) mm",
+        down.x / 1000,
+        down.z / 1000
+    );
+    assert_eq!(parent, Some(g), "frame B set down, not left hanging");
+    let (p, q) = ends(down, 0);
     both(&mut hands, (2, 3), p, q, "Souls 3 and 4 to frame B");
     let crew_b = crew(&mut hands, (2, 3), g);
     assert_eq!(
