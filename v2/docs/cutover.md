@@ -35,8 +35,9 @@ removes both. With an optional absolute `staticDir` (the directory the v2 origin
 routed page publishes the old world's read-only views there (`scene.json`, `snapshot.json`, `items.json`,
 `platforms.json`, `config.json`, `kernel.json`, then `manifest.json`), and the page's reads of them are answered from those
 files. `/v1/config` keeps the served client's answer. The page loads the replica (`replica.js`, `replica_bg.wasm`) that
-the launcher serves from `clientDir` for the routed world. Known limit: god edits made on v2 after the switch are not in
-those files until a converter from v2 facts exists. The launcher's user must be able to write `staticDir`.
+the launcher serves from `clientDir` for the routed world. God edits made on v2 after the switch are not in those files;
+the page draws them from the stream (`apps/web/src/v2-engine/creator-kinds.ts`), and a world with none of those files (one
+made on the new engine) is drawn from its stream alone (`v2-engine/source/stream-scene.ts`, 0.135 W2). The launcher's user must be able to write `staticDir`.
 
 ### One world's old page, on and off (B3-1)
 
