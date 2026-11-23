@@ -1159,6 +1159,8 @@ pub struct PublicWriter<S> {
     /// Whether the open cut holds anything but motion and fields set on nodes; else the nodes it set (#3799).
     structural: bool,
     touched: std::collections::BTreeSet<Id>,
+    /// The nodes the open cut made (T-late): the only rows a cut by rows may add.
+    made: std::collections::BTreeSet<Id>,
     /// The timers the open cut set or cleared (#3799).
     timers: std::collections::BTreeSet<Id>,
     /// The links the open cut made or ended, the transfers it began and the nodes they moved, with what is under
@@ -1589,6 +1591,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             incremental: std::env::var_os("SOULS_STREAM_WHOLE").is_none(),
             structural: true,
             touched: std::collections::BTreeSet::new(),
+            made: std::collections::BTreeSet::new(),
             timers: std::collections::BTreeSet::new(),
             links: std::collections::BTreeSet::new(),
             left: std::collections::BTreeSet::new(),
@@ -2873,9 +2876,12 @@ impl<S: ObjectStore> PublicWriter<S> {
                                 // takes, a Soul arriving), and so does the source's Create of a private node, which the
                                 // rows leave out.
                                 replica::effects::Change::Set { node, .. }
-                                | replica::effects::Change::Reparent { node, .. }
-                                | replica::effects::Change::Create { node, .. } => {
+                                | replica::effects::Change::Reparent { node, .. } => {
                                     self.touched.insert(*node);
+                                }
+                                replica::effects::Change::Create { node, .. } => {
+                                    self.touched.insert(*node);
+                                    self.made.insert(*node);
                                 }
                                 replica::effects::Change::Link { link, .. }
                                 | replica::effects::Change::Unlink { link } => {
@@ -3048,6 +3054,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         self.force_remainder = false;
         self.structural = false;
         self.touched.clear();
+        self.made.clear();
         self.timers.clear();
         self.links.clear();
         self.left.clear();
@@ -3121,9 +3128,16 @@ impl<S: ObjectStore> PublicWriter<S> {
                 .collect();
             // Every leave of the cut arrived in it: no flight is open at the cut. A thing put into a closed container
             // leaves the public state with what is under it, its links and its timers (#3948): the whole cut. One taken
-            // out is not in the published state, so its row makes the cut whole too.
+            // out is not in the published state, so its row makes the cut whole too: `row_delta` takes a row it does not
+            // hold as a node made only when the cut made it (`made`).
             let landed = self.left.iter().all(|t| tree.flight(*t).is_none())
                 && !self.moved.iter().any(|id| self.hidden(tree, *id));
+            // A node made with links or timers already on it (a link made to its id before it was a node is attached
+            // to it when it is made, `Tree` rule 7) makes the cut whole: those rows are not in this cut's, and whether
+            // they are public changes with it (T-late review).
+            let bare = self.made.iter().all(|id| {
+                tree.links_at(*id).is_empty() && !tree.timers().values().any(|t| t.node == *id)
+            });
             // A timer's row as the public state holds it: of a public live owner; none once cleared. One whose
             // owner is not live here (in flight) is left to the whole cut.
             let int = |n: i64| {
@@ -3150,9 +3164,10 @@ impl<S: ObjectStore> PublicWriter<S> {
                     }
                 })
                 .collect();
-            match (timers, links, landed) {
+            match (timers, links, landed && bare) {
                 (Some(timers), Some(links), true) => {
-                    self.player.row_delta(tree.next(), rows, timers, links)?
+                    self.player
+                        .row_delta(tree.next(), rows, timers, links, &self.made)?
                 }
                 _ => None,
             }

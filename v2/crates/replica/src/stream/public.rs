@@ -1058,15 +1058,18 @@ impl PublicPlayer {
     }
     /// The delta from the state to one at version `next` whose node rows `rows`, timers `timers` and links `links` (by
     /// id; `None`, gone) replace the live ones, those equal to the live ones left out (#3799, #4192): as [`context`]
-    /// works it out from the two whole states; a row of a node not live here is a node made (T-late). None when it
-    /// cannot be played in place (a gone node, a frame walk `validate` would refuse, no new version); the caller then
-    /// works it out whole.
+    /// works it out from the two whole states. A row of a node not live here is a node made (T-late) only when its id
+    /// is in `made`, the nodes the caller's cut made, with no links or timers on them; any other is a node that comes
+    /// back (out of a closed container, #3948) with rows this delta does not hold. None when it cannot be played in
+    /// place (such a row, a gone node, a frame walk `validate` would refuse, no new version); the caller then works it
+    /// out whole.
     pub fn row_delta(
         &self,
         next: u64,
         mut rows: Vec<(Id, Value)>,
         timers: Vec<(Id, Option<Value>)>,
         links: Vec<(Id, Option<Value>)>,
+        made: &BTreeSet<Id>,
     ) -> R<Option<Value>> {
         if next == self.version() {
             return Ok(None);
@@ -1075,11 +1078,12 @@ impl PublicPlayer {
         let live = arr(field(map(&self.state)?, 2)?)?;
         let mut changed = Vec::new();
         for (id, v) in rows {
-            let made = match row_index(live, id)? {
+            let changes = match row_index(live, id)? {
                 Some(i) => arr(&live[i])?[1] != v,
-                None => true,
+                None if made.contains(&id) => true,
+                None => return Ok(None),
             };
-            if made {
+            if changes {
                 changed.push(Value::Array(vec![id.to_value(), v]));
             }
         }
