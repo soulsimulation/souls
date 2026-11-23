@@ -390,8 +390,14 @@ fn stuck_report(agents: &[Sent]) -> serde_like::Obj {
 /// more than [`targets::SHARE_MOST`] Souls were sent to, of the places sent to.
 fn same_target(sent_to: &BTreeMap<Id, std::collections::BTreeSet<usize>>) -> String {
     let most = sent_to.values().map(|s| s.len()).max().unwrap_or(0);
-    let over = sent_to.values().filter(|s| s.len() > targets::SHARE_MOST).count();
-    format!("{{\"places\": {}, \"mostSouls\": {most}, \"placesOverShare\": {over}}}", sent_to.len())
+    let over = sent_to
+        .values()
+        .filter(|s| s.len() > targets::SHARE_MOST)
+        .count();
+    format!(
+        "{{\"places\": {}, \"mostSouls\": {most}, \"placesOverShare\": {over}}}",
+        sent_to.len()
+    )
 }
 
 /// #4193: how near its place a body counts as there, in micrometres (positions are micrometres, `v2/docs/pose.md`).
@@ -422,7 +428,9 @@ fn accuracy_report(
             body.and_then(|b| targets::world_xz(seen, b)),
             targets::world_xz(seen, place),
         ) {
-            (Some((x, z)), Some((px, pz))) => i128::from(x - px).pow(2) + i128::from(z - pz).pow(2) <= NEAR_PLACE_UM.pow(2),
+            (Some((x, z)), Some((px, pz))) => {
+                i128::from(x - px).pow(2) + i128::from(z - pz).pow(2) <= NEAR_PLACE_UM.pow(2)
+            }
             _ => false,
         };
         let done = agents[k].done.contains(seq);
@@ -1511,7 +1519,10 @@ async fn main() {
         } else {
             arg.as_ref().map(|x| x.1)
         };
-        if let (Some(t), true) = (target, v.ends_with(":walk") || v.ends_with(":sit") || v.ends_with(":take")) {
+        if let (Some(t), true) = (
+            target,
+            v.ends_with(":walk") || v.ends_with(":sit") || v.ends_with(":take"),
+        ) {
             sent_to.entry(t).or_default().insert(k);
         }
         if let (Some(p), false) = (place, v.ends_with(":look_at") || v.ends_with(":point")) {
@@ -1698,7 +1709,10 @@ async fn main() {
         println!("  minute {}", m.json());
     }
     println!("  refused by verb {}", counts(&refused_by));
-    println!("  same target (Souls sent to one place) {}", same_target(&sent_to));
+    println!(
+        "  same target (Souls sent to one place) {}",
+        same_target(&sent_to)
+    );
     println!(
         "  replaced by the agent's own next act (claim-taken, not counted as refused): {replaced}"
     );

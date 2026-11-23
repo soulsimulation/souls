@@ -177,13 +177,18 @@ fn ground(seen: &Seen) -> Option<Id> {
 /// #4193: each Soul's [`MINE_EACH`] nearest of `of`, taking a farther one where [`SHARE_MOST`] Souls already have it
 /// (`used` counts across the kinds, so a seat that is also a walk target counts for both).
 fn spread(seen: &Seen, of: &[Id], used: &mut BTreeMap<Id, usize>) -> BTreeMap<Id, Vec<Id>> {
-    let at: Vec<(Id, (i64, i64))> = of.iter().filter_map(|t| Some((*t, world_xz(seen, t)?))).collect();
+    let at: Vec<(Id, (i64, i64))> = of
+        .iter()
+        .filter_map(|t| Some((*t, world_xz(seen, t)?)))
+        .collect();
     let mut out = BTreeMap::new();
     if at.is_empty() {
         return out;
     }
     for (soul, body) in &seen.bodies {
-        let Some((x, z)) = world_xz(seen, body) else { continue };
+        let Some((x, z)) = world_xz(seen, body) else {
+            continue;
+        };
         let mut by: Vec<(i128, Id)> = at
             .iter()
             .map(|(t, (tx, tz))| (i128::from(tx - x).pow(2) + i128::from(tz - z).pow(2), *t))
@@ -299,7 +304,11 @@ impl Targets {
         };
         // #4193: each Soul's own targets are the nearest its body, from every reachable thing, not only the middle's.
         let every = |f: &dyn Fn(&Json) -> bool| -> Vec<Id> {
-            things.iter().filter(|(_, e)| f(e)).map(|(id, _)| *id).collect()
+            things
+                .iter()
+                .filter(|(_, e)| f(e))
+                .map(|(id, _)| *id)
+                .collect()
         };
         let mut walk = ids(&|e| has_slot(e, None));
         if walk.is_empty() {
