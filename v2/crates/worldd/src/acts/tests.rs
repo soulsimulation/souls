@@ -472,6 +472,70 @@ fn s8_an_answered_form_walk_question_is_not_sent_again_before_its_form_reads_it(
     assert_eq!(sent, 1, "one search for the question");
 }
 
+/// S11: a form walker waiting for its line is pushed along by the crowd round it. Its question stands while it is on
+/// the same floor: asked once, not once a tick, and the line that comes back is its own, read from where it now is.
+/// Before, each new pose was a new question, and the answer never matched the question current when it came.
+#[test]
+fn s11_a_jostled_walkers_line_question_stands_and_its_answer_is_read() {
+    let generated = testworld::generate(1, 0).unwrap();
+    let imported = import_eden::load(&generated.text).unwrap();
+    let ground = imported.nodes["ground"];
+    let header = import_eden::header(imported.nodes["world"], &imported.rules).unwrap();
+    let town = Town::new(imported.tree, ground, Doors::new(header, imported.rules, 0)).unwrap();
+    let id = Id::new(Scope([0xc9; 16]), 1).unwrap();
+    let at = |x: i64| {
+        town.surfaces[&ground]
+            .place(
+                id,
+                Frame {
+                    node: ground,
+                    slot: None,
+                },
+                Vec3::new(x, 0, 40_000_000),
+                Quat::IDENTITY,
+            )
+            .unwrap()
+    };
+    let key = FormKey {
+        body: id,
+        intent: Id::new(Scope([0xc9; 16]), 2).unwrap(),
+        stage: 1,
+        step: 2,
+        kind: FormKind::Line,
+    };
+    let map = Arc::new(town.versions.clone());
+    let to = Vec3::new(5_000_000, 0, 40_000_000);
+    let mut planning = Planning::default();
+    // Pushed 90 mm a tick for ten ticks while it waits: one question, one generation.
+    let mut asked = Vec::new();
+    for k in 0..10 {
+        planning.ask(key, at(k * 90_000), FormQuery::Line { to }, &map);
+        asked.extend(
+            std::mem::take(&mut planning.queued)
+                .into_values()
+                .map(|q| q.generation),
+        );
+    }
+    asked.dedup();
+    assert_eq!(asked.len(), 1, "one question while jostled: {asked:?}");
+    // Its answer comes back and is read, the walker 900 mm from where it was asked.
+    planning.receive(BTreeMap::from([(
+        key,
+        FormAnswer {
+            generation: asked[0],
+            map: Arc::clone(&map),
+            result: FormResult::Line(Err(Refusal {
+                name: "test.answer",
+                detail: String::new(),
+            })),
+        },
+    )]));
+    assert!(
+        planning.line(key, at(900_000), to, &map).is_some(),
+        "the answer is the walker's own"
+    );
+}
+
 /// C34 (#3599) A1: a walk to a building's named area is planned on the building's own room and floor: the area
 /// named as an upstairs room (`r1a`) resolves onto that room's floor at the room's height, whatever height the point
 /// gives; an area that names no room of a building with more than one floor has no way there; a point its entry does
