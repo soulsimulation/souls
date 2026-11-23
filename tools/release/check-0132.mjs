@@ -141,6 +141,17 @@ async function worldPage(video) {
   const ctx = await browser.newContext({ viewport: { width: 1280, height: 720 }, ...(video ? { recordVideo: { dir: join(OUT, 'clip'), size: { width: 1280, height: 720 } } } : {}) });
   const page = await ctx.newPage();
   page.on('dialog', (d) => void d.accept('Ada'));
+  // what the world says happened, by name, as the page's v2 reader hands its parts on (the world's own records, such as
+  // an act ended at its deadline): counted from the reader worker's messages, read-only
+  await page.addInitScript(() => {
+    const W = window.Worker, seen = (window.__happened = {});
+    window.Worker = class extends W {
+      constructor(...a) {
+        super(...a);
+        this.addEventListener('message', (e) => { for (const h of e.data?.p?.happened ?? []) if (h?.name) seen[h.name] = (seen[h.name] ?? 0) + 1; });
+      }
+    };
+  });
   await page.goto(`${BASE}/w/${SLUG}/`);
   await page.waitForFunction(() => (window.__soulsV2?.parts ?? 0) > 0, null, { timeout: 60_000 }).catch(() => {});
   return { ctx, page };
@@ -189,19 +200,23 @@ if (ONLY.has('2')) {
   const step = async (name, send, shown) => {
     const b = soul ? await probe(page, soul) : null, t0 = Date.now(), sent = send();
     let seenMs = null;
-    while (Date.now() - t0 < 6000) {
+    while (Date.now() - t0 < (soul ? 6000 : 30_000)) { // a Soul not on the page yet: wait longer, to say when it came
       if (!soul) {
         soul = (await page.evaluate(() => [...(window.__soulsV2?.souls.keys() ?? [])])).find((s) => !before.has(s)) ?? null;
+        if (soul) report.lines[2].appearedMs = Date.now() - t0;
         // the clip follows it: its card by the page's own link, then Follow
         if (soul) { await page.evaluate((id) => { location.hash = `soul/${id}`; }, soul); await page.getByRole('button', { name: /^Follow$/ }).first().click({ timeout: 3000 }).catch(() => {}); }
       }
       const s = soul ? await probe(page, soul) : null;
       if (s && shown(s, b ?? s)) { seenMs = Date.now() - t0; break; }
+      if (soul && !s && Date.now() - t0 > 6000) break;
       await sleep(100);
     }
     const pass = sent?.ok !== false && seenMs !== null && seenMs <= 2000;
     // what the world answered so far (its receipt's phases or refusal, by name) and what the page showed last
-    const answers = sent?.sequence ? (cli('receipt', String(sent.sequence)).receipt?.answers ?? []).map((a) => a.reason ?? a.answer).join(' > ') : '';
+    // each answer with how long after the send the world gave it (the client's own receipt: sentAt and each answer's at)
+    const rc = sent?.sequence ? cli('receipt', String(sent.sequence)).receipt : null;
+    const answers = (rc?.answers ?? []).map((a) => `${a.reason ?? a.answer}${rc.sentAt && a.at ? ` at ${Date.parse(a.at) - Date.parse(rc.sentAt)} ms` : ''}`).join(' > ');
     const last = soul ? await probe(page, soul) : null;
     report.lines[2].steps.push({ name, answer: sent?.ok === false ? sent : { ok: true, sequence: sent?.sequence }, answers, seenMs, page: last });
     row(2, name, pass, `${sent?.ok === false ? `refused: ${JSON.stringify(sent).slice(0, 160)}` : `world: ${answers || 'no answer yet'}`}; on the page ${seenMs === null ? `not within 6 s (it shows ${last ? `${last.doing ?? '?'}, ${last.activity ?? '?'}${last.prop ? `, holding ${last.prop}` : ''}` : 'no such Soul'})` : `after ${seenMs} ms`}`);
@@ -228,8 +243,12 @@ if (ONLY.has('2')) {
     if (r?.sequence) await ended(r.sequence, 15_000);
     r = await step('carry', () => bench ? cli('act', bench) : { ok: false, detail: 'no place to carry it to' }, (s) => !!s.prop && walking(s));
     if (r?.sequence) await ended(r.sequence);
-    const down = cup ? (JSON.stringify(cli('inspect', cup)).match(/"([a-z_-]+:(?:set-down|put-down|put|drop)(?::[^"]*)?)"/)?.[1] ?? 'hands:set-down') : null;
-    r = await step('put down', () => down ? cli('act', down) : { ok: false, detail: 'nothing held' }, (s, b) => !!b.prop && !s.prop);
+    // the client's set-down names the held thing itself (a take from a bookcase holds a new book, not the bookcase): the
+    // thing `find` places in the Soul's own body, by the body's name
+    const me = cli('status').body, myName = me ? cli('inspect', me).name : null, held = (await probe(page, soul))?.prop;
+    const heldId = myName ? (cli('find', held ?? 'thing').found ?? []).find((f) => f.in === myName || f.in?.startsWith(`${myName},`))?.id ?? null : null;
+    report.lines[2].held = heldId;
+    r = await step('put down', () => (heldId ? cli('set-down', heldId) : { ok: false, detail: `the held thing not found (${held ?? 'nothing shown held'})` }), (s, b) => !!b.prop && !s.prop);
     if (r?.sequence) await ended(r.sequence, 15_000);
     await step('say', () => cli('say', 'Hello from the release check'), (s, b) => s.said > b.said);
     const body = cli('status').body ?? (soul ? (await page.evaluate((id) => window.__soulsV2.souls.get(id)?.entityId, soul))?.match(/^v2_([0-9a-f]{32})_(\d+)/)?.slice(1).join('-') : null);
@@ -309,7 +328,9 @@ if (ONLY.has('3')) {
     '--stream', `http://127.0.0.1:${port.origin}/${stream.replace(/^\//, '')}`, '--trace', join(OUT, 'trace.txt')], null);
   const driver = procs.at(-1);
   await new Promise((r) => driver.on('exit', r));
-  clearInterval(sampler); await ctx.close();
+  clearInterval(sampler);
+  const happened = await page.evaluate(() => window.__happened ?? {}).catch(() => ({}));
+  await ctx.close();
   const driverLog = existsSync(join(OUT, 'logs/driver.log')) ? readFileSync(join(OUT, 'logs/driver.log'), 'utf8').trim().split('\n') : [];
   const driverReport = existsSync(join(D, 'report.json')) ? JSON.parse(readFileSync(join(D, 'report.json'), 'utf8')) : null;
   row(3, 'the driver ran', !!driverReport, driverReport ? `${AGENTS} Souls, ${SECONDS} s; its report in driver/report.json` : `no report: ${driverLog.at(-1)?.slice(0, 200) ?? 'no output'}`);
@@ -322,7 +343,7 @@ if (ONLY.has('3')) {
   row(3, 'no two bodies overlap for more than a moment', overlapPairs === 0 && samples > 0, `${overlapPairs} pairs closer than 0.3 m in two chunks running, over ${samples} chunks; worst ${worst.overlapChunks} chunks (${worst.pair ?? 'none'})`);
   row(3, 'no body ignores a new intent', ignored.length === 0 && firsts.size > 0, `${ignored.length} of ${firsts.size + ignored.length} intents never answered${ignored.length ? `; first: agent ${ignored[0].split(' ')[0]}` : ''}`);
   row(3, 'no Soul stuck over 10 s without a receipt saying why', slow.length === 0 && ignored.length === 0 && firsts.size > 0, `${slow.length} acts answered after more than 10 s (worst ${slow[0] ? `${(slow[0][1] / 1000).toFixed(1)} s, agent ${slow[0][0].split(' ')[0]}` : 'none'}), ${ignored.length} never`);
-  report.lines[3] = { overlapPairs, samples, worstOverlap: worst, intents: firsts.size + ignored.length, ignored: ignored.length, answeredAfter10s: slow.length, worstAnswerMs: slow[0]?.[1] ?? null };
+  report.lines[3] = { happened, overlapPairs, samples, worstOverlap: worst, intents: firsts.size + ignored.length, ignored: ignored.length, answeredAfter10s: slow.length, worstAnswerMs: slow[0]?.[1] ?? null };
 }
 
 await browser.close();
