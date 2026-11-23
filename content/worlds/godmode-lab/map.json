@@ -1,0 +1,21 @@
+{
+  "format": "souls-world-map/1",
+  "world": "godmode-lab",
+  "template": "worlds/templates/hello-hamlet.json",
+  "about": [
+    "One row per kind and revision placed in the template, as Eden's map (content/worlds/eden/map.json): the entry each placed copy becomes, or waiting. A kind Eden's map names keeps Eden's row; the others were written by 0.133 W3."
+  ],
+  "rows": [
+    {"def": "core/door@2", "placed": 5, "entry": "eden:door", "forms": "own", "pr": 3065, "state": {"open": {"from": "open"}, "locked": {"from": "locked"}}},
+    {"def": "core/bench@1", "placed": 2, "entry": "eden:bench", "forms": "own", "pr": 3039},
+    {"def": "core/flag@1", "placed": 2, "entry": "eden:flag", "forms": "base"},
+    {"def": "core/hall@4", "placed": 2, "entry": "eden:hall", "forms": "own", "pr": 3072, "dropped": {"paint": "a god's repaint of the walls, not a Soul's act; the colour is the look's (palette wall)"}},
+    {"def": "core/chair@1", "placed": 1, "entry": "eden:chair", "forms": "own", "pr": 3039, "state": {"tucked": "default"}},
+    {"def": "core/cottage@3", "placed": 1, "entry": "eden:cottage", "forms": "own", "pr": 3072, "dropped": {"paint": "a god's repaint of the walls, not a Soul's act; the colour is the look's (palette wall)"}},
+    {"def": "core/desk@1", "placed": 1, "entry": "eden:desk", "forms": "own", "pr": 3038, "state": {"pages": "default"}},
+    {"def": "core/knoll@1", "placed": 1, "entry": "eden:hill", "forms": "base", "note": "a low rise; the hill entry"},
+    {"def": "core/pond@1", "placed": 1, "entry": "eden:pond", "forms": "own", "note": "placed as an area; the entry is a 36 m pond, as far as an entry's shore areas reach (20 m)", "pr": 3076},
+    {"def": "core/zone@1", "placed": 1, "entry": "eden:zone", "forms": "base", "pr": 3072, "state": {"use": {"from": "use"}}, "note": "use is today's param, kept as the entry's state"},
+    {"def": "lab-closeable-hall@1", "placed": 1, "entry": "eden:hall", "forms": "own"}
+  ]
+}

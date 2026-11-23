@@ -1,0 +1,101 @@
+# O2's sleep and wake on a real Linux machine with systemd (0.133 S3a). Two parts, each on a disposable GitHub-hosted
+# VM, since both need root and systemd 254 or later (worldd@ uses RestartSteps), which the shared build machine's
+# runners do not have:
+# - `install`: `v2/tools/ops/install.sh apply` installs, enables and starts the alarm daemon (souls-alarms.service);
+#   a process of the user souls reaches its socket; it comes back after SIGKILL; a second apply starts nothing again;
+#   uninstall stops, disables and removes it. The other programs of the bundle are stand-ins (none is started).
+# - `runs`: O2's own runs (`v2/crates/supervisor/runs/sleep-and-wake.sh`), one VM per mode, two repeats each.
+# Runbooks: v2/docs/runbook/install.md, v2/docs/runbook/sleep-and-wake.md. Manual, or on a same-repository pull
+# request that changes sleep, the alarm daemon or the install.
+name: sleep-linux
+on:
+  workflow_dispatch:
+  pull_request:
+    paths:
+      - v2/crates/supervisor/src/sleep.rs
+      - v2/crates/supervisor/src/alarm.rs
+      - v2/crates/supervisor/src/wake.rs
+      - v2/crates/supervisor/runs/sleep-and-wake.sh
+      - v2/tools/ops/install.sh
+      - v2/tools/ops/units/souls-alarms.service
+      - v2/tools/ops/units/alarms-install.conf
+      - .github/workflows/sleep-linux.yml
+permissions:
+  contents: read
+jobs:
+  install:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 30
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - name: Build the supervisor
+        working-directory: v2
+        run: |
+          export RUSTUP_TOOLCHAIN=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --no-self-update
+          cargo build --release --locked -q -p supervisor --bin supervisor
+      - name: A bundle (the real supervisor, stand-ins for the rest)
+        run: |
+          d=$RUNNER_TEMP/b && mkdir -p "$d/bins" "$d/page" "$d/client"
+          for p in worldd gatewayd directoryd register-world deploy gateway-upgrade import-accounts import-world templates; do
+            printf '#!/bin/sh\necho stand-in\n' > "$d/bins/$p"
+          done
+          cp v2/target/release/supervisor "$d/bins/"
+          echo '<!doctype html>' > "$d/page/index.html"
+          echo '{}' > "$d/client/soul-client.json"
+          bash v2/tools/ops/install.sh bundle "$d/bundle" "$d/bins" "$d/page" "" "$d/client"
+          echo "BUNDLE=$d/bundle" >> "$GITHUB_ENV"
+      - name: apply installs and starts the alarm daemon
+        run: |
+          systemctl --version | head -1
+          sudo env PATH="$PATH" bash "$BUNDLE/install.sh" apply --from "$BUNDLE" | tee "$RUNNER_TEMP/apply1"
+          grep -qx 'did enable souls-alarms.service' "$RUNNER_TEMP/apply1"
+          grep -qx 'did start souls-alarms.service' "$RUNNER_TEMP/apply1"
+          sleep 1
+          echo "enabled: $(systemctl is-enabled souls-alarms.service); active: $(systemctl is-active souls-alarms.service)"
+          systemctl is-enabled --quiet souls-alarms.service && systemctl is-active --quiet souls-alarms.service
+          sudo journalctl -u souls-alarms.service --no-pager -o cat | grep 'alarms:'
+          sudo stat -c 'socket %A %U:%G' /var/lib/souls/worlds/alarms.sock
+          sudo -u souls python3 -c "import socket; s = socket.socket(socket.AF_UNIX); s.connect('/var/lib/souls/worlds/alarms.sock'); print('the user souls reached the alarm socket')"
+      - name: the daemon comes back after SIGKILL
+        run: |
+          before=$(systemctl show -p MainPID --value souls-alarms.service)
+          sudo systemctl kill -s KILL souls-alarms.service
+          sleep 1
+          after=$(systemctl show -p MainPID --value souls-alarms.service)
+          echo "after SIGKILL: $(systemctl is-active souls-alarms.service), a new process: $([ "$before" != "$after" ] && echo yes || echo no)"
+          systemctl is-active --quiet souls-alarms.service && [ "$before" != "$after" ]
+      - name: a second apply starts nothing again
+        run: |
+          sudo env PATH="$PATH" bash "$BUNDLE/install.sh" apply --from "$BUNDLE" | tee "$RUNNER_TEMP/apply2"
+          ! grep -q '^did .*souls-alarms' "$RUNNER_TEMP/apply2"
+      - name: uninstall stops, disables and removes it
+        run: |
+          sudo env PATH="$PATH" bash "$BUNDLE/install.sh" uninstall | tee "$RUNNER_TEMP/uninstall"
+          grep -qx 'did stop souls-alarms.service' "$RUNNER_TEMP/uninstall"
+          grep -qx 'did disable souls-alarms.service' "$RUNNER_TEMP/uninstall"
+          [ ! -e /etc/systemd/system/souls-alarms.service ] && [ ! -e /etc/systemd/system/souls-alarms.service.d ]
+          ! systemctl is-active --quiet souls-alarms.service
+          echo "uninstalled: the unit and its drop-in are gone, the daemon is stopped"
+  runs:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    strategy:
+      fail-fast: false
+      matrix:
+        mode: [quiet, burst, kill, intent]
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - name: Build the supervisor and the stand-in world
+        working-directory: v2
+        run: |
+          export RUSTUP_TOOLCHAIN=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' rust-toolchain.toml)
+          rustup toolchain install "$RUSTUP_TOOLCHAIN" --profile minimal --no-self-update
+          cargo build --release --locked -q -p supervisor --bin supervisor --example sleeper
+      - name: sleep-and-wake.sh ${{ matrix.mode }}
+        run: |
+          sudo O1_BIN="$GITHUB_WORKSPACE/v2/target" bash v2/crates/supervisor/runs/sleep-and-wake.sh ${{ matrix.mode }} | tee -a "$GITHUB_STEP_SUMMARY"

@@ -54,9 +54,10 @@ export function stateOf(copy, kinds, me) {
   }
   // D8: a body taken into a seat or a bed by the thing's own form (a reparent into its slot) holds no posture field;
   // its posture is the slot's, when the thing's body slots all give one (an armchair's `sit`, a bed's `lie`).
+  // D10: nor does that form write over a `stand` a rise wrote before, so a seat's posture wins over a written `stand`.
   for (const [id, parent] of parents) {
     const n = nodes[id], def = kinds[n.kind]?.state?.posture;
-    if (!def || n.fields?.posture !== undefined) continue;
+    if (!def || (n.fields?.posture !== undefined && n.fields.posture !== 'stand')) continue;
     const slots = Object.values(kinds[nodes[parent]?.kind]?.slots ?? {}).filter((t) => t?.admits === 'body' && typeof t.posture === 'string');
     const postures = [...new Set(slots.map((t) => t.posture))];
     if (postures.length === 1 && (def.values ?? []).includes(postures[0])) n.fields = { ...n.fields, posture: postures[0] };
