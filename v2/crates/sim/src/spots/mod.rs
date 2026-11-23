@@ -38,7 +38,8 @@
 //!   room. A target the asker cannot reach at all does not overflow: it is refused `spot-none-free` as before. It is held and released like
 //!   any place, and kept across a change of the ground while its point is still one; a holder whose place a change
 //!   took away is released (`ground-changed`) and named to the runner ([`Spots::revoked`]), which plans it again.
-//!   The walk there ends `done`, as near as the crowd allows ([`Granted::overflow`]).
+//!   The walk there ends `done`, as near as the crowd allows ([`Granted::overflow`]). One pass chooses at most
+//!   [`OVERFLOW_EACH`] overflow points; the rest of a burst are answered in the passes after, never refused.
 //!
 //! Refusals: `spot-none-near` (no walkable place on the rings), `spot-none-free` (every place held or out of reach,
 //! and no free standing point within [`OVERFLOW`] of the target either).
@@ -63,6 +64,9 @@ pub const CLEAR: i64 = 700_000;
 /// How far round a crowded target its overflow points lie, µm (A2-5): a walker is refused `spot-none-free` only when
 /// no free standing point is within this.
 pub const OVERFLOW: i64 = 15_000_000;
+/// The most overflow points one pass of the tables chooses (A2-5): a burst beyond it is answered over the next passes,
+/// so the other answers of a planner's batch never wait behind a crowd moment.
+pub const OVERFLOW_EACH: usize = 4;
 /// Bodies this far apart in height stand on different levels: neither keeps the other from a place, µm.
 const LEVEL: i64 = 1_000_000;
 /// The weight of a place's straight gap to the target against the walk to it.
@@ -1052,6 +1056,8 @@ impl Spots {
             })
             .collect();
         let mut refused = None;
+        // Overflow points chosen in this pass (A2-5): a burst beyond [`OVERFLOW_EACH`] waits for the next pass.
+        let mut overflowed = 0;
         for (who, why) in gone {
             let held = self.held.remove(&who).expect("held");
             let table = if let Some(k) = held.overflow {
@@ -1145,6 +1151,13 @@ impl Spots {
                 .nearest(&mut g, a, &blocked)
                 .map(|(i, cost)| (i, cost, None));
             if found == Err("spot-none-free") && tb.crowded(&mut g, a, &blocked) {
+                // A burst of overflow asks (a crowd moment) is spread over passes: each choice costs route searches,
+                // and with a planner every other answer of the batch waits for them. The rest are answered next pass,
+                // none refused (A2-5's review).
+                if overflowed >= OVERFLOW_EACH {
+                    continue;
+                }
+                overflowed += 1;
                 let rounds = self
                     .overflow
                     .entry((*size, t))
@@ -1153,7 +1166,13 @@ impl Spots {
                     let r = (*size).radius_mm();
                     // Each ground round it in turn: the bodies holding a place near it, and how far each keeps others.
                     for (k, (round, otb)) in rounds.iter_mut().enumerate() {
-                        let reach = OVERFLOW + 2 * PITCH;
+                        // Every body that could keep a point within OVERFLOW off: the widest room two bodies keep.
+                        let reach = OVERFLOW
+                            + Size::ALL
+                                .iter()
+                                .map(|z| (2 * z.radius_mm() + 140) * 1000)
+                                .max()
+                                .unwrap_or(0);
                         let held: Vec<(Vec3, i64)> = self
                             .held
                             .values()

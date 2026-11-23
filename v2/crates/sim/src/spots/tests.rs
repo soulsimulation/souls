@@ -578,6 +578,21 @@ impl Ground for Deck {
     }
 }
 
+/// The tables' passes over `asks` from `at` until each is answered: a burst of overflow asks is answered at most
+/// `OVERFLOW_EACH` a pass.
+fn passes(spots: &mut Spots, g: &mut Deck, asks: &[Ask], at: Micros) {
+    for k in 0..20 {
+        spots.write(g, asks, at + k).unwrap();
+        if asks
+            .iter()
+            .all(|a| spots.granted(a.who, &a.target).is_some())
+        {
+            return;
+        }
+    }
+    panic!("not every ask answered in 20 passes");
+}
+
 fn granted_all(spots: &Spots, asks: &[Ask]) -> Vec<Option<Granted>> {
     asks.iter()
         .map(|a| spots.granted(a.who, &a.target).and_then(Result::ok))
@@ -605,7 +620,18 @@ fn a2_5_a_full_place_overflows_onto_the_ground_round_it() {
     let mut g = Deck::default();
     let asks = deck_asks(8);
     let mut spots = Spots::new();
+    // One pass answers the deck's own place and at most OVERFLOW_EACH overflow points; the rest wait, unrefused.
     spots.write(&mut g, &asks, 0).unwrap();
+    let first = asks
+        .iter()
+        .filter(|a| spots.granted(a.who, &a.target).is_some())
+        .count();
+    assert_eq!(first, 1 + OVERFLOW_EACH, "a burst spread over passes");
+    assert!(
+        asks.iter()
+            .all(|a| !matches!(spots.granted(a.who, &a.target), Some(Err(_))))
+    );
+    passes(&mut spots, &mut g, &asks, 1);
     let got: Vec<Granted> = asks
         .iter()
         .map(|a| {
@@ -666,7 +692,7 @@ fn a2_5_no_ground_round_a_full_place_is_refused() {
     };
     let asks = deck_asks(2);
     let mut spots = Spots::new();
-    spots.write(&mut g, &asks, 0).unwrap();
+    passes(&mut spots, &mut g, &asks, 0);
     assert!(matches!(
         spots.granted(asks[0].who, &asks[0].target),
         Some(Ok(_))
@@ -687,7 +713,7 @@ fn a2_5_an_unreachable_place_does_not_overflow() {
     };
     let asks = deck_asks(1);
     let mut spots = Spots::new();
-    spots.write(&mut g, &asks, 0).unwrap();
+    passes(&mut spots, &mut g, &asks, 0);
     assert_eq!(
         spots.granted(asks[0].who, &asks[0].target),
         Some(Err("spot-none-free"))
@@ -704,7 +730,7 @@ fn a2_5_no_overflow_point_behind_a_wall() {
     };
     let asks = deck_asks(30);
     let mut spots = Spots::new();
-    spots.write(&mut g, &asks, 0).unwrap();
+    passes(&mut spots, &mut g, &asks, 0);
     let got = granted_all(&spots, &asks);
     let over: Vec<Granted> = got
         .iter()
@@ -732,13 +758,13 @@ fn a2_5_overflow_points_are_released_on_retarget_and_kept_across_a_ground_change
     let mut g = Deck::default();
     let mut asks = deck_asks(8);
     let mut spots = Spots::new();
-    spots.write(&mut g, &asks, 0).unwrap();
+    passes(&mut spots, &mut g, &asks, 0);
     let before = granted_all(&spots, &asks);
     assert!(before[3].is_some_and(|b| b.overflow));
     // The ground changes under the fourth: its point is a hole now.
     g.hole = Some(before[3].unwrap().at);
     spots.invalidate_geometry();
-    spots.write(&mut g, &asks, 1).unwrap();
+    passes(&mut spots, &mut g, &asks, 100);
     assert_eq!(
         spots.revoked(),
         vec![asks[3].who],
@@ -756,7 +782,7 @@ fn a2_5_overflow_points_are_released_on_retarget_and_kept_across_a_ground_change
     );
     // A newcomer gets a point of its own too.
     let mut more = deck_asks(9);
-    spots.write(&mut g, &more, 2).unwrap();
+    passes(&mut spots, &mut g, &more, 200);
     let all = granted_all(&spots, &more);
     let n = all[8].expect("the newcomer is granted");
     assert!(
