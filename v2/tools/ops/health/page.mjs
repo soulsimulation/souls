@@ -2,7 +2,7 @@
 // The site owner's health page (Engine v2 O21, #3325): GET /ops/health.
 //   plain GET   the shell, v2/web/health.html (phone width, light and dark), with no data in it; it fetches ?json=1
 //               every 30 s.
-//   ?json=1     each world's numbers (read.mjs), for a signed-in site owner only. The session token comes by
+//   ?json=1     each world's numbers and the Soul client versions in use over 24 h, as counts (read.mjs), for a signed-in site owner only. The session token comes by
 //               `Authorization: Bearer` or the `__session` cookie and is checked by the directory's sign-in (W1,
 //               `POST /v1/account/session`), which answers the account id; the account must be on the site owners'
 //               list. No token: 401. A token the directory refuses: 401. Another account: 403. Neither gets a number.
@@ -10,12 +10,13 @@
 //
 //   node page.mjs --root <worlds root> --directory <directoryd URL> --owners <site-owners.json> [--port 8090] [--host 127.0.0.1]
 // site-owners.json: {"owners": ["<account id>", ...]}, the account ids W1 issues.
+import { isMain } from '../../../../tools/lib/is-main.mjs';
 import { createHash } from 'node:crypto';
 import { readFileSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { dirname, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
-import { NOT_METERED, readWorlds } from './read.mjs';
+import { NOT_METERED, clientsInUse, readWorlds } from './read.mjs';
 
 const HERE = dirname(fileURLToPath(import.meta.url));
 export const SHELL = join(HERE, '..', '..', '..', 'web', 'health.html');
@@ -78,7 +79,7 @@ export function healthPage({ root, owners, verify, cost, now = Date.now, shell =
     if (!account) return send(res, 401, { error: 'not-signed-in' }), true;
     if (!ownerSet.has(account)) return send(res, 403, { error: 'not-a-site-owner' }), true;
     const t = now();
-    send(res, 200, { at: t, worlds: readWorlds(root, t, { cost }), not_metered: NOT_METERED });
+    send(res, 200, { at: t, worlds: readWorlds(root, t, { cost }), clients: clientsInUse(root, t), not_metered: NOT_METERED });
     return true;
   };
 }
@@ -91,7 +92,7 @@ export function serve(opts) {
   });
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const argv = process.argv.slice(2), opt = (k, d) => { const i = argv.indexOf(`--${k}`); return i < 0 ? d : argv[i + 1]; };
   const root = opt('root', process.env.WORLDS_ROOT ?? '/var/lib/souls/worlds');
   const owners = JSON.parse(readFileSync(opt('owners'), 'utf8')).owners ?? [];

@@ -1,0 +1,96 @@
+# S1 (0.133): the gateway upgraded and killed under a real systemd on Linux, 100 scripted agents, two repeats.
+# `v2/tools/ops/o16-run.sh --systemd` runs one world, its gateway as a `souls-gateway@o16` unit, the upgrade through
+# `v2/tools/ops/gateway-upgrade.sh` (systemctl restart) and the kill through `systemctl kill -s KILL`; each repeat
+# prints the event rows and the intents' row. The user's systemd manager is used when the runner has one, else the
+# system's through passwordless sudo. Runbook: v2/docs/runbook/gateway-upgrade.md. Manual, or on a same-repository
+# pull request that changes the run or the gateway's upgrade.
+name: gateway-linux
+on:
+  workflow_dispatch:
+    inputs:
+      runner:
+        description: souls-timed (the shared build machine) or hosted (GitHub-hosted)
+        type: choice
+        options: [souls-timed, hosted]
+        default: souls-timed
+      agents:
+        description: scripted agents
+        default: '100'
+      repeats:
+        description: repeats, 1 to 3
+        default: '2'
+  pull_request:
+    paths:
+      - v2/tools/ops/o16-run.sh
+      - v2/tools/ops/gateway-upgrade.sh
+      - v2/tools/ops/src/gateway_run.rs
+      - v2/tools/ops/src/gateway_upgrade.rs
+      - .github/workflows/gateway-linux.yml
+permissions:
+  contents: read
+jobs:
+  o16:
+    if: github.event_name == 'workflow_dispatch' || github.event.pull_request.head.repo.full_name == github.repository
+    runs-on: ${{ inputs.runner == 'hosted' && 'ubuntu-latest' || fromJSON('["self-hosted","souls-timed"]') }}
+    timeout-minutes: 60
+    env:
+      AGENTS: ${{ inputs.agents || '100' }}
+      REPEATS: ${{ inputs.repeats || '2' }}
+    steps:
+      - name: Mask host-identifying values
+        run: |
+          for v in "$HOME" "$GITHUB_WORKSPACE" "$RUNNER_WORKSPACE" "$RUNNER_TEMP" "$RUNNER_TOOL_CACHE" "$(hostname)" "$(id -un)"; do
+            if [ "${#v}" -ge 4 ]; then echo "::add-mask::$v"; fi
+          done
+      - name: Per-run directory
+        run: |
+          d="$RUNNER_TEMP/gw-$GITHUB_RUN_ID-$GITHUB_RUN_ATTEMPT"
+          mkdir -p "$d/tmp"
+          { echo "PER_RUN=$d"; echo "TMPDIR=$d/tmp"; } >> "$GITHUB_ENV"
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with: { persist-credentials: false }
+      - uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with: { node-version: 22 }
+      # As timed-run.yml's v2-bench: the pinned channel, minimal profile, in the per-run directory.
+      - name: Rust toolchain
+        working-directory: v2
+        run: |
+          channel=$(sed -n 's/^channel *= *"\(.*\)"$/\1/p' rust-toolchain.toml)
+          if ! printf '%s' "$channel" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then echo "::error::no pinned channel in v2/rust-toolchain.toml"; exit 1; fi
+          export RUSTUP_HOME="$PER_RUN/rustup" CARGO_HOME="$PER_RUN/cargo"
+          curl --proto '=https' --tlsv1.2 -sSf https://sh.rustup.rs -o "$PER_RUN/rustup-init.sh"
+          sh "$PER_RUN/rustup-init.sh" -y --quiet --no-modify-path --profile minimal --default-toolchain "$channel" > /dev/null
+          { echo "RUSTUP_HOME=$RUSTUP_HOME"; echo "CARGO_HOME=$CARGO_HOME"; echo "RUSTUP_TOOLCHAIN=$channel"; } >> "$GITHUB_ENV"
+          echo "$CARGO_HOME/bin" >> "$GITHUB_PATH"
+      - name: Which systemd
+        run: |
+          systemctl --version | head -1
+          uid=$(id -u)
+          export XDG_RUNTIME_DIR=${XDG_RUNTIME_DIR:-/run/user/$uid}
+          if [ -d "$XDG_RUNTIME_DIR" ] && systemctl --user show-environment > /dev/null 2>&1; then
+            mode=user
+          elif sudo -n true 2> /dev/null; then
+            mode=system
+          else
+            echo "::error::no systemd manager reachable: no user manager and no passwordless sudo"; exit 1
+          fi
+          echo "systemd manager: $mode"
+          { echo "O16_SYSTEMD=$mode"; echo "XDG_RUNTIME_DIR=$XDG_RUNTIME_DIR"; } >> "$GITHUB_ENV"
+      - name: Build
+        working-directory: v2
+        run: cargo build --release --locked --quiet -p ops -p worldd -p gatewayd
+      # o16-run.sh builds again (a no-op now).
+      - name: Run the repeats
+        working-directory: v2
+        run: |
+          fail=0
+          for k in $(seq 1 "$REPEATS"); do
+            echo "## Repeat $k of $REPEATS ($AGENTS agents, systemd $O16_SYSTEMD manager, $(uname -sr))" | tee -a "$GITHUB_STEP_SUMMARY"
+            if ! O16_ROOT="$PER_RUN/o16-$k" O16_AGENTS="$AGENTS" bash tools/ops/o16-run.sh --systemd > "$PER_RUN/o16-$k.txt" 2>&1; then fail=1; fi
+            cat "$PER_RUN/o16-$k.txt"
+            grep -v '^warning' "$PER_RUN/o16-$k.txt" >> "$GITHUB_STEP_SUMMARY"
+          done
+          exit $fail
+      - name: Clean up
+        if: always()
+        run: rm -rf "$PER_RUN"

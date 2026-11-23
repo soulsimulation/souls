@@ -10,6 +10,7 @@
 // A live seat (claude-headless) needs --max-usd: the run stops before an episode once its spend reaches the cap. Each
 // local episode runs on its own fresh fake-mind world, which keeps its own model budget (default $0.50 a day).
 // Docs: docs/testing/soul-eval.md.
+import { isMain } from '../../lib/is-main.mjs';
 import { resolve, join, relative } from 'node:path';
 import { mkdirSync, writeFileSync, rmSync, existsSync, readdirSync } from 'node:fs';
 import { execFileSync } from 'node:child_process';
@@ -199,4 +200,4 @@ async function main() {
   if (cmd === 'load') { const { runLoad } = await import('./load.mjs'); await runLoad(o); process.exit(0); }
   process.stderr.write('usage: soul-eval.mjs run|report|load (see the header)\n'); process.exitCode = 2;
 }
-if (import.meta.url === `file://${process.argv[1]}` || process.argv[1]?.endsWith('soul-eval.mjs')) main().catch((e) => { log(e.stack ?? e.message); process.exitCode = 1; });
+if (isMain(import.meta.url) || process.argv[1]?.endsWith('soul-eval.mjs')) main().catch((e) => { log(e.stack ?? e.message); process.exitCode = 1; });

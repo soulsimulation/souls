@@ -14,8 +14,8 @@
 //   node v2/tools/ops/reapproved.mjs --accounts <accounts.sqlite> --pairing <pairing.sqlite>
 //        [--since YYYY-MM-DD] [--until YYYY-MM-DD] [--json]
 // --since defaults to the first approval's day, --until to today (UTC).
+import { isMain } from '../../../tools/lib/is-main.mjs';
 import { DatabaseSync } from 'node:sqlite';
-import { fileURLToPath } from 'node:url';
 
 const DAY_MS = 86_400_000;
 const dayOf = (ms) => new Date(ms).toISOString().slice(0, 10);
@@ -60,7 +60,7 @@ export function format({ imported, days }) {
   return ['| UTC day | Imported | Approved again that day | Approved again so far | Share |', '|---|---|---|---|---|', ...rows].join('\n');
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const argv = process.argv.slice(2);
   const flag = (k) => { const i = argv.indexOf(`--${k}`); return i >= 0 ? argv[i + 1] : undefined; };
   const isDay = (d) => d === undefined || /^\d{4}-\d{2}-\d{2}$/.test(d);

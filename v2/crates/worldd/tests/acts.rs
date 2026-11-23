@@ -34,6 +34,23 @@ use worldd::answers::{self, Config};
 use worldd::bodies::Bodies;
 use worldd::checkers::Rules;
 
+thread_local! {
+    /// The acts that had their one progress answer (C20) on this test's thread.
+    static PROGRESSED: std::cell::RefCell<std::collections::BTreeSet<(Vec<u8>, u64)>> =
+        std::cell::RefCell::default();
+}
+
+/// Whether `frame` is an act's progress answer (C20, W11 #4087), which the answer helpers read past. An act has at
+/// most one: a second fails the test.
+fn progress_once(frame: &[u8]) -> bool {
+    let Some(key) = answers::progress_of(frame) else {
+        return false;
+    };
+    let first = PROGRESSED.with(|p| p.borrow_mut().insert(key));
+    assert!(first, "a second progress answer for one act");
+    true
+}
+
 const LINEAGE: Scope = Scope([0xc2; 16]);
 
 fn name(s: &str) -> Name {
@@ -52,10 +69,11 @@ const PLANK: &str = "test:plank";
 const PAIR: &str = "test:pair";
 const CARRY: &str = "test:carry";
 const COURT: &str = "test:court";
+const CAN: &str = "test:can";
 
 /// The kinds in pinned order: (plain name, full name).
 fn kinds() -> Vec<(&'static str, String)> {
-    [PLACE, WALKER, VESSEL, RACK, PLANK, PAIR, CARRY, COURT]
+    [PLACE, WALKER, VESSEL, RACK, PLANK, PAIR, CARRY, COURT, CAN]
         .iter()
         .enumerate()
         .map(|(i, k)| (*k, full(k, i as u8 + 1)))
@@ -136,6 +154,20 @@ fn plank() -> Id {
 fn court() -> Id {
     id(6)
 }
+/// #4086: three watering cans south of the first walker, 100 m, 2.2 m and 1.5 m away (a can's reach from a body is
+/// its half size, 0.38 m, and 1.5 m).
+fn far_can() -> Id {
+    id(7)
+}
+fn beyond_can() -> Id {
+    id(8)
+}
+fn near_can() -> Id {
+    id(9)
+}
+fn south(by: i64) -> Vec3 {
+    Vec3::new(at1().x, 0, at1().z - by)
+}
 
 /// Where the bodies stand on the test world's open ground, west of the square, µm.
 fn at1() -> Vec3 {
@@ -194,6 +226,7 @@ fn tree_rules() -> TreeRules {
             (fullname(PAIR), k("activity", &[], &[], None)),
             (fullname(CARRY), k("activity", &[], &[1], None)),
             (fullname(COURT), k("thing", &[], &[], None)),
+            (fullname(CAN), k("thing", &[], &[], Some(1))),
         ]),
         souls: [w1(), w2()].into(),
         audiences: BTreeMap::new(),
@@ -270,10 +303,23 @@ fn entries() -> Json {
           "steps": [], "effects": [{ "change": "set", "field": "disc", "to": "end_b", "event": "threw" }] } } }"#,
     )
     .unwrap();
+    // The watering can's own take (`content/kinds/garden/watering_can.json`): no move and no walk before its hand
+    // step, and a free hand its one need (#4086).
+    let can = parse(
+        r#"{ "format": "souls-entry/1", "kind": "test:can", "owner": "thing",
+      "points": { "grip": { "role": "grip", "at_mm": [0, 305, 0] } },
+      "geometry": { "bounds_mm": [760, 360, 240] },
+      "forms": { "take": { "who": "anyone", "starts": "act", "needs": [{ "need": "hand", "free": true }],
+        "steps": [{ "step": "take" }],
+        "effects": [{ "change": "reparent", "what": "this", "into": "actor_hand", "event": "taken" }] } },
+      "motion": { "how": "one_hand" }, "loose": { "ever": true } }"#,
+    )
+    .unwrap();
     Json::Obj(vec![
         (VESSEL.into(), vessel),
         (RACK.into(), rack),
         (COURT.into(), court),
+        (CAN.into(), can),
     ])
 }
 
@@ -320,6 +366,9 @@ fn world() -> Replica {
             g,
             Vec3::new(at1().x, 0, at1().z - 2_000_000),
         ),
+        create(far_can(), CAN, g, south(100_000_000)),
+        create(beyond_can(), CAN, g, south(2_200_000)),
+        create(near_can(), CAN, g, south(1_500_000)),
     ];
     let effects: Vec<Value> = changes
         .into_iter()
@@ -401,19 +450,33 @@ impl Client {
         self.0.write_all(&bytes).unwrap();
     }
 
-    /// The next answer: a receipt's entries, or a refusal's reason.
+    /// The next answer: a receipt's entries, or a refusal's reason. A progress answer (C20, sent as a run starts) is
+    /// read past.
     fn answer(&mut self) -> Result<Vec<u64>, String> {
-        let mut len = [0u8; 4];
-        self.0.read_exact(&mut len).expect("an answer");
-        let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
-        self.0.read_exact(&mut frame).unwrap();
+        self.answer_of().1
+    }
+
+    /// The next answer, with the sequence of the intent it answers.
+    fn answer_of(&mut self) -> (u64, Result<Vec<u64>, String>) {
+        let frame = loop {
+            let mut len = [0u8; 4];
+            self.0.read_exact(&mut len).expect("an answer");
+            let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
+            self.0.read_exact(&mut frame).unwrap();
+            if !progress_once(&frame) {
+                break frame;
+            }
+        };
         let Value::Map(m) = decode(&frame).unwrap().value else {
             panic!("a frame")
         };
         let Some(Value::Map(a)) = m.get(&2) else {
             panic!("an answer")
         };
-        match (a.get(&3), a.get(&5)) {
+        let Some(Value::Uint(sequence)) = a.get(&2) else {
+            panic!("an answer's sequence: {a:?}")
+        };
+        let r = match (a.get(&3), a.get(&5)) {
             (Some(Value::Uint(1)), Some(Value::Array(e))) => Ok(e
                 .iter()
                 .map(|v| match v {
@@ -426,7 +489,17 @@ impl Client {
                 other => panic!("a refusal: {other:?}"),
             },
             other => panic!("an answer: {other:?}"),
-        }
+        };
+        (*sequence, r)
+    }
+
+    /// Waits for the progress answer of the act just sent (C20: sent in the tick its run starts).
+    fn started(&mut self) {
+        let mut len = [0u8; 4];
+        self.0.read_exact(&mut len).expect("an answer");
+        let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
+        self.0.read_exact(&mut frame).unwrap();
+        assert!(progress_once(&frame), "the act's run started");
     }
 
     /// One act and its one answer.
@@ -879,5 +952,143 @@ fn i3888_a_forms_needs_are_the_worlds_at_commit() {
     // The disc is at end b now: a's throw from end a is refused by the state need (need 0).
     let again = a.act("test:throw_from_end_a_to_end_b", Some(court()), none());
     assert_eq!(again, Err("field_differs".to_owned()));
+    run.stop();
+}
+
+/// Where node `n` is in its frame, as the world's records have it.
+fn at(r: &Replica, n: Id) -> Vec3 {
+    let t = r.tree();
+    t.node(t.handle(n).expect("the node"))
+        .expect("the node")
+        .place()
+        .expect("a place")
+        .position
+}
+
+/// #4086: no take at a distance. A watering can's `take` has no walk and no move before its hand step (the can's own
+/// form, as Eden and Mars serve it). Before this change a body 100 m away was handed the can at once, never moving
+/// (A1). Now the world measures the reach at commit: the can 100 m away and one just beyond a form's reach (2.2 m)
+/// are refused `out_of_reach`, naming the walk that would work, with nothing changed; one within it (1.5 m) is taken.
+/// The body's place and the cans' parents are read from the world's records.
+#[test]
+fn w10_a_take_with_no_walk_needs_the_thing_in_reach() {
+    let (run, mut a, _) = serve("w10");
+    let none = BTreeMap::new;
+    let before = at(&run.replay(), w1());
+    let far = a.act("test:take", Some(far_can()), none());
+    let r = run.replay();
+    println!(
+        "W10 take 100 m: {far:?}; body {before:?} then {:?}; can at {:?}, parent {:?}",
+        at(&r, w1()),
+        at(&r, far_can()),
+        parent(&r, far_can())
+    );
+    assert_eq!(far, Err("out_of_reach".to_owned()), "refused by name");
+    assert_eq!(at(&r, w1()), before, "the body has not moved");
+    assert_eq!(
+        parent(&r, far_can()),
+        (Some(ground()), None),
+        "the can lies where it lay"
+    );
+    let beyond = a.act("test:take", Some(beyond_can()), none());
+    println!("W10 take 2.2 m: {beyond:?}");
+    assert_eq!(beyond, Err("out_of_reach".to_owned()));
+    assert_eq!(parent(&run.replay(), beyond_can()), (Some(ground()), None));
+    let near = a.act("test:take", Some(near_can()), none());
+    let r = run.replay();
+    println!(
+        "W10 take 1.5 m: {near:?}; parent {:?}",
+        parent(&r, near_can())
+    );
+    assert!(!near.expect("within reach: taken").is_empty());
+    assert_eq!(parent(&r, near_can()).0, Some(w1()), "in the body's hand");
+    assert_eq!(at(&r, w1()), before, "taken where the body stands");
+    run.stop();
+}
+
+/// A walk's point, `{1: [x, y, z]}` in µm in its target's frame.
+fn point(v: Vec3) -> BTreeMap<u64, Value> {
+    let i =
+        |n: i64| u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint);
+    p(&[(1, Value::Array(vec![i(v.x), i(v.y), i(v.z)]))])
+}
+
+/// #4187, the trace: a Soul's take is running (its run open, its press under way) when its own controller sends a
+/// walk. The walk is a move, which the bodies take, not the form runner. Today the walk replaces the run: its claim on
+/// the body ends the take's press, the take is refused `claim-taken` with nothing taken, and the walk is done where it
+/// was sent.
+#[test]
+fn i4187_a_walk_sent_during_an_open_form_run() {
+    let (run, mut a, _) = serve("i4187w");
+    a.send("test:take", Some(vessel()), BTreeMap::new());
+    a.started();
+    a.send("test:walk", Some(ground()), point(south(3_000_000)));
+    let first = a.answer_of();
+    let second = a.answer_of();
+    println!("#4187 trace: take then walk answered {first:?} then {second:?}");
+    let r = run.replay();
+    println!(
+        "#4187 trace: body at {:?}, vessel parent {:?}",
+        at(&r, w1()),
+        parent(&r, vessel())
+    );
+    assert_eq!(
+        first,
+        (1, Err("claim-taken".to_owned())),
+        "the take is replaced"
+    );
+    assert!(
+        matches!(second, (2, Ok(_))),
+        "the walk is accepted and done"
+    );
+    assert_eq!(
+        at(&r, w1()),
+        south(3_000_000),
+        "walked to where it was sent"
+    );
+    assert_eq!(
+        parent(&r, vessel()),
+        (Some(ground()), None),
+        "nothing taken"
+    );
+    run.stop();
+}
+
+/// #4187: a second form act from the Soul's own controller while its first run is open. Before this change it was
+/// refused `form-running` and the first ran on. Now it preempts: the first run is left (answered `left`, nothing
+/// taken) and the second starts at once and lands.
+#[test]
+fn i4187_a_form_act_sent_during_an_open_form_run() {
+    let (run, mut a, _) = serve("i4187f");
+    a.send("test:take", Some(vessel()), BTreeMap::new());
+    a.started();
+    a.send("test:take", Some(near_can()), BTreeMap::new());
+    let mut answers = [a.answer_of(), a.answer_of()];
+    answers.sort_by_key(|(s, _)| *s);
+    println!("#4187: take then take answered {answers:?}");
+    let r = run.replay();
+    println!(
+        "#4187: vessel parent {:?}, can parent {:?}",
+        parent(&r, vessel()),
+        parent(&r, near_can())
+    );
+    let [(1, first), (2, second)] = answers else {
+        panic!("{answers:?}")
+    };
+    assert_eq!(first, Err("left".to_owned()), "the first run is left");
+    assert!(
+        second.is_ok(),
+        "the Soul's own new act is accepted: {second:?}"
+    );
+    assert_eq!(
+        parent(&r, vessel()),
+        (Some(ground()), None),
+        "nothing of the first"
+    );
+    assert_eq!(
+        parent(&r, near_can()).0,
+        Some(w1()),
+        "the can in the body's hand"
+    );
     run.stop();
 }

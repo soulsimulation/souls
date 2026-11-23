@@ -440,9 +440,18 @@ mod tests {
             .expect("a bucket")
             .expect("its settings");
         register(&bucket, &eden(id(3, 0))).expect("registered");
+        // A second world replaces the list over the version read (`If-Match`), as the switch's second run did.
+        let mut garden = eden(id(4, 0));
+        (garden.name, garden.label, garden.lineage, garden.zone) =
+            ("garden", "Garden", [0xc3; 16], id(0xc3, 1));
+        register(&bucket, &garden).expect("a second world registered");
         assert_eq!(
             stand_in.paths(),
-            vec!["souls/world-list", "souls/world-name/eden"]
+            vec![
+                "souls/world-list",
+                "souls/world-name/eden",
+                "souls/world-name/garden"
+            ]
         );
         let w = Worlds::new(
             Directory::new(&bucket, Name::new("m1").expect("a name")),
