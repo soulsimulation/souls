@@ -132,11 +132,14 @@ export class V2Bridge {
     this.liveFrom ??= p.from;
     this.nodesChanged(p.nodes, p.removed, p.from);
     for (const [id, frame, slot, at, x, y, z] of p.samples) this.sample(id, frame, slot, at, [x, y, z]);
-type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; said?: Said[];
-  moves?: { body: string; name: string; start: number; ends: number[] }[]; runEnds?: { body: string; at: number }[] };
-/** A world record (sound/record.ts Happened); only the fields read here (B3-3). */
-type Happened = { at: number; node: string; name?: string };
-type PartRec = { number: number; from: number; to: number; nodes: NodeRec[]; removed: string[]; samples: SampleRec[]; said?: Said[]; happened?: Happened[] };
+    // A gesture move plays on its body (take-gestures.ts); a run that ends early ends its gesture then.
+    for (const m of p.moves ?? []) { const g = gestureFrom(m), t = this.tracks.get(m.body); if (g && t) t.gestures.push(g); }
+    for (const e of p.runEnds ?? []) { const t = this.tracks.get(e.body); if (t) cutGestures(t.gestures, e.at); }
+    for (const h of p.happened ?? []) {
+      const word = h.name === undefined ? undefined : WOUND.get(h.name);
+      if (word && (this.wound.get(h.node)?.at ?? -Infinity) <= h.at) this.wound.set(h.node, { at: h.at, word });
+    }
+    this.said = [...this.said, ...(p.said ?? []).filter((x) => x.words !== null)].filter((x) => x.at + x.length > p.to - 60_000_000);
     for (const s of p.said ?? []) if (isPublic(s) && !this.saidSeen.has(saidKey(s))) { this.saidSeen.add(saidKey(s)); this.pendingSaid.push(s); }
     this.view.newestTo = Math.max(this.view.newestTo ?? p.to, p.to);
     this.view.parts++;
