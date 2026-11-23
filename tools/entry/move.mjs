@@ -8,10 +8,10 @@
 // instant at the end of start-up; a pour has a contact window (`pour_us`) after it. The effector `held_point` is a named
 // point of the thing in the hand (a spout): reach is measured from it, not from the hand. Nothing is counted in ticks and no number is floating-point. Where the hand is at a
 // time is `pose.mjs`. This file reads `format.mjs` and changes nothing in it.
+import { isMain } from '../lib/is-main.mjs';
 import {createHash} from 'node:crypto';
 import {readdirSync, readFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {fileURLToPath} from 'node:url';
 import {parseEntry, canonical} from './format.mjs';
 
 export const MOVE_FORMAT = 'souls-move/1';
@@ -83,7 +83,7 @@ export function loadMoves(dir) {
   return out;
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const dir = process.argv[2] ?? 'content/moves';
   let bad = 0;
   for (const r of loadMoves(dir)) { console.log(JSON.stringify({file: r.file, ref: r.ref, errors: r.errors})); bad += r.errors.length; }

@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Playtest orchestrator: run | review | replay | compare | preflight. See DESIGN.md §1.
+import { isMain } from '../lib/is-main.mjs';
 import { mkdirSync, existsSync, readFileSync, writeFileSync, copyFileSync, cpSync } from 'node:fs';
 import { resolve, join, dirname, basename } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -401,4 +402,4 @@ async function main() {
   console.log('usage: playtest.mjs run <scenario.json> [--seed n] [--out dir] [--from step] [--server-root dir] [--keep-world] [--world <url>] | review <run> | replay <run> --mode scripted|live | compare <a> <b> | preflight | replay-set [--server-root dir] [--repeats 2] [--out dir] [--baseline dir] [--dry-run] [--score-only] [--only labels] [--frozen bundle.json] [--force-machine] | freeze-bundle [--runs-root dir] [--out file] | direct <cast.json> [--server-root dir] [--world <url>] [--headless] [--script file] [--only a,b] [--out dir] [--no-planner] [--force-machine] [--keep-world]');
   process.exit(1);
 }
-if (import.meta.url === `file://${process.argv[1]}`) main();
+if (isMain(import.meta.url)) main();

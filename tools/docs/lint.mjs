@@ -5,6 +5,7 @@
 // The writing rules behind these checks: docs/site/WRITING.md.
 //
 //   node tools/docs/lint.mjs [--dir docs/site]     exit 0 clean, 1 with one line per problem
+import { isMain } from '../lib/is-main.mjs';
 import { execFileSync } from 'node:child_process';
 import { existsSync, readFileSync, readdirSync, statSync } from 'node:fs';
 import { join, relative, resolve } from 'node:path';
@@ -124,7 +125,7 @@ export function lintTree(dir = SITE, { full = {} } = {}) {
   return { pages: [...pages].sort(), problems };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const i = process.argv.indexOf('--dir');
   if (i > 0 && !process.argv[i + 1]) { console.error('usage: node tools/docs/lint.mjs [--dir <docs dir>]'); process.exit(2); }
   const dir = i > 0 ? resolve(process.argv[i + 1]) : SITE;

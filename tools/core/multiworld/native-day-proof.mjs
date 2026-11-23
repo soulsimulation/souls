@@ -1,5 +1,6 @@
 // Accelerated real native-cast day and exact graceful-close replay, using only
 // disposable local databases and the seeded fake backend ($0).
+import { isMain } from '../../lib/is-main.mjs';
 import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync,mkdirSync,writeFileSync} from 'node:fs';
 import {tmpdir} from 'node:os';import {join,resolve} from 'node:path';
@@ -35,4 +36,4 @@ export async function proveNativeDay({input,worldKey,output}){
   if(output){mkdirSync(resolve(output,'..'),{recursive:true});writeFileSync(resolve(output),JSON.stringify(proof,null,2)+'\n');}return proof;
  }finally{if(app)await app.close();rmSync(dir,{recursive:true,force:true});}
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){const [input,worldKey,output]=process.argv.slice(2);console.log(JSON.stringify(await proveNativeDay({input,worldKey,output})));}
+if(isMain(import.meta.url)){const [input,worldKey,output]=process.argv.slice(2);console.log(JSON.stringify(await proveNativeDay({input,worldKey,output})));}

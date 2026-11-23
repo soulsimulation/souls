@@ -7,6 +7,7 @@
 // The export runs under Node's permission model: it may read the content packages, the core asset index, the map and
 // the one backup file, write only its facts file, and has no network, no child processes and no workers. SQLite opens
 // the backup read-only and immutable. A backup that does not export is a row that is not clean, with the reason.
+import { isMain } from '../../../tools/lib/is-main.mjs';
 import { spawnSync } from 'node:child_process';
 import { existsSync, mkdirSync, writeFileSync } from 'node:fs';
 import { basename, dirname, join, resolve } from 'node:path';
@@ -44,4 +45,4 @@ export function run(argv: string[]): number {
   return r.status ?? 1;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === resolve(import.meta.filename)) process.exitCode = run(process.argv.slice(2));
+if (isMain(import.meta.url)) process.exitCode = run(process.argv.slice(2));

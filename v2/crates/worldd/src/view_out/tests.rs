@@ -3657,6 +3657,64 @@ fn i3948_a_closed_containers_contents_stay_out_of_the_public_stream_until_taken_
     assert!(again.hides && !i3948_holds(&again.player, hidden));
 }
 
+/// #3948 with #4192's cuts by rows: a thing put into a closed container in the same cut as a public change leaves the
+/// public state (the cut is whole), and taken out with one comes back; the stream's state is always the source's
+/// public projection with closed contents left out.
+#[test]
+fn i3948_a_hide_beside_a_public_change_still_leaves_the_public_state() {
+    let h = header();
+    let d = scratch("i3948-hide-rows");
+    let store = directoryd::directory::store::Memory::default();
+    let id = |n| Id::new(Scope([0x3b; 16]), n).unwrap();
+    let (crate_, thing, beside) = (id(1), id(2), id(3));
+    let mut actual = Replica::start(h.stored()).unwrap();
+    let built = w3e_packet(
+        &h,
+        vec![
+            i3948_create(&h, 0, crate_, h.zone, 5),
+            i3948_create(&h, 1, thing, h.zone, 3),
+            i3948_create(&h, 2, beside, h.zone, 3),
+        ],
+    );
+    actual.apply_bytes(&built).unwrap();
+    let mut out = PublicWriter::open_hiding(
+        PublicStart {
+            root: &d.join("views"),
+            header: &h,
+            key: key(&h),
+            initial: actual.frozen(),
+            record: 0,
+            checkpoint: None,
+            text: None,
+            names: None,
+            clock_seed: None,
+            history: None,
+        },
+        &store,
+        i3948_closed(&h),
+    )
+    .unwrap();
+    assert!(i3948_holds(&out.player, thing));
+    let (x1, x2) = (id(8), id(9));
+    // The writer's first cut is whole whatever it holds: a public change first.
+    let warm = vec![i3948_set(3, beside, 6)];
+    let mut hide = i3948_move(&h, 4, thing, crate_, x1);
+    hide.push(i3948_set(6, beside, 7));
+    let mut take = i3948_move(&h, 7, thing, h.zone, x2);
+    take.push(i3948_set(9, beside, 8));
+    for (record, effects, held) in [(0, warm, true), (1, hide, false), (2, take, true)] {
+        let p = w3e_packet(&h, effects);
+        actual.apply_bytes(&p).unwrap();
+        out.push(record, &p).unwrap();
+        out.flush().unwrap();
+        assert_eq!(i3948_holds(&out.player, thing), held);
+        assert_eq!(
+            out.player.state(),
+            &shown(&h, Some(&i3948_closed(&h)), actual.tree()).unwrap()
+        );
+    }
+}
+
 #[test]
 /// #3948: a stream begun before keeps what closed containers hold until its next generation, which starts without
 /// it and with no hand-off (a viewer starts again from its baseline); a restart recovers it.
@@ -3723,4 +3781,161 @@ fn i3948_a_stream_begun_before_drops_closed_contents_at_its_next_generation() {
     let again = PublicWriter::open_hiding(start(initial), &store, i3948_closed(&h)).unwrap();
     assert!(again.hides && again.handoff.is_none());
     assert_eq!(again.player.state(), &state);
+}
+
+/// #4192: a take or a sit (a leave and its arrive in one cut), links made and ended (one to a private node, which is
+/// never public), and a node moved with what is under it are each published from their rows, not as a whole cut, and
+/// the parts and words are the same bytes as when every cut is worked out whole.
+#[test]
+fn i4192_takes_sits_and_links_are_cuts_by_rows_with_the_same_bytes_as_whole_cuts() {
+    let (rows, rows_whole) = i4192_run(true);
+    let (whole, whole_whole) = i4192_run(false);
+    assert!(whole.len() > 1000, "the log published");
+    assert!(rows == whole, "the cuts by rows differ from the whole cuts");
+    assert_eq!(whole_whole, 5, "every reference cut is whole");
+    assert_eq!(rows_whole, 0, "a take, a sit or a link is a cut by rows");
+}
+
+fn i4192_run(incremental: bool) -> (Vec<u8>, u64) {
+    use replica::effects::TransferRec;
+    let h = header();
+    let mut actual = Replica::restored(
+        h.clone(),
+        replica::tree::Tree::start(h.zone, h.kinds[0].clone()),
+        0,
+    );
+    let d = scratch(&format!("4192-rows-{incremental}"));
+    let cp = w3e_checkpoint(&d.join("cp"), &h, &mut actual, 0);
+    let store = directoryd::directory::store::Memory::default();
+    let words = Arc::new(
+        Store::open_dir(
+            &d.join("words"),
+            replica::ids::Minter::at(Scope([58; 16]), 0),
+        )
+        .unwrap(),
+    );
+    let n = |s: u8| Id::new(Scope([0x90 + s; 16]), 1).unwrap();
+    let (carrier, child, foreign, hidden) = (n(1), n(2), n(3), n(4));
+    let (l1, l2, t1, t2) = (n(5), n(6), n(7), n(8));
+    let said = words
+        .write(b"words on the child", Audience::Everyone, child)
+        .unwrap();
+    let mut out = PublicWriter::open(
+        PublicStart {
+            root: &d.join("views"),
+            header: &h,
+            key: key(&h),
+            initial: actual.frozen(),
+            record: 0,
+            checkpoint: Some(cp),
+            text: Some(words),
+            names: None,
+            clock_seed: None,
+            history: None,
+        },
+        &store,
+    )
+    .unwrap();
+    out.incremental = incremental;
+    let everyone = Audience::Everyone;
+    let change = |seq: u64, node: Id, c: Change| {
+        w3e_effect(
+            seq,
+            node,
+            everyone,
+            Body::Changes(vec![ChangeRec {
+                change: c,
+                rest: Rest::new(),
+            }]),
+        )
+    };
+    let onto = |node: Id| Pose {
+        frame: Frame { node, slot: None },
+        position: Vec3::new(1, 0, 1),
+        orientation: Quat::IDENTITY,
+        support: Support::Surface {
+            surface: node,
+            height: 0,
+        },
+    };
+    let move_to = |seq: u64, node: Id, transfer: Id, to: Id| {
+        w3e_effect(
+            seq,
+            node,
+            everyone,
+            Body::Transfer(TransferRec::Leave {
+                transfer,
+                node,
+                lineage: h.lineage,
+                zone: h.zone,
+                pose: onto(to),
+            }),
+        )
+    };
+    // An arrive is written by the node the subtree arrives under.
+    let arrive = |seq: u64, transfer: Id, under: Id| {
+        w3e_effect(
+            seq,
+            under,
+            everyone,
+            Body::Transfer(TransferRec::Arrive {
+                transfer,
+                carried: Vec::new(),
+            }),
+        )
+    };
+    let link = |seq: u64, link: Id, to: Id| {
+        change(
+            seq,
+            carrier,
+            Change::Link {
+                link,
+                ty: h.kinds[0].clone(),
+                ends: [carrier, to],
+                owner: replica::world_model::End::First,
+                audience: everyone,
+            },
+        )
+    };
+    let unlink = |seq: u64, link: Id| change(seq, carrier, Change::Unlink { link });
+    let log = vec![
+        vec![
+            w3e_create(&h, 0, carrier, h.zone, everyone),
+            w3e_create(&h, 1, child, carrier, everyone),
+            w3e_create(&h, 2, foreign, h.zone, everyone),
+            w3e_create(&h, 3, hidden, h.zone, Audience::Of(hidden)),
+            change(4, child, set(child, 5, said.to_value())),
+        ],
+        vec![
+            move_to(5, child, t1, foreign),
+            arrive(6, t1, foreign),
+            change(7, foreign, set(foreign, 1, Value::Uint(9))),
+        ],
+        vec![link(8, l1, foreign)],
+        vec![link(9, l2, hidden)],
+        vec![unlink(10, l1), unlink(11, l2)],
+        vec![move_to(12, foreign, t2, carrier), arrive(13, t2, carrier)],
+    ];
+    let mut whole = 0;
+    for (i, effects) in log.into_iter().enumerate() {
+        let bytes = w3e_packet(&h, effects);
+        actual.apply_bytes(&bytes).unwrap();
+        out.push(i as u64, &bytes).unwrap();
+        out.flush().unwrap();
+        if i == 0 {
+            whole = out.whole_cuts;
+        }
+    }
+    // The reader holds the source's public state.
+    assert_eq!(
+        out.public_player().state(),
+        &project(&h, &actual.tree().to_state()).unwrap()
+    );
+    let mut all = Vec::new();
+    for (name, bytes) in files(&out.generation_dir()) {
+        all.extend(name.into_bytes());
+        all.extend(bytes);
+    }
+    all.extend(wire(out.public_player().state().clone()).unwrap());
+    (all, out.whole_cuts - whole)
 }

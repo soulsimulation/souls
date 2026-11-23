@@ -1,0 +1,30 @@
+# The agents' relay (stage 2c, #4152; installed by v2/tools/ops/install.sh): every world's agent paths
+# (/w/<slug>/v2/ws, v2/creator-token, v2/entries), relayed to the world's gatewayd from the placement file, on loopback
+# only, in a process apart from the viewers' origin so a viewer join wave never drops an agent. It only reads.
+[Unit]
+Description=Souls agents' relay
+After=network-online.target
+Wants=network-online.target
+
+[Service]
+User=souls
+Group=souls
+Slice=souls.slice
+# The gauge: open agent sockets, processor seconds and resident memory, every 10 s.
+Environment=AGENTS_STATS=/run/souls-agents/stats.json
+RuntimeDirectory=souls-agents
+ExecStart=/usr/bin/env node /usr/local/lib/souls/origin/agents.mjs 7330 localhost
+Restart=always
+RestartSec=1s
+# Two sockets an agent (its own and its gateway's).
+LimitNOFILE=65536
+# About 50 MB idle and a few kB a relayed socket. Inside souls.slice's 3G.
+MemoryMax=512M
+MemorySwapMax=0
+NoNewPrivileges=yes
+ProtectSystem=strict
+ProtectHome=yes
+PrivateTmp=yes
+
+[Install]
+WantedBy=multi-user.target

@@ -30,6 +30,7 @@
   <h1>World health</h1>
   <div id="status">Loading…</div>
   <div id="worlds"></div>
+  <section class="world" id="clients" hidden></section>
 </main>
 <script>
   const $ = (id) => document.getElementById(id);
@@ -50,11 +51,15 @@
   async function load() {
     try {
       const r = await fetch('?json=1', { credentials: 'same-origin', cache: 'no-store' });
-      if (r.status === 401) { $('status').textContent = 'Sign in as a site owner to see this page.'; $('worlds').innerHTML = ''; return; }
-      if (r.status === 403) { $('status').textContent = 'This page is for site owners.'; $('worlds').innerHTML = ''; return; }
+      if (r.status === 401) { $('status').textContent = 'Sign in as a site owner to see this page.'; $('worlds').innerHTML = ''; $('clients').hidden = true; return; }
+      if (r.status === 403) { $('status').textContent = 'This page is for site owners.'; $('worlds').innerHTML = ''; $('clients').hidden = true; return; }
       const d = await r.json();
       $('status').textContent = `${d.worlds.length} worlds · ${new Date(d.at).toLocaleTimeString()} · refreshes every 30 s`;
       $('worlds').innerHTML = d.worlds.map((w) => row(w, d.not_metered)).join('');
+      const c = d.clients ?? [];
+      $('clients').hidden = false;
+      $('clients').innerHTML = `<div class="head"><span class="name">Soul clients, last 24 h</span></div><dl>` +
+        (c.length ? c.map((x) => `<dt>${esc(x.client)}</dt><dd>${x.souls} Souls, ${x.acts} acts</dd>`).join('') : '<dt>none</dt><dd>—</dd>') + '</dl>';
     } catch (e) { $('status').textContent = `Could not load: ${e.message}`; }
   }
   load();

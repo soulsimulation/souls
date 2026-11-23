@@ -2,7 +2,8 @@
 #   gate   tools/test-harness/release-gate.sh <sha> --baseline <ref> [--scope full|auto] [--dry-run]
 #          against the last release tag reachable from the candidate by default (release-pin.mjs last: git describe
 #          --tags --abbrev=0 --match 'v0.*' <sha>, so a pinned candidate behind main and a stray tag such as v4.18 both
-#          get the release it builds on); uploads gate.log and receipt.json as the `gate-<sha12>` artifact
+#          get the release it builds on); uploads gate.log, receipt.json and each driver log's last lines (Modal URLs
+#          removed) as the `gate-<sha>` artifact. The pinned campus inputs come from the asset CDN (#1303).
 #
 # Why: the laptop path is denied for agents (.claude/settings.json denies release-gate.sh, modal and ssh), so every
 # gate has needed Gene's terminal. This runs it where MODAL_TOKEN_ID/SECRET already live (repo secrets). It ships
@@ -99,6 +100,33 @@ jobs:
           restore-keys: |
             gate-cache-${{ steps.refs.outputs.baseline }}-node${{ steps.refs.outputs.node }}-
             gate-cache-
+      - name: Campus inputs
+        # remote-suite.sh stages the two pinned inputs of the full campus re-extraction (tools/test-harness/campus-assets.json)
+        # from CAMPUS_ASSETS_SRC, which only the laptop set, so every real run here exited 2 before Modal (#1303). Fetch
+        # each from the public asset CDN at a key that carries its sha256 (apps/web/src/cdn-manifest.json, or the
+        # repo-media key assets/br/<aa>/<sha256>.<ext>) and check bytes and sha256. No credentials; no manifest or
+        # harness change, so `pnpm assets:pull` and the baseline cache key are untouched. A dry run never stages them.
+        if: ${{ inputs.dry_run != true }}
+        run: |
+          dir="$RUNNER_TEMP/campus"; mkdir -p "$dir"
+          node --input-type=module - "$dir" <<'JS'
+          import { createHash } from 'node:crypto'; import { existsSync, readFileSync, writeFileSync } from 'node:fs'; import { extname, join } from 'node:path';
+          const dir = process.argv[2], cdn = 'https://assets.eden.art', pins = JSON.parse(readFileSync('tools/test-harness/campus-assets.json', 'utf8')).files;
+          const keys = existsSync('apps/web/src/cdn-manifest.json') ? readFileSync('apps/web/src/cdn-manifest.json', 'utf8').match(/assets\/[a-z0-9/_-]+\.[a-z0-9]+/g) ?? [] : [];
+          for (const [name, pin] of Object.entries(pins)) {
+            const urls = [...new Set([...keys.filter(k => k.includes(pin.sha256)), `assets/br/${pin.sha256.slice(0, 2)}/${pin.sha256}${extname(name)}`])].map(k => `${cdn}/${k}`);
+            const tried = [];
+            for (const url of urls) {
+              const res = await fetch(url, { redirect: 'error' });   // fetch decodes a body stored with Content-Encoding br
+              if (!res.ok) { tried.push(`${res.status} ${url}`); continue; }
+              const bytes = Buffer.from(await res.arrayBuffer()), sha = createHash('sha256').update(bytes).digest('hex');
+              if (bytes.length !== pin.bytes || sha !== pin.sha256) { tried.push(`${bytes.length} bytes, sha256 ${sha} at ${url}`); continue; }
+              writeFileSync(join(dir, name), bytes); console.log(`${name}: ${bytes.length} bytes, sha256 ${sha} (${url})`); tried.length = 0; break;
+            }
+            if (tried.length) throw Error(`${name}: no CDN copy with ${pin.bytes} bytes, sha256 ${pin.sha256}: ${tried.join('; ')}`);
+          }
+          JS
+          echo "CAMPUS_ASSETS_SRC=$dir" >> "$GITHUB_ENV"
       - name: Modal client
         if: ${{ inputs.dry_run != true }}
         env:
@@ -131,6 +159,18 @@ jobs:
           kill $beat
           grep -E '^RELEASE_GATE ' "$RUNNER_TEMP/gate.log" | tail -1 >> "$GITHUB_STEP_SUMMARY" || true
           exit $status
+      - name: Driver log tails
+        # release-gate.mjs sends each Modal driver's stdout and stderr to <out>/gate-driver.log, not to the job log, so a
+        # driver that exits early used to leave only "Modal driver failed (n)" (#1303). Print and keep the last lines of
+        # each, with Modal app and workspace URLs removed.
+        if: always()
+        run: |
+          shopt -s nullglob
+          for log in "$RUNNER_TEMP"/gate/*/gate-driver.log; do
+            side=$(basename "$(dirname "$log")")
+            tail -n 200 "$log" | sed -E 's#https?://[^[:space:]]*modal\.(com|run)[^[:space:]]*#<modal-url>#g' > "$RUNNER_TEMP/gate/$side/gate-driver.tail.txt"
+            echo "::group::$side driver log (last 200 lines)"; cat "$RUNNER_TEMP/gate/$side/gate-driver.tail.txt"; echo "::endgroup::"
+          done
       - uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
         if: always()
         with:
@@ -138,4 +178,5 @@ jobs:
           path: |
             ${{ runner.temp }}/gate.log
             ${{ runner.temp }}/gate/**/*.json
+            ${{ runner.temp }}/gate/*/gate-driver.tail.txt
           if-no-files-found: ignore

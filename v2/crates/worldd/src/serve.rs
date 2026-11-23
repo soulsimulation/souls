@@ -121,7 +121,7 @@ use sim::log::{FileStore, Log};
 use sim::recorder;
 use sim::slots::PlaceAt;
 use sim::walk::town::Town;
-use supervisor::bucket::Under;
+use supervisor::bucket::{Patient, Under, patiently};
 use worldd::answers::{self, Config, Join};
 use worldd::bodies::{Bodies, Placed};
 use worldd::buildsafe::Creator;
@@ -142,10 +142,11 @@ const EPOCH: u64 = 1;
 /// `seed` and template checks print nothing.
 static STARTED: std::sync::OnceLock<std::time::Instant> = std::sync::OnceLock::new();
 
-/// One start-up stage's elapsed-time stamp (#3672), only while `serve` starts.
+/// One start-up stage's elapsed-time stamp (#3672), only while `serve` starts; each is progress (#4013).
 fn stamp(stage: &str) {
     if let Some(t) = STARTED.get() {
         println!("start-up: {stage} at {} ms", t.elapsed().as_millis());
+        crate::progress();
     }
 }
 /// K5's checkpoint interval: one each 8 MiB of log (the bench constant, as `worldd fork`).
@@ -674,6 +675,7 @@ fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
 fn recovered_towns(built: &Built, initial: &Replica, records: &[Vec<u8>]) -> R<(Town, Town)> {
     let mut live = initial.frozen();
     for bytes in records {
+        crate::progress();
         if !recorder::is_input(bytes) {
             let part = replica::effects::Part::read(bytes).map_err(refusal)?;
             live.apply(&part).map_err(refusal)?;
@@ -1294,7 +1296,8 @@ fn bodies(
     Ok(b)
 }
 
-type Bucket = Shared<supervisor::bucket::Bucket>;
+/// The world's store; its reads at the start are made [`patiently`] (#1960).
+type Bucket = Shared<Patient<supervisor::bucket::Bucket>>;
 
 /// Public navigation only: the same restored header/root as the live writer, beside the history export.
 fn public_history_live(dir: &Path, name: &str, header: &Header, key: &Key) -> R<()> {
@@ -1584,7 +1587,8 @@ fn archiving(
     closed: impl Fn(u64) + Send + 'static,
 ) -> std::thread::JoinHandle<Result<(), Refusal>> {
     std::thread::spawn(move || {
-        let mut a = open()?;
+        // A fork's open is the world's start too: its reads are patient (#1960).
+        let mut a = patiently(open)?;
         // How far its closed objects reach, for the log's compactor (#3837).
         let publish = |a: &Archiver<Again>| closed(a.durable_cursor());
         publish(&a);
@@ -1789,10 +1793,10 @@ fn off_machine(
         text,
     } = source;
     let (first, records) = (recovered.first, recovered.records.as_slice());
-    let store: Bucket = Shared(Arc::new(
+    let store: Bucket = Shared(Arc::new(Patient::new(
         supervisor::bucket::Bucket::from_spec(spec).map_err(refusal)?,
-    ));
-    println!("store: {}", store.0.what());
+    )));
+    println!("store: {}", store.0.store.what());
     let prefix = format!("h/{name}/{}/", to_hex(&built.header.lineage.0));
     let fork_base = checkpoint
         .map(|newest| fork_archive_base(&store, &prefix, dir, &built.header, newest, recovered))
@@ -1927,12 +1931,12 @@ fn off_machine(
 /// each [`CREATOR_EVERY`] on a thread of its own: a change replaces it (there is never more than one), and a failed
 /// read keeps the last.
 fn creator(spec: &str, built: &Built) -> R<Arc<Creator>> {
-    let store = supervisor::bucket::Bucket::from_spec(spec).map_err(refusal)?;
+    let store = Patient::new(supervisor::bucket::Bucket::from_spec(spec).map_err(refusal)?);
     let (lineage, zone) = (built.header.lineage.0, built.header.zone);
     let read = Arc::new(move || directory_creator_of(&store, &lineage, zone));
     let admission = Arc::clone(&read);
     let creator = Arc::new(Creator::with_reader(
-        read().map_err(refusal)?,
+        patiently(|| read()).map_err(refusal)?,
         Arc::new(move || admission().ok().flatten()),
     ));
     let say = |c: Option<Id>| c.map_or_else(|| "none".to_owned(), principal_text);
@@ -1972,6 +1976,13 @@ pub fn run(args: &[String]) -> i32 {
 fn serve(args: &[String]) -> R<()> {
     let _ = STARTED.set(std::time::Instant::now());
     stamp("launch");
+    // A test's long load (#4013's A2): `$WORLDD_HOLD_LOAD_S` seconds of progress first. Only in a build with the
+    // `hold-load` feature (v2/tools/ops/x5-start-progress.sh); a release build has no hold.
+    #[cfg(feature = "hold-load")]
+    for _ in 0..std::env::var("WORLDD_HOLD_LOAD_S").map_or(0, |s| s.parse::<u64>().unwrap_or(0)) {
+        std::thread::sleep(std::time::Duration::from_secs(1));
+        stamp("held");
+    }
     let dir = PathBuf::from(arg(args, "--dir").ok_or(
         "usage: worldd serve --dir <world folder> [--socket <path>] [--checkpoint-every <bytes>] \
          [--compact-after <bytes>] [--store <store>] [--machine <name>] [--directory <file>] [--rate <num>/<den>]",
@@ -2002,6 +2013,8 @@ fn serve(args: &[String]) -> R<()> {
         &std::fs::read_to_string(&facts).map_err(io(&facts))?,
         &kinds,
     )?;
+    // A Soul's body runs its family's forms (E21, #2791): a wave or a bow on its own body.
+    replica::kinds::entry::family_forms(&mut kinds, plain(&built.body_kind));
     let stored_header = if meta.get("fork") == Some(&Json::Bool(true)) {
         let header =
             replica::effects::Header::read(&std::fs::read(dir.join("header")).map_err(io(&dir))?)
@@ -2086,6 +2099,7 @@ fn serve(args: &[String]) -> R<()> {
         let mut observer = None;
         let observed_real = answers::now();
         for (offset, bytes) in found.after(record).iter().enumerate() {
+            crate::progress();
             if !recorder::is_input(bytes) {
                 let part = replica::effects::Part::read(bytes).map_err(refusal)?;
                 live.apply(&part).map_err(refusal)?;
@@ -2200,21 +2214,25 @@ fn serve(args: &[String]) -> R<()> {
                 .cloned()
                 .or_else(|| std::env::var("WORLDD_MACHINE").ok())
                 .unwrap_or_else(|| "local".to_owned());
-            Some(off_machine(
-                spec,
-                &machine,
-                &built,
-                &name,
-                &dir,
-                SourceContext {
-                    recovered: &found,
-                    parts_from: sim::log::compact::read_cut(&log_path)
-                        .map_err(refusal)?
-                        .map_or(0, |c| c.note),
-                    checkpoint: checkpoint.as_deref(),
-                    text: Arc::clone(&text),
-                },
-            )?)
+            let parts_from = sim::log::compact::read_cut(&log_path)
+                .map_err(refusal)?
+                .map_or(0, |c| c.note);
+            // The start's reads of the store are patient: one slow answer does not end the world (#1960).
+            Some(patiently(|| {
+                off_machine(
+                    spec,
+                    &machine,
+                    &built,
+                    &name,
+                    &dir,
+                    SourceContext {
+                        recovered: &found,
+                        parts_from,
+                        checkpoint: checkpoint.as_deref(),
+                        text: Arc::clone(&text),
+                    },
+                )
+            })?)
         }
         None => None,
     };
@@ -2249,6 +2267,7 @@ fn serve(args: &[String]) -> R<()> {
     hub.seed(resumed.as_ref().map_or(initial.tree(), |(at, _)| at.tree()));
     let feed = worldd::views::served::start_with(hub).map_err(refusal)?;
     for bytes in found.after(base_record) {
+        crate::progress();
         if !recorder::is_input(bytes) {
             feed.record(bytes.clone());
         }
@@ -2264,6 +2283,8 @@ fn serve(args: &[String]) -> R<()> {
         .map_err(|e| format!("refusing to start: {}", refusal(e)))?;
     println!("{backup}");
     cfg.synced = Some(tx);
+    // A failed log or text store ends the process by name; the unit restarts the world from its log (#4134).
+    cfg.halted = Some(answers::exit_on_halt());
     // E6's day, night and weather on Eden's calendar, written at the first tick of a world whose node holds none (C5).
     cfg.sky = Some(eden_sky(built.header.lineage));
     cfg.hatches = hatches(&dir.join("hatches"))?;
@@ -2320,14 +2341,18 @@ fn serve(args: &[String]) -> R<()> {
         level: Level::Full,
         audience: Audience::Everyone,
     };
-    let stream_store = supervisor::bucket::Bucket::from_spec(
-        bucket
-            .as_deref()
-            .map(str::to_owned)
-            .unwrap_or_else(|| format!("folder:{}", dir.join(".stream-recovery-store").display()))
-            .as_str(),
-    )
-    .map_err(refusal)?;
+    let stream_store = Patient::new(
+        supervisor::bucket::Bucket::from_spec(
+            bucket
+                .as_deref()
+                .map(str::to_owned)
+                .unwrap_or_else(|| {
+                    format!("folder:{}", dir.join(".stream-recovery-store").display())
+                })
+                .as_str(),
+        )
+        .map_err(refusal)?,
+    );
     if let Some(seed) = stream_mapping {
         println!(
             "stream: initial mapping from durable record {} effect {}",
@@ -2455,8 +2480,10 @@ fn serve(args: &[String]) -> R<()> {
                     clock_seed: stream_clock,
                     history: Some(&*stream_found),
                 };
-                let mut writer =
-                    view_out::PublicWriter::open_hiding(start, stream_store, stream_closed)?;
+                // Its recovery reads are the world's start: patient (#1960).
+                let mut writer = patiently(|| {
+                    view_out::PublicWriter::open_hiding(start, stream_store, stream_closed)
+                })?;
                 // Both the pointer and placement bootstrap resolve the existing strict public history export.
                 let history = "history/";
                 let pointer = format!(
@@ -2961,13 +2988,13 @@ mod tests {
             Header::read(&fixture_bytes(replica::effects::FIXTURE_HEADER).unwrap()).unwrap();
         let dir = std::env::temp_dir().join(format!("w3c-export-{}", std::process::id()));
         std::fs::create_dir_all(&dir).unwrap();
-        let bucket = Shared(Arc::new(
+        let bucket = Shared(Arc::new(Patient::new(
             supervisor::bucket::Bucket::parse(
                 &format!("folder:{}", dir.join("store").display()),
                 |_| String::new(),
             )
             .unwrap(),
-        ));
+        )));
         let public = dir.join("public");
         let adapter = Again {
             store: Under {

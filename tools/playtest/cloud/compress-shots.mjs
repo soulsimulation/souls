@@ -3,6 +3,7 @@
 // never upscaled), the PNG is removed, and text files that name `<x>.png` are rewritten to `<x>.jpg` so REPORT.md,
 // evidence and story links still resolve (story.html thumbnails are inline data URIs and are unaffected).
 //   node tools/playtest/cloud/compress-shots.mjs <dir> [--width 1024] [--quality 75] [--jobs 4]
+import { isMain } from '../../lib/is-main.mjs';
 import { readdirSync, readFileSync, writeFileSync, rmSync, statSync, existsSync } from 'node:fs';
 import { join } from 'node:path';
 import { execFile } from 'node:child_process';
@@ -41,7 +42,7 @@ export async function compressShots(dir, { width = 1024, quality = 75, jobs = 4,
   return { pngs: pngs.length, failed, beforeBytes: before, afterBytes: after, rewritten, tool };
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const argv = process.argv.slice(2); const flag = (k, d) => { const i = argv.indexOf(`--${k}`); return i >= 0 ? Number(argv[i + 1]) : d; };
   const dir = argv[0];
   if (!dir) { console.error('usage: compress-shots.mjs <dir> [--width 1024] [--quality 75] [--jobs 4]'); process.exit(1); }

@@ -2,9 +2,9 @@
 // Bounded resident comparison for Gene, with no retirement/migration verdict.
 // Both endpoints must be explicitly attested fresh fake-mind disposable worlds.
 // node tools/parity/compare-behaviour.mjs input.json > comparison.json
+import { isMain } from '../lib/is-main.mjs';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { assertFreshLocalTarget } from './behaviour.mjs';
 
 const pause = (ms) => new Promise((r) => setTimeout(r, ms));
@@ -136,7 +136,7 @@ export async function runComparisonBehaviour({ oldBase, newBase, world, freshWor
     purpose: 'Comparison evidence for Gene; no retirement or migration verdict.' };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (isMain(import.meta.url)) {
   runComparisonBehaviour(JSON.parse(readFileSync(resolve(process.argv[2]), 'utf8'))).then((report) => console.log(JSON.stringify(report, null, 2)))
     .catch((error) => { console.error(error.message); process.exitCode = 2; });
 }

@@ -7,6 +7,7 @@
 //
 // The tier is the highest any changed file maps to; a `tier:Tn` label can raise it. `--json` adds the per-file
 // mapping and the release gate's `--scope auto` steps for the same diff.
+import { isMain } from '../lib/is-main.mjs';
 import { execFileSync } from 'node:child_process';
 import { readFileSync } from 'node:fs';
 import { resolve } from 'node:path';
@@ -101,4 +102,4 @@ function main(argv) {
   return 0;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) process.exitCode = main(process.argv.slice(2));
+if (isMain(import.meta.url)) process.exitCode = main(process.argv.slice(2));

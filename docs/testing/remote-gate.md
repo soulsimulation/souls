@@ -119,8 +119,11 @@ With no `baseline`, it gates against the last release tag reachable from the can
 `git describe --tags --abbrev=0 --match 'v0.*' <sha>`), so a pinned candidate behind main compares with the release
 it builds on. It shares release.yml's `release` concurrency group (one gate at a time), refuses a non-dry run once the day's runs of
 both workflows reach `modal_gates_per_day` (PROOF-POLICY.yml), keeps the baseline cache across runs with
-`actions/cache` keyed by baseline commit and Node version, and uploads `gate.log` and `receipt.json` as the
-`gate-<sha>` artifact. It ships nothing; the ship step is tracked by #519.
+`actions/cache` keyed by baseline commit and Node version, and uploads `gate.log`, `receipt.json` and the last 200
+lines of each Modal driver's log (`gate-driver.tail.txt`, also printed in the job log, Modal URLs removed) as the
+`gate-<sha>` artifact. Before a real run it fetches the two pinned campus inputs (`campus-assets.json`) from the public
+asset CDN, checks bytes and sha256 and sets `CAMPUS_ASSETS_SRC`; without them `remote-suite.sh` exits 2 before
+contacting Modal (#1303). It ships nothing; the ship step is tracked by #519.
 
 ### What blocks
 

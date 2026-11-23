@@ -1,6 +1,7 @@
 // Released bodies only. Ordinary uploads continue through importBody's unchanged validator and budgets.
 // Core scans are admitted solely by the checked-in released manifest's exact hash. Authored examples reuse the
 // existing body-definition normalization and immutable revision pin; procedural meshes sample their released source.
+import { isMain } from '../../../tools/lib/is-main.mjs';
 import { createHash } from 'node:crypto';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, readdirSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
@@ -133,7 +134,7 @@ export async function importPresets(out: string, media = REPO) {
   } finally { rmSync(tmp, { recursive: true }); }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === resolve(import.meta.filename)) {
+if (isMain(import.meta.url)) {
   const args = process.argv.slice(2), at = (key: string) => args.indexOf(key) < 0 ? undefined : args[args.indexOf(key) + 1];
   const out = at('--out'); if (!out) throw Error('usage: presets.ts --out <dir> [--media <checkout>]');
   importPresets(resolve(out), resolve(at('--media') ?? REPO)).then((result) => console.log(JSON.stringify({ imported: result.bodies.map((b) => b.preset), left: result.left }))).catch((error) => { console.error(JSON.stringify({ refused: { code: error.code ?? 'body.presets-unavailable', preset: error.preset ?? 'input' } })); process.exitCode = 1; });

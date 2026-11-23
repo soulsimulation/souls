@@ -92,6 +92,113 @@ use replica::world_model::{Audience, End};
 use crate::views::{Delivery, Subscriber};
 use sim::text::Store;
 
+/// Where the public writer's core goes (#4192): with `STREAM_PROFILE=1`, each stage's wall time on the writer's
+/// thread, summed and printed to stderr every 10 s with the thread's own processor time. A measurement only: it never
+/// changes a byte written, and off (the default) it reads no clock.
+mod prof {
+    // A profile is wall time on the writer's thread, off unless asked for (K7 allows it, as in `measures`).
+    #![allow(clippy::disallowed_methods)]
+    use std::cell::RefCell;
+    use std::time::Instant;
+    pub const NAMES: [&str; 13] = [
+        "push.apply",
+        "flush.state",
+        "flush.context",
+        "flush.encode",
+        "flush.put",
+        "flush.words",
+        "flush.play",
+        "flush.commit",
+        "flush.files",
+        "flush.prune",
+        "flush.pointer",
+        "idle.check",
+        "idle.pointer",
+    ];
+    struct P {
+        ns: [u128; 13],
+        records: u64,
+        parts: u64,
+        whole: u64,
+        since: Instant,
+        cpu0: u64,
+        causes: std::collections::BTreeMap<&'static str, u64>,
+    }
+    thread_local!(static P_: RefCell<Option<P>> = const { RefCell::new(None) });
+    fn on() -> bool {
+        static ON: std::sync::OnceLock<bool> = std::sync::OnceLock::new();
+        *ON.get_or_init(|| std::env::var("STREAM_PROFILE").is_ok_and(|v| v == "1"))
+    }
+    fn cpu() -> u64 {
+        std::fs::read_to_string("/proc/thread-self/stat")
+            .ok()
+            .and_then(|s| {
+                let f: Vec<&str> = s[s.rfind(')')? + 2..].split(' ').collect();
+                Some(f.get(11)?.parse::<u64>().ok()? + f.get(12)?.parse::<u64>().ok()?)
+            })
+            .unwrap_or(0)
+    }
+    pub struct Lap(Option<Instant>);
+    impl Lap {
+        pub fn start() -> Lap {
+            Lap(on().then(Instant::now))
+        }
+        pub fn mark(&mut self, stage: usize) {
+            let Some(t) = self.0 else { return };
+            let now = Instant::now();
+            let d = now.duration_since(t).as_nanos();
+            self.0 = Some(now);
+            P_.with(|p| {
+                let mut p = p.borrow_mut();
+                let p = p.get_or_insert_with(|| P {
+                    ns: [0; 13],
+                    records: 0,
+                    parts: 0,
+                    whole: 0,
+                    since: now,
+                    cpu0: cpu(),
+                    causes: Default::default(),
+                });
+                p.ns[stage] += d;
+            });
+        }
+    }
+    /// What made a record's cut whole (`structural`), by change kind.
+    pub fn cause(name: &'static str) {
+        if !on() {
+            return;
+        }
+        P_.with(|p| {
+            if let Some(p) = p.borrow_mut().as_mut() {
+                *p.causes.entry(name).or_default() += 1;
+            }
+        });
+    }
+    pub fn count(records: u64, parts: u64, whole: u64) {
+        if !on() {
+            return;
+        }
+        P_.with(|p| {
+            let mut g = p.borrow_mut();
+            let Some(p) = g.as_mut() else { return };
+            p.records += records; p.parts += parts; p.whole += whole;
+            let wall = p.since.elapsed();
+            if wall.as_secs() < 10 { return; }
+            let c = cpu();
+            let ms = |n: u128| n as f64 / 1e6;
+            let busy: u128 = p.ns.iter().sum();
+            let mut line = format!(
+                "public-stream profile: wall {:.1}s cpu {:.2}s staged {:.0}ms records {} parts {} whole-cuts {}",
+                wall.as_secs_f64(), (c - p.cpu0) as f64 / 100.0, ms(busy), p.records, p.parts, p.whole
+            );
+            for (i, n) in NAMES.iter().enumerate() { line += &format!(" {n} {:.0}ms", ms(p.ns[i])); }
+            line += &format!(" structural-by {:?}", p.causes);
+            eprintln!("{line}");
+            *g = None;
+        });
+    }
+}
+
 type R<T> = Result<T, Refusal>;
 
 enum Start {
@@ -877,7 +984,7 @@ pub fn follow(
 // A stream observer has its own durable publication cursor. The canonical source copy validates WHOLE parts
 // before any projection is exposed; the public copy never receives the source's private ledger.
 use directoryd::directory::store::{Store as ObjectStore, When};
-use replica::stream::public::{PublicPlayer, context as public_context, digest, project};
+use replica::stream::public::{PublicPlayer, digest, project};
 use replica::views::{Redactions, View};
 
 use crate::closed::{Closed, Inside};
@@ -1000,6 +1107,13 @@ pub struct PublicWriter<S> {
     touched: std::collections::BTreeSet<Id>,
     /// The timers the open cut set or cleared (#3799).
     timers: std::collections::BTreeSet<Id>,
+    /// The links the open cut made or ended, the transfers it began and the nodes they moved, with what is under
+    /// them (#4192): a take or a sit, a leave and its arrive in the same cut, changes only these rows.
+    links: std::collections::BTreeSet<Id>,
+    left: std::collections::BTreeSet<Id>,
+    moved: std::collections::BTreeSet<Id>,
+    /// Cuts worked out whole since the writer opened (#4192).
+    pub whole_cuts: u64,
     /// The references each node row of the published state holds, and those of the rest of it (#3799).
     /// Kept with the version of the state they are of.
     #[allow(clippy::type_complexity)]
@@ -1414,6 +1528,10 @@ impl<S: ObjectStore> PublicWriter<S> {
             structural: true,
             touched: std::collections::BTreeSet::new(),
             timers: std::collections::BTreeSet::new(),
+            links: std::collections::BTreeSet::new(),
+            left: std::collections::BTreeSet::new(),
+            moved: std::collections::BTreeSet::new(),
+            whole_cuts: 0,
             refs: None,
             still_at: None,
             closed_kinds: closed,
@@ -1624,7 +1742,14 @@ impl<S: ObjectStore> PublicWriter<S> {
     }
     /// The words file of a cut (#3799): the references of the state after it and of its records, as
     /// [`PublicWriter::words`] finds them in the two whole, each node row's kept from the last cut that set it.
-    fn words_after(&mut self, after: Option<&Value>, delta: Option<&Value>) -> R<Vec<u8>> {
+    /// `whole_delta`, with a whole `after`: the rows of `after` that differ from the published state (the context's
+    /// delta), so the index of the published state is brought up to date from them rather than rebuilt (#4192).
+    fn words_after(
+        &mut self,
+        after: Option<&Value>,
+        delta: Option<&Value>,
+        whole_delta: Option<&Value>,
+    ) -> R<Vec<u8>> {
         if self.text.is_none() {
             // No text store: no reference words to keep, but a part's own place names are still published (#3574).
             return self.words_of(
@@ -1651,7 +1776,41 @@ impl<S: ObjectStore> PublicWriter<S> {
             .refs
             .as_ref()
             .is_none_or(|r| r.0 != self.player.version());
-        if after.is_some() || stale {
+        if let (Some(after), Some(Value::Map(d)), false) = (after, whole_delta, stale) {
+            // The node rows from the delta (a removed node is a row of its id alone), the rest of the state's
+            // references read field by field, never copying the node rows.
+            let Value::Map(a) = after else {
+                return Err(fault("stream-words", "a state is a map"));
+            };
+            let changed: &[Value] = match d.get(&2) {
+                Some(Value::Array(c)) => c,
+                _ => &[],
+            };
+            let Some((at, rows, rest)) = &mut self.refs else {
+                unreachable!("not stale")
+            };
+            for row in changed {
+                let Value::Array(p) = row else {
+                    return Err(fault("stream-words", "a row is a pair"));
+                };
+                let id = replica::effects::read_id(&p[0])?;
+                let r = match p.get(1) {
+                    Some(v) => replica::audience::references(v),
+                    None => Default::default(),
+                };
+                if r.is_empty() {
+                    rows.remove(&id);
+                } else {
+                    rows.insert(id, r);
+                }
+            }
+            *rest = a
+                .iter()
+                .filter(|(k, _)| **k != 2)
+                .flat_map(|(_, v)| replica::audience::references(v))
+                .collect();
+            *at = version(after);
+        } else if after.is_some() || stale {
             let whole = after.unwrap_or(self.player.state());
             let at = version(whole);
             let Value::Map(mut m) = whole.clone() else {
@@ -1669,12 +1828,45 @@ impl<S: ObjectStore> PublicWriter<S> {
             self.refs = Some((at, rows, replica::audience::references(&Value::Map(m))));
         }
         if after.is_none()
-            && let (Some((at, rows, _)), Some(d)) = (&mut self.refs, delta)
+            && let (Some((at, rows, rest)), Some(d)) = (&mut self.refs, delta)
         {
             *at = version(d);
             let Value::Map(d) = d else {
                 return Err(fault("stream-words", "a delta is a map"));
             };
+            // Links or timers changed (#4192): the rest of the state's references, read again from the published
+            // state with the delta's rows of them in place. The node rows are not copied.
+            if d.contains_key(&3) || d.contains_key(&6) {
+                let Value::Map(st) = self.player.state() else {
+                    return Err(fault("stream-words", "a state is a map"));
+                };
+                let mut m: BTreeMap<u64, Value> = st
+                    .iter()
+                    .filter(|(k, _)| **k != 2)
+                    .map(|(k, v)| (*k, v.clone()))
+                    .collect();
+                for k in [3, 6] {
+                    let (Some(Value::Array(rows)), Some(Value::Array(old))) =
+                        (d.get(&k), m.get(&k))
+                    else {
+                        continue;
+                    };
+                    // The order of the rows does not matter to a set of references.
+                    let mut by = BTreeMap::new();
+                    for r in old.iter().chain(rows) {
+                        let Value::Array(p) = r else {
+                            return Err(fault("stream-words", "a row is a pair"));
+                        };
+                        let id = replica::effects::read_id(&p[0])?;
+                        match p.get(1) {
+                            Some(v) => by.insert(id, Value::Array(vec![p[0].clone(), v.clone()])),
+                            None => by.remove(&id),
+                        };
+                    }
+                    m.insert(k, Value::Array(by.into_values().collect()));
+                }
+                *rest = replica::audience::references(&Value::Map(m));
+            }
             let changed: &[Value] = match d.get(&2) {
                 Some(Value::Array(c)) => c,
                 _ => &[],
@@ -2603,8 +2795,9 @@ impl<S: ObjectStore> PublicWriter<S> {
                     .retain(|(seq, _)| self.migration_cut.is_none_or(|cut| *seq >= cut));
                 self.canonical = checked;
             }
-            // What the cut can be published from (#3799): motion, fields set and a node set still in its own
-            // frame touch only their rows.
+            // What the cut can be published from (#3799): motion, fields set and nodes set in a slot touch only their
+            // rows; links made or ended only theirs; a leave whose arrive is in the same cut only the rows of what it
+            // moved (#4192).
             for e in &part.effects {
                 match &e.body {
                     Body::Changes(cs) => {
@@ -2613,18 +2806,33 @@ impl<S: ObjectStore> PublicWriter<S> {
                                 replica::effects::Change::Motion(h) => {
                                     self.touched.insert(h.node);
                                 }
-                                replica::effects::Change::Set { node, .. } => {
+                                replica::effects::Change::Set { node, .. }
+                                | replica::effects::Change::Reparent { node, .. } => {
                                     self.touched.insert(*node);
                                 }
-                                replica::effects::Change::Reparent { node, from, pose }
-                                    if *from == pose.frame =>
-                                {
-                                    self.touched.insert(*node);
+                                replica::effects::Change::Link { link, .. }
+                                | replica::effects::Change::Unlink { link } => {
+                                    self.links.insert(*link);
                                 }
-                                _ => self.structural = true,
+                                c => {
+                                    prof::cause(match c {
+                                        replica::effects::Change::Create { .. } => "create",
+                                        replica::effects::Change::Remove { .. } => "remove",
+                                        _ => "other-change",
+                                    });
+                                    self.structural = true
+                                }
                             }
                         }
                     }
+                    Body::Transfer(replica::effects::TransferRec::Leave {
+                        transfer, node, ..
+                    }) => {
+                        self.left.insert(*transfer);
+                        self.moved.insert(*node);
+                    }
+                    Body::Transfer(replica::effects::TransferRec::Arrive { transfer, carried })
+                        if carried.is_empty() && self.left.contains(transfer) => {}
                     Body::Timers(recs) => {
                         for r in recs {
                             match r {
@@ -2635,7 +2843,14 @@ impl<S: ObjectStore> PublicWriter<S> {
                             }
                         }
                     }
-                    _ => self.structural = true,
+                    b => {
+                        prof::cause(match b {
+                            Body::Transfer(_) => "transfer",
+                            Body::Time(_) => "time",
+                            _ => "other-body",
+                        });
+                        self.structural = true
+                    }
                 }
             }
             let at = part.effects.last().map(|e| e.envelope.at);
@@ -2733,7 +2948,10 @@ impl<S: ObjectStore> PublicWriter<S> {
     }
     pub fn push(&mut self, record: u64, raw: &[u8]) -> R<()> {
         let window = self.window;
+        let mut lap = prof::Lap::start();
         self.apply_record(record, raw)?;
+        lap.mark(0);
+        prof::count(1, 0, 0);
         if let (Some(before), Some(last)) = (window, self.records.last())
             && stream_effect(&self.header, last.clone())?
                 .envelope
@@ -2756,11 +2974,15 @@ impl<S: ObjectStore> PublicWriter<S> {
         self.structural = false;
         self.touched.clear();
         self.timers.clear();
+        self.links.clear();
+        self.left.clear();
+        self.moved.clear();
     }
     pub fn flush(&mut self) -> R<()> {
         if self.chunks.is_empty() && !self.force_remainder {
             return Ok(());
         }
+        let mut lap = prof::Lap::start();
         // A cut of motion and fields set only (#3799): the published state with the touched nodes' rows replaced, its
         // digest worked out in place; any other cut, the public state whole. The same bytes either way.
         let delta = if self.incremental
@@ -2770,8 +2992,21 @@ impl<S: ObjectStore> PublicWriter<S> {
             && self.migration_cut.is_none()
         {
             let tree = self.canonical.tree();
-            let rows = self
-                .touched
+            // A moved node's row and those under it (#4192), each read once.
+            let mut ids = self.touched.clone();
+            let mut todo: Vec<Id> = self.moved.iter().copied().collect();
+            while let Some(id) = todo.pop() {
+                ids.insert(id);
+                if let Some(h) = tree.handle(id) {
+                    todo.extend(
+                        tree.children(h)
+                            .unwrap_or(&[])
+                            .iter()
+                            .filter_map(|c| tree.node(*c).map(|n| n.id())),
+                    );
+                }
+            }
+            let rows = ids
                 .iter()
                 .filter_map(|id| {
                     let n = tree.node_state_of(*id)?;
@@ -2779,6 +3014,40 @@ impl<S: ObjectStore> PublicWriter<S> {
                         .then(|| (*id, n.to_value()))
                 })
                 .collect();
+            // A link's row as the public state holds it: public, with no end a node here that is not public or is
+            // hidden in a closed container (#3948); none once ended. One with an end not live here (a node in flight,
+            // or gone) is left to the whole cut.
+            let links: Option<Vec<(Id, Option<Value>)>> = self
+                .links
+                .iter()
+                .map(|id| match tree.link(*id) {
+                    None => Some((*id, None)),
+                    Some((ty, ends, owner, audience)) => {
+                        let mut public = audience == Audience::Everyone;
+                        for e in ends {
+                            public &= tree.node_state_of(e)?.audience == Audience::Everyone
+                                && !self.hidden(tree, e);
+                        }
+                        Some((
+                            *id,
+                            public.then(|| {
+                                replica::effects::LinkState {
+                                    ty: ty.clone(),
+                                    ends,
+                                    owner,
+                                    audience,
+                                }
+                                .to_value()
+                            }),
+                        ))
+                    }
+                })
+                .collect();
+            // Every leave of the cut arrived in it: no flight is open at the cut. A thing put into a closed container
+            // leaves the public state with what is under it, its links and its timers (#3948): the whole cut. One taken
+            // out is not in the published state, so its row makes the cut whole too.
+            let landed = self.left.iter().all(|t| tree.flight(*t).is_none())
+                && !self.moved.iter().any(|id| self.hidden(tree, *id));
             // A timer's row as the public state holds it: of a public live owner; none once cleared. One whose
             // owner is not live here (in flight) is left to the whole cut.
             let int = |n: i64| {
@@ -2805,9 +3074,11 @@ impl<S: ObjectStore> PublicWriter<S> {
                     }
                 })
                 .collect();
-            match timers {
-                Some(timers) => self.player.row_delta(tree.next(), rows, timers)?,
-                None => None,
+            match (timers, links, landed) {
+                (Some(timers), Some(links), true) => {
+                    self.player.row_delta(tree.next(), rows, timers, links)?
+                }
+                _ => None,
             }
         } else {
             None
@@ -2820,6 +3091,9 @@ impl<S: ObjectStore> PublicWriter<S> {
                 (Some(a), h)
             }
         };
+        lap.mark(1);
+        prof::count(0, 0, after.is_some() as u64);
+        self.whole_cuts += after.is_some() as u64;
         if self.records.is_empty()
             && let Some(after) = &after
         {
@@ -2946,11 +3220,23 @@ impl<S: ObjectStore> PublicWriter<S> {
             .iter()
             .map(|(i, v)| (*i, *v))
             .collect::<Vec<_>>();
-        let context = match (&after, &delta) {
-            (Some(after), _) => public_context(
-                &self.baseline,
+        // A whole cut's rows that differ from the published state: its context's delta, and what the words index
+        // is brought up to date from (#4192).
+        let whole_delta = match &after {
+            Some(after) => Some(replica::stream::public::context_delta(
                 self.player.state(),
                 after,
+            )?),
+            None => None,
+        };
+        let context = match (&after, &delta) {
+            // The digests are already worked out: the player's state's, and the cut's above (#4192). Hashing either
+            // state again was a sixth of the writer's core at 500 agents.
+            (Some(_), _) => replica::stream::public::context_with(
+                &self.baseline,
+                self.player.digest(),
+                &after_digest,
+                whole_delta.clone().expect("a whole cut has its delta"),
                 self.cursor,
                 &self.duplicates,
                 &changed,
@@ -2966,6 +3252,7 @@ impl<S: ObjectStore> PublicWriter<S> {
             )?,
             (None, None) => unreachable!("a cut is worked out whole or by rows"),
         };
+        lap.mark(2);
         let mut value = object_map(&sp.to_bytes()?)?;
         value.insert(10, Value::Bytes(context));
         let bytes = wire(Value::Map(value))?;
@@ -2983,11 +3270,16 @@ impl<S: ObjectStore> PublicWriter<S> {
                 ),
             ),
         ])))?;
+        lap.mark(3);
         let chunk_hash = self.put(&chunk)?;
         let part_hash = self.put(&bytes)?;
-        let text = self.words_after(after.as_ref(), delta.as_ref())?;
+        lap.mark(4);
+        let text = self.words_after(after.as_ref(), delta.as_ref(), whole_delta.as_ref())?;
+        lap.mark(5);
         let text_hash = self.put(&text)?;
+        lap.mark(4);
         self.player.play(&bytes)?;
+        lap.mark(6);
         let manifest = wire(Value::Map(BTreeMap::from([
             (1, Value::Bytes(self.seed.clone())),
             (2, Value::Bytes(self.head.clone().unwrap_or_default())),
@@ -2998,17 +3290,23 @@ impl<S: ObjectStore> PublicWriter<S> {
             (7, Value::Uint(self.cursor)),
         ])))?;
         self.commit(&manifest)?;
+        lap.mark(7);
         // Commit exact recovery bytes before exposing local immutable files. A killed publication replays the
         // same committed bytes, never a new cut at an orphan file's address.
         immutable(&self.generation_dir().join(number.to_string()), &bytes)?;
         immutable(&self.generation_dir().join(format!("{number}.text")), &text)?;
+        lap.mark(8);
         self.last_to = Some(sp.to);
         self.clear_pending();
         self.delete_some(DELETES_PER_PART);
         if self.rollover_due() {
             self.rollover()?;
         }
-        self.pointer(None)
+        lap.mark(9);
+        self.pointer(None)?;
+        lap.mark(10);
+        prof::count(0, 1, 0);
+        Ok(())
     }
     fn pointer(&self, quiet: Option<i64>) -> R<()> {
         let real = crate::answers::now();
@@ -3071,6 +3369,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         if !self.records.is_empty() {
             return Ok(());
         }
+        let mut lap = prof::Lap::start();
         let at = (
             self.canonical.version(),
             self.player.version(),
@@ -3085,10 +3384,14 @@ impl<S: ObjectStore> PublicWriter<S> {
                 a.insert(1, b[&1].clone());
             }
             if published != current {
+                lap.mark(11);
                 return Ok(());
             }
             self.still_at = Some(at);
         }
-        self.pointer(Some(world.saturating_sub(SETTLE_US)))
+        lap.mark(11);
+        self.pointer(Some(world.saturating_sub(SETTLE_US)))?;
+        lap.mark(12);
+        Ok(())
     }
 }

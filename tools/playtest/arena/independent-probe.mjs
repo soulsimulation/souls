@@ -1,10 +1,11 @@
 // Bounded development runner, NOT the sealed comparison scorer. One controller
 // process and private journal per Soul; no speaking order or cross-agent relay.
+import { isMain } from '../../lib/is-main.mjs';
 import {spawn} from 'node:child_process';
 import {createHash} from 'node:crypto';
 import {mkdirSync,readFileSync,writeFileSync,appendFileSync,existsSync,renameSync} from 'node:fs';
 import {resolve,join,dirname} from 'node:path';
-import {fileURLToPath,pathToFileURL} from 'node:url';
+import { fileURLToPath } from 'node:url';
 import {createWorldClient} from '../../soul-runtime/world-client.mjs';
 import {abortableSleep} from '../../soul-runtime/receiver.mjs';
 import {probeSessions,verifyOwnedProbeExit,probeArchivalStatus} from './probe-sessions.mjs';
@@ -115,7 +116,7 @@ export async function runIndependentProbe({directory,actors,fixtureActors=[],sec
   return {...summary,archived};
  }
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){
+if(isMain(import.meta.url)){
  const config=JSON.parse(readFileSync(resolve(process.argv[2]),'utf8')),stop=new AbortController();
  process.once('SIGINT',()=>stop.abort());process.once('SIGTERM',()=>stop.abort());
  runIndependentProbe({...config,signal:stop.signal,onState:s=>{if(['running','blocked','recovering'].includes(s.state))console.log(JSON.stringify(s));}}).then(r=>{console.log(JSON.stringify(r));if(r.failure||r.archival?.status==='incomplete')process.exitCode=1;}).catch(e=>{console.error(e.message);process.exitCode=1});
