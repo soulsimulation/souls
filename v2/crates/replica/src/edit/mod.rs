@@ -339,13 +339,6 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
     }
     // Each new definition's forms create only kinds the world has, into slots that admit them, and fire no ring of
     // timers every tick (`kind.effects`): one record never makes every run fail (#3697 review).
-    for (i, (_, k, _, entry)) in &made {
-        defined::effects_checked(entry, k, &kinds).map_err(|(name, detail)| Refused {
-            op: Some(*i),
-            name,
-            detail,
-        })?;
-    }
     // A thing of a creator's kind stands as its kind's bounds say (#3697): its solids, unless the batch gives its own,
     // so walkers go round it and the safety rule (G2) judges what it would bury, as a boot thing's.
     let mut shapes = defined::solids_in(tree);
@@ -353,6 +346,13 @@ pub fn check(mut edit: Edit, copy: &Replica, world: &World) -> Result<Checked, R
         made.values()
             .filter_map(|(full, _, s, _)| Some((full.clone(), s.clone()?))),
     );
+    for (i, (_, k, _, entry)) in &made {
+        defined::effects_checked(entry, k, &kinds, &shapes).map_err(|(name, detail)| Refused {
+            op: Some(*i),
+            name,
+            detail,
+        })?;
+    }
     for op in &mut edit.ops {
         if let Op::Place { kind, fields, .. } = op
             && let Some(s) = shapes.get(kind.as_str())
@@ -1088,8 +1088,7 @@ pub fn confirm(live: &Replica, c: &Checked) -> Result<(), Refused> {
 /// check, which the read set cannot hold, still refuses that definition's removal. Only a batch that removes a
 /// definition pays for the walk.
 fn in_use_live(live: &Replica, c: &Checked) -> Result<(), Refused> {
-    let tree = live.tree();
-    let removed: Vec<(usize, Id)> = c
+    let removed: Vec<(Option<usize>, Id)> = c
         .edit
         .ops
         .iter()
@@ -1097,11 +1096,19 @@ fn in_use_live(live: &Replica, c: &Checked) -> Result<(), Refused> {
         .filter_map(|(i, op)| match op {
             Op::Remove {
                 node: Ref::Node(id),
-            } => Some((i, *id)),
+            } => Some((Some(i), *id)),
             _ => None,
         })
         .collect();
-    let gone: Vec<(usize, String)> = removed
+    in_use_on(live.tree(), &removed)
+}
+
+/// `kind.in-use` for removing `removed` (each with the operation that removes it, if any) from `tree`: a removed
+/// definition whose kind is still the kind of a thing left. An edit's commit and an undo or redo (`sim::edit::undo`,
+/// on the checker's copy and at the tick) both ask it, so no reversal removes a kind a thing still has (#3697
+/// re-review). Only removing a definition pays for the walk.
+pub fn in_use_on(tree: &crate::tree::Tree, removed: &[(Option<usize>, Id)]) -> Result<(), Refused> {
+    let gone: Vec<(Option<usize>, String)> = removed
         .iter()
         .filter_map(|(i, id)| {
             let n = tree.node(tree.handle(*id)?)?;
@@ -1114,7 +1121,7 @@ fn in_use_live(live: &Replica, c: &Checked) -> Result<(), Refused> {
     if gone.is_empty() {
         return Ok(());
     }
-    let removed: BTreeSet<Id> = removed.into_iter().map(|(_, id)| id).collect();
+    let removed: BTreeSet<Id> = removed.iter().map(|(_, id)| *id).collect();
     let mut stack = vec![tree.root()];
     while let Some(h) = stack.pop() {
         let Some(n) = tree.node(h) else { continue };
@@ -1123,7 +1130,7 @@ fn in_use_live(live: &Replica, c: &Checked) -> Result<(), Refused> {
         }
         if let Some((i, full)) = gone.iter().find(|(_, f)| f == n.kind().as_str()) {
             return refuse(
-                Some(*i),
+                *i,
                 "kind.in-use",
                 format!(
                     "{:?} is still a {}; remove what uses it first",

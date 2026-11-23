@@ -75,6 +75,8 @@ use std::io::Write;
 use std::sync::OnceLock;
 use std::time::Instant;
 
+/// Two centres closer than this, µm, are a close pair (#4215: the overlap count's 0.3 m).
+const CLOSE: i64 = 300_000;
 /// µs a tick: 20 a second.
 const TICK: Micros = 50_000;
 /// µm a second: today's walking pace.
@@ -750,6 +752,10 @@ fn main() {
     let mut ended_names: BTreeMap<String, u64> = BTreeMap::new();
     // #3231: the tick's hearing (`Hearing::update`, after the ladder's step), timed apart from the tick, ns.
     let (mut hearing, mut hear_ns) = (Hearing::new(), Vec::with_capacity(ticks as usize));
+    // #4215: pairs of bodies on one node, neither carried, at least one walking, whose centres are closer than
+    // CLOSE after a tick (not timed): distinct pairs, pair-ticks and the most in one tick.
+    let mut close_pairs: std::collections::BTreeSet<(Id, Id)> = std::collections::BTreeSet::new();
+    let (mut close_ticks, mut close_most) = (0u64, 0usize);
     while ticker.next_tick() < ticks {
         let mut body = |tick: i64, start: Micros| {
             // The clock catches up after an overrun: never past the run's last tick.
@@ -1050,6 +1056,39 @@ fn main() {
                     }
                 }
             }
+            {
+                let mut on: Vec<(Id, i64, i64, Id, bool)> = runner
+                    .controller
+                    .bodies()
+                    .filter(|b| !runner.controller.carried(b.id))
+                    .map(|b| {
+                        let walking = runner.running(b.id);
+                        (
+                            node_of(b),
+                            b.pose.position.x,
+                            b.pose.position.z,
+                            b.id,
+                            walking,
+                        )
+                    })
+                    .collect();
+                on.sort();
+                let mut this = 0usize;
+                for i in 0..on.len() {
+                    for j in i + 1..on.len() {
+                        let (a, b) = (on[i], on[j]);
+                        if b.0 != a.0 || b.1 - a.1 >= CLOSE {
+                            break;
+                        }
+                        if (a.4 || b.4) && dist([a.1, a.2], [b.1, b.2]) < CLOSE {
+                            this += 1;
+                            close_pairs.insert((a.3.min(b.3), a.3.max(b.3)));
+                        }
+                    }
+                }
+                close_ticks += this as u64;
+                close_most = close_most.max(this);
+            }
             if let Some((f, c)) = trace.as_mut() {
                 for b in runner.controller.bodies() {
                     let Some(&k) = index.get(&b.id) else { continue };
@@ -1242,6 +1281,11 @@ fn main() {
             longest_wait / 1000,
         );
     }
+    println!(
+        "walkers: close pairs (centres under {} mm, one walking, same node): {} distinct, {close_ticks} pair-ticks, at most {close_most} in a tick",
+        CLOSE / 1000,
+        close_pairs.len()
+    );
     let bar = |ok: bool| if ok { "pass" } else { "miss" };
     println!(
         "walkers: bars: median <= 5 ms {}; p99 <= 15 ms {}; corner median < 1 ms {}; no walker without progress for 30 s {}; walker faults 0 {}",

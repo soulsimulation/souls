@@ -27,3 +27,18 @@ export function ageOf({ now, startedAt, confirmedAt, changedAt, cutAt, why, aske
   const still = changedAt == null ? 0 : now - changedAt;
   return { age, ...(still >= ASLEEP_AFTER_MS ? { asleep: { sinceMs: Math.round(still) } } : {}) };
 }
+
+// #1960: the world's sync copy seals at most every 250 ms (worldd `syncs::SEAL_EVERY`) and answers a hashes request
+// sooner than that from its last seal, at that seal's version. A follow can then end behind the version a receipt or
+// an entry named; the daemon follows again FOLLOW_AGAIN_MS later, once the world has sealed the change.
+
+/** How long after a follow that ended behind the daemon follows again: worldd's `SEAL_EVERY`. */
+export const FOLLOW_AGAIN_MS = 250;
+/** At most this many follows again in a row: past it, the next entry or receipt asks again. */
+export const FOLLOW_AGAIN_MOST = 8;
+
+/**
+ * Whether a follow that ended at sequence `at` follows again: the copy is behind `owed` (the newest version a receipt
+ * or an entry named since sign-in), and fewer than FOLLOW_AGAIN_MOST follows again were made in a row (`again`).
+ */
+export const followsAgain = ({ at, owed, again }) => at < owed && again < FOLLOW_AGAIN_MOST;

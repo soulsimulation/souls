@@ -121,6 +121,11 @@ pub trait Links {
         speed: i64,
         at: Micros,
     ) -> Result<Option<Track>, Refusal>;
+    /// Whether `link` is taken in turns (N8): its owner's turns keep its far end clear, so a crossing of it is not held
+    /// for a body standing where it lands (#4215).
+    fn in_turns(&self, _link: Id) -> bool {
+        false
+    }
 }
 
 /// A running skill on a body.
@@ -510,6 +515,9 @@ pub fn hand_on_threads(
     controller.set_velocities_on(&staged.controls, threads)
 }
 
+/// A crossing waits while another body stands within this of where it lands, µm (#4215).
+pub use crate::controller::LANDING_ROOM;
+
 /// Hands a tick's staged crossings on: for each, the world's [`Links`] gives the track (or opens a shut door, and the
 /// body stands), and the controller carries the body along it under the run's driver. Refusals are returned with
 /// their bodies; a refused crossing changes nothing.
@@ -519,7 +527,22 @@ pub fn carry(
     links: &mut impl Links,
     at: Micros,
 ) -> Vec<(Id, Refusal)> {
+    carry_past(staged, controller, links, at, &BTreeSet::new())
+}
+
+/// [`carry`], with a crossing held while a body other than those in `queued` stands where it would land (#4215).
+pub fn carry_past(
+    staged: &Staged,
+    controller: &mut Controller,
+    links: &mut impl Links,
+    at: Micros,
+    queued: &BTreeSet<Id>,
+) -> Vec<(Id, Refusal)> {
     let mut refused = Vec::new();
+    // Those asking to cross this tick leave where they stand: a body at a link's far end asking the other way does not
+    // hold a crossing toward it.
+    let mut leaving: BTreeSet<Id> = staged.crossings.iter().map(|c| c.0).collect();
+    leaving.extend(queued);
     for &(body, driver, link, speed) in &staged.crossings {
         let Some(b) = controller.body(body).copied() else {
             refused.push((
@@ -532,8 +555,14 @@ pub fn carry(
             continue;
         };
         let r = match links.track(&b, link, speed, at) {
-            Ok(Some(t)) => controller.cross(body, driver, t),
-            Ok(None) => controller.set(
+            Ok(Some(t))
+                if links.in_turns(link)
+                    || !controller.landing_taken(body, &t, LANDING_ROOM, &leaving) =>
+            {
+                controller.cross(body, driver, t)
+            }
+            // A shut door being opened, or a body standing where it would land (#4215): it stands and asks again.
+            Ok(_) => controller.set(
                 body,
                 driver,
                 Part::Velocity(Vec3::ZERO, replica::pose::Mode::Surface),
@@ -1230,7 +1259,16 @@ impl Runner {
             wants.marks = Some(marks);
         }
         let mut refused = hand_on_threads(&staged, &mut self.controller, self.threads);
-        refused.extend(carry(&staged, &mut self.controller, town, at));
+        // Those waiting at a narrow place stand in its queue; its owner's turns keep its far end clear (N8). A body
+        // staying by its own order is passed (N10).
+        let mut queued: BTreeSet<Id> = self
+            .fields
+            .iter()
+            .filter(|(_, f)| crate::host::waiting(Some(f)).is_some())
+            .map(|(id, _)| *id)
+            .collect();
+        queued.extend(&self.staying);
+        refused.extend(carry_past(&staged, &mut self.controller, town, at, &queued));
         // The tick's end: each skill's own entries set its body's fields.
         for e in &staged.emits {
             for c in &e.changes {

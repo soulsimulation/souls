@@ -1131,6 +1131,182 @@ fn a3727_a_helper_builds_only_under_its_own_claim_and_an_undo_stays_out_of_claim
     w.close();
 }
 
+fn points(list: &[[i64; 2]]) -> Value {
+    Value::Array(
+        list.iter()
+            .map(|p| Value::Array(vec![mm(p[0]), mm(p[1])]))
+            .collect(),
+    )
+}
+
+/// A road at its parent's origin, as the creator's `place --path` lays one (#3962): its line (field 16) and the
+/// ribbon outline (field 11) of a line along x, `width` mm wide, all in mm.
+fn road(name: u64, kind: &Name, parent: Ref, line: &[[i64; 2]], width: i64) -> Op {
+    let h = width / 2;
+    let left = line.iter().map(|p| [p[0], p[1] + h]);
+    let right = line.iter().rev().map(|p| [p[0], p[1] - h]);
+    Op::Place {
+        name,
+        kind: kind.clone(),
+        parent,
+        at: spot(0, None),
+        audience: Audience::Everyone,
+        fields: BTreeMap::from([
+            (11, points(&left.chain(right).collect::<Vec<_>>())),
+            (16, points(line)),
+        ]),
+    }
+}
+
+#[test]
+fn a3962_a_shape_is_judged_by_its_outline_and_line_not_its_origin() {
+    use replica::edit::claims::{F_CLAIMS, judge_effects};
+    let mut w = W::new();
+    let room = kind(&w.header, "souls:room");
+    let helper = Id::new(Scope([0xc0; 16]), (1 << 44) + 7).expect("an id");
+    let as_helper = Actor::Creator(helper);
+    // Before any claim, the lead lays a road at the ground's origin, x 120..180 mm along z 30 mm.
+    let v = w.live.version();
+    let lead = w
+        .edit(
+            w.creator(),
+            v,
+            vec![road(
+                1,
+                &room,
+                Ref::Node(w.root),
+                &[[120, 30], [180, 30]],
+                4,
+            )],
+        )
+        .expect("the lead's road");
+    let built = lead.names[&1];
+    // The lead's yard (x 100..200, z -10..10 mm) and the helper's house (x 100..200, z 20..40 mm): neither holds the
+    // origin, where every shape stands.
+    let yard = claim_row("c:yard", "part:yard", [100, -10, 200, 10]);
+    let mut house = match claim_row("c:house", "part:house", [100, 20, 200, 40]) {
+        Value::Array(r) => r,
+        _ => unreachable!(),
+    };
+    house.push(text(&format!(
+        "helper:h{}-{}",
+        replica::encode::to_hex(&helper.scope().0),
+        helper.counter()
+    )));
+    let v = w.live.version();
+    w.edit(
+        w.creator(),
+        v,
+        vec![set_root(
+            w.root,
+            F_CLAIMS,
+            Value::Array(vec![yard, Value::Array(house)]),
+        )],
+    )
+    .expect("claimed");
+    let v = w.live.version();
+    // A road across the yard, under no claim: its middle point is inside, so it is refused.
+    let r = w
+        .edit(
+            w.creator(),
+            v,
+            vec![road(
+                1,
+                &room,
+                Ref::Node(w.root),
+                &[[50, 0], [150, 0], [250, 0]],
+                4,
+            )],
+        )
+        .expect_err("across the yard");
+    assert_eq!((r.op, r.name), (Some(0), "edit.claimed"), "{r:?}");
+    // The helper's road inside its own claim is built; one that leaves it is not.
+    w.edit_under(
+        as_helper,
+        v,
+        vec![road(
+            1,
+            &room,
+            Ref::Node(w.root),
+            &[[110, 25], [190, 25]],
+            4,
+        )],
+        Some("c:house"),
+    )
+    .expect("the helper's road inside its claim");
+    let v = w.live.version();
+    let r = w
+        .edit_under(
+            as_helper,
+            v,
+            vec![road(
+                1,
+                &room,
+                Ref::Node(w.root),
+                &[[150, 30], [250, 30]],
+                4,
+            )],
+            Some("c:house"),
+        )
+        .expect_err("out of its claim");
+    assert_eq!((r.op, r.name), (Some(0), "edit.outside-claim"), "{r:?}");
+    // The lead's road now lies in the house claim: the lead may not move, remove or reshape it under no claim.
+    for op in [
+        Op::Move {
+            node: Ref::Node(built),
+            at: spot(5_000, None),
+        },
+        Op::Remove {
+            node: Ref::Node(built),
+        },
+        Op::Set {
+            node: Ref::Node(built),
+            field: 16,
+            to: points(&[[120, 30], [170, 30]]),
+        },
+    ] {
+        let r = w.edit(w.creator(), v, vec![op]).expect_err("in the house");
+        assert_eq!((r.op, r.name), (Some(0), "edit.claimed"), "{r:?}");
+    }
+    // An undo or redo that lays it again is refused too.
+    let r = judge_effects(&w.live, &lead.part.effects).expect_err("in the house");
+    assert_eq!(r.name, "edit.claimed", "{r:?}");
+    // The helper moves it 10 mm along, inside; 60 mm takes its far end out (x 180..240 mm); then removes it.
+    w.edit_under(
+        as_helper,
+        v,
+        vec![Op::Move {
+            node: Ref::Node(built),
+            at: spot(10_000, None),
+        }],
+        Some("c:house"),
+    )
+    .expect("moved inside");
+    let v = w.live.version();
+    let r = w
+        .edit_under(
+            as_helper,
+            v,
+            vec![Op::Move {
+                node: Ref::Node(built),
+                at: spot(60_000, None),
+            }],
+            Some("c:house"),
+        )
+        .expect_err("moved out");
+    assert_eq!((r.op, r.name), (Some(0), "edit.outside-claim"), "{r:?}");
+    w.edit_under(
+        as_helper,
+        v,
+        vec![Op::Remove {
+            node: Ref::Node(built),
+        }],
+        Some("c:house"),
+    )
+    .expect("the helper removes it");
+    w.close();
+}
+
 #[test]
 fn a3728_a_link_is_judged_at_both_ends_and_its_door() {
     use replica::edit::claims::{F_CLAIMS, judge_effects};

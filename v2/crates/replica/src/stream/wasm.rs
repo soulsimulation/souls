@@ -56,6 +56,18 @@ pub fn read_pointer(bytes: &[u8]) -> Result<String, JsError> {
             crate::encode::to_hex(from)
         ));
     }
+    // #2731: the world sleeps, still until its next due change (`[t]`, world µs) or with nothing due (`[]`).
+    if let Some(crate::encode::Value::Array(due)) = m.get(&11) {
+        let until = match due.as_slice() {
+            [] => "null".to_owned(),
+            [t] => super::read_int(Some(t), "still until")
+                .map_err(js)?
+                .to_string(),
+            _ => return Err(JsError::new("still until")),
+        };
+        json.pop();
+        json.push_str(&format!(",\"asleep\":true,\"stillUntil\":{until}}}"));
+    }
     Ok(json)
 }
 

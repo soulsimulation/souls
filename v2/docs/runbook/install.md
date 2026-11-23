@@ -1,7 +1,7 @@
 # Installing Engine v2 beside today's system
 
 Engine v2 O17 (#2810). One script, `v2/tools/ops/install.sh`, puts the new programs on one Linux machine beside
-today's system. It serves nothing public and starts nothing: the preview is a path on the public name that the proxy
+today's system. It serves nothing public and starts nothing but the alarm daemon (below): the preview is a path on the public name that the proxy
 sends to these programs once the owner places its site file. Routing between the systems is O19 (`v2/tools/ops/proxy/README.md`); releases are O18.
 
 ## What it makes
@@ -18,7 +18,7 @@ sends to these programs once the owner places its site file. Routing between the
 | The directory's arguments, written once, never overwritten | `/etc/souls/directory.args` | root:souls, 640 |
 | Secrets, `KEY=value`, written once (empty), never overwritten | `/etc/souls/secrets.env` | root, 600 |
 | What the install made (its record; see below) | `/etc/souls/install.state` | root, 644 |
-| Units | `souls.slice`, `worldd@.service` (O1) and its drop-in `worldd@.service.d/10-install.conf`, `souls-gateway@.service`, `souls-directory.service`, `souls-origin.service`, `souls-agents.service` | root, 644 |
+| Units | `souls.slice`, `worldd@.service` (O1) and its drop-in `worldd@.service.d/10-install.conf`, `souls-gateway@.service`, `souls-directory.service`, `souls-origin.service`, `souls-agents.service`, `souls-alarms.service` and its drop-in `souls-alarms.service.d/10-install.conf` (the one unit it starts) | root, 644 |
 
 The view tier runs inside each world's process (`worldd`), so it has no unit of its own. Every program runs as
 `souls` in `souls.slice`, whose `MemoryMax` is 12 GB: the largest world's cap (Eden's 8 GB) and 4 GB for the rest.
@@ -44,7 +44,12 @@ slice that is at most 29 GB of 30.6 GB, 9.3 GB at today's use. Yes.
 
 ## How it stays apart
 
-- It starts, enables and restarts nothing; the one systemd call is `daemon-reload` when a unit file changed.
+- It starts, enables and restarts nothing but the alarm daemon, `souls-alarms.service` (O2, #2731; runbook
+  [sleep-and-wake.md](sleep-and-wake.md)): it enables and starts it, and restarts it when its unit or drop-in
+  changed. With no world asleep it only waits. Its drop-in (`souls-alarms.service.d/10-install.conf`) keeps it root,
+  since it starts worlds, in the group souls with a group-writable socket, so worlds and gateways (the user souls)
+  reach it. Uninstall stops and disables it. Otherwise the one systemd call is `daemon-reload` when a unit file
+  changed.
 - It never reads or writes today's units, users, data, proxy, DNS or firewall. `install.sh check` (run by CI in
   `v2/tools/ci.sh` and by the workflow) plans into an empty folder and compares every path it would write, and every
   unit, user and port it names, with what today's installer and units name (read from
