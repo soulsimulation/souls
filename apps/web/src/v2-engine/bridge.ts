@@ -2,7 +2,7 @@
 // (v2/web/src/source/worker.ts: the stream's pointer and parts, played on the replica's WASM in a worker), keeps the
 // public nodes and body samples it hands on, and keeps the page's `takes` and Souls list as the old socket would: the
 // last chunks of every Soul's body (takes.ts) and one PublicSoul a body. Nothing here draws or decides; LiveWorld does.
-import { chunkEnd, chunkOf, TICKS, TICK_US, type Body, type Frame, type RecordedChunk, type WorldSample } from './takes.ts';
+import { chunkEnd, chunkOf, TICK_US, type Body, type Frame, type RecordedChunk, type WorldSample } from './takes.ts';
 import { defaultLookOf, entityWithLook, legacyBodyOf, propOf, seatOf, type CatalogueBody, type Held, type Seat } from './take-bodies.ts';
 import { isPublic, saidKey, speechOf, talkOf, type Said, type Talk } from './take-speech.ts';
 import { cut as cutGestures, gestureFrom, type Gesture } from './take-gestures.ts';
@@ -28,7 +28,8 @@ export type V2View = {
   unplaced: number;
   /** The last frames (node ids) a sample could not be placed in, and the slot it named, newest last: for checks. */
   unplacedFrames: string[];
-  takes: { serverTick: number; chunks: RecordedChunk[]; receivedAt: number };
+  /** `playDelay`: the ticks the page plays behind serverTick (LiveWorld's live delay for this source, B3-4). */
+  takes: { serverTick: number; chunks: RecordedChunk[]; receivedAt: number; playDelay: number };
   souls: Map<string, V2Soul>;
   /** World time (µs) the parts reach. */
   newestTo: number | null;
@@ -59,8 +60,15 @@ export function doingOf(n: NodeRec | null, samples: readonly { at: number }[], t
 }
 
 const Q = 2 ** 30;
-/** The v2 page's own lag behind the world (v2/web/src/clock/clock.ts BEHIND_US: four 0.5 s parts). */
-const BEHIND_US = 2_000_000;
+/** How far behind the newest part a chunk is made (B3-4): past a walker's next sample, which comes every 0.2 s (p99
+ *  0.25 s at 100 Souls), so a walking body is never held at its last one; was the v2 page's 2 s, which with LiveWorld's
+ *  1.5 s and one-second chunks showed an act about 3.5 s after the world's answer. */
+export const BEHIND_US = 300_000;
+/** Ticks a chunk (B3-4): half a second, one stream part, so a new chunk is in as often as a part comes. */
+export const CHUNK = 10;
+/** Ticks the page plays behind the newest chunk's end (LiveWorld's live delay for this source, B3-4): one chunk and half
+ *  of one more for a part that comes late, where the old socket's one-second chunks need 30. */
+export const PLAY_DELAY = 15;
 type Mat = { p: [number, number, number]; q: [number, number, number, number] };
 const rotate = (q: Mat['q'], v: [number, number, number]): [number, number, number] => {
   const [w, x, y, z] = q, [vx, vy, vz] = v;
@@ -73,13 +81,13 @@ const mul = (a: Mat['q'], b: Mat['q']): Mat['q'] => [a[0] * b[0] - a[1] * b[1] -
 /** A body: a node with a public Soul (its body-of link), or one of a body kind. */
 const isBody = (n: NodeRec) => !!n.soul || /:(humanoid|body)$/.test(n.kind.split('@')[0]);
 const samePlace = (a: NodeRec, b: NodeRec) => a.parent === b.parent && a.slot === b.slot && a.pos.every((v, i) => v === b.pos[i]);
-/** Chunks the page keeps, as useSouls keeps the socket's. */
-const KEEP = 12;
+/** Chunks the page keeps: 12 s, as useSouls keeps the socket's twelve one-second ones. */
+const KEEP = 24;
 /** Samples kept a body: a minute of world time before the oldest chunk kept. */
-const KEEP_US = (KEEP * TICKS * TICK_US) + 60_000_000;
+const KEEP_US = (KEEP * CHUNK * TICK_US) + 60_000_000;
 
 export class V2Bridge {
-  readonly view: V2View = { unplaced: 0, unplacedFrames: [], takes: { serverTick: 0, chunks: [], receivedAt: 0 }, souls: new Map(), newestTo: null, error: null, parts: 0, speech: [] };
+  readonly view: V2View = { unplaced: 0, unplacedFrames: [], takes: { serverTick: 0, chunks: [], receivedAt: 0, playDelay: PLAY_DELAY }, souls: new Map(), newestTo: null, error: null, parts: 0, speech: [] };
   private readonly nodes = new Map<string, NodeRec>();
   /** Each body's samples, its last record and, while the public copy cannot draw it (a frame that is not public, or it
    *  left), since when: it is not drawn from then until it is back. */
@@ -247,9 +255,9 @@ export class V2Bridge {
     const to = this.view.newestTo;
     if (to === null) return;
     // A body's samples come at its turns and steps, not every tick: a chunk is made once the world is BEHIND_US past its
-    // end (the v2 page's own lag), so the sample after it is in and a walking body is not held at its last one.
-    const end = chunkEnd(to - BEHIND_US), bodies = this.bodies();
-    const first = Math.max(end - KEEP * TICKS, Math.ceil((this.liveFrom ?? Infinity) / TICK_US / TICKS) * TICKS);
+    // end, so the sample after it is in and a walking body is not held at its last one.
+    const end = chunkEnd(to - BEHIND_US, CHUNK), bodies = this.bodies();
+    const first = Math.max(end - KEEP * CHUNK, Math.ceil((this.liveFrom ?? Infinity) / TICK_US / CHUNK) * CHUNK);
     // what each is doing at the time the page shows (the world's newest time less the page's lag)
     const shown = to - BEHIND_US;
     const souls = new Map(bodies.map((b) => {
@@ -263,7 +271,7 @@ export class V2Bridge {
     if (end === this.view.takes.serverTick) return;
     this.speak(end);
     const datetime = this.datetime(end * TICK_US);
-    for (let from = first; from < end; from += TICKS) if (from >= 0 && !this.built.has(from)) this.built.set(from, chunkOf(bodies, from, { ...this.frame, datetime }));
+    for (let from = first; from < end; from += CHUNK) if (from >= 0 && !this.built.has(from)) this.built.set(from, chunkOf(bodies, from, { ...this.frame, datetime }, CHUNK));
     for (const from of [...this.built.keys()]) if (from < first) this.built.delete(from);
     const cut = first * TICK_US - KEEP_US;
     for (const [id, t] of this.tracks) {
@@ -277,7 +285,7 @@ export class V2Bridge {
       t.said = t.said.filter((l) => l.tick >= first);
       t.gestures = t.gestures.filter((g) => g.end >= cut);
     }
-    this.view.takes = { serverTick: end, chunks: [...this.built.values()].sort((a, b) => a.fromTick - b.fromTick), receivedAt: performance.now() };
+    this.view.takes = { serverTick: end, chunks: [...this.built.values()].sort((a, b) => a.fromTick - b.fromTick), receivedAt: performance.now(), playDelay: PLAY_DELAY };
   }
 
   /** The saids before chunk tick `end` become talk lines, in world-time order, each once: on its speaker's body (the
