@@ -60,3 +60,21 @@ test("the old page: the production front door with this run's addresses, and the
   assert.deepEqual(withRoute(routes, 'hello-hamlet').worlds['hello-hamlet'], { gateway: 'http://127.0.0.1:7802', stream: '/s/w/dev/x/', canonical: false });
   assert.equal(templateName('worlds/templates/hello-hamlet.json'), 'hello-hamlet');
 });
+
+test("a cast's and a battery's old words in the new client's, and what the stream says back", async () => {
+  const { newWords, placePathOf, mailboxSoul } = await import('./director.mjs');
+  const { placeIds, receiptsOf, kindName } = await import('./battery.mjs');
+  assert.deepEqual(newWords(['act', 'walk to the pond hall', '--wait', '100']), ['act', '?the pond hall', '--wait']);
+  assert.deepEqual(newWords(['act', 'walk:lab-presentation-hall', '--wait', '60']), ['act', '?lab-presentation-hall', '--wait']);
+  assert.deepEqual(newWords(['act', '{{prev.found[0].act}}']), ['act', '{{prev.found[0].id}}']);
+  assert.deepEqual(newWords(['say', 'Hello']), ['say', 'Hello']);
+  assert.match(newWords(['act', 'sit-ground:here']).skip, /sit-ground/);
+  assert.match(newWords(['plan', '["walk:cottage"]', '--for', '{id}']).skip, /plan/);
+  assert.equal(mailboxSoul('s_ab12-0'), 'soul-ab12-0');
+  const nodes = new Map([['b.0', { id: 'b.0', parent: 'f.45' }], ['f.45', { id: 'f.45', parent: 'h.44' }], ['h.44', { id: 'h.44', parent: 'g.1', placeName: 'lab-pond-hall' }], ['g.1', { id: 'g.1', parent: null }]]);
+  assert.deepEqual(placePathOf(nodes, 'b.0'), ['lab-pond-hall']);
+  assert.deepEqual(placeIds(['lab-pond-hall']), ['g-lab-pond-hall']);
+  assert.equal(kindName('eden:bench@1220ab'), 'core-bench');
+  const r = receiptsOf([{ at: 5, words: ['act', 't-1', '--wait'], answer: { phase: 'done', receipt: { verbs: ['dev:sit'], target: 't-1' } } }, { at: 1, words: ['act', 'x'], answer: { receipt: { verbs: ['dev:walk'] } } }], 2);
+  assert.deepEqual(r.map((x) => [x.capability, x.phase]), [['sit:t-1', 'completed']]);
+});

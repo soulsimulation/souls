@@ -22,17 +22,23 @@ import { sleep } from '../../lib/clock.mjs';
 /** The directory's key for a client's Soul id (`s_<hex>-<n>` → `soul-<hex>-<n>`). */
 export const mailboxSoul = (soul) => String(soul).replace(/^s_/, 'soul-');
 
+/** The old client's verbs the new client has no form of yet: a step of one is listed and skipped, not re-made. */
+export const NO_NEW_FORM = { 'sit-ground': 'sitting on the ground', plan: 'a multi-step plan (out of 0.135)', 'walk-to': 'a walk to a point' };
+
 /** An old-client step in the new client's words: `act "walk to <words>"` or `act walk:<id>` → `act ?<words>` (found in
- *  the Soul's copy); `--wait <n>` → `--wait`. Anything else is passed as it is. */
+ *  the Soul's copy); `--wait <n>` → `--wait`; `{{prev.found[i].act}}` → the found thing's id (the new client's `find`
+ *  names things, not acts: an id alone is a walk there). A verb with no new-engine form → `{ skip }`. */
 export function newWords(step) {
   const w = [...step];
+  const verb = w[0] === 'act' ? String(w[1] ?? '').split(':')[0] : w[0];
+  if (NO_NEW_FORM[verb]) return { skip: `${verb}: ${NO_NEW_FORM[verb]} has no new-engine form` };
   if (w[0] === 'act' && typeof w[1] === 'string') {
     const to = /^walk to (.+)$/i.exec(w[1]) ?? /^walk:(.+)$/.exec(w[1]);
     if (to) w[1] = `?${to[1].replace(/\/.*$/, '')}`;
   }
   const i = w.indexOf('--wait');
   if (i >= 0 && /^\d+$/.test(w[i + 1] ?? '')) w.splice(i + 1, 1);
-  return w;
+  return w.map((x) => String(x).replace(/\{\{prev\.found\[(\d+)\]\.act\}\}/g, '{{prev.found[$1].id}}'));
 }
 
 /** A place path from a node's frames: the place names of its parents, innermost first. */
@@ -97,7 +103,7 @@ export function newEngineModules({ log = () => {} } = {}) {
       mkdirSync(dir, { recursive: true });
       const info = { id: s.id, soulName: s.soulName ?? s.id, adapter: s.adapter, soulId: null, ownerIdentity: s.id, body: null };
       let v2 = null, looping = false, stopped = false;
-      const handled = new Set(), transcript = join(dir, 'turns.jsonl');
+      const handled = new Set(), transcript = join(dir, 'turns.jsonl'), skipped = [];
       const note = (rec) => appendFileSync(transcript, JSON.stringify({ t: new Date().toISOString(), ...rec }) + '\n');
       /** One owner's message, answered by the script's first matching rule. */
       async function serve(m) {
@@ -108,6 +114,8 @@ export function newEngineModules({ log = () => {} } = {}) {
         let ok = true, prev = null;
         for (const step of rule.do ?? []) {
           let words = newWords(stepArgs(step));
+          if (words.skip) { note({ message: m.id, step: stepArgs(step), skipped: words.skip }); skipped.push(words.skip); continue; }
+          words = words.map((x) => x.replaceAll('{id}', m.id));
           const bound = bindPrev(words, prev);
           if (bound.error) { ok = false; note({ message: m.id, step: words, error: bound.error }); break; }
           words = await Promise.all(bound.args.map(async (w) => (w.startsWith('?') ? (await placeIn(v2, w.slice(1)))?.id ?? w : w)));
@@ -120,7 +128,7 @@ export function newEngineModules({ log = () => {} } = {}) {
         if (rule.close !== 'open') await v2.cli('ack', m.id, (rule.result ?? (ok ? 'Done' : 'Could not')).slice(0, 140), '--close', ok ? 'done' : 'failed');
       }
       const self = {
-        info, dir, rails: null, budgetRefused: null,
+        info, dir, rails: null, budgetRefused: null, skipped, commands: () => join(dir, s.id, 'commands.jsonl'),
         async onboard() {
           v2 = await pairSeat({ world, dir, label: s.id, owner: s.id, name: info.soulName });
           info.body = (await v2.join()).body; info.soulId = v2.soul; bodies.set(v2.soul, info.body);
@@ -147,6 +155,8 @@ export function newEngineModules({ log = () => {} } = {}) {
   };
 
   const swarmTruth = () => ({
+    /** A stream node by a client id (`<scope>-<n>`). */
+    node: (id) => viewer?.node(id) ?? null,
     async soul(soulId) {
       if (!viewer) return { soulId, ok: false };
       const body = bodies.has(soulId) ? viewer.node(bodies.get(soulId)) : null;
