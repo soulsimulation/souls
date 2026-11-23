@@ -32,23 +32,31 @@ use replica::effects::{
     Actor, Body, Cause, Change, ChangeRec, Effect, Envelope, Header, Part, Rest, schema_hash,
 };
 use replica::encode::{Name, Value, decode, encode};
+use replica::ids::Minter;
 use replica::ids::{Hash, Id, Purpose, Scope, Version};
 use replica::intents::{Hello, Intent, PROTOCOL, Target};
 use replica::pose::{Frame, Pose, Quat, Support, Vec3};
 use replica::rules::json::{Value as Json, parse};
 use replica::tree::Rules as TreeRules;
+use replica::views::{Key, Level, Redactions};
 use replica::world_model::{Audience, Kind};
 use sim::activity::carry::Load;
 use sim::ground::scene::F_SOLIDS;
 use sim::links::Doors;
 use sim::log::{Mem, recover};
+use sim::text::Store;
 use sim::walk::town::Town;
+use std::sync::Arc;
+use std::sync::atomic::AtomicBool;
 use tokio::net::TcpStream;
 use tokio_tungstenite::tungstenite::Message;
 use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
 use worldd::answers::{self, BODIES, Config, STATE};
 use worldd::bodies::{Bodies, Placed, read_row};
 use worldd::checkers::Rules;
+use worldd::view_out::{Writer, follow};
+use worldd::views::Tier;
+use worldd::words;
 
 type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
 
@@ -61,7 +69,7 @@ const CARRIED: i64 = 25 * M;
 const PLACE: &str = "souls:place";
 /// The open ground, as the carry's sweep reads it (`sim::ground::scene::GROUND`): a child of the zone's root.
 const GROUND: &str = "eden:ground";
-const WALKER: &str = "test:walker";
+const WALKER: &str = "test:body"; // K1: a body as the old page knows one (`:body`), so the scene draws its carriers
 const BEAM: &str = "mars:rack_beam";
 const UPRIGHT: &str = "mars:rack_upright";
 const CRATE: &str = "test:crate";
@@ -641,17 +649,80 @@ fn nodes(r: &Replica) -> BTreeSet<Id> {
     out
 }
 
+/// K1 (0.135): with `TEAM_GATE_WWW=<dir>`, the scene's world also writes its public stream under `<dir>` (as
+/// `worldd gateway-link --www` does), so the old page can play the carry; `TEAM_GATE_HOLD=<s>` keeps the world up that
+/// long after the scene and `TEAM_GATE_WAIT=<s>` before it, to watch. Unset, nothing changes.
+fn watch(cfg: &mut Config) {
+    let Ok(www) = std::env::var("TEAM_GATE_WWW") else {
+        return;
+    };
+    let www = PathBuf::from(www);
+    let text = Arc::new(
+        Store::open_dir(&www.join("text"), Minter::new(words::scope(LINEAGE)))
+            .expect("the text store"),
+    );
+    cfg.text = Some(Arc::clone(&text));
+    let built = world();
+    let header = built.header().clone();
+    let start = built.tree().to_state();
+    let key = Key {
+        node: start.root,
+        level: Level::Full,
+        audience: Audience::Everyone,
+    };
+    cfg.follow = Some(Box::new(move |durable| {
+        let tier = Tier::start(
+            header.clone(),
+            start.clone(),
+            Redactions::default(),
+            durable,
+        )
+        .expect("the view tier");
+        let sub = tier.subscribe(vec![key], 1 << 16);
+        let now = answers::now();
+        let anchor = (now, u64::try_from(now / 1_000).unwrap_or(0));
+        let writer = Writer::fork_with_text(&www, &header, &key, anchor, &start, Some(text))
+            .expect("the stream writer");
+        println!(
+            "team gate: stream {}",
+            writer
+                .dir()
+                .strip_prefix(&www)
+                .unwrap_or(writer.dir())
+                .display()
+        );
+        drop(follow(
+            writer,
+            sub,
+            Arc::new(AtomicBool::new(false)),
+            answers::now,
+        ));
+        Box::new(move |n, bytes| tier.offer(n, bytes))
+    }));
+}
+
+/// K1: `TEAM_GATE_WAIT` seconds before the scene (a page opens on the world) and `TEAM_GATE_HOLD` after it, else none.
+async fn hold(var: &str) {
+    if let Some(s) = std::env::var(var).ok().and_then(|v| v.parse::<u64>().ok()) {
+        tokio::time::sleep(Duration::from_secs(s)).await;
+    }
+}
+
 fn socket_path(tag: &str) -> PathBuf {
     PathBuf::from(env!("CARGO_TARGET_TMPDIR"))
         .join(format!("team-{tag}-{}.sock", std::process::id()))
 }
 
-/// The world, from `store`'s log if it has one, serving the gateway's link on `path`.
-fn start_world(store: &Mem, path: &std::path::Path) -> answers::World {
+/// The world, from `store`'s log if it has one, serving the gateway's link on `path`; `watched`, its stream written
+/// for the old page as K1's [`watch`] says (rungs 0 and 1).
+fn start_world(store: &Mem, path: &std::path::Path, watched: bool) -> answers::World {
     let mut cfg = Config::new(LINEAGE, 1);
     cfg.measures = false;
     cfg.bodies = Some(Box::new(|p: &Placed| bodies(p)));
     cfg.engine = Some((tree_rules(), vec![carry_kind(), carry_of(BRIEF, 500_000)]));
+    if watched {
+        watch(&mut cfg);
+    }
     let rules = Rules {
         kinds: entries(),
         moves: Json::Obj(Vec::new()),
@@ -702,12 +773,13 @@ async fn gate(path: &std::path::Path) -> Gate {
 async fn rungs_0_and_1_two_souls_carry_loads_as_their_entries_state_through_the_gateway() {
     let store = Mem::with(Vec::new());
     let path = socket_path("c1");
-    let served = start_world(&store, &path);
+    let served = start_world(&store, &path, true);
     let Gate { url, issued } = gate(&path).await;
     let mut a = Soul::connect(&url, soul(1), &issued[0]).await;
     let mut b = Soul::connect(&url, soul(2), &issued[1]).await;
     let g = ground();
     let mut steps = Vec::new();
+    hold("TEAM_GATE_WAIT").await;
 
     // The beam: each walks to its place by an ordinary walk.
     let [back, front] = places(&beam_entry());
@@ -872,6 +944,7 @@ async fn rungs_0_and_1_two_souls_carry_loads_as_their_entries_state_through_the_
          carry-grip-out-of-reach; ids conserved; the log replays to its state hash; a blocked set-down: not reached",
         steps.join(", ")
     );
+    hold("TEAM_GATE_HOLD").await;
 }
 
 /// Soul `from` offers a carry, in front, to Soul `to`, on the ground: the offer's activity.
@@ -992,7 +1065,7 @@ fn start_of(store: &Mem, body: Id) -> Vec3 {
 async fn rung_2_a_carry_that_breaks_off_sets_its_load_down() {
     let store = Mem::with(Vec::new());
     let path = socket_path("c3");
-    let mut served = start_world(&store, &path);
+    let mut served = start_world(&store, &path, false);
     let Gate { url, issued } = gate(&path).await;
     let mut a = Soul::connect(&url, soul(1), &issued[0]).await;
     let mut b = Soul::connect(&url, soul(2), &issued[1]).await;
@@ -1101,7 +1174,7 @@ async fn rung_2_a_carry_that_breaks_off_sets_its_load_down() {
     walk_on(&mut b, &store, 6 * M).await;
     tokio::time::sleep(Duration::from_millis(1_500)).await;
     served.stop();
-    served = start_world(&store, &path);
+    served = start_world(&store, &path, false);
     let _ = a.answer().await;
     let _ = b.answer().await;
     held = held.max(leave(&mut a, carry, "the front leaves").await);
