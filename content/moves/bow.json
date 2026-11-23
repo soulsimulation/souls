@@ -4,7 +4,7 @@
   "claims": ["locomotion", "gaze"],
   "blocks": ["locomotion", "gaze"],
   "cancels_on": ["claim_taken"],
-  "effector": "hand",
-  "reach_mm": 600,
+  "effector": "aim",
+  "reach_mm": 20000,
   "phases": { "start_up_us": 500000, "recovery_us": 600000 }
 }

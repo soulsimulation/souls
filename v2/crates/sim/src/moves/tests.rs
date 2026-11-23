@@ -242,3 +242,90 @@ fn a_later_claim_cancels_a_move_at_its_next_boundary() {
         assert!(w.due.is_empty() && w.moves.is_empty());
     }
 }
+
+/// 0.134 B1: the content move named `name` (`content/moves`).
+fn content_move(name: &str) -> Move {
+    let dir = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/moves");
+    let (lib, _) = library(&dir).expect("content/moves");
+    lib.current()
+        .into_iter()
+        .find(|m| m.name.as_str() == format!("souls:{name}"))
+        .unwrap_or_else(|| panic!("{name} in content/moves"))
+}
+
+/// Starts `mv` at a target `d` µm away and fires it to its end; the receipt's how.
+fn run_at(mv: &Move, d: i64) -> Result<String, replica::effects::Refusal> {
+    let mut w = world();
+    let geo = Fixed(d);
+    w.moves.start(
+        &mut w.c,
+        &mut w.due,
+        &mut w.mint,
+        &geo,
+        w.body,
+        mv,
+        w.target,
+        0,
+    )?;
+    let mut how = String::new();
+    while let Some(t) = w.due.fire(Micros::MAX) {
+        if let Some(Fired::Done(r) | Fired::Cancelled(r)) =
+            w.moves.fire(&mut w.c, &mut w.due, &mut w.mint, &geo, &t)
+        {
+            how = r
+                .ended
+                .map(|e| e.how.as_str().to_owned())
+                .unwrap_or_default();
+        }
+    }
+    Ok(how)
+}
+
+/// 0.134 B1: point, wave, nod, bow and look aim rather than touch: their reach is sight, 20 m.
+#[test]
+fn the_gestures_aim_with_a_reach_of_sight() {
+    for name in ["point", "wave", "nod", "bow", "look"] {
+        let mv = content_move(name);
+        assert_eq!(mv.effector, Effector::Aim, "{name} aims");
+        assert_eq!(mv.reach, replica::moves::AIM_MOST, "{name}: 20 m");
+    }
+}
+
+/// 0.134 B1: a Soul points at a lamp 10 m away, and the move completes.
+#[test]
+fn a_point_at_a_lamp_10_m_away_completes() {
+    assert_eq!(
+        run_at(&content_move("point"), 10_000_000).as_deref(),
+        Ok("done")
+    );
+}
+
+/// 0.134 B1: a Soul points at (and waves to) another Soul 15 m away, and each completes.
+#[test]
+fn a_point_at_a_soul_15_m_away_completes() {
+    for name in ["point", "wave"] {
+        assert_eq!(
+            run_at(&content_move(name), 15_000_000).as_deref(),
+            Ok("done"),
+            "{name}"
+        );
+    }
+    // Past sight it is still refused by name.
+    let r = run_at(&content_move("point"), replica::moves::AIM_MOST + 1).expect_err("refused");
+    assert_eq!(r.name, "out-of-reach");
+}
+
+/// 0.134 B1: a move that touches still reaches at most an arm: a touch at 0.8 m is refused.
+#[test]
+fn a_contact_move_is_still_refused_at_0_8_m() {
+    let touch = content_move("touch");
+    assert_ne!(touch.effector, Effector::Aim);
+    assert!(touch.reach <= replica::moves::REACH_MOST);
+    let r = run_at(&touch, 800_000).expect_err("refused");
+    assert_eq!(r.name, "out-of-reach");
+    assert_eq!(
+        run_at(&touch, 500_000).as_deref(),
+        Ok("done"),
+        "within an arm it completes"
+    );
+}
