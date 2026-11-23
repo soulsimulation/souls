@@ -70,11 +70,10 @@ const PAIR: &str = "test:pair";
 const CARRY: &str = "test:carry";
 const COURT: &str = "test:court";
 const CAN: &str = "test:can";
-const CHAIR: &str = "test:chair";
 
 /// The kinds in pinned order: (plain name, full name).
 fn kinds() -> Vec<(&'static str, String)> {
-    [PLACE, WALKER, VESSEL, RACK, PLANK, PAIR, CARRY, COURT, CAN, CHAIR]
+    [PLACE, WALKER, VESSEL, RACK, PLANK, PAIR, CARRY, COURT, CAN]
         .iter()
         .enumerate()
         .map(|(i, k)| (*k, full(k, i as u8 + 1)))
@@ -157,10 +156,6 @@ fn court() -> Id {
 }
 /// #4086: three watering cans south of the first walker, 100 m, 2.2 m and 1.5 m away (a can's reach from a body is
 /// its half size, 0.38 m, and 1.5 m).
-fn chair() -> Id {
-    id(40)
-}
-
 fn far_can() -> Id {
     id(7)
 }
@@ -232,15 +227,6 @@ fn tree_rules() -> TreeRules {
             (fullname(CARRY), k("activity", &[], &[1], None)),
             (fullname(COURT), k("thing", &[], &[], None)),
             (fullname(CAN), k("thing", &[], &[], Some(1))),
-            (
-                fullname(CHAIR),
-                Kind {
-                    owner: "thing".into(),
-                    children: Default::default(),
-                    slots: BTreeMap::from([(1, BTreeSet::from(["body".to_owned()]))]),
-                    hands: None,
-                },
-            ),
         ]),
         souls: [w1(), w2()].into(),
         audiences: BTreeMap::new(),
@@ -329,10 +315,7 @@ fn entries() -> Json {
       "motion": { "how": "one_hand" }, "loose": { "ever": true } }"#,
     )
     .unwrap();
-    // An armchair's seat and its sit (`content/kinds/seating/armchair.json`): N2's mid-sit at a restart.
-    let chair = parse(r#"{"format": "souls-entry/1", "kind": "test:chair", "owner": "thing", "slots": {"seat": {"admits": "body", "posture": "sit", "most": 1, "at_mm": [0, 510, 80], "stand": "front"}}, "forms": {"sit": {"who": "anyone", "starts": "act", "takes": {"seat": {"type": "slot", "select": {"of": "free_slots", "in": "this", "anchor": "me", "order": "nearest", "rank": 1}}}, "needs": [{"need": "slot_free", "slot": {"arg": "seat"}}], "steps": [{"step": "walk_to", "point": {"arg": "seat"}}, {"step": "sit", "slot": {"arg": "seat"}}], "effects": [{"change": "reparent", "what": "actor", "into": {"arg": "seat"}, "event": "sat_down"}]}}}"#).unwrap();
     Json::Obj(vec![
-        (CHAIR.into(), chair),
         (VESSEL.into(), vessel),
         (RACK.into(), rack),
         (COURT.into(), court),
@@ -386,7 +369,6 @@ fn world() -> Replica {
         create(far_can(), CAN, g, south(100_000_000)),
         create(beyond_can(), CAN, g, south(2_200_000)),
         create(near_can(), CAN, g, south(1_500_000)),
-        create(chair(), CHAIR, g, Vec3::new(at1().x + 6_000_000, 0, at1().z)),
     ];
     let effects: Vec<Value> = changes
         .into_iter()
@@ -1121,69 +1103,76 @@ fn i4187_a_form_act_sent_during_an_open_form_run() {
     run.stop();
 }
 
+/// The form runs' endings the log holds, by name (`souls:form-ended`'s field 3).
+fn endings(run: &Run) -> Vec<String> {
+    let log = run.store.0.lock().unwrap().bytes.clone();
+    let mut out = Vec::new();
+    for rec in recover(&log).unwrap().records {
+        if sim::recorder::is_input(&rec) {
+            continue;
+        }
+        for e in Part::read(&rec).unwrap().effects {
+            for ev in e.events.iter().flatten() {
+                if ev.name.as_str() == "souls:form-ended"
+                    && let Some(Value::Bytes(how)) = ev.fields.get(&3)
+                {
+                    out.push(String::from_utf8_lossy(how).into_owned());
+                }
+            }
+        }
+    }
+    out
+}
+
+/// N2 (0.133): a world stopped with a form's run open (a take, walking to its thing) and a gateway walk under way,
+/// then started again from its log. The open run is ended `restart` in the log in the first tick; each intent, sent
+/// again as the gateway sends the unanswered ones, starts afresh and ends with its receipt, well before its deadline.
+/// (This harness's bodies start where it built them; a served world stands each where the log last had it.)
 #[test]
-fn n2_probe_a_run_open_at_a_stop_and_its_intent_sent_again() {
+// A real world on the real clock: an answer's time is real time.
+#[allow(clippy::disallowed_methods)]
+fn n2_a_run_open_at_a_restart_ends_by_name_and_its_intent_starts_again() {
     let store = Mem::with(Vec::new());
-    let (run, mut a, _) = serve_on("n2p1", store.clone());
+    let (run, mut a, mut b) = serve_on("n2a", store.clone());
+    b.send("test:walk", Some(ground()), point(south(12_000_000)));
+    b.started();
+    std::thread::sleep(Duration::from_millis(1500));
     a.send("test:take", Some(vessel()), BTreeMap::new());
     a.started();
+    let (take, walk) = (a.3.clone(), b.3.clone());
+    assert_ne!(at(&run.replay(), w2()), at2(), "the walker was under way");
+    run.world.stop();
+
+    let (run, mut a, mut b) = serve_on("n2b", store);
     std::thread::sleep(Duration::from_millis(300));
-    let bytes = a.3.clone();
-    run.world.stop();
-    let (run, mut a, _) = serve_on("n2p2", store);
+    assert_eq!(
+        endings(&run),
+        ["souls:restart"],
+        "the take's open run ended by name in the first tick"
+    );
     PROGRESSED.with(|p| p.borrow_mut().clear());
     let t0 = std::time::Instant::now();
-    a.raw(&bytes);
-    let got = a.answer_of();
-    println!("N2 probe: resent after restart answered {got:?} in {:?}", t0.elapsed());
+    a.raw(&take);
+    b.raw(&walk);
+    assert!(
+        matches!(a.answer_of(), (1, Ok(_))),
+        "the take starts again and lands"
+    );
+    assert!(
+        matches!(b.answer_of(), (1, Ok(_))),
+        "the walk is planned again from where it stood and arrives"
+    );
+    assert!(
+        t0.elapsed() < Duration::from_secs(15),
+        "no intent waits to its deadline: {:?}",
+        t0.elapsed()
+    );
     let r = run.replay();
-    println!("N2 probe: body at {:?}, vessel parent {:?}", at(&r, w1()), parent(&r, vessel()));
-    run.stop();
-}
-
-#[test]
-fn n2_probe_a_walk_open_at_a_stop_and_its_intent_sent_again() {
-    let store = Mem::with(Vec::new());
-    let (run, mut a, _) = serve_on("n2w1", store.clone());
-    a.send("test:walk", Some(ground()), point(south(12_000_000)));
-    a.started();
-    std::thread::sleep(Duration::from_millis(1500));
-    let bytes = a.3.clone();
-    let mid = at(&run.replay(), w1());
-    run.world.stop();
-    let (run, mut a, _) = serve_on("n2w2", store);
-    println!("N2 walk probe: body at {mid:?} at the stop, {:?} after the restart", at(&run.replay(), w1()));
-    PROGRESSED.with(|p| p.borrow_mut().clear());
-    let t0 = std::time::Instant::now();
-    a.raw(&bytes);
-    let got = a.answer_of();
-    println!("N2 walk probe: resent after restart answered {got:?} in {:?}", t0.elapsed());
-    println!("N2 walk probe: body at {:?}, goal {:?}", at(&run.replay(), w1()), south(12_000_000));
-    run.stop();
-}
-
-#[test]
-fn n2_probe_a_sit_open_at_a_stop_and_its_intent_sent_again() {
-    let store = Mem::with(Vec::new());
-    let (run, mut a, _) = serve_on("n2s1", store.clone());
-    a.send("test:sit", Some(chair()), BTreeMap::new());
-    let mut len = [0u8; 4];
-    a.0.read_exact(&mut len).unwrap();
-    let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
-    a.0.read_exact(&mut frame).unwrap();
-    println!("N2 sit probe: first answer {:?}", decode(&frame).unwrap().value);
-    std::thread::sleep(Duration::from_millis(1500));
-    let bytes = a.3.clone();
-    let mid = at(&run.replay(), w1());
-    run.world.stop();
-    let (run, mut a, _) = serve_on("n2s2", store);
-    println!("N2 sit probe: body at {mid:?} at the stop, {:?} after the restart", at(&run.replay(), w1()));
-    PROGRESSED.with(|p| p.borrow_mut().clear());
-    let t0 = std::time::Instant::now();
-    a.raw(&bytes);
-    let got = a.answer_of();
-    println!("N2 sit probe: resent after restart answered {got:?} in {:?}", t0.elapsed());
-    let r = run.replay();
-    println!("N2 sit probe: body parent {:?}", parent(&r, w1()));
+    assert_eq!(parent(&r, vessel()).0, Some(w1()), "the vessel in the hand");
+    let off = (at(&r, w2()).z - south(12_000_000).z).abs();
+    assert!(
+        off <= 100_000,
+        "at the walk's goal, within 10 cm: {off} µm off"
+    );
     run.stop();
 }
