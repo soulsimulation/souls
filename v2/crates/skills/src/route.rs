@@ -105,8 +105,9 @@ pub struct Route {
     last: Option<(Vec3, [i64; 2], usize)>,
     /// Its personal radius, µm (#4215).
     pub room: i64,
-    /// Ticks in a row its step was cut to under a quarter by another body's space.
+    /// Ticks into the window its progress is judged over, and where the window began.
     held: u32,
+    window: Option<Vec3>,
     /// Yielding: the body it backs away from and the ticks left.
     yielding: Option<(Id, u32)>,
 }
@@ -125,6 +126,7 @@ impl Route {
             last: None,
             room: ROOM,
             held: 0,
+            window: None,
             yielding: None,
         }
     }
@@ -521,21 +523,24 @@ impl Skill for Route {
             }
         }
         let step = guard([p.x, p.z], want, self.tick, &near, room);
-        if self.yielding.is_none() && len(step) * 4 < len(want) {
-            self.held += 1;
-        } else {
-            self.held = 0;
-        }
+        // Judged over a window of HOLD ticks: a walker that got under a quarter of its free way, while a lower id
+        // stands near it, yields to that one.
+        self.held += 1;
+        let start = *self.window.get_or_insert(p);
         if self.held >= HOLD {
-            self.held = 0;
-            let reach = room + self.speed * self.tick / 1_000_000;
-            let by = near
-                .iter()
-                .filter(|n| n.id < body && dist(n) <= reach)
-                .min_by_key(|n| (dist(n), n.id));
-            if let Some(n) = by {
-                self.yielding = Some((n.id, BACK));
+            let moved = len([p.x - start.x, p.z - start.z]);
+            let could = self.speed * self.tick * i64::from(HOLD) / 1_000_000;
+            if self.yielding.is_none() && moved * 4 < could {
+                let reach = 2 * room;
+                let by = near
+                    .iter()
+                    .filter(|n| n.id < body && dist(n) <= reach)
+                    .min_by_key(|n| (dist(n), n.id));
+                if let Some(n) = by {
+                    self.yielding = Some((n.id, BACK));
+                }
             }
+            (self.held, self.window) = (0, None);
         }
         walk(host, step);
         Progress::Going
