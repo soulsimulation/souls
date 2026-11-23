@@ -12,24 +12,18 @@ import { createAgents } from './agents.mjs';
 const caddy = readFileSync(fileURLToPath(new URL('../ops/proxy/soul-game.caddy', import.meta.url)), 'utf8');
 /** The front door's named matcher's path regexp, as RE2 reads it (these patterns mean the same in JavaScript). */
 const matcher = (name) => new RegExp(new RegExp(`@${name} path_regexp (?:\\w+ )?(\\S+)`).exec(caddy)[1]);
-/** The loopback port the front door's `handle @<name>` block proxies to. */
-const upstream = (name) => new RegExp(`handle @${name} \\{[^}]*?reverse_proxy localhost:(\\d+)`).exec(caddy)[1];
+/** The first loopback port the front door's `handle @<name>` block proxies to (for agents: a switched world's relay). */
+const upstream = (name) => new RegExp(`handle @${name} \\{[\\s\\S]*?reverse_proxy localhost:(\\d+)`).exec(caddy)[1];
 
-test('the front door sends every agent path to the relay on 7330 and none to the viewers\' origin', () => {
-  const agents = matcher('agents'), native = matcher('native');
+test('the front door sends every agent path to the relay on 7330; the page and its reads stay with today\'s launcher (F4)', () => {
+  const agents = matcher('agents');
   assert.equal(upstream('agents'), '7330');
-  assert.equal(upstream('native'), '7320');
-  for (const base of ['/w/eden', '/preview/w/eden', '/w/new-town']) {
-    for (const path of ['v2/ws', 'v2/creator-token', 'v2/entries']) {
-      assert.ok(agents.test(`${base}/${path}`), `${base}/${path} reaches the relay`);
-      assert.ok(!native.test(`${base}/${path}`), `${base}/${path} never reaches the origin`);
-    }
-    for (const path of ['v1/bootstrap', 'views/world.json']) {
-      assert.ok(native.test(`${base}/${path}`), `${base}/${path} stays with the origin`);
-      assert.ok(!agents.test(`${base}/${path}`));
-    }
+  for (const base of ['/w/eden', '/w/new-town']) {
+    for (const path of ['v2/ws', 'v2/creator-token', 'v2/entries']) assert.ok(agents.test(`${base}/${path}`), `${base}/${path} reaches the relay`);
+    for (const path of ['', 'v1/bootstrap', 'views/world.json', 'eden.mjs', 'v1/config']) assert.ok(!agents.test(`${base}/${path}`), `${base}/${path} stays with today's launcher`);
   }
-  for (const path of ['/w/eden/v2/ws/x', '/w/eden/v2/wsx', '/v2/ws', '/w/eden/s/v2/ws']) assert.ok(!agents.test(path), path);
+  assert.doesNotMatch(caddy, /@native|@page|preview/, 'no page, native read or preview route to the new system');
+  for (const path of ['/w/eden/v2/ws/x', '/w/eden/v2/wsx', '/v2/ws', '/w/eden/s/v2/ws', '/preview/w/eden/v2/ws']) assert.ok(!agents.test(path), path);
 });
 
 let dir, gateway, relay, stats, port;

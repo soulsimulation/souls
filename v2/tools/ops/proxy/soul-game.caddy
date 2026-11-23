@@ -7,116 +7,41 @@
 # today's file. The new system's loopback addresses are the install's (v2/docs/runbook/install.md): the directory on
 # 7310, the viewers' origin on 7320, the agents' relay on 7330, the page's files in /usr/local/lib/souls/web.
 #
-# - A slug routes by a map made from the directory and trusted activation metadata: routes.mjs (beside this file,
-#   run each minute by souls-routes.timer) keeps one file per explicitly canonical trusted mapping in
-#   /var/lib/souls-routes/slugs, retaining unlisted and archived addresses. A canonical
-#   slug's page, served client and its config come from the new system; every other address under /w/<slug>/ (today's
-#   API, the agent and god routes, sockets) still reaches today's launcher, which gives old clients its own answers (R18), never a
-#   redirect that would drop their token. An unmapped or preview-only slug stays with today's launcher; an archived
-#   canonical address returns its named archive refusal. Public listing and sitemap membership are separate.
-# - Old page addresses (an alias, the /worlds prefix) are today's launcher's same-origin 308 to /w/<slug>/, keeping the
-#   query; the browser keeps the fragment. A redirected alias of a listed slug lands on the new system.
-# - / is the one list of both systems' worlds (v2/web/src/home/); its files are the new system's, found on disk
-#   (/assets/* is the new system's only where such a file exists, else today's).
+# Since 0.132 Core (F4): the front door keeps the old home. Today's launcher serves every page and every API it has
+# always served: /, sign-in and account (/v1/account/*, /v1/auth/config), the world list, the site's pages, sitemap,
+# and each world's page, client files and API, a switched world's included. For a switched world the launcher itself
+# writes the v2 stream into the old page and serves the replica (tools/world-launcher/cutover.mjs; v2/docs/cutover.md).
+# Only these go to the new system:
+# - Streams: /s/* to the viewers' origin (7320), the stream a switched world's old page reads.
+# - A switched world's gateway: /w/<slug>/v2/(ws|creator-token|entries) to the agents' relay (7330, #4152), only for a
+#   slug with an activation file in /var/lib/souls-routes/slugs (routes.mjs, run each minute by souls-routes.timer).
+#   Every other address under /w/<slug>/ stays with today's launcher; an unmapped slug's v2 paths do too.
+# - Pairing, for the new Soul client: /pair (the pairing card, from the new page's files), /v1/pair/* and
+#   /v1/agent/account[/*] to the directory (7310). The card's own /assets/* files come from the new page's folder where
+#   such a file exists, else today's.
 # - The visitor's address: X-Forwarded-For is replaced with {client_ip}, trusted only from cdn-trust.snippet's ranges.
-# - Pages refuse framing by other sites; API answers are not indexed. Neither replaces a header the answer already has
-#   (the sign-in bridge keeps its own CSP and DENY).
-# - The site's own pages, /changelog, /changelog.md, the feed (/v1/feed) and the owner overview (/ops), are the new
-#   system's, answered by the viewers' origin (v2/tools/origin/site.mjs; O23, #3324).
-# - /sitemap.xml is routes.mjs's: today's sitemap plus the directory's worlds; robots.txt stays today's.
+# - Pages refuse framing by other sites; API answers are not indexed. Neither replaces a header the answer already has.
 # - When an origin cannot answer, a page a browser asked for gets today's poster ("back in a moment"), as before.
-# Canonical and preview pages use identical static assets, bootstrap and native gateway routing.
-# - A world's agent paths (v2/ws, v2/creator-token, v2/entries) go to the agents' relay (v2/tools/origin/agents.mjs,
-#   #4152), never through the viewers' origin, so a viewer join wave that saturates or restarts the origin drops no
-#   agent. The relay applies the origin's own world rules (world-routes.mjs); the paths are unchanged.
-# - A world's models (/w/<slug>/models/: models.json and worlds/models/<hash>.glb, baked by
-#   v2/tools/import-eden/bake/bake.ts) are files in /var/lib/souls/models/<slug>, outside the page's mirrored folder, so
-#   an install never removes them. A model is named by its hash and never changes (immutable); models.json is revalidated.
-#   A world with no folder answers 404 and its page draws boxes.
-(v2_world) {
-	@page path_regexp ^/(?:preview/)?w/[^/]+/(index\.html)?$
-	@files path_regexp files ^/(?:preview/)?w/[^/]+(/assets/.+)$
-	@models path_regexp models ^/(?:preview/)?w/([a-z0-9][a-z0-9-]{0,62})/models(/.+)$
-	@panel path_regexp ^/(?:preview/)?w/[^/]+/src/panel/(index\.html)?$
-	@native path_regexp ^/(?:preview/)?w/[^/]+/(v1/bootstrap|views/world\.json)$
-	@agents path_regexp ^/(?:preview/)?w/[^/]+/v2/(ws|creator-token|entries)$
-	@client path_regexp client ^/(?:preview/)?w/([^/]+)/(eden\.mjs|skill\.md|creator\.md|instructions\.md|safety\.md|llms\.txt|replica\.js|replica_bg\.wasm|v1/config)$
-	handle @page {
-		header X-Souls-System v2
-		rewrite * /index.html
-		root * /usr/local/lib/souls/web
-		file_server
-	}
-	handle @models {
-		header X-Souls-System v2
-		@glb path *.glb
-		header @glb Cache-Control "public, max-age=31536000, immutable"
-		@index path */models.json
-		header @index Cache-Control no-cache
-		rewrite * {re.models.2}
-		root * /var/lib/souls/models/{re.models.1}
-		file_server
-	}
-	handle @panel {
-		header X-Souls-System v2
-		rewrite * /src/panel/index.html
-		root * /usr/local/lib/souls/web
-		file_server
-	}
-	handle @files {
-		header X-Souls-System v2
-		rewrite * {re.files.1}
-		root * /usr/local/lib/souls/web
-		file_server
-	}
-	handle @native {
-		header X-Souls-System v2
-		reverse_proxy localhost:7320 {
-			header_up X-Forwarded-For {client_ip}
-		}
-	}
-	handle @agents {
-		header X-Souls-System v2
-		reverse_proxy localhost:7330 {
-			header_up X-Forwarded-For {client_ip}
-		}
-	}
-	handle @client {
-		header X-Souls-System v2
-		rewrite * /w/{re.client.1}/{re.client.2}
-		reverse_proxy localhost:7320 {
-			header_up X-Forwarded-For {client_ip}
-		}
-	}
-	handle {
-		header X-Souls-System today
-		reverse_proxy localhost:@@PRODUCTION_PORT@@ {
-			header_up X-Forwarded-For {client_ip}
-		}
-	}
-}
 https://soul.game {
 	header {
 		?X-Frame-Options SAMEORIGIN
 		?Content-Security-Policy "frame-ancestors 'self'"
 	}
-	@api path /__sim/* /v1/* /w/*/v1/* /w/*/v2/* /preview/w/*/v1/* /preview/w/*/v2/* /s/*
+	@api path /__sim/* /v1/* /w/*/v1/* /w/*/v2/* /s/*
 	header @api ?X-Robots-Tag "noindex, nofollow"
 
-	@preview path_regexp ^/preview/w/[a-z0-9][a-z0-9-]{0,62}(/|$)
-	handle @preview {
-		header X-Robots-Tag "noindex, nofollow"
-		import v2_world
-	}
-	@v2world path_regexp v2world ^/w/([a-z0-9][a-z0-9-]{0,62})(/|$)
-	handle @v2world {
+	@agents path_regexp agents ^/w/([a-z0-9][a-z0-9-]{0,62})/v2/(ws|creator-token|entries)$
+	handle @agents {
 		# The outer match sets the slug capture before the dependent activation-file lookup.
 		@active file {
 			root /var/lib/souls-routes/slugs
-			try_files /{re.v2world.1}
+			try_files /{re.agents.1}
 		}
 		handle @active {
-			import v2_world
+			header X-Souls-System v2
+			reverse_proxy localhost:7330 {
+				header_up X-Forwarded-For {client_ip}
+			}
 		}
 		handle {
 			header X-Souls-System today
@@ -125,25 +50,11 @@ https://soul.game {
 			}
 		}
 	}
-
-	handle / {
-		header X-Souls-System v2
-		rewrite * /src/home/
-		root * /usr/local/lib/souls/web
-		file_server
-	}
 	@pair path /pair /pair/
 	handle @pair {
 		header X-Souls-System v2
 		header X-Robots-Tag "noindex, nofollow"
 		rewrite * /src/pairing/card.html
-		root * /usr/local/lib/souls/web
-		file_server
-	}
-	@browser path /src/account /src/account/* /src/worlds /src/worlds/* /src/panel /src/panel/*
-	handle @browser {
-		header X-Souls-System v2
-		header X-Robots-Tag "noindex, nofollow"
 		root * /usr/local/lib/souls/web
 		file_server
 	}
@@ -158,25 +69,8 @@ https://soul.game {
 		root * /usr/local/lib/souls/web
 		file_server
 	}
-	@sitemap {
-		path /sitemap.xml
-		file {
-			root /var/lib/souls-routes
-		}
-	}
-	handle @sitemap {
-		root * /var/lib/souls-routes
-		file_server
-	}
-	@site path /changelog /changelog/ /changelog.md /v1/feed /ops /v1/auth/config
-	handle @site {
-		header X-Souls-System v2
-		reverse_proxy localhost:7320 {
-			header_up X-Forwarded-For {client_ip}
-		}
-	}
-	@directory path /v1/worlds /v1/worlds/archive /v1/worlds/handoff/offer /v1/worlds/handoff/cancel /v1/worlds/handoff/accept /v1/account/* /v1/pair/* /v1/agent/account /v1/agent/account/*
-	handle @directory {
+	@pairing path /v1/pair/* /v1/agent/account /v1/agent/account/*
+	handle @pairing {
 		header X-Souls-System v2
 		reverse_proxy localhost:7310 {
 			header_up X-Forwarded-For {client_ip}

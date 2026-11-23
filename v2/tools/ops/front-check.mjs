@@ -2,37 +2,39 @@
 // Checks the front door from outside (Engine v2 O19, #2830; the site files are in proxy/ beside this script):
 //   node v2/tools/ops/front-check.mjs --v2 <a world the directory lists> --today <a world only today's system serves> \
 //     [--public https://soul.game] [--primary https://sim.eden.art] [--old https://souls.game] [--alias old=slug,...] \
-//     [--unlisted <slug>] [--points a,b] [--stopped <path>] [--map https://name=http://address,...]
+//     [--unlisted <slug>] [--stream /s/<stream>/] [--points a,b] [--stopped <path>] [--map https://name=http://address,...]
+// Since 0.132 Core (F4) the front door keeps the old home: today's launcher serves every page, a switched world's included,
+// and only streams, a switched world's gateway and pairing reach the new system.
 // Points (all but `poster` by default), each PASS or a PROBLEM naming it:
-//   worlds   /w/<v2>/ is the new system's page and /w/<today>/ today's; /w/<v2>/v1/edge/ (an old API path) is answered
-//            by today's launcher, never redirected
-//   client   /w/<v2>/eden.mjs and /v1/config answer from v2, with the client's SHA-256 equal to soulClient.sha256;
-//            /llms.txt is the current instructions; client and config paths for --today still come from today's launcher
+//   worlds   /w/<v2>/ and /w/<today>/ are today's pages; /w/<v2>/v1/edge/ (an old API path) is today's, never redirected
+//   client   each world's eden.mjs and /v1/config answer 200 from today's launcher (it serves a switched world's client)
 //   aliases  each old alias, at /w/<old>/ and /worlds/w/<old>/, is a same-origin 308 to /w/<slug>/ keeping the query, and
-//            lands on the system that serves the slug
+//            lands on today's page
 //   domains  the primary and each older domain send GET/HEAD (301) and POST (308) to the public name, path and query kept
 //   sign-in  the primary's /sign-in bridge answers (200, no-store, its own CSP) for a return to /w/<v2>/ and to the home
 //            page's own sign-in link, refuses a return elsewhere, and the return page opens on the public name
 //   headers  pages refuse framing by other sites; API answers are noindex; a CSP with a fetch directive allows the counter
-//   robots   robots.txt names the sitemap; the sitemap lists every world of the one list and no other (nor --unlisted)
-//   list     / is the one list; it shows --v2 as the new system's and --today as today's; every row opens on its system
+//   robots   robots.txt names the sitemap; the sitemap is today's, lists --today and not --unlisted
+//   list     / (the home), /v1/worlds, /v1/auth/config and /v1/account/session are today's
 //   address  a forged X-Forwarded-For is never the address today's launcher keys a request on
-//   site     /changelog, /changelog.md, /v1/feed and /ops answer 200 from the new system (O23, #3324): the changelog
-//            no-cache, the feed today's {items, next}, /ops noindex with its own CSP; each answer's headers are shown
+//   site     /changelog, /changelog.md, /v1/feed and /ops answer from today's launcher
+//   stream   <stream>pointer (--stream, default /s/<v2>/) answers 200 from the new system
+//   gateway  /w/<v2>/v2/ws reaches the new system's agents' relay; /w/<today>/v2/ws stays with today's launcher
+//   pairing  /pair is the new system's pairing card; /v1/pair/* and /v1/agent/account reach the new system
 //   poster   (asked for) --stopped, a page behind a stopped origin, shows "back in a moment" as 503 with Retry-After
 // --map reaches a name at another address (a local stand-in); redirects are still checked against the names.
 // Read-only: GETs and HEADs, plus a POST to an unknown path that each older domain redirects before anything reads it.
 // Exit 0 on PASS.
 import { isMain } from '../../../tools/lib/is-main.mjs';
 import { createHash } from 'node:crypto';
-import { canonicalRows, signInHref } from '../../web/src/home/list.ts';
+import { signInHref } from '../../web/src/home/list.ts';
 
-export const POINTS = ['worlds', 'client', 'aliases', 'domains', 'sign-in', 'headers', 'robots', 'list', 'address', 'site'];
+export const POINTS = ['worlds', 'client', 'aliases', 'domains', 'sign-in', 'headers', 'robots', 'list', 'address', 'site', 'stream', 'gateway', 'pairing'];
 const UA = 'souls-front-check';
 const FORGED = '203.0.113.77';   // a documentation address (RFC 5737): no visitor has it
 const COUNTER = 'goatcounter.com';
 
-export async function frontCheck({ public: pub = 'https://soul.game', primary = 'https://sim.eden.art', old = ['https://souls.game'], v2, today, aliases = [], unlisted, points = POINTS, stopped, map = {}, fetchImpl = fetch } = {}) {
+export async function frontCheck({ public: pub = 'https://soul.game', primary = 'https://sim.eden.art', old = ['https://souls.game'], v2, today, aliases = [], unlisted, stream, points = POINTS, stopped, map = {}, fetchImpl = fetch } = {}) {
   const problems = [], seen = [];
   const bad = (point, message) => problems.push(`${point}: ${message}`);
   const reach = (url) => { for (const [name, at] of Object.entries(map)) if (url.startsWith(name)) return at + url.slice(name.length); return url; };
@@ -44,8 +46,9 @@ export async function frontCheck({ public: pub = 'https://soul.game', primary = 
 
   const run = {
     worlds: async () => {
-      for (const [slug, want] of [[v2, 'v2'], [today, 'today']]) {
-        if (!slug) { bad('worlds', `no --${want} world named`); continue; }
+      for (const [slug, flag] of [[v2, 'v2'], [today, 'today']]) {
+        const want = 'today';
+        if (!slug) { bad('worlds', `no --${flag} world named`); continue; }
         const r = await done(await page(`/w/${slug}/?from=check`));
         seen.push(`worlds: /w/${slug}/ -> ${r.status} ${system(r)}`);
         if (r.status !== 200 || system(r) !== want) bad('worlds', `/w/${slug}/ answered ${r.status} from ${system(r)}, want 200 from ${want}`);
@@ -59,23 +62,11 @@ export async function frontCheck({ public: pub = 'https://soul.game', primary = 
     },
     client: async () => {
       if (!v2) return bad('client', 'no --v2 world named');
-      let sha;
-      for (const path of ['eden.mjs', 'v1/config']) {
-        const r = await get(`${pub}/w/${v2}/${path}`), body = Buffer.from(await r.arrayBuffer());
-        seen.push(`client: /w/${v2}/${path} -> ${r.status} ${system(r)}`);
-        if (r.status !== 200 || system(r) !== 'v2') bad('client', `/w/${v2}/${path} answered ${r.status} from ${system(r)}, want 200 from v2`);
-        if (path === 'eden.mjs') sha = createHash('sha256').update(body).digest('hex');
-        else if (JSON.parse(body).soulClient?.sha256 !== sha) bad('client', 'eden.mjs SHA-256 differs from soulClient.sha256');
-      }
-      const guide = await get(`${pub}/w/${v2}/llms.txt`), text = await guide.text();
-      const instructions = await get(`${pub}/w/${v2}/instructions.md`);
-      seen.push(`client: /w/${v2}/llms.txt -> ${guide.status} ${system(guide)}`);
-      if (guide.status !== 200 || system(guide) !== 'v2' || guide.headers.get('cache-control') !== 'no-cache' || text !== await instructions.text()) bad('client', 'llms.txt must serve the current v2 instructions with no-cache');
-      // The stopped-launcher run checks only the new system; the full run also checks today's slugs.
-      if (today) for (const path of ['eden.mjs', 'v1/config']) {
-        const r = await done(await get(`${pub}/w/${today}/${path}`));
-        seen.push(`client: /w/${today}/${path} -> ${r.status} ${system(r)}`);
-        if (r.status !== 200 || system(r) !== 'today') bad('client', `/w/${today}/${path} answered ${r.status} from ${system(r)}, want 200 from today`);
+      // The stopped-launcher run checks only the new system; the full run checks both worlds' client files.
+      for (const slug of [v2, today].filter(Boolean)) for (const path of ['eden.mjs', 'v1/config']) {
+        const r = await done(await get(`${pub}/w/${slug}/${path}`));
+        seen.push(`client: /w/${slug}/${path} -> ${r.status} ${system(r)}`);
+        if (r.status !== 200 || system(r) !== 'today') bad('client', `/w/${slug}/${path} answered ${r.status} from ${system(r)}, want 200 from today`);
       }
     },
     aliases: async () => {
@@ -86,7 +77,7 @@ export async function frontCheck({ public: pub = 'https://soul.game', primary = 
           const at = loc ? new URL(loc, pub + path) : null, want = `${pub}/w/${to}/?view=map`;
           seen.push(`aliases: ${path}?view=map -> ${r.status} ${loc ?? ''}`);
           if (r.status !== 308 || at?.href !== want) { bad('aliases', `${path}: ${r.status} to ${at?.href ?? 'nowhere'}, want 308 to ${want}`); continue; }
-          const land = await done(await page(at.pathname + at.search)), wantSys = v2 === to ? 'v2' : 'today';
+          const land = await done(await page(at.pathname + at.search)), wantSys = 'today';
           if (land.status !== 200 || system(land) !== wantSys) bad('aliases', `${at.pathname} answered ${land.status} from ${system(land)}, want 200 from ${wantSys}`);
         }
       }
@@ -136,26 +127,22 @@ export async function frontCheck({ public: pub = 'https://soul.game', primary = 
     robots: async () => {
       const robots = await (await get(`${pub}/robots.txt`)).text();
       if (!/^Sitemap: \S+\/sitemap\.xml$/m.test(robots)) bad('robots', 'robots.txt names no sitemap');
-      const map = await (await get(`${pub}/sitemap.xml`)).text();
+      const r = await get(`${pub}/sitemap.xml`), map = await r.text();
       const listed = new Set([...map.matchAll(/<loc>[^<]*\/w\/([^/<]+)\/<\/loc>/g)].map((m) => m[1]));
-      const want = new Set((await canonicalRows(await json(`${pub}/v1/worlds`), await json(`${pub}/__sim/worlds.json`), pub, get)).map((w) => w.slug));
-      seen.push(`robots: the sitemap lists ${listed.size} worlds; the one list has ${want.size}`);
-      for (const s of want) if (!listed.has(s)) bad('robots', `the sitemap leaves out the listed world ${s}`);
-      for (const s of listed) if (!want.has(s)) bad('robots', `the sitemap lists ${s}, which the list does not`);
+      seen.push(`robots: the sitemap (${r.status} ${system(r)}) lists ${listed.size} worlds`);
+      if (r.status !== 200 || system(r) !== 'today') bad('robots', `the sitemap answered ${r.status} from ${system(r)}, want 200 from today`);
+      if (today && !listed.has(today)) bad('robots', `the sitemap leaves out ${today}`);
       if (unlisted && listed.has(unlisted)) bad('robots', `the sitemap lists the unlisted world ${unlisted}`);
     },
     list: async () => {
-      const home = await page('/'), html = await home.text();
+      const home = await done(await page('/'));
       seen.push(`list: / -> ${home.status} ${system(home)}`);
-      if (home.status !== 200 || system(home) !== 'v2' || !/id="list"/.test(html)) bad('list', `/ answered ${home.status} from ${system(home)}, want the one list (200 from v2)`);
-      const all = await canonicalRows(await json(`${pub}/v1/worlds`), await json(`${pub}/__sim/worlds.json`), pub, get);
-      seen.push(`list: ${all.map((w) => `${w.slug} (${w.system})`).join(', ')}`);
-      for (const [slug, want] of [[v2, 'v2'], [today, 'today']]) if (!all.some((w) => w.slug === slug && w.system === want)) bad('list', `the list does not show ${slug} as ${want}'s`);
-      for (const w of all) {
-        const r = await done(await page(w.href));
-        if (r.status !== 200 || system(r) !== w.system) bad('list', `${w.href} answered ${r.status} from ${system(r)}, want 200 from ${w.system}`);
+      if (home.status !== 200 || system(home) !== 'today') bad('list', `/ answered ${home.status} from ${system(home)}, want today's home (200)`);
+      for (const path of ['/v1/worlds', '/v1/auth/config', '/v1/account/session']) {
+        const r = await done(await get(pub + path, { headers: { accept: 'application/json' } }));
+        seen.push(`list: ${path} -> ${r.status} ${system(r)}`);
+        if (system(r) !== 'today' || r.status >= 500) bad('list', `${path} answered ${r.status} from ${system(r)}, want today's launcher`);
       }
-      seen.push(`list: ${all.length} rows opened`);
     },
     address: async () => {
       const r = await get(`${pub}/__sim/whoami`, { headers: { 'x-forwarded-for': FORGED } }), a = r.ok ? (await r.json()).address : (await r.body?.cancel(), null);
@@ -163,14 +150,39 @@ export async function frontCheck({ public: pub = 'https://soul.game', primary = 
       if (!a || a === FORGED) bad('address', `the launcher keyed ${a ?? 'nothing'} with a forged X-Forwarded-For`);
     },
     site: async () => {
-      const shown = ['cache-control', 'content-type', 'x-robots-tag', 'content-security-policy'];
-      for (const [path, accept, want] of [['/changelog', 'text/html', (r, b) => /no-cache/.test(r.headers.get('cache-control') ?? '') && /<html/i.test(b)],
-        ['/changelog.md', 'text/markdown', (r, b) => /no-cache/.test(r.headers.get('cache-control') ?? '') && /^#/m.test(b)],
+      const shown = ['cache-control', 'content-type', 'x-robots-tag'];
+      for (const [path, accept, want] of [['/changelog', 'text/html', (r, b) => /<html/i.test(b)],
+        ['/changelog.md', 'text/markdown', (r, b) => /^#/m.test(b)],
         ['/v1/feed', 'application/json', (r, b) => { try { const d = JSON.parse(b); return Array.isArray(d.items) && 'next' in d; } catch { return false; } }],
-        ['/ops', 'text/html', (r) => /noindex/.test(r.headers.get('x-robots-tag') ?? '') && /script-src 'sha256-/.test(r.headers.get('content-security-policy') ?? '')]]) {
+        ['/ops', 'text/html', (r) => r.status < 500]]) {
         const r = await get(pub + path, { headers: { accept } }), body = await r.text();
         seen.push(`site: ${path} -> ${r.status} ${system(r)}; ${shown.map((h) => `${h}: ${(r.headers.get(h) ?? 'none').slice(0, 60)}`).join('; ')}`);
-        if (r.status !== 200 || system(r) !== 'v2' || !want(r, body)) bad('site', `${path} answered ${r.status} from ${system(r)}, want 200 from v2 in today's shape`);
+        if ((path !== '/ops' && r.status !== 200) || system(r) !== 'today' || !want(r, body)) bad('site', `${path} answered ${r.status} from ${system(r)}, want today's page`);
+      }
+    },
+    stream: async () => {
+      const at = stream ?? (v2 ? `/s/${v2}/` : null);
+      if (!at) return bad('stream', 'no --stream or --v2 named');
+      const r = await done(await get(`${pub}${at}pointer`));
+      seen.push(`stream: ${at}pointer -> ${r.status} ${system(r)}`);
+      if (r.status !== 200 || system(r) !== 'v2') bad('stream', `${at}pointer answered ${r.status} from ${system(r)}, want 200 from v2`);
+    },
+    gateway: async () => {
+      for (const [slug, want] of [[v2, 'v2'], [today, 'today']]) {
+        if (!slug) continue;
+        const r = await done(await get(`${pub}/w/${slug}/v2/ws`));
+        seen.push(`gateway: /w/${slug}/v2/ws -> ${r.status} ${system(r)}`);
+        if (system(r) !== want || r.status === 502) bad('gateway', `/w/${slug}/v2/ws answered ${r.status} from ${system(r)}, want ${want}'s answer`);
+      }
+    },
+    pairing: async () => {
+      const card = await get(`${pub}/pair`, { headers: { accept: 'text/html' } }), html = await card.text();
+      seen.push(`pairing: /pair -> ${card.status} ${system(card)}`);
+      if (card.status !== 200 || system(card) !== 'v2' || !/<html/i.test(html)) bad('pairing', `/pair answered ${card.status} from ${system(card)}, want the new pairing card (200 from v2)`);
+      for (const path of ['/v1/pair/poll', '/v1/agent/account']) {
+        const r = await done(await get(pub + path, { headers: { accept: 'application/json' } }));
+        seen.push(`pairing: ${path} -> ${r.status} ${system(r)}`);
+        if (system(r) !== 'v2' || r.status === 502) bad('pairing', `${path} answered ${r.status} from ${system(r)}, want the new system's directory`);
       }
     },
     poster: async () => {
@@ -189,7 +201,7 @@ if (isMain(import.meta.url)) {
   const list = (k) => opt(k)?.split(',').filter(Boolean);
   const pairs = (k) => (list(k) ?? []).map((p) => { const i = p.indexOf('='); return [p.slice(0, i), p.slice(i + 1)]; });
   const r = await frontCheck({ public: opt('--public', 'https://soul.game'), primary: opt('--primary', 'https://sim.eden.art'), old: list('--old') ?? ['https://souls.game'],
-    v2: opt('--v2'), today: opt('--today'), aliases: pairs('--alias'), unlisted: opt('--unlisted'), stopped: opt('--stopped'),
+    v2: opt('--v2'), today: opt('--today'), aliases: pairs('--alias'), unlisted: opt('--unlisted'), stream: opt('--stream'), stopped: opt('--stopped'),
     points: list('--points') ?? POINTS, map: Object.fromEntries(pairs('--map')) });
   for (const s of r.seen) console.log(`  ${s}`);
   for (const p of r.problems) console.log(`  PROBLEM ${p}`);
