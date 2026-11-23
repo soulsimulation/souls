@@ -75,6 +75,9 @@ function nodeRec(v: Map<number, unknown>): NodeRec {
     // W2 (0.135): the def it was imported from (import-eden's field 2), which the old page draws it by
     const d = f.get(2);
     if (d instanceof Uint8Array || typeof d === 'string') rec.def = typeof d === 'string' ? d : new TextDecoder().decode(d);
+    // W3: its def's params (import-eden's field 19, today's JSON text)
+    const p = f.get(19);
+    if (p instanceof Uint8Array) try { const v = JSON.parse(new TextDecoder().decode(p)); if (v && typeof v === 'object' && !Array.isArray(v)) rec.params = v; } catch { /* drawn with the def's defaults */ }
   } else if (typeof o === 'string' && f.get(2) instanceof Uint8Array) (rec.defines = o), (rec.entry = f.get(2) as Uint8Array); // #3697: a creator's kind
   if (Array.isArray(f.get(11))) rec.outline = rows(f.get(11));
   if (Array.isArray(f.get(12))) rec.solids = rows(f.get(12));

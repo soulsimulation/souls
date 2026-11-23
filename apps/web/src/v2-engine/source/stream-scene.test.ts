@@ -58,6 +58,14 @@ test('a hamlet from its stream: things at their world pose by their library defs
   assert.equal(m.entities.size, 5);
 });
 
+test('W3: a thing\'s recorded params (field 19) are drawn as the import carried them', () => {
+  const params = { w: 12, d: 9, floors: 2, material: 'brick', roof: 'flat' };
+  const s = streamSnapshot(WORLD.map((n) => (n.id === 'hall' ? { ...n, params } : n)), 'hamlet');
+  assert.deepEqual(s.entities.find((e) => e.id === 'e_hall1')!.params, params, 'not the floor-derived size');
+  assert.ok(!s.plain.some((p) => p.startsWith('params')), 'a world whose import carries params names no params hatch');
+  assert.ok(streamSnapshot(WORLD, 'hamlet').plain.some((p) => p.startsWith('params')), 'one imported before W3 does');
+});
+
 test('the terrain draws the stream\'s heights, flat at the base off its tiles', () => {
   const t = new Terrain({ schema: 'ground/1', base: 0, extent: [-64, -64, 64, 64], landforms: [], waters: [] });
   fixTerrain(t, tileHeights(WORLD[1]));
