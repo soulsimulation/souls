@@ -42,6 +42,84 @@ impl<S: Store> Store for Under<S> {
     }
 }
 
+/// How long a read made [`patiently`] waits before each try after the first: four tries, about 14 s of waiting, or
+/// about 34 s in all when each try runs to the S3 client's 5 s timeout.
+pub const WAITS: [std::time::Duration; 3] = [
+    std::time::Duration::from_secs(2),
+    std::time::Duration::from_secs(4),
+    std::time::Duration::from_secs(8),
+];
+
+std::thread_local! {
+    static PATIENT: std::cell::Cell<bool> = const { std::cell::Cell::new(false) };
+}
+
+/// Runs `f` with this thread's reads through a [`Patient`] store tried again when the store is out of reach (#1960):
+/// a world's start makes many reads of the bucket, and one slow answer must not end it. Reads elsewhere, and writes,
+/// are tried once, as before.
+pub fn patiently<T>(f: impl FnOnce() -> T) -> T {
+    let before = PATIENT.with(|p| p.replace(true));
+    let out = f();
+    PATIENT.with(|p| p.set(before));
+    out
+}
+
+/// A store whose reads (`get`, `list`) made [`patiently`] are tried again after each of `waits` while the store
+/// answers `store-unreachable` (no answer in time, or a 5xx); then that refusal, as the store gave it. Any other
+/// answer, a refusal or not, is the store's at once. Writes and deletes pass through untouched.
+#[derive(Clone)]
+pub struct Patient<S> {
+    pub store: S,
+    pub waits: &'static [std::time::Duration],
+}
+
+impl<S> Patient<S> {
+    pub fn new(store: S) -> Patient<S> {
+        Patient {
+            store,
+            waits: &WAITS,
+        }
+    }
+
+    fn read<T>(&self, call: impl Fn(&S) -> R<T>) -> R<T> {
+        let mut waits = self.waits.iter();
+        loop {
+            match call(&self.store) {
+                Err(e) if e.name == "store-unreachable" && PATIENT.with(std::cell::Cell::get) => {
+                    let Some(wait) = waits.next() else {
+                        return Err(e);
+                    };
+                    eprintln!(
+                        "store: out of reach ({}), trying again in {} s",
+                        e.detail,
+                        wait.as_secs_f32()
+                    );
+                    std::thread::sleep(*wait);
+                }
+                answer => return answer,
+            }
+        }
+    }
+}
+
+impl<S: Store> Store for Patient<S> {
+    fn get(&self, key: &str) -> R<Option<Object>> {
+        self.read(|s| s.get(key))
+    }
+
+    fn put(&self, key: &str, bytes: &[u8], when: When) -> R<String> {
+        self.store.put(key, bytes, when)
+    }
+
+    fn list(&self, prefix: &str) -> R<Vec<String>> {
+        self.read(|s| s.list(prefix))
+    }
+
+    fn delete(&self, key: &str) -> R<()> {
+        self.store.delete(key)
+    }
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;
@@ -133,5 +211,97 @@ mod tests {
         let e = wrong.get("x").expect_err("refused");
         assert_eq!(e.name, "store-error");
         assert!(!e.detail.contains("someone-else"));
+    }
+
+    /// A store that answers its first `refusals` calls with the refusal `name`, counting every call.
+    struct Flaky {
+        store: directoryd::directory::store::Memory,
+        name: &'static str,
+        refusals: std::sync::atomic::AtomicUsize,
+        calls: std::sync::atomic::AtomicUsize,
+    }
+
+    impl Flaky {
+        fn new(name: &'static str, refusals: usize) -> Flaky {
+            let store = directoryd::directory::store::Memory::default();
+            store.put("k", b"v", When::Absent).expect("written");
+            Flaky {
+                store,
+                name,
+                refusals: refusals.into(),
+                calls: 0.into(),
+            }
+        }
+
+        fn answer<T>(&self, then: impl FnOnce() -> R<T>) -> R<T> {
+            use std::sync::atomic::Ordering::SeqCst;
+            self.calls.fetch_add(1, SeqCst);
+            match self
+                .refusals
+                .fetch_update(SeqCst, SeqCst, |n| n.checked_sub(1))
+            {
+                Ok(_) => directoryd::directory::store::refuse(self.name, "flaky"),
+                Err(_) => then(),
+            }
+        }
+
+        fn calls(&self) -> usize {
+            self.calls.load(std::sync::atomic::Ordering::SeqCst)
+        }
+    }
+
+    impl Store for Flaky {
+        fn get(&self, key: &str) -> R<Option<Object>> {
+            self.answer(|| self.store.get(key))
+        }
+        fn put(&self, key: &str, bytes: &[u8], when: When) -> R<String> {
+            self.answer(|| self.store.put(key, bytes, when))
+        }
+        fn list(&self, prefix: &str) -> R<Vec<String>> {
+            self.answer(|| self.store.list(prefix))
+        }
+    }
+
+    const SHORT: [std::time::Duration; 3] = [std::time::Duration::from_millis(1); 3];
+
+    fn patient(name: &'static str, refusals: usize) -> Patient<Flaky> {
+        Patient {
+            store: Flaky::new(name, refusals),
+            waits: &SHORT,
+        }
+    }
+
+    /// #1960: a read made patiently is tried four times while the store is out of reach, then refused as the store
+    /// refused it; any other refusal, a write, and a read made outside `patiently`, are tried once.
+    #[test]
+    fn i1960_patient_reads_try_four_times_and_nothing_else_is_tried_again() {
+        let p = patient("store-unreachable", 3);
+        let got = patiently(|| p.get("k")).expect("the fourth try reads");
+        assert_eq!(
+            (got.map(|o| o.bytes), p.store.calls()),
+            (Some(b"v".to_vec()), 4)
+        );
+        let p = patient("store-unreachable", 3);
+        assert_eq!(patiently(|| p.list("")).expect("listed"), ["k"]);
+        assert_eq!(p.store.calls(), 4);
+
+        let p = patient("store-unreachable", 4);
+        assert_eq!(refusal(patiently(|| p.get("k"))), "store-unreachable");
+        assert_eq!(p.store.calls(), 4, "four tries, then the store's refusal");
+
+        for name in ["store-error", "precondition-failed"] {
+            let p = patient(name, 1);
+            assert_eq!(refusal(patiently(|| p.get("k"))), name);
+            assert_eq!(p.store.calls(), 1, "{name} is the store's answer at once");
+        }
+        let p = patient("store-unreachable", 1);
+        assert_eq!(
+            refusal(patiently(|| p.put("k", b"w", When::Absent))),
+            "store-unreachable"
+        );
+        assert_eq!(p.store.calls(), 1, "a write is never tried again");
+        let p = patient("store-unreachable", 1);
+        assert_eq!(refusal(p.get("k")), "store-unreachable");
+        assert_eq!(p.store.calls(), 1, "outside patiently, one try");
     }
 }

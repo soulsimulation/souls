@@ -86,7 +86,7 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   // VF1: arriving = no frame drawn yet. It gets one calm card (not warnings); a drawn view that stops being
   // current says why only once that lasts (transient gaps never flash), and the pill never says "Held".
   const reason = state?.unavailableReason ?? null;
-  const blocked = !!reason && /graphics|3D/.test(reason);
+  const blocked = !!reason && /graphics|3D|stream is not available/.test(reason);
   const drawnOnce = useRef(false);
   if (state?.shownTick != null && !state.loading) drawnOnce.current = true;
   const arriving = !blocked && (!state || state.shownTick == null || (state.loading && !drawnOnce.current));

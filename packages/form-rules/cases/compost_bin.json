@@ -1,0 +1,254 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "eden:compost_bin (0.132 E2): a held bundle of weeds fills the bin by one portion of compost, and the bin is emptied. Today's compost heap offered fill and empty; these are the entry's.",
+  "cases": [
+    {
+      "name": "fill_every_need_met",
+      "act": {
+        "this": "c1",
+        "form": "fill",
+        "args": {
+          "waste": "w1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {
+            "kind": "eden:compost_bin",
+            "fields": {
+              "compost": 2
+            }
+          },
+          "w1": {
+            "kind": "eden:weed_bundle"
+          },
+          "b1": {
+            "hands": {
+              "left": "w1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "fill_not_holding_weeds",
+      "act": {
+        "this": "c1",
+        "form": "fill",
+        "args": {
+          "waste": "w1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {
+            "kind": "eden:compost_bin",
+            "fields": {
+              "compost": 2
+            }
+          },
+          "w1": {
+            "kind": "eden:weed_bundle"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "not_holding_kind",
+        "need": 0,
+        "detail": {
+          "kind": "eden:weed_bundle"
+        },
+        "fix": {
+          "step": "take",
+          "kind": "eden:weed_bundle"
+        }
+      }
+    },
+    {
+      "name": "fill_bin_full",
+      "act": {
+        "this": "c1",
+        "form": "fill",
+        "args": {
+          "waste": "w1"
+        }
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {
+            "kind": "eden:compost_bin"
+          },
+          "w1": {
+            "kind": "eden:weed_bundle"
+          },
+          "b1": {
+            "hands": {
+              "left": "w1",
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "detail": {
+          "field": "compost",
+          "found": 3,
+          "wanted": {
+            "at_most": 2
+          }
+        },
+        "fix": {
+          "form": "empty"
+        }
+      }
+    },
+    {
+      "name": "empty_every_need_met",
+      "act": {
+        "this": "c1",
+        "form": "empty"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {
+            "kind": "eden:compost_bin"
+          },
+          "w1": {
+            "kind": "eden:weed_bundle"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "empty_hands_full",
+      "act": {
+        "this": "c1",
+        "form": "empty"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {
+            "kind": "eden:compost_bin"
+          },
+          "w1": {
+            "kind": "eden:weed_bundle"
+          },
+          "b1": {
+            "hands": {
+              "left": "w1",
+              "right": "w2"
+            }
+          },
+          "w2": {
+            "kind": "eden:weed_bundle"
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "no_free_hand",
+        "need": 0
+      }
+    },
+    {
+      "name": "empty_already_empty",
+      "act": {
+        "this": "c1",
+        "form": "empty"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "c1": {
+            "kind": "eden:compost_bin",
+            "fields": {
+              "compost": 0
+            }
+          },
+          "w1": {
+            "kind": "eden:weed_bundle"
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            }
+          }
+        }
+      },
+      "asker": {
+        "sees": [
+          "public"
+        ]
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1,
+        "detail": {
+          "field": "compost",
+          "found": 0,
+          "wanted": {
+            "at_least": 1
+          }
+        },
+        "fix": {
+          "form": "fill"
+        }
+      }
+    }
+  ]
+}

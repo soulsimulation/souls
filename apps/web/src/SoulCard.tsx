@@ -12,6 +12,8 @@ import {VisitorFrom} from './SoulTravel.tsx';
 import {clockAt,clockTitle,useAgentPresence,type AgentHere} from './agent-presence.ts';
 import {ApprovalCard} from './god-ui/ApprovalDialog.tsx';
 import {retireQuestion,retireSoul} from './soul-retire.ts';
+import {doingText} from './place-names.ts';
+import {v2Stream} from './v2-engine/use-v2-souls.ts';
 import {WAITING_PROMPT_MS,ageText,bodyPhrase,bodyWord,holderLine,newest,ownerLink,placeOf,readBody,readNow,reconnectSentence,readSlowed,slowedText,visitorPhrase,type Body,type Link,type Now} from './soul-state.ts';
 
 /** LINK (spec SOUL-LINK r3 §4, canvas v5): one Soul card, one frame, the status line changes shape.
@@ -20,6 +22,10 @@ import {WAITING_PROMPT_MS,ageText,bodyPhrase,bodyWord,holderLine,newest,ownerLin
  * · Pairing (the card is the approval). Visitor: Awake / Zombie / Asleep, place, `now`, Follow.
  * Never two of {message box, Reconnect box, Approve} at once. All server text is untrusted and rendered as text only. */
 type Rec=PublicRecord|'loading'|'unavailable';
+/** B3-3: on a world the new engine runs, the card says what the Soul is doing now (the stream's, souls.ts `status`).
+ *  Read when this module loads: the page's main takes the inline config, and deletes it, when it mounts. */
+const V2=typeof window!=='undefined'&&!!v2Stream();
+const doingNow=(soul:PublicSoul)=>V2&&soul.doing?doingText(soul.doing,null,soul.id)||null:null;
 type Camera={following:boolean;follow():void;stop():void};
 
 function usePublicRecord(api:Api,soulId:string):Rec{
@@ -43,13 +49,13 @@ export function SoulCard(props:SoulCardProps){
  const body=newest(readBody(x.body),r?.body??null,props.bodyEvent??null)??fadeBody(r);
  const now=newest(readNow(x.now),r?.now??null);
  const place=placeOf(r?.self?.placePath);
- return props.owner?<OwnerCard {...props} body={body} now={now} place={place}/>:<SoulCardView soul={props.soul} view="visitor" body={body} now={now} place={place} camera={props.camera} story={r?.timeline}/>;
+ return props.owner?<OwnerCard {...props} body={body} now={now} place={place}/>:<SoulCardView soul={props.soul} view="visitor" body={body} now={now} place={place} camera={props.camera} story={r?.timeline} doing={doingNow(props.soul)}/>;
 }
 function OwnerCard({api,soul,camera,signedIn=true,body,now,place}:SoulCardProps&{body:Body|null;now:Now|null;place:string|null}){
  const {inbox,send}=useSoulInbox(api,soul.id),here=useAgentPresence(soul.id),code=useWindowCode();
  const link=ownerLink(here?.link??null,here);
  const disconnect=async()=>{const r=await api(`/v1/souls/${encodeURIComponent(soul.id)}/revoke`,{});return r.status===200&&r.data?.ok===true;};
- return <SoulCardView soul={soul} view="owner" link={link} here={here} inbox={inbox} send={send} body={body} now={newest(now,readNow(inbox?.now))} place={place}
+ return <SoulCardView soul={soul} view="owner" link={link} here={here} inbox={inbox} send={send} body={body} now={newest(now,readNow(inbox?.now))} place={place} doing={doingNow(soul)}
   prompt={soulStartPrompt(location.origin+apiPath(''),soul.id,soul.name,code)} camera={camera} signedIn={signedIn} disconnect={disconnect} retire={()=>retireSoul(api,soul,()=>true)}/>;
 }
 
@@ -61,8 +67,10 @@ export type SoulCardViewProps={soul:PublicSoul;view:'owner'|'visitor';body:Body|
  /** owner only (#3375): asks once, then retires the Soul for good */
  retire?():Promise<boolean>;
  /** fixtures and shots: a fixed clock, the link details (and Pair another session) open from the start */
- clock?:number;open?:{details?:boolean;pair?:boolean}};
-export function SoulCardView({soul,view,body,now,place,camera,story,link=null,here=null,inbox=null,send,prompt='',signedIn=true,disconnect,retire,clock,open}:SoulCardViewProps){
+ clock?:number;open?:{details?:boolean;pair?:boolean};
+ /** B3-3: what it is doing now ("Walking"), shown in the status line while it is awake; null when not known */
+ doing?:string|null};
+export function SoulCardView({soul,view,body,now,place,camera,story,link=null,here=null,inbox=null,send,prompt='',signedIn=true,disconnect,retire,clock,open,doing=null}:SoulCardViewProps){
  const t=clock??Date.now();
  const [copied,setCopied]=useState<''|'ok'|'failed'>('');
  const [details,setDetails]=useState(!!open?.details);
@@ -96,7 +104,7 @@ export function SoulCardView({soul,view,body,now,place,camera,story,link=null,he
   <Head soul={soul} title={title} share={share} copied={copied}/>
   <p className="soul-meta">
    {owner?<OwnerStatus link={link} waiting={waiting} details={details} toggle={()=>setDetails(v=>!v)}/>:<VisitorStatus body={body}/>}
-   <StatusPlace text={!owner?visitorPhrase(body,place,t):waiting?(link?.since&&t-link.since<WAITING_PROMPT_MS?'approved just now':'approved'):disconnected&&!body?(link?.since?`since ${clockAt(link.since,t)}`:''):bodyPhrase(body,place,t)} title={body?.since?clockTitle(body.since):undefined}/>
+   <StatusPlace text={doing&&(!body||body.state==='awake')?`${doing}${place?` at ${place}`:''}`:!owner?visitorPhrase(body,place,t):waiting?(link?.since&&t-link.since<WAITING_PROMPT_MS?'approved just now':'approved'):disconnected&&!body?(link?.since?`since ${clockAt(link.since,t)}`:''):bodyPhrase(body,place,t)} title={body?.since?clockTitle(body.since):undefined}/>
    <VisitorFrom soulId={soul.id}/>
   </p>
   {slowedNow&&<p className="soul-slowed soul-dim" role="status" data-slowed={slowed!.reason}>{slowedNow}</p>}

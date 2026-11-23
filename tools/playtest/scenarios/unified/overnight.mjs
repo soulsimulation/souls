@@ -1,5 +1,6 @@
 #!/usr/bin/env node
 // Coordinator-invoked only. One local battery at a time; no automatic provider/model/review substitution or retries.
+import { isMain } from '../../../lib/is-main.mjs';
 import{readFileSync,writeFileSync,mkdirSync,appendFileSync,existsSync}from'node:fs';
 import{resolve,join}from'node:path';import{fileURLToPath,pathToFileURL}from'node:url';import{spawn,execFileSync}from'node:child_process';
 import{machineCheck}from'../../playtest.mjs';
@@ -33,4 +34,4 @@ export async function overnight({baselineRoot,treatmentRoot,fixtures,out,manualP
  }
  return{out:resolve(out),runs:selected.runs.length,retained:selected.retained.length};
 }
-if(process.argv[1]&&import.meta.url===pathToFileURL(resolve(process.argv[1])).href){let args=process.argv.slice(2),f={};for(let i=0;i<args.length;i+=2)f[args[i].replace(/^--/,'')]=args[i+1];console.log(await overnight({baselineRoot:f['baseline-root'],treatmentRoot:f['treatment-root'],fixtures:f.fixtures,out:f.out,manualPlan:f.plan}));}
+if(isMain(import.meta.url)){let args=process.argv.slice(2),f={};for(let i=0;i<args.length;i+=2)f[args[i].replace(/^--/,'')]=args[i+1];console.log(await overnight({baselineRoot:f['baseline-root'],treatmentRoot:f['treatment-root'],fixtures:f.fixtures,out:f.out,manualPlan:f.plan}));}
