@@ -1259,6 +1259,24 @@ fn a3728_a_link_is_judged_at_both_ends_and_its_door() {
         .edit(w.creator(), v, vec![link(1, [c, d], End::Second, Some(e))])
         .expect_err("a link with a door, owned by its second end");
     assert_eq!((r.op, r.name), (Some(0), "edit.link"), "{r:?}");
+    // A doorway link owned by its first end still writes a row of at least 5 values to field 22, where it is read.
+    let first = |field: u64, row: Vec<Value>| Op::Link {
+        name: 1,
+        ty: Name::new("eden:doorway").expect("a name"),
+        ends: [c, d].map(Ref::Node),
+        owner: End::First,
+        field,
+        row,
+        door: None,
+    };
+    let r = w
+        .edit(w.creator(), v, vec![first(21, vec![Value::Uint(1); 6])])
+        .expect_err("a doorway's row in another field");
+    assert_eq!((r.op, r.name), (Some(0), "edit.link"), "{r:?}");
+    let r = w
+        .edit(w.creator(), v, vec![first(22, vec![Value::Uint(1)])])
+        .expect_err("a doorway's row too short to read");
+    assert_eq!((r.op, r.name), (Some(0), "edit.link"), "{r:?}");
     assert_eq!(w.log_hash(), log, "refusals write nothing");
     // The lead links outside every claim, and the helper inside its own.
     w.edit(w.creator(), v, vec![link(1, [c, d], End::First, Some(e))])
@@ -1616,4 +1634,194 @@ fn a2_zones_are_named_land_uses_with_an_outline() {
         assert_eq!(r.name, "edit.zone-malformed", "{r:?}");
     }
     w.close();
+}
+
+// --- #3934 review: a removal's unlink rewrites a far owner, which the claim check judges too ------------------------
+
+/// N2's test world as imported, on a copy that edits commit to: its doorways are real links.
+struct Doorways {
+    live: Replica,
+    root: Id,
+    /// The leaf of the test world's door to b.
+    leaf: Id,
+    world: World,
+    minter: Minter,
+    intents: Minter,
+    at: i64,
+}
+
+impl Doorways {
+    fn new() -> Doorways {
+        let im = import_eden::load(&testworld::generate(1, 0).expect("the test world").text)
+            .expect("the test world loads");
+        let root = im.nodes["world"];
+        let h = import_eden::header(root, &im.rules).expect("a header");
+        let next = im.tree.to_state().next;
+        let leaf = im.nodes["door-building-to-b"];
+        Doorways {
+            live: Replica::restored(h, im.tree, next),
+            root,
+            leaf,
+            world: World {
+                creator: Id::new(Scope([0xc0; 16]), 1).expect("an id"),
+                kinds: BTreeMap::new(),
+            },
+            minter: Minter::new(Scope([0x77; 16])),
+            intents: Minter::new(Scope([0x11; 16])),
+            at: 0,
+        }
+    }
+
+    fn planned(&mut self, ops: Vec<Op>, claim: Option<&str>) -> Result<Planned, Refused> {
+        let copy = self.live.frozen();
+        let checked = check(
+            Edit {
+                claim: claim.map(|c| Name::new(c).expect("a name")),
+                intent: self.intents.mint().expect("an id"),
+                actor: Actor::Creator(self.world.creator),
+                planned: self.live.version(),
+                ops,
+            },
+            &copy,
+            &self.world,
+        )?;
+        plan(checked, &copy, None)
+    }
+
+    fn edit(&mut self, ops: Vec<Op>, claim: Option<&str>) -> Result<Committed, Refused> {
+        let planned = self.planned(ops, claim)?;
+        self.at += 1_000;
+        commit(&mut self.live, &mut self.minter, &planned, &[], self.at)
+    }
+
+    /// Where `node`'s origin is on the root's ground (x, z mm), as the claim check reads it: an edit of it under the
+    /// far-away probe claim is refused naming its point.
+    fn probe(&mut self, node: Id) -> (i64, i64) {
+        let r = self
+            .planned(
+                vec![Op::Set {
+                    node: Ref::Node(node),
+                    field: 200,
+                    to: Value::Uint(1),
+                }],
+                Some("c:probe"),
+            )
+            .err()
+            .expect("outside the probe");
+        assert_eq!(r.name, "edit.outside-claim", "{r:?}");
+        let n = |k: &str| -> i64 {
+            let at = r.detail.find(k).expect("a coordinate") + k.len();
+            r.detail[at..]
+                .split(' ')
+                .next()
+                .and_then(|s| s.parse().ok())
+                .expect("a number")
+        };
+        (n("x "), n("z "))
+    }
+}
+
+#[test]
+fn a3934_removing_a_node_that_names_a_claimed_doorway_is_judged_where_the_doorway_is() {
+    use replica::edit::claims::{F_CLAIMS, judge_effects};
+    const F_DOOR_LINK: u64 = 7;
+    let mut w = Doorways::new();
+    let root = w.root;
+    // The doorway the test world's door to b opens, and its owning end, whose field 22 lists it.
+    let tree = w.live.tree();
+    let leaf = tree
+        .node(tree.handle(w.leaf).expect("the leaf"))
+        .expect("the leaf");
+    let link_value = leaf.fields()[&F_DOOR_LINK].clone();
+    let link = replica::effects::read_id(&link_value).expect("a link");
+    let (_, [owner, _], ..) = tree.link(link).expect("the doorway");
+    let probe = Value::Array(vec![claim_row(
+        "c:probe",
+        "part:probe",
+        [900_000_000, 900_000_000, 900_000_001, 900_000_001],
+    )]);
+    w.edit(vec![set_root(root, F_CLAIMS, probe)], None)
+        .expect("the probe claim");
+    let (ox, oz) = w.probe(owner);
+    // A childless node far from the owner, with no door of its own.
+    let tree = w.live.tree();
+    let mut candidates: Vec<Id> = Vec::new();
+    let mut stack = vec![tree.root()];
+    while let Some(h) = stack.pop() {
+        let kids = tree.children(h).unwrap_or_default();
+        if let Some(n) = tree.node(h)
+            && kids.is_empty()
+            && n.parent().is_some()
+            && !n.fields().contains_key(&F_DOOR_LINK)
+            && !n.fields().contains_key(&replica::edit::DOOR_GEOMETRY)
+        {
+            candidates.push(n.id());
+        }
+        stack.extend(kids.iter().copied());
+    }
+    candidates.sort();
+    let (outside, (px, pz)) = candidates
+        .into_iter()
+        .find_map(|c| {
+            let p = w.probe(c);
+            ((p.0 - ox).abs() + (p.1 - oz).abs() > 5_000).then_some((c, p))
+        })
+        .expect("a node far from the doorway");
+    let aim = |node: Id| Op::Set {
+        node: Ref::Node(node),
+        field: F_DOOR_LINK,
+        to: link_value.clone(),
+    };
+    let remove = |node: Id| Op::Remove {
+        node: Ref::Node(node),
+    };
+    // The same removal before the claim, on a copy: what a redo would write again.
+    let mut scratch = Doorways {
+        live: w.live.frozen(),
+        root,
+        leaf: w.leaf,
+        world: w.world.clone(),
+        minter: Minter::new(Scope([0x78; 16])),
+        intents: Minter::new(Scope([0x12; 16])),
+        at: w.at,
+    };
+    let unlinked = scratch
+        .edit(vec![aim(outside), remove(outside)], None)
+        .expect("unclaimed, the removal unlinks the doorway");
+    assert!(scratch.live.tree().link(link).is_none(), "unlinked");
+    // The lead claims the doorway's owner.
+    let house = claim_row("c:house", "part:house", [ox - 1, oz - 1, ox + 1, oz + 1]);
+    w.edit(
+        vec![set_root(root, F_CLAIMS, Value::Array(vec![house.clone()]))],
+        None,
+    )
+    .expect("claimed");
+    // Under no claim: aiming and removing in one batch, or the removal after the aim, is refused where the doorway is.
+    let r = w
+        .edit(vec![aim(outside), remove(outside)], None)
+        .expect_err("the removal unlinks a claimed doorway");
+    assert_eq!((r.op, r.name), (Some(1), "edit.claimed"), "{r:?}");
+    assert!(r.detail.contains("c:house"), "{}", r.detail);
+    w.edit(vec![aim(outside)], None)
+        .expect("aiming alone writes only the outside node");
+    let r = w
+        .edit(vec![remove(outside)], None)
+        .expect_err("the removal unlinks a claimed doorway");
+    assert_eq!((r.op, r.name), (Some(0), "edit.claimed"), "{r:?}");
+    assert!(w.live.tree().link(link).is_some(), "the doorway stands");
+    // An undo or a redo writing the same removal is refused too.
+    let r = judge_effects(&w.live, &unlinked.part.effects).expect_err("inside a claim");
+    assert_eq!(r.name, "edit.claimed", "{r:?}");
+    // Under another claim holding the removed node: the doorway's owner is outside it.
+    let yard = claim_row("c:yard", "part:yard", [px - 1, pz - 1, px + 1, pz + 1]);
+    w.edit(
+        vec![set_root(root, F_CLAIMS, Value::Array(vec![house, yard]))],
+        None,
+    )
+    .expect("a second claim");
+    let r = w
+        .edit(vec![remove(outside)], Some("c:yard"))
+        .expect_err("the owner is outside c:yard");
+    assert_eq!((r.op, r.name), (Some(0), "edit.outside-claim"), "{r:?}");
+    assert!(w.live.tree().link(link).is_some(), "the doorway stands");
 }

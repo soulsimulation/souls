@@ -17,6 +17,7 @@
 //               that does not hash to the URL's sha) is 502 sha-mismatch twice (never stored), a query is 400;
 //   6. no collision: a published core key (assets/...) still answers 200 from R2, not from the Worker.
 // Exit 0 and "result":"PASS" only when every check passes. The upload is not placed or defined (no world edit).
+import { isMain } from '../../lib/is-main.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync, mkdirSync } from 'node:fs';
 import { createServer } from 'node:http';
@@ -165,7 +166,7 @@ async function selfTest() {
   } finally { world.close(); worker.close(); }
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const out = opt('out');
   let result;
   if (args.includes('--self-test')) result = { mode: 'self-test (loopback stand-ins)', ...(await selfTest()) };

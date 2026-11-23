@@ -17,6 +17,7 @@
 //            second a CDN hit; the snapshot under a stale key is no-store and never a hit
 // Read-only: GETs, one WebSocket join, and one POST without a token that the launcher refuses before any world reads it.
 // Exit 0 on PASS.
+import { isMain } from '../../../lib/is-main.mjs';
 import { readFileSync } from 'node:fs';
 import { fileURLToPath } from 'node:url';
 
@@ -121,7 +122,7 @@ export async function checkSoulGame({ origin = 'https://soul.game', world = 'ede
   return { pass: problems.length === 0, problems, seen };
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (isMain(import.meta.url)) {
   const a = process.argv.slice(2), opt = (k, d) => { const i = a.indexOf(k); return i >= 0 ? a[i + 1] : d; };
   const r = await checkSoulGame({ origin: opt('--origin', 'https://soul.game').replace(/\/$/, ''), world: opt('--world', 'eden'), trace: opt('--trace'), token: process.env.SOUL_CHECK_TOKEN, eventMs: Number(opt('--event-ms', 5000)), stable: opt('--stable', STABLE), points: opt('--points')?.split(',') ?? [...POINTS, 'cache'] });
   for (const s of r.seen) console.log(`  ${s}`);

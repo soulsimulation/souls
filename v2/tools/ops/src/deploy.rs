@@ -86,8 +86,16 @@ fn main() {
         world,
         canary: Canary {
             window: Duration::from_secs(num("--window-s", 60)),
-            // As worldd@.service's TimeoutStartSec: a real world loads its facts and replays its log (O18b, #3498).
-            start_within: Duration::from_secs(30),
+            // A real world loads its facts and replays its log (O18b, #3498): the world's own bound from its limits
+            // drop-in (world-limits.json, Eden's 600 s), else worldd@.service's TimeoutStartSec, 30 s.
+            start_within: supervisor::deploy::start_within(
+                std::fs::read_to_string(format!(
+                    "/etc/systemd/system/worldd@{}.service.d/limits.conf",
+                    world.name()
+                ))
+                .ok()
+                .as_deref(),
+            ),
             answer_within: Duration::from_secs(2),
             every: Duration::from_millis(500),
         },

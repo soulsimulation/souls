@@ -8,7 +8,7 @@
 //   node v2/client/served/serve.mjs <served dir> [--port <n>] [--upstream <origin>]
 //     a local stand-in: anything else is passed to --upstream (a directory, say), else 404. Prints `listening <url>`.
 
-import { readFileSync } from 'node:fs';
+import { readFileSync, realpathSync } from 'node:fs';
 import { createServer } from 'node:http';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -33,7 +33,9 @@ export function answer(dir, path) {
   }
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+// tools/lib/is-main.mjs, inlined: this file is bundled or copied alone. A start through a symlink still runs main.
+const startedAsScript = () => { try { return !!process.argv[1] && realpathSync(process.argv[1]) === realpathSync(fileURLToPath(import.meta.url)); } catch { return false; } };
+if (startedAsScript()) {
   const args = process.argv.slice(2), dir = args[0];
   const opt = (n) => { const k = args.indexOf(n); return k >= 0 ? args[k + 1] : undefined; };
   const upstream = opt('--upstream');

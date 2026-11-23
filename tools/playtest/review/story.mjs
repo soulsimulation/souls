@@ -2,9 +2,9 @@
 // at that moment, what the player said, what the agent did and said, the card and the body, and the verdict.
 // Read-only over a run folder; story.html / story.json are the only outputs (writeStory, CLI below).
 // node tools/playtest/review/story.mjs <run-dir> [--out story.html] [--max 30]
+import { isMain } from '../../lib/is-main.mjs';
 import { existsSync, readFileSync } from 'node:fs';
 import { isAbsolute, join, relative, resolve, sep } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { readJson, readJsonl } from '../lib/jsonl.mjs';
 import { loadRun } from './run.mjs';
 import { renderStoryHtml, storyPage, storyLines, writeStory } from './story-html.mjs';
@@ -272,7 +272,7 @@ function finish(k, S, run) {
   };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const a = process.argv.slice(2); const opt = (k) => { const i = a.indexOf(k); return i >= 0 ? a[i + 1] : null; };
   const dir = a.find((x, i) => !x.startsWith('--') && !['--out', '--max'].includes(a[i - 1]));
   if (!dir) { process.stderr.write('usage: story.mjs <run-dir> [--out story.html] [--max 30]\n'); process.exit(2); }

@@ -2,10 +2,11 @@
 // Field-scoped live meaning patches. Credentials stay inside the existing God CLI.
 // plan <overlay.json> <god-folder> <receipt.json> [source-snapshot.json] --expected-world-id <live-id>
 // apply/rollback <overlay.json> <god-folder> <receipt.json>
+import { isMain } from '../lib/is-main.mjs';
 import { readFileSync,writeFileSync,existsSync,renameSync,unlinkSync } from 'node:fs';
 import { randomUUID } from 'node:crypto';
 import { resolve,dirname } from 'node:path';
-import { fileURLToPath,pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { execFileSync } from 'node:child_process';
 import { hashOf } from '../../packages/world-compiler/src/index.ts';
 import { aboutSchema,worldAboutSchema } from '../../packages/world-compiler/src/schemas.ts';
@@ -102,7 +103,7 @@ export function parseLiveArgs(args){
  if(mode==='plan'&&!expectedWorldId?.trim())throw Error('plan requires --expected-world-id <live-id>');
  return{mode,overlayPath,folder,receiptPath,sourcePath,expectedWorldId};
 }
-if(process.argv[1]&&pathToFileURL(resolve(process.argv[1])).href===import.meta.url){
+if(isMain(import.meta.url)){
  const{mode,overlayPath,folder,receiptPath,sourcePath,expectedWorldId}=parseLiveArgs(process.argv.slice(2));
  const current=cli(folder,['snapshot']);
  if(expectedWorldId&&current.worldId!==expectedWorldId)throw Error(`wrong live world: expected ${expectedWorldId}, received ${current.worldId}`);

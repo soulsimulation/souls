@@ -1,12 +1,14 @@
 //! A local S3 stand-in for tests (O3c, #3529): an HTTP server on `127.0.0.1` that answers the four calls
 //! [`super::s3::S3`] makes, GET and PUT of one object (with `If-None-Match: *` and `If-Match`) and ListObjectsV2 by
 //! prefix, page by page. It refuses a request that is not signed with its key id or whose body hash does not match
-//! (403). It never stands for the production bucket: it holds its objects in memory and is gone when dropped.
+//! (403). [`StandIn::fail_writes`] fails the answers to writes it has applied, as a bucket out of breath does. It
+//! never stands for the production bucket: it holds its objects in memory and is gone when dropped.
 
 use std::collections::BTreeMap;
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{TcpListener, TcpStream};
 use std::sync::{Arc, Mutex};
+use std::time::Duration;
 
 use replica::encode::to_hex;
 use ring::digest;
@@ -16,10 +18,27 @@ pub const KEY_ID: &str = "stand-in-key";
 
 type Objects = Arc<Mutex<BTreeMap<String, (String, Vec<u8>)>>>;
 
+/// How many reads are still to be held, for how long each, and what their target holds ([`StandIn::stall_reads`]).
+type Stalls = Arc<Mutex<(usize, Duration, String)>>;
+
+/// How the stand-in fails the answer to a write it has done ([`StandIn::fail_writes`]).
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+pub enum Fail {
+    /// This status in place of the answer, with no ETag.
+    Status(u16),
+    /// No answer: the connection is closed.
+    Lost,
+}
+
+/// How many write answers are still to be failed, and how ([`StandIn::fail_writes`]).
+type Fails = Arc<Mutex<(usize, Option<Fail>)>>;
+
 /// A running stand-in. Its address is [`StandIn::url`]; its threads end with the test process.
 pub struct StandIn {
     port: u16,
     objects: Objects,
+    stalls: Stalls,
+    fails: Fails,
 }
 
 impl StandIn {
@@ -28,14 +47,38 @@ impl StandIn {
         let listener = TcpListener::bind("127.0.0.1:0")?;
         let port = listener.local_addr()?.port();
         let objects: Objects = Arc::default();
-        let shared = objects.clone();
+        let stalls: Stalls = Arc::default();
+        let fails: Fails = Arc::default();
+        let (shared, held, failing) = (objects.clone(), stalls.clone(), fails.clone());
         std::thread::spawn(move || {
             for stream in listener.incoming().flatten() {
-                let objects = shared.clone();
-                std::thread::spawn(move || serve(stream, &objects, page.max(1)));
+                let (objects, stalls, fails) = (shared.clone(), held.clone(), failing.clone());
+                std::thread::spawn(move || serve(stream, &objects, &stalls, &fails, page.max(1)));
             }
         });
-        Ok(StandIn { port, objects })
+        Ok(StandIn {
+            port,
+            objects,
+            stalls,
+            fails,
+        })
+    }
+
+    /// Holds the next `n` reads (GETs: an object or a listing page) whose target contains `matching` for `wait` each
+    /// before answering them, as a slow bucket does: past the client's timeout, the client counts the store out of
+    /// reach (#1960).
+    pub fn stall_reads(&self, n: usize, wait: Duration, matching: &str) {
+        if let Ok(mut s) = self.stalls.lock() {
+            *s = (n, wait, matching.to_owned());
+        }
+    }
+
+    /// Does the next `n` PUTs as asked (applied, or refused on their condition) and then fails each one's answer
+    /// `how`: the store did the write, the client never hears so (#4014).
+    pub fn fail_writes(&self, n: usize, how: Fail) {
+        if let Ok(mut f) = self.fails.lock() {
+            *f = (n, Some(how));
+        }
     }
 
     /// The bucket's URL in the offsite form: `s3:http://127.0.0.1:<port>/<bucket>[/<prefix>]`.
@@ -53,7 +96,7 @@ impl StandIn {
 }
 
 /// Answers one connection's requests until it closes.
-fn serve(stream: TcpStream, objects: &Objects, page: usize) {
+fn serve(stream: TcpStream, objects: &Objects, stalls: &Stalls, fails: &Fails, page: usize) {
     let Ok(mut out) = stream.try_clone() else {
         return;
     };
@@ -87,7 +130,29 @@ fn serve(stream: TcpStream, objects: &Objects, page: usize) {
         }
         let mut parts = line.split_whitespace();
         let (method, target) = (parts.next().unwrap_or(""), parts.next().unwrap_or(""));
-        let (code, etag, answer) = answer(method, target, &head, &body, objects, page);
+        if method == "GET" {
+            let hold = stalls.lock().ok().and_then(|mut s| {
+                (s.0 > 0 && target.contains(s.2.as_str())).then(|| {
+                    s.0 -= 1;
+                    s.1
+                })
+            });
+            if let Some(wait) = hold {
+                std::thread::sleep(wait);
+            }
+        }
+        let (mut code, mut etag, mut answer) = answer(method, target, &head, &body, objects, page);
+        let fail = fails.lock().ok().and_then(|mut f| {
+            (method == "PUT" && f.0 > 0).then(|| {
+                f.0 -= 1;
+                f.1
+            })?
+        });
+        match fail {
+            Some(Fail::Lost) => return,
+            Some(Fail::Status(c)) => (code, etag, answer) = (c, None, Vec::new()),
+            None => {}
+        }
         let mut res = format!("HTTP/1.1 {code} X\r\ncontent-length: {}\r\n", answer.len());
         if let Some(e) = etag {
             res.push_str(&format!("etag: \"{e}\"\r\n"));
@@ -165,7 +230,8 @@ fn answer(
                     if now.is_none() {
                         return (404, None, Vec::new());
                     }
-                    now.as_deref() == Some(e.trim_matches('"'))
+                    // As R2 does (#1960): only the bare ETag matches; a quoted one is refused (412).
+                    now.as_deref() == Some(e.as_str())
                 }
                 (None, None) => true,
             };
