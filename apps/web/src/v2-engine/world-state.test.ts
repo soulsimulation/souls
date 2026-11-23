@@ -181,3 +181,28 @@ test('a moved thing keeps its tilt and its door or lamp state goes in the same u
   ws.receive(part([], ['l.1']));
   assert.equal(ws.moved.has('e_lamp'), false, 'a removed node is no longer v2\'s word');
 });
+
+test('a cup already on the other table in the first state the page receives is drawn there; things where the scene has them are not touched', () => {
+  const ws = new WorldState(), { l, apply } = layer([
+    { id: 'e_cup', in: { parent: 'e_tablea', slot: 'top' }, p: [0, 0], r: 0, state: {} },
+    { id: 'e_tablea', in: { parent: 'world' }, p: [1, 0, 2], r: 0 },
+    { id: 'e_tableb', in: { parent: 'world' }, p: [5, 0, 2], r: Math.PI / 2 + 0.0001 },
+  ] as never);
+  // the captured scene's world poses (WorldModel.worldPose): the cup on table A's slot, 0.75 m up
+  const poses: Record<string, { x: number; y: number; z: number; yaw: number; s: number }> = {
+    e_cup: { x: 1, y: 0.75, z: 2, yaw: 0, s: 1 }, e_tablea: { x: 1, y: 0, z: 2, yaw: 0, s: 1 }, e_tableb: { x: 5.0004, y: 0, z: 2, yaw: Math.PI / 2 + 0.0001, s: 1 } };
+  Object.assign(l.model, { worldPose: (e: { id: string }) => poses[e.id] });
+  assert.equal(ws.diff(l, 0), null, 'nothing from the stream yet');
+  ws.receive({ t: 'snapshot', s: { nodes: [...ROOM, { ...CUP, parent: 't.2', slot: null, pos: [500_000, 760_000, 0], rot: ID }], removed: [] } });
+  const d = ws.diff(l, 0)!;
+  assert.deepEqual((d.diff.upserts as { id: string }[]).map((e) => e.id), ['e_cup'], 'only the cup: the tables are where the scene has them, to the rounding');
+  const e = d.diff.upserts[0] as { in: unknown; p: number[]; r: number };
+  assert.deepEqual(e.in, { parent: 'world' });
+  assert.ok(near(e.p, [5, 0.76, 1.5]) && Math.abs(e.r - Math.PI / 2) < 1e-6, `on table B: ${e.p}`);
+  apply(d);
+  assert.equal(ws.diff(l, 0), null, 'once drawn there, no diff again');
+  // and it is followed from there as any moved thing
+  ws.receive(part([{ ...CUP, parent: 't.1', slot: 1, pos: [0, 0, 0], rot: ID }]));
+  apply(ws.diff(l, 0));
+  assert.ok(near((l.model.entities.get('e_cup') as unknown as { p: number[] }).p, [1, 0.75, 2]), 'put back on table A');
+});

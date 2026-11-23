@@ -5,8 +5,8 @@
 // of them (the reader worker's node records: a thing's kind state fields, the world node's sky fields) and, when the
 // layer draws something else, makes the one `world-diff` that brings it to v2's state. Nothing here draws; the layer
 // does, as it draws any diff. The world's clock (calendar fields 60, 61) already rides the chunks (bridge.ts datetime).
-// A thing a Soul sets down elsewhere (B2-2: its node's parent or place changed since the stream first showed it) is
-// moved to where v2 has it: an upsert at its world pose, which the layer eases there as it eases any moved thing. A
+// A thing a Soul sets down elsewhere (B2-2: its node's parent or place changed since the stream first showed it, or,
+// before the page opened, its first place is not where the captured scene has it) is moved to where v2 has it: an upsert at its world pose, which the layer eases there as it eases any moved thing. A
 // thing in a body's hand is not (the bodies' adapter draws what is held).
 import { TICK_US } from './takes.ts';
 
@@ -97,15 +97,19 @@ export function placedOf(nodes: ReadonlyMap<string, NodeLike>, id: string): Plac
  *  reads them). */
 type EntityLike = { id: string; state?: Record<string, unknown>; in?: { parent: string; slot?: string }; p?: number[]; r?: number | number[]; s?: number };
 export type LayerLike = { seq?: unknown; model?: { entities: Map<string, EntityLike>; state?: { weather?: unknown };
-  worldPose?(e: EntityLike): { x: number; y: number; z: number; yaw: number; s: number } } | null };
+  worldPose?(e: EntityLike): { x: number; y: number; z: number; yaw: number; s: number }; readPass?<T>(fn: () => T): T } | null };
 export type WorldDiff = { type: 'edge'; kind: 'world-diff'; seq: number; at: number; by: 'engine'; tick?: number;
   diff: { upserts: unknown[]; removes: string[]; defs: unknown[]; tiles: string[]; world?: { weather: OldWeather } } };
 
 /** Whether the layer draws a thing at a place already: at the world's root there, to the millimetre and the milliradian. */
+const turnBetween = (a: number, b: number) => Math.abs(((a - b) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI);
 const placedAt = (e: EntityLike, to: Placed) => {
-  const p = e.p, yaw = Array.isArray(e.r) ? e.r[0] : e.r ?? 0, turn = Math.abs(((yaw - to.yaw) % (2 * Math.PI) + 3 * Math.PI) % (2 * Math.PI) - Math.PI);
-  return e.in?.parent === 'world' && p?.length === 3 && p.every((v, k) => Math.abs(v - to.p[k]) < 1e-3) && turn < 1e-3;
+  const p = e.p, yaw = Array.isArray(e.r) ? e.r[0] : e.r ?? 0;
+  return e.in?.parent === 'world' && p?.length === 3 && p.every((v, k) => Math.abs(v - to.p[k]) < 1e-3) && turnBetween(yaw, to.yaw) < 1e-3;
 };
+/** How far a first place may be from the captured scene's and still be the same place: import-eden rounds to the
+ *  millimetre and the millidegree; a thing a Soul has set down elsewhere is further. */
+const SAME_M = 0.02, SAME_RAD = 0.02;
 
 const sameWeather = (a: unknown, b: OldWeather) => {
   const o = a as Partial<OldWeather> | null | undefined;
@@ -151,6 +155,8 @@ export class WorldState {
   private readonly nodes = new Map<string, NodeLike>();
   /** Each thing's place (parent, slot, position, turn) when the stream first showed it: the captured world's. */
   private readonly first = new Map<string, string>();
+  /** Things first shown and not yet compared with the captured scene (the layer's world pose of their entity). */
+  private readonly unchecked = new Set<string>();
   /** Old entity id → where v2 has a thing that has moved since, while it is not in a hand. */
   readonly moved = new Map<string, Placed>();
   /** The take tick each state was read at (a part's end; 0 from a snapshot); '' is the weather's. */
@@ -184,7 +190,7 @@ export class WorldState {
       // a thing of the captured world (an old entity id, not a building's room or floor) whose place has changed
       if (!n.pos || n.origin.includes('/')) continue;
       const at = placeOf(n), was = this.first.get(n.id);
-      if (was === undefined) this.first.set(n.id, at);
+      if (was === undefined) { this.first.set(n.id, at); this.unchecked.add(n.id); }
       else if (was !== at || this.moved.has(n.origin)) { this.origins.set(n.id, n.origin); this.ticks.set(n.origin, tick); moves = true; }
     }
     // a moved thing's world pose, again with every part that moves one (its frame may be what moved); while it is in a
@@ -197,8 +203,29 @@ export class WorldState {
     }
   }
 
+  /** Things moved before the page opened: a resting thing whose first place in the stream is not where the layer's
+   *  captured scene has it. Each is compared once, when the layer has its model. */
+  private check(layer: LayerLike | null | undefined): void {
+    const m = layer?.model;
+    if (!m?.worldPose || !this.unchecked.size) return;
+    const pass = () => {
+      for (const id of this.unchecked) {
+        const n = this.nodes.get(id), e = n?.origin ? m.entities.get(n.origin) : undefined;
+        // a path or an area is world-frame geometry, not a thing set down
+        if (!n?.origin || !e || (e as { shape?: unknown }).shape) continue;
+        let was: ReturnType<NonNullable<typeof m.worldPose>>;
+        try { was = m.worldPose!(e); } catch { continue; }
+        const w = placedOf(this.nodes, id);
+        if (!w || (Math.hypot(w.p[0] - was.x, w.p[1] - was.y, w.p[2] - was.z) < SAME_M && turnBetween(w.yaw, was.yaw) < SAME_RAD)) continue;
+        this.moved.set(n.origin, w); this.origins.set(id, n.origin);
+      }
+      this.unchecked.clear();
+    };
+    if (m.readPass) m.readPass(pass); else pass();
+  }
+
   /** The diff for the page's entity layer now, or null (see worldDiff). */
-  diff(layer: LayerLike | null | undefined, at: number): WorldDiff | null { return worldDiff(layer, this.things, this.weather, at, this.ticks, this.moved); }
+  diff(layer: LayerLike | null | undefined, at: number): WorldDiff | null { this.check(layer); return worldDiff(layer, this.things, this.weather, at, this.ticks, this.moved); }
 
   /** The diff to append to the page's edge log now, or null: once per sequence number (while the layer has not applied
    *  it, the same seq is not sent again; whatever is still unlike v2 after it goes in the next). */
