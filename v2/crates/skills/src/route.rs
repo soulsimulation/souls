@@ -3,15 +3,22 @@
 //! world to carry it. It touches the world through `Host` alone, so it runs on any family with locomotion.
 //!
 //! - **A tick.** Aim at the next corner toward the leg's end (`Ask::Toward`), add a push away from every body within
-//!   [`RANGE`] (`Ask::Near`: ids, positions and velocities as of the last tick), leaning right when one comes
-//!   head-on, and hand the velocity on (`Host::control`). The push is resolved on the walker's own axes: forward, never
-//!   below a tenth of free speed, and sideways; the sum never exceeds free speed.
+//!   [`RANGE`] ahead of it, or beside or behind it within two spaces (`Ask::Near`: ids, positions and velocities as of
+//!   the last tick; a body a [`LEVEL`] above or below is left out), leaning right when one comes head-on, and hand the
+//!   velocity on (`Host::control`). The push is resolved on the walker's own axes: forward, never below a tenth of free
+//!   speed, and sideways; the sum never exceeds free speed.
+//! - **Its own space** (#4215). Under the push, a hard guard: over a tick a walker closes on each body near it by at
+//!   most half the gap beyond two radii ([`ROOM`] each), and not at all when already inside; the other keeps its own
+//!   half, so no step ends inside another body's space. A step the guard holds is a wait, never a jump.
 //! - **Crossing.** At a link's near end it asks the world to carry it (`Host::cross`); a shut door is opened for it by
 //!   the world. While carried its body shows [`F_CROSSING`]; once that is gone, the next leg starts.
 //! - **Turns at a narrow place** (N8, T9b A3). The link reads [`F_TURNS`] when it is taken in turns, and
 //!   [`F_GRANTED`] names the body its owner lets in. Without leave the walker marks itself waiting, [`F_WAITING`] on
 //!   its own body (`[link, distance µm]`), within [`MARK`] of the near end, and stands within [`QUEUE`] of it or
-//!   behind a body waiting for the same link within [`BEHIND`] and nearer. Those waiting push only each other.
+//!   behind a body waiting for the same link within [`BEHIND`] and nearer. Those waiting push only each other. A
+//!   standing waiter steps aside, square to the line between them, for a walker let into a narrow place near it (for
+//!   its own link, one farther from the end) and for a walker not waiting that touches it, so a queue never stands in
+//!   a mouth or walls a walker in.
 //! - **Along an edge.** The mover cuts a step at the ground's edge and does not slide. A step that left the body where
 //!   it was is tried next tick turned by 45 and then 70 degrees, either way (N7 tried them in the same tick on a copy;
 //!   through the host the skill sees each result a tick later, T1).
@@ -67,6 +74,8 @@ pub const HOLD: u32 = 10;
 /// A walker held this near its goal, µm, by a body at rest nearer the goal has arrived: the crowd there is as
 /// near as it gets (#4215).
 pub const CROWDED: i64 = 3_000_000;
+/// A body this much above or below a walker, µm, stands on another level: it neither pushes nor holds it (#4215).
+pub const LEVEL: i64 = 1_000_000;
 /// A yielding walker stands this many ticks while the lower id holding it is near.
 pub const BACK: u32 = 10;
 
@@ -113,6 +122,8 @@ pub struct Route {
     window: Option<Vec3>,
     /// Yielding: the body it stands for and the ticks left.
     yielding: Option<(Id, u32)>,
+    /// Standing aside while waiting: where it stood last tick and the side it steps to.
+    aside: Option<(Vec3, i64)>,
 }
 
 impl Route {
@@ -131,6 +142,7 @@ impl Route {
             held: 0,
             window: None,
             yielding: None,
+            aside: None,
         }
     }
 
@@ -443,8 +455,12 @@ impl Skill for Route {
             Some(l) if narrow && gap <= MARK => Some((l, gap)),
             _ => None,
         };
-        let near = match host.ask(&Ask::Near { radius: RANGE }) {
-            Some(Answer::Near(n)) => n,
+        // A body a level above or below (on a stair over it) is not in its way (#4215).
+        let near: Vec<Near> = match host.ask(&Ask::Near { radius: RANGE }) {
+            Some(Answer::Near(n)) => n
+                .into_iter()
+                .filter(|n| (n.position.y - p.y).abs() < LEVEL)
+                .collect(),
             _ => Vec::new(),
         };
         let dist = |n: &Near| len([p.x - n.position.x, p.z - n.position.z]);
@@ -455,7 +471,54 @@ impl Skill for Route {
                 .filter(|n| dist(n) < BEHIND)
                 .any(|n| mark_of(host, n.id).is_some_and(|(l, g)| Some(l) == leg.link && g < gap));
             if gap <= QUEUE || (gap <= MARK && behind) {
-                walk(host, [0, 0]);
+                // A walker let into its own narrow place close by: it stands aside, square to the line between
+                // them, so it never stands in the mouth that walker goes to (#4215, N8).
+                let reach = 2 * (2 * self.room + SLACK);
+                // For its own link, only one farther from the end than itself: one nearer it is not held by it.
+                // A walker not waiting that it touches (within two spaces and two steps): it stands aside from that
+                // one too, so a queue never walls a walker in (#4215).
+                let touch = 2 * self.room + SLACK + 2 * self.speed * self.tick / 1_000_000;
+                let by =
+                    near.iter()
+                        .filter(|n| dist(n) <= reach)
+                        .find(|n| match mark_of(host, n.id) {
+                            Some((l, g)) => {
+                                (Some(l) != leg.link || g > gap)
+                                    && host.read(l).and_then(|s| {
+                                        s.fields.get(&F_GRANTED).and_then(|v| read_id(v).ok())
+                                    }) == Some(n.id)
+                            }
+                            None => dist(n) <= touch,
+                        });
+                let Some(n) = by else {
+                    self.aside = None;
+                    walk(host, [0, 0]);
+                    return Progress::Going;
+                };
+                let o = [p.x - n.position.x, p.z - n.position.z];
+                let o = if o == [0, 0] {
+                    if body < n.id { [1, 0] } else { [-1, 0] }
+                } else {
+                    o
+                };
+                // The side kept while it moves; turned over when the last step left it where it was (an edge).
+                let side = match self.aside {
+                    Some((q, s)) if q == p => -s,
+                    Some((_, s)) => s,
+                    None => {
+                        if body < n.id {
+                            1
+                        } else {
+                            -1
+                        }
+                    }
+                };
+                let l = len(o).max(1);
+                let half = self.speed / 2;
+                let want = [-o[1] * side * half / l, o[0] * side * half / l];
+                let step = guard([p.x, p.z], want, self.tick, &near, 2 * self.room + SLACK);
+                self.aside = Some((p, side));
+                walk(host, step);
                 return Progress::Going;
             }
         }
@@ -490,10 +553,14 @@ impl Skill for Route {
         if !shoulder && !calm {
             for n in &near {
                 let settled = self.spot && host.field(n.id, F_SETTLED).is_some();
-                // Only a body ahead pushes: one behind would press the walker into an edge (#4215).
+                // A body ahead pushes; one beside or behind only when within two spaces: from farther it would
+                // press the walker into an edge (#4215).
                 let ahead =
                     (n.position.x - p.x) * (aim.x - p.x) + (n.position.z - p.z) * (aim.z - p.z) > 0;
-                if ahead && (wait || mark_of(host, n.id).is_none()) && !settled {
+                if (ahead || (!wait && dist(n) <= 2 * (2 * self.room + SLACK)))
+                    && (wait || mark_of(host, n.id).is_none())
+                    && !settled
+                {
                     pushers.push((*n, dist(n)));
                 }
             }
