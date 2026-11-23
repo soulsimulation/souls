@@ -5,6 +5,36 @@ second (N) one world carried, the viewers (Q) it served, each limit's measured v
 Why and how to measure is in [scaling](scaling.md). These are measurements of one build on one machine. They are not
 promises.
 
+## 0.133, 23 Nov 2026: the planner asks each question once (S7, S8)
+
+**Builds:** before = main `9717c6ff2` (with C6, before S7); after = S8's head (#4355): S7's cheaper passages and
+triangles (#4335) and S8's one request per walk, line and form cursor out at the planner at a time. **Machine,
+placement and load:** a timed runner on the build machine, 6 CPUs: the world (worldd, gatewayd, the viewers' origin)
+on 5, the driver on 1. Stage 2a's rung (`v2/tools/bench/stage2a/rung.sh`), 120 s, two repeats, before and after
+alternating, by `.github/workflows/planner-500.yml`. Figures are ranges over the two repeats.
+
+| Rung (agents, rate, arm) | intents/s | planner cores, before / after | ticks on time, before / after | viewer delay p95 ms, before / after |
+| --- | --- | --- | --- | --- |
+| 500, burst, even | 333 | 0.38–0.39 / 0.40–0.41 | 100 / 99.82–99.96 % | 711–777 / 849–1007 |
+| 500, burst, uneven | 327 | 0.42–0.45 / 0.43–0.66 | 99.82–100 / 99.91–100 % | 813–851 / 826–1075 |
+| 750, burst, even | 500 | 1.0 / 1.0 | 99.91 / 99.78–99.87 % | 650–706 / 797–817 |
+| 750, burst, uneven | 503 | 1.0 / 1.0 | 99.05–99.30 / 98.86–99.35 % | 803–806 / 798–821 |
+| 1,000, `every4`, even | 250 | 1.0 / 1.0 | 99.86–99.91 / 99.87–99.96 % | 925–2269 / 1093–1607 |
+
+**What it shows.** At 500 agents in bursts the planner either keeps up at about 0.4 of a core or sits at a full
+core, and which one happens varies from run to run on the same build. Before S8, a walk, a walker's line or a form's
+walk question still out at the planner was asked again every tick. A planner that fell behind therefore answered
+each request once for every tick it was behind, and stayed at a full core. Across the four runs of this work it
+sat at a full core in 7 of 20 rungs before S8 (one more at 0.9) and in 1 of 12 after: S7's run (main 3 of 4, S7 4 of 4), S7 against
+S8's first version (0 of 4, 0 of 4), main against S8 with exact generations (0 of 4, 1 of 4), and the run above
+(0 of 4, 0 of 4). "Before" counts main and S7 together. In the run above, before also kept up, so that run
+alone does not separate them; the tests do (`s8_*` in `sim/tests/planner.rs` and `worldd/src/acts/tests.rs`). At
+750 agents in bursts and 1,000 agents `every4` the planner is at a full core before and after. That is its real
+demand, not repeats: each form's walk question is a full `stand_near_shape` search (C7's profile below). Ticks stay
+on time, and the viewer delay p95 stays under 1.1 s at 750 burst and under 2.3 s at 1,000 `every4`. The next step is
+C7's: a cheaper `stand_near_shape`, or forms' walk questions answered on more than one thread. The 1,000 `every4`
+uneven rows did not print in this run.
+
 ## 0.133, 23 Nov 2026: past 500 agents
 
 **Build:** main `456552d8b` with #4325 (C6: whose a thing is reads two marks, which keeps the clock on time at 500
