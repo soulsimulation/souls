@@ -2541,11 +2541,13 @@ fn v3(x: i64, y: i64, z: i64) -> Vec3 {
 ///
 /// - Two Souls (crew A) take frame A off the stand, carry it 25 m and put it in `upright_a`, where they hold it; a walk
 ///   to its column ends clear of it, the ground rebuilt with the seating. Crew B, asked into the same slot while crew A's
-///   frame is still on its way in, is refused `slot.occupied` at its track's end: frame B stays in its crew's slot,
-///   goes back along a track to where its set-in started, its carry goes on, and from 3 m it may not be put
-///   (`part.out-of-reach`); from beside `upright_b` it is.
+///   frame is still on its way in, is refused `slot.occupied` at its track's end: frame B stays in its crew's slot and
+///   goes back along a track to where its set-in started; its carriers having walked off meanwhile, its carry breaks
+///   off there and it is set down (never pulled after them). Taken up again, from 3 m it may not be put
+///   (`part.out-of-reach`); from beside `upright_b` it is. Left its lone holder, unbraced, Soul 4 may not let go
+///   (`support.none`) but lays it down beside the bay and leaves; a crew puts it back.
 /// - Refused before anything moves: a take by a conversation (`part.not-a-crew`), its lift (`not-a-carry`, C4), a
-///   take of a frame another crew holds
+///   take of a frame riding another crew
 ///   (`part.held-by-another`), of a beam 25 m away (`part.out-of-reach`), of a beam in a Soul's hand (`part.in-a-hand`),
 ///   frame B into frame A's slot joined to frame A (`connectors-do-not-mate`).
 /// - Crew C puts beam 1 in `beam_low_l`. With a Soul inside the bay, beam 2 into `beam_low_r` would shut it in: refused
@@ -2683,9 +2685,35 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
         Some(crew_b),
         "frame B still rides crew B"
     );
-    // Its node goes back along a track to where its set-in started, then its carry goes on; from there upright_b is
-    // too far to put it in.
+    // Its node goes back along a track to where its set-in started; its carriers walk 2 m off meanwhile, so its
+    // carry does not start again (it would pull the frame after them): it breaks off there, frame B set down.
+    let (p, q) = ends(ua, -2_800_000);
+    both(
+        &mut hands,
+        (2, 3),
+        p,
+        q,
+        "crew B walks off while frame B comes back",
+    );
     std::thread::sleep(Duration::from_secs(3));
+    let (parent, _, laid) = where_is(&w, fb);
+    println!(
+        "frame B, its carriers gone off: set down at ({}, {}) mm",
+        laid.x / 1000,
+        laid.z / 1000
+    );
+    assert_eq!(parent, Some(g), "frame B set down where its set-in started");
+    // Crew B takes it up again; from there upright_b is too far to put it in.
+    let (p, q) = ends(laid, 0);
+    both(&mut hands, (2, 3), p, q, "crew B back to frame B");
+    let got = hands[2].act("part:take", crew_b, part(fb));
+    assert_eq!(got.kind, 1, "frame B taken up again: {got:?}");
+    let got = hands[0].act("part:take", crew_a, part(fb));
+    refused(
+        &got,
+        "part.held-by-another",
+        "crew A takes the frame riding crew B",
+    );
     let got = hands[2].act("part:put", crew_b, into("upright_b"));
     refused(
         &got,
@@ -2721,16 +2749,50 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     println!("crew B, its carry going on, puts frame B in upright_b: {got:?}");
     assert_eq!(got.kind, 1, "frame B in");
     assert_eq!(where_is(&w, fb).0, Some(bay));
-    // Souls 1 and 3 let go; Soul 2 holds frame A, Soul 4 frame B.
-    assert_eq!(
-        leave(&mut hands, 0, crew_a).kind,
-        1,
-        "Soul 1 lets go of frame A"
-    );
+    // Soul 3 lets go: Soul 4, alone, holds frame B, unbraced. It may not leave it hanging, so it lays it down beside
+    // the bay (a lone holder's unseat), and may then leave.
     assert_eq!(
         leave(&mut hands, 2, crew_b).kind,
         1,
         "Soul 3 lets go of frame B"
+    );
+    one(
+        &mut hands,
+        3,
+        v3(ub.x, 0, ub.z + 4_500_000),
+        "Soul 4 steps back",
+    );
+    let got = leave(&mut hands, 3, crew_b);
+    refused(&got, "support.none", "Soul 4, alone, lets go of frame B");
+    let got = hands[3].act("part:unseat", crew_b, part(fb));
+    println!("Soul 4 lays frame B down beside the bay: {got:?}");
+    assert_eq!(got.kind, 1, "frame B laid down");
+    let (parent, _, laid) = where_is(&w, fb);
+    assert_eq!(parent, Some(g), "frame B on the ground");
+    assert_eq!(leave(&mut hands, 3, crew_b).kind, 1, "Soul 4 leaves");
+    // Crew B again (Souls 3, 4) takes it up and puts it back; Soul 3 lets go, Soul 4 holds it.
+    let (p, q) = ends(laid, 0);
+    both(&mut hands, (2, 3), p, q, "Souls 3 and 4 to frame B");
+    let crew_b = crew(&mut hands, (2, 3), g);
+    assert_eq!(
+        hands[2].act("part:take", crew_b, part(fb)).kind,
+        1,
+        "frame B taken up"
+    );
+    let (p, q) = ends(ub, 0);
+    both(&mut hands, (2, 3), p, q, "frame B back to upright_b");
+    let got = hands[2].act("part:put", crew_b, into("upright_b"));
+    assert_eq!(got.kind, 1, "frame B back in: {got:?}");
+    assert_eq!(
+        leave(&mut hands, 2, crew_b).kind,
+        1,
+        "Soul 3 lets go of frame B"
+    );
+    // Soul 1 lets go; Soul 2 holds frame A, Soul 4 frame B.
+    assert_eq!(
+        leave(&mut hands, 0, crew_a).kind,
+        1,
+        "Soul 1 lets go of frame A"
     );
     one(
         &mut hands,
@@ -2750,12 +2812,6 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     let (p, q) = across(ua, 0);
     both(&mut hands, (0, 2), p, q, "Souls 1 and 3 to frame A");
     let crew_c = crew(&mut hands, (0, 2), g);
-    let got = hands[0].act("part:take", crew_c, part(fa));
-    refused(
-        &got,
-        "part.held-by-another",
-        "crew C takes the frame crew A holds",
-    );
     let got = hands[0].act("part:take", crew_c, part(b1));
     refused(&got, "part.out-of-reach", "crew C takes a beam 25 m away");
     {

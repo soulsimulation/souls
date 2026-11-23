@@ -274,6 +274,11 @@ fn param_kind(p: &BTreeMap<u64, Value>, k: u64, what: &'static str) -> R<Name> {
     }
 }
 
+/// How far a crew's carriers' middle may be from where its refused set-in started for its carry to start again there.
+const BACK_SLACK: i64 = 300_000;
+/// How far out from a seated part toward its lone holder it is laid down, µm.
+const LAY_OUT: i64 = 2_000_000;
+
 /// How far apart two carriers stand along the ground, µm.
 fn apart(f: Vec3, k: Vec3) -> i64 {
     let (dx, dz) = (i128::from(f.x - k.x), i128::from(f.z - k.z));
@@ -570,6 +575,24 @@ impl Engine {
             }
             Verb::Steer | Verb::Land | Verb::Stop => {}
             Verb::Take | Verb::Unseat | Verb::Put => {
+                // A lone holder of a seated part lays it down beside its bay (0.135 A2): it cannot carry it alone, and
+                // B18 would keep it holding the part for good.
+                if a.verb == Verb::Unseat
+                    && let Some(activity) = a.target
+                    && let Some([m]) = self.activities.members(activity)
+                    && m.body == a.body
+                {
+                    let part = param_id(&a.params, 1, "take-needs-a-part")?;
+                    return self.lay_down(
+                        &mut tree,
+                        c,
+                        (a.id, a.soul),
+                        activity,
+                        a.body,
+                        part,
+                        now,
+                    );
+                }
                 let asm = self
                     .asm
                     .as_mut()
@@ -976,6 +999,7 @@ impl Engine {
         }
         if let Some(tr) = tree.as_mut() {
             self.stop_refused(tr, now);
+            self.came_back(tr, c, now);
         }
         self.collect(None);
     }
@@ -984,7 +1008,7 @@ impl Engine {
     /// track to its mover where the track ended, and its carry started again from there, the part still in its slot.
     fn stop_refused(&mut self, tree: &mut Tree, now: Micros) {
         let Some(asm) = self.asm.as_mut() else { return };
-        let mut written = Vec::new();
+        let mut written = std::mem::take(&mut asm.moved);
         for (activity, s) in std::mem::take(&mut asm.stopped) {
             let by = s.by;
             match asm.stop(tree, now, activity, s) {
@@ -995,9 +1019,27 @@ impl Engine {
                 ),
             }
         }
+        self.send(written);
+    }
+
+    fn send(&mut self, written: Vec<((Id, Id), Vec<Effect>)>) {
+        for ((intent, soul), effects) in written {
+            for mut e in effects {
+                e.envelope.cause = Cause::Intent(intent);
+                e.envelope.actor = Actor::Soul(soul);
+                self.out.push(e);
+            }
+        }
+    }
+
+    /// The crews' nodes back where their refused set-in started (0.135 A2): each crew's carry starts again there when
+    /// its carriers' middle is still within [`BACK_SLACK`] of it; else (they walked off meanwhile) it breaks off there
+    /// and the part is set down where it is (C3), never pulled to where they went.
+    fn came_back(&mut self, tree: &mut Tree, c: &Controller, now: Micros) {
+        let Some(asm) = self.asm.as_mut() else { return };
         let back = asm.returned(tree, now);
         for (activity, s, effects) in back {
-            written.push((s.by, effects));
+            self.send(vec![(s.by, effects)]);
             let Some(audience) = tree
                 .handle(activity)
                 .and_then(|h| tree.node(h))
@@ -1018,15 +1060,125 @@ impl Engine {
             if let Some(l) = self.held_load(tree, s.part) {
                 carry.load = l;
             }
-            self.carries.insert(activity, carry);
-        }
-        for ((intent, soul), effects) in written {
-            for mut e in effects {
-                e.envelope.cause = Cause::Intent(intent);
-                e.envelope.actor = Actor::Soul(soul);
-                self.out.push(e);
+            let middle = match self.activities.members(activity) {
+                Some([f, k]) => match (stands(c, f.body), stands(c, k.body)) {
+                    (Ok((_, f)), Ok((_, k))) => Some([(f.x + k.x) / 2, (f.z + k.z) / 2]),
+                    _ => None,
+                },
+                _ => None,
+            };
+            let near =
+                middle.is_some_and(|m| apart(Vec3::new(m[0], 0, m[1]), s.start.0) <= BACK_SLACK);
+            if near {
+                self.carries.insert(activity, carry);
+                continue;
+            }
+            match break_off(
+                &mut carry,
+                &mut self.activities,
+                &mut self.mint,
+                tree,
+                now,
+                None,
+                "souls:carriers-apart",
+                Some(s.by),
+            ) {
+                Ok(()) => {
+                    if let Some(asm) = self.asm.as_mut() {
+                        asm.ended(activity);
+                    }
+                }
+                Err(r) => eprintln!("worldd: a crew's part was not set down: {r}"),
             }
         }
+    }
+
+    /// A lone holder `holder` of crew `activity` lays its seated `part` down beside its bay, 2 m out toward where it
+    /// stands, at rest as its kind's entry lays it (C3's set-down, C4's load); written through the walkers' maps as a
+    /// seating is, and refused by B18 when another part hangs by it. Then its holder may leave.
+    #[allow(clippy::too_many_arguments)]
+    fn lay_down(
+        &mut self,
+        tree: &mut Tree,
+        c: &Controller,
+        by: (Id, Id),
+        activity: Id,
+        holder: Id,
+        part: Id,
+        now: Micros,
+    ) -> R<()> {
+        let node = |id: Id| tree.handle(id).and_then(|h| tree.node(h));
+        let pn = node(part).ok_or_else(|| refusal("part-missing", show(part)))?;
+        if node(activity).and_then(|n| n.parent()) != Some(part) {
+            return Err(refusal("part.not-held", show(activity)));
+        }
+        let kind = pn.kind().clone();
+        let in_bay = pn.parent().and_then(&node).is_some_and(|b| {
+            self.asm
+                .as_ref()
+                .is_some_and(|s| s.is_bay(b.kind().as_str()))
+        });
+        if !in_bay {
+            return Err(refusal("part.not-seated", show(part)));
+        }
+        let audience = node(activity)
+            .map(|n| n.audience())
+            .ok_or_else(|| refusal("activity-missing", show(activity)))?;
+        let (ground, at) = stands(c, holder)?;
+        let (ph, gh) = match (tree.handle(part), tree.handle(ground)) {
+            (Some(p), Some(g)) => (p, g),
+            _ => return Err(refusal("part-missing", show(part))),
+        };
+        let x = sim::ground::scene::xform_to(tree, ph, gh).map_err(|e| refusal("part-pose", e))?;
+        let d = [at.x - x.pos.x, at.z - x.pos.z];
+        let len = apart(Vec3::new(d[0], 0, d[1]), Vec3::ZERO).max(1);
+        let out = |v: i64| (i128::from(v) * i128::from(LAY_OUT) / i128::from(len)) as i64;
+        let place = Vec3::new(
+            x.pos.x + out(d[0]),
+            sim::activity::carry::HEIGHT,
+            x.pos.z + out(d[1]),
+        );
+        let yaw = sim::activity::carry::yaw_toward(d)?;
+        let mut carry = Carry::new(
+            activity,
+            part,
+            ground,
+            audience,
+            self.header.clone(),
+            self.rules.clone(),
+        );
+        if let Some(l) = self.loads.get(plain(kind.as_str())) {
+            carry.load = *l;
+        }
+        carry.track.push((now, place, yaw));
+        let transfer = self
+            .mint
+            .mint()
+            .map_err(|e| refusal("id-counter-exhausted", e.to_string()))?;
+        carry.set_down_here(tree, now, ground, None, transfer)?;
+        let effects: Vec<Effect> = carry
+            .log
+            .parts
+            .drain(..)
+            .flatten()
+            .map(|mut e| {
+                e.envelope.cause = Cause::Intent(by.0);
+                e.envelope.actor = Actor::Soul(by.1);
+                e
+            })
+            .collect();
+        let asm = self
+            .asm
+            .as_mut()
+            .ok_or_else(|| refusal("seating-off", "the world's kinds join no parts"))?;
+        asm.ready.push(crate::assembly::Ready {
+            intent: by.0,
+            soul: by.1,
+            activity,
+            step: crate::assembly::Step::Laid,
+            effects,
+        });
+        Ok(())
     }
 
     /// The load `part` is as its kind's entry states it, turned as it is held in its crew's slot (0.135 C4's
