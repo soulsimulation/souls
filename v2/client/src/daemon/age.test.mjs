@@ -3,7 +3,7 @@
 
 import { strict as assert } from 'node:assert';
 import { test } from 'node:test';
-import { ASLEEP_AFTER_MS, FRESH_MS, ageOf } from './age.mjs';
+import { ASLEEP_AFTER_MS, FOLLOW_AGAIN_MOST, FOLLOW_AGAIN_MS, FRESH_MS, ageOf, followsAgain } from './age.mjs';
 
 test('A1: age is the steady time since the copy was confirmed, and a gap says since when and why', () => {
   const at = { startedAt: 0, confirmedAt: 1000, changedAt: 1000, cutAt: null, why: null };
@@ -29,4 +29,16 @@ test('A2: a world confirmed current that has written nothing is asleep, not stal
   const b = ageOf({ ...still, confirmedAt: 2000, cutAt: 3000, why: 'not-connected', now: 40_000 });
   assert.equal(b.stale, true);
   assert.equal(b.asleep, undefined);
+});
+
+test('#1960: a follow that ends behind the version a receipt named follows again, a bounded number of times', () => {
+  assert.equal(FOLLOW_AGAIN_MS, 250, "worldd's SEAL_EVERY");
+  // The world answered from its last seal, before the receipt's tick: behind, so it follows again.
+  assert.equal(followsAgain({ at: 41, owed: 42, again: 0 }), true);
+  // That follow sees the change: current, no more.
+  assert.equal(followsAgain({ at: 42, owed: 42, again: 1 }), false);
+  assert.equal(followsAgain({ at: 50, owed: 42, again: 0 }), false);
+  // A version that never comes (a world restarted under it) stops after FOLLOW_AGAIN_MOST tries in a row.
+  assert.equal(followsAgain({ at: 41, owed: 42, again: FOLLOW_AGAIN_MOST - 1 }), true);
+  assert.equal(followsAgain({ at: 41, owed: 42, again: FOLLOW_AGAIN_MOST }), false);
 });
