@@ -205,7 +205,7 @@ impl Planner {
                     });
                     let result = self
                         .town
-                        .plan_with_metrics(body, target.node, p)
+                        .plan_with_metrics(body, p.node, p.at)
                         .map(|(legs, metrics)| (p, legs, metrics))
                         .map_err(|e| e.name);
                     trace.line("route-end", || {

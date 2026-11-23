@@ -442,6 +442,7 @@ impl Ladder {
             // A served world searches no route on its clock: the planner plans it again from where it stands, and its
             // answer comes to [`Ladder::routed`] (0.133 N1).
             runner.granted.remove(&who);
+            runner.overflow.remove(&who);
             return Ok(());
         }
         let (Some(w), Some(body)) = (self.walkers.get_mut(&who), runner.controller.body(who))

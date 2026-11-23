@@ -520,3 +520,132 @@ fn a_thing_is_walkable_when_a_place_a_floor_to_stand_on_a_step_high_or_stood_on_
         "a bowl"
     );
 }
+
+/// 0.133 A2-5: a thing's deck (node 1) with room for one body at its middle, on open ground (node 2) where none
+/// stands within 1 m of the middle (under the deck), or, `bare`, within 16 m of it. Every walk is straight.
+struct Deck {
+    bare: bool,
+}
+
+fn deck() -> Id {
+    Id::new(replica::ids::Scope([0xa5; 16]), 1).expect("an id")
+}
+
+fn open_ground() -> Id {
+    Id::new(replica::ids::Scope([0xa5; 16]), 2).expect("an id")
+}
+
+impl Ground for Deck {
+    fn stand(&self, n: Id, p: Vec3) -> Option<(Vec3, Vec3)> {
+        let r = flat(p, Vec3::ZERO);
+        let ok = if n == deck() {
+            r < 400_000
+        } else {
+            r > if self.bare { 16_000_000 } else { 1_000_000 }
+        };
+        ok.then_some((p, p))
+    }
+    fn passage(&self, _: Id, _: Vec3) -> bool {
+        false
+    }
+    fn walk(&mut self, _: Id, a: Vec3, _: Id, b: Vec3) -> Option<i64> {
+        Some(flat(a, b))
+    }
+    fn overflow_at(&self, n: Id, p: Vec3) -> Vec<(Id, Vec3)> {
+        if n == deck() {
+            vec![(n, p), (open_ground(), p)]
+        } else {
+            Vec::new()
+        }
+    }
+}
+
+fn deck_asks(n: u64) -> Vec<Ask> {
+    let id = |k| Id::new(replica::ids::Scope([0xa6; 16]), k).unwrap();
+    (0..n)
+        .map(|k| Ask {
+            who: id(1 + k),
+            order: id(100 + k),
+            node: open_ground(),
+            from: Vec3::new(20_000_000, 0, k as i64 * 1_000_000),
+            target: Target::new(deck(), Vec3::ZERO),
+            carried: false,
+        })
+        .collect()
+}
+
+/// A2-5: the deck's one place held, the others sent to it are granted overflow points on the open ground round it,
+/// nearest first, each its own and a body's room apart; released like any place when their orders end.
+#[test]
+fn a2_5_a_full_place_overflows_onto_the_ground_round_it() {
+    let mut g = Deck { bare: false };
+    let asks = deck_asks(8);
+    let mut spots = Spots::new();
+    spots.write(&mut g, &asks, 0).unwrap();
+    let got: Vec<Granted> = asks
+        .iter()
+        .map(|a| {
+            spots
+                .granted(a.who, &a.target)
+                .expect("answered")
+                .expect("granted")
+        })
+        .collect();
+    println!("A2-5 overflow: {got:?}");
+    assert_eq!(
+        (got[0].node, got[0].at, got[0].overflow),
+        (deck(), Vec3::ZERO, false),
+        "the first on the deck"
+    );
+    for (i, g) in got.iter().enumerate().skip(1) {
+        assert!(
+            g.overflow && g.node == open_ground(),
+            "an overflow point: {g:?}"
+        );
+        let r = flat(g.at, Vec3::ZERO);
+        assert!(
+            r > 1_000_000 && r <= 3 * PITCH + 1,
+            "nearest first, round the deck: {r} µm"
+        );
+        for h in &got[..i] {
+            assert!(
+                flat(g.at, h.at) >= 690_000,
+                "a body's room apart: {g:?} {h:?}"
+            );
+        }
+    }
+    // Their orders end: every place is released.
+    spots.write(&mut g, &[], 1).unwrap();
+    let released = spots
+        .record
+        .iter()
+        .filter(|e| {
+            matches!(
+                e,
+                Entry::Release {
+                    why: "order-ended",
+                    ..
+                }
+            )
+        })
+        .count();
+    assert_eq!(released, 8, "all released");
+    assert!(spots.held.is_empty());
+}
+
+/// A2-5: with no standing point on the ground within `OVERFLOW` of the place, the overflow is refused, `spot-none-free`.
+#[test]
+fn a2_5_no_ground_round_a_full_place_is_refused() {
+    let mut g = Deck { bare: true };
+    let asks = deck_asks(2);
+    let mut spots = Spots::new();
+    spots.write(&mut g, &asks, 0).unwrap();
+    assert!(matches!(
+        spots.granted(asks[0].who, &asks[0].target),
+        Some(Ok(_))
+    ));
+    assert_eq!(
+        spots.granted(asks[1].who, &asks[1].target),
+        Some(Err("spot-none-free"))
+    );
+}

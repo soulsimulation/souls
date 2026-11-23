@@ -594,8 +594,10 @@ pub struct Runner {
     /// What each body was sent to, and the order it was sent for: it asks a standing spot near the point (N9) while
     /// its order lasts.
     pub asks: BTreeMap<Id, (Target, Id)>,
-    /// The place each asker was granted (µm, the target node's frame).
+    /// The place each asker was granted (µm, the frame of the node it stands on there: the target's, or an overflow's).
     pub granted: BTreeMap<Id, Vec3>,
+    /// The walks granted an overflow point round a crowded target, until they end (A2-5).
+    pub overflow: BTreeSet<Id>,
     /// The actual planner's route metrics, bound to the body and its current order (C29).
     route_metrics: BTreeMap<Id, (Id, crate::walk::town::RouteMetrics)>,
     /// The last tick's refusals, each of one body (the tick went on for the others), in the order they came; each
@@ -710,7 +712,14 @@ pub struct Wants {
 }
 
 /// A walk's place and legs, or a refusal's name.
-pub type Placed = Result<(Vec3, Vec<Leg>, crate::walk::town::RouteMetrics), &'static str>;
+pub type Placed = Result<
+    (
+        crate::spots::Granted,
+        Vec<Leg>,
+        crate::walk::town::RouteMetrics,
+    ),
+    &'static str,
+>;
 
 /// The lines a tick's walkers asked for: the body as it stood and the leg's end.
 type Asked = RefCell<Vec<(Moved, Vec3)>>;
@@ -926,6 +935,7 @@ impl Runner {
             ended: BTreeMap::new(),
             asks: BTreeMap::new(),
             granted: BTreeMap::new(),
+            overflow: BTreeSet::new(),
             route_metrics: BTreeMap::new(),
             refused: Vec::new(),
             said: Vec::new(),
@@ -982,6 +992,7 @@ impl Runner {
         self.ended.remove(&body);
         self.asks.remove(&body);
         self.granted.remove(&body);
+        self.overflow.remove(&body);
         self.route_metrics.remove(&body);
         self.runs.push(Run {
             body,
@@ -1008,6 +1019,7 @@ impl Runner {
         self.start(body, skill)?;
         self.asks.insert(body, (target, order));
         self.granted.remove(&body);
+        self.overflow.remove(&body);
         self.route_metrics.remove(&body);
         Ok(())
     }
@@ -1059,6 +1071,7 @@ impl Runner {
         }
         self.asks.remove(&body);
         self.granted.remove(&body);
+        self.overflow.remove(&body);
         self.route_metrics.remove(&body);
         self.ended.insert(body, (self.now, Progress::Failed(name)));
     }
@@ -1071,6 +1084,7 @@ impl Runner {
         }
         self.asks.remove(&body);
         self.granted.remove(&body);
+        self.overflow.remove(&body);
         self.route_metrics.remove(&body);
     }
 
@@ -1256,7 +1270,10 @@ impl Runner {
                 match planned.places.get(&who) {
                     Some((o, Ok((p, legs, metrics)))) if *o == order => {
                         self.route_metrics.insert(who, (order, *metrics));
-                        self.granted.insert(who, *p);
+                        self.granted.insert(who, p.at);
+                        if p.overflow {
+                            self.overflow.insert(who);
+                        }
                         self.route(who, legs);
                     }
                     Some((o, Err(name))) if *o == order => self.end(who, named(name)),
@@ -1278,10 +1295,13 @@ impl Runner {
                 continue;
             }
             match town.spot(who, &target) {
-                Some(Ok(p)) => match town.plan_with_metrics(&body, target.node, p) {
+                Some(Ok(p)) => match town.plan_with_metrics(&body, p.node, p.at) {
                     Ok((legs, metrics)) => {
                         self.route_metrics.insert(who, (order, metrics));
-                        self.granted.insert(who, p);
+                        self.granted.insert(who, p.at);
+                        if p.overflow {
+                            self.overflow.insert(who);
+                        }
                         self.route(who, &legs);
                     }
                     Err(e) => self.end(who, named(e.name)),
@@ -1364,15 +1384,23 @@ impl Runner {
             }
             self.route_metrics.remove(who);
             // A walk that ended short of its granted spot, as near as the crowd allows, never stood on it: the spot is
-            // released (its ask goes), and the body is not settled (A2-4).
-            if matches!(p, Progress::Done)
-                && self
+            // released (its ask goes), and the body is not settled (A2-4). One that arrived on an overflow point round
+            // a crowded target keeps it, and ends as near as the crowd allows too (A2-5).
+            let overflow = self.overflow.remove(who);
+            if matches!(p, Progress::Done) {
+                if self
                     .fields
                     .get(who)
                     .is_some_and(|f| f.contains_key(&F_SHORT))
-            {
-                self.asks.remove(who);
-                self.granted.remove(who);
+                {
+                    self.asks.remove(who);
+                    self.granted.remove(who);
+                } else if overflow {
+                    self.fields
+                        .entry(*who)
+                        .or_default()
+                        .insert(F_SHORT, Value::Uint(1));
+                }
             }
             self.ended.insert(*who, (self.now, p.clone()));
         }

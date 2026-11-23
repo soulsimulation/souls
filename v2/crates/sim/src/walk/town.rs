@@ -59,7 +59,7 @@ use crate::links::{
 };
 use crate::mover::{Body, Surface};
 use crate::routes::{HANDS, Hop, Map, Mask, Route, Scratch, Spot, on_pieces};
-use crate::spots::{Ask, CLEAR, ClassGround, Ground, Spots, Target, flat, to_segment};
+use crate::spots::{Ask, CLEAR, ClassGround, Granted, Ground, Spots, Target, flat, to_segment};
 use replica::effects::{Actor, Cause, Header, Part, Refusal};
 use replica::encode::{Value, encode};
 use replica::host::{F_GRANTED, F_TURNS, Seen};
@@ -2165,6 +2165,12 @@ impl ClassGround for ClassGrounds<'_> {
     fn may_reach(&self, size: Size, an: Id, a: Vec3, bn: Id, b: Vec3) -> bool {
         self.0.get(&size).is_none_or(|g| g.may_reach(an, a, bn, b))
     }
+    fn overflow_at(&self, size: Size, node: Id, p: Vec3) -> Vec<(Id, Vec3)> {
+        self.0
+            .get(&size)
+            .map(|g| g.overflow_at(node, p))
+            .unwrap_or_default()
+    }
 }
 
 impl Ground for Grounds<'_> {
@@ -2223,7 +2229,31 @@ impl Ground for Grounds<'_> {
             _ => true,
         }
     }
+
+    /// A crowded target overflows round its point on its own floor or the open ground first, then, off the open
+    /// ground (a bandstand's floor, a room), onto the open ground round it, its point taken into the ground's frame by
+    /// its node's own pieces (A2-5).
+    fn overflow_at(&self, node: Id, p: Vec3) -> Vec<(Id, Vec3)> {
+        let mut out = Vec::new();
+        if node == self.ground || self.buildings.iter().any(|b| b.floors.contains_key(&node)) {
+            out.push((node, p));
+        }
+        let m = self.map.get();
+        if node != self.ground
+            && let Some(s) = m.spot_near(node, p, OVERFLOW_FIND)
+        {
+            let w = m.world(s.piece, [p.x / 1000, p.y / 1000, p.z / 1000]);
+            out.push((
+                self.ground,
+                Vec3::new(w[0] * 1000, w[1] * 1000, w[2] * 1000),
+            ));
+        }
+        out
+    }
 }
+
+/// How far from a thing's target its own walkable ground may lie, mm, for its overflow onto the open ground (A2-5).
+const OVERFLOW_FIND: i64 = 20_000;
 
 impl World for Town {
     fn spots(&mut self, marks: &[Mark], at: Micros) -> Result<(), Refusal> {
@@ -2292,8 +2322,8 @@ impl World for Town {
         spots.write_sized(&mut ClassGrounds(gs), &asks, at)
     }
 
-    fn spot(&self, who: Id, target: &Target) -> Option<Result<Vec3, &'static str>> {
-        self.spots.of(who, target)
+    fn spot(&self, who: Id, target: &Target) -> Option<Result<Granted, &'static str>> {
+        self.spots.granted(who, target)
     }
 
     fn turns(&mut self, marks: &[Mark], at: Micros) -> Result<(), Refusal> {
