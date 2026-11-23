@@ -157,92 +157,6 @@
   },
   "looks": {
     "model": "look:braid_frame",
-    "table": [
-      {
-        "part": "cross_1",
-        "field": "stage",
-        "do": "show",
-        "at": {
-          "0": 0,
-          "1": 1,
-          "2": 1,
-          "3": 1,
-          "4": 1,
-          "5": 1,
-          "6": 1
-        }
-      },
-      {
-        "part": "cross_2",
-        "field": "stage",
-        "do": "show",
-        "at": {
-          "0": 0,
-          "1": 0,
-          "2": 1,
-          "3": 1,
-          "4": 1,
-          "5": 1,
-          "6": 1
-        }
-      },
-      {
-        "part": "cross_3",
-        "field": "stage",
-        "do": "show",
-        "at": {
-          "0": 0,
-          "1": 0,
-          "2": 0,
-          "3": 1,
-          "4": 1,
-          "5": 1,
-          "6": 1
-        }
-      },
-      {
-        "part": "cross_4",
-        "field": "stage",
-        "do": "show",
-        "at": {
-          "0": 0,
-          "1": 0,
-          "2": 0,
-          "3": 0,
-          "4": 1,
-          "5": 1,
-          "6": 1
-        }
-      },
-      {
-        "part": "cross_5",
-        "field": "stage",
-        "do": "show",
-        "at": {
-          "0": 0,
-          "1": 0,
-          "2": 0,
-          "3": 0,
-          "4": 0,
-          "5": 1,
-          "6": 1
-        }
-      },
-      {
-        "part": "cross_6",
-        "field": "stage",
-        "do": "show",
-        "at": {
-          "0": 0,
-          "1": 0,
-          "2": 0,
-          "3": 0,
-          "4": 0,
-          "5": 0,
-          "6": 1
-        }
-      }
-    ],
     "shape": {
       "round": 0,
       "shapes": [
@@ -711,12 +625,12 @@
           "pitch": -50906,
           "roll": 41125,
           "tint": "A",
-          "role": "cross_1",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=1"
         },
         {
           "kind": "capsule",
@@ -731,12 +645,12 @@
           "pitch": 0,
           "roll": 54162,
           "tint": "A",
-          "role": "cross_1",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=1"
         },
         {
           "kind": "capsule",
@@ -751,12 +665,12 @@
           "pitch": 50906,
           "roll": 41125,
           "tint": "A",
-          "role": "cross_1",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=1"
         },
         {
           "kind": "capsule",
@@ -771,12 +685,12 @@
           "pitch": 50906,
           "roll": -41125,
           "tint": "B",
-          "role": "cross_1",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=1"
         },
         {
           "kind": "capsule",
@@ -791,12 +705,12 @@
           "pitch": 0,
           "roll": -54162,
           "tint": "B",
-          "role": "cross_1",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=1"
         },
         {
           "kind": "capsule",
@@ -811,12 +725,12 @@
           "pitch": -50906,
           "roll": -41125,
           "tint": "B",
-          "role": "cross_1",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=1"
         },
         {
           "kind": "capsule",
@@ -831,12 +745,12 @@
           "pitch": 0,
           "roll": 0,
           "tint": "C",
-          "role": "cross_1",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=1"
         },
         {
           "kind": "capsule",
@@ -851,12 +765,12 @@
           "pitch": 0,
           "roll": 0,
           "tint": "B",
-          "role": "cross_2",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=2"
         },
         {
           "kind": "capsule",
@@ -871,12 +785,12 @@
           "pitch": 50906,
           "roll": 41125,
           "tint": "A",
-          "role": "cross_2",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=2"
         },
         {
           "kind": "capsule",
@@ -891,12 +805,12 @@
           "pitch": 0,
           "roll": 54162,
           "tint": "A",
-          "role": "cross_2",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=2"
         },
         {
           "kind": "capsule",
@@ -911,12 +825,12 @@
           "pitch": -50906,
           "roll": 41125,
           "tint": "A",
-          "role": "cross_2",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=2"
         },
         {
           "kind": "capsule",
@@ -931,12 +845,12 @@
           "pitch": -50906,
           "roll": -41125,
           "tint": "C",
-          "role": "cross_2",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=2"
         },
         {
           "kind": "capsule",
@@ -951,12 +865,12 @@
           "pitch": 0,
           "roll": -54162,
           "tint": "C",
-          "role": "cross_2",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=2"
         },
         {
           "kind": "capsule",
@@ -971,12 +885,12 @@
           "pitch": 50906,
           "roll": -41125,
           "tint": "C",
-          "role": "cross_2",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=2"
         },
         {
           "kind": "capsule",
@@ -991,12 +905,12 @@
           "pitch": -50906,
           "roll": 41125,
           "tint": "B",
-          "role": "cross_3",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=3"
         },
         {
           "kind": "capsule",
@@ -1011,12 +925,12 @@
           "pitch": 0,
           "roll": 54162,
           "tint": "B",
-          "role": "cross_3",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=3"
         },
         {
           "kind": "capsule",
@@ -1031,12 +945,12 @@
           "pitch": 50906,
           "roll": 41125,
           "tint": "B",
-          "role": "cross_3",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=3"
         },
         {
           "kind": "capsule",
@@ -1051,12 +965,12 @@
           "pitch": 50906,
           "roll": -41125,
           "tint": "C",
-          "role": "cross_3",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=3"
         },
         {
           "kind": "capsule",
@@ -1071,12 +985,12 @@
           "pitch": 0,
           "roll": -54162,
           "tint": "C",
-          "role": "cross_3",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=3"
         },
         {
           "kind": "capsule",
@@ -1091,12 +1005,12 @@
           "pitch": -50906,
           "roll": -41125,
           "tint": "C",
-          "role": "cross_3",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=3"
         },
         {
           "kind": "capsule",
@@ -1111,12 +1025,12 @@
           "pitch": 0,
           "roll": 0,
           "tint": "A",
-          "role": "cross_3",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=3"
         },
         {
           "kind": "capsule",
@@ -1131,12 +1045,12 @@
           "pitch": 0,
           "roll": 0,
           "tint": "C",
-          "role": "cross_4",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=4"
         },
         {
           "kind": "capsule",
@@ -1151,12 +1065,12 @@
           "pitch": 50906,
           "roll": 41125,
           "tint": "B",
-          "role": "cross_4",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=4"
         },
         {
           "kind": "capsule",
@@ -1171,12 +1085,12 @@
           "pitch": 0,
           "roll": 54162,
           "tint": "B",
-          "role": "cross_4",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=4"
         },
         {
           "kind": "capsule",
@@ -1191,12 +1105,12 @@
           "pitch": -50906,
           "roll": 41125,
           "tint": "B",
-          "role": "cross_4",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=4"
         },
         {
           "kind": "capsule",
@@ -1211,12 +1125,12 @@
           "pitch": -50906,
           "roll": -41125,
           "tint": "A",
-          "role": "cross_4",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=4"
         },
         {
           "kind": "capsule",
@@ -1231,12 +1145,12 @@
           "pitch": 0,
           "roll": -54162,
           "tint": "A",
-          "role": "cross_4",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=4"
         },
         {
           "kind": "capsule",
@@ -1251,12 +1165,12 @@
           "pitch": 50906,
           "roll": -41125,
           "tint": "A",
-          "role": "cross_4",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=4"
         },
         {
           "kind": "capsule",
@@ -1271,12 +1185,12 @@
           "pitch": -50906,
           "roll": 41125,
           "tint": "C",
-          "role": "cross_5",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=5"
         },
         {
           "kind": "capsule",
@@ -1291,12 +1205,12 @@
           "pitch": 0,
           "roll": 54162,
           "tint": "C",
-          "role": "cross_5",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=5"
         },
         {
           "kind": "capsule",
@@ -1311,12 +1225,12 @@
           "pitch": 50906,
           "roll": 41125,
           "tint": "C",
-          "role": "cross_5",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=5"
         },
         {
           "kind": "capsule",
@@ -1331,12 +1245,12 @@
           "pitch": 50906,
           "roll": -41125,
           "tint": "A",
-          "role": "cross_5",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=5"
         },
         {
           "kind": "capsule",
@@ -1351,12 +1265,12 @@
           "pitch": 0,
           "roll": -54162,
           "tint": "A",
-          "role": "cross_5",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=5"
         },
         {
           "kind": "capsule",
@@ -1371,12 +1285,12 @@
           "pitch": -50906,
           "roll": -41125,
           "tint": "A",
-          "role": "cross_5",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=5"
         },
         {
           "kind": "capsule",
@@ -1391,12 +1305,12 @@
           "pitch": 0,
           "roll": 0,
           "tint": "B",
-          "role": "cross_5",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=5"
         },
         {
           "kind": "capsule",
@@ -1411,12 +1325,12 @@
           "pitch": 0,
           "roll": 0,
           "tint": "A",
-          "role": "cross_6",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=6"
         },
         {
           "kind": "capsule",
@@ -1431,12 +1345,12 @@
           "pitch": 50906,
           "roll": 41125,
           "tint": "C",
-          "role": "cross_6",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=6"
         },
         {
           "kind": "capsule",
@@ -1451,12 +1365,12 @@
           "pitch": 0,
           "roll": 54162,
           "tint": "C",
-          "role": "cross_6",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=6"
         },
         {
           "kind": "capsule",
@@ -1471,12 +1385,12 @@
           "pitch": -50906,
           "roll": 41125,
           "tint": "C",
-          "role": "cross_6",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=6"
         },
         {
           "kind": "capsule",
@@ -1491,12 +1405,12 @@
           "pitch": -50906,
           "roll": -41125,
           "tint": "B",
-          "role": "cross_6",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=6"
         },
         {
           "kind": "capsule",
@@ -1511,12 +1425,12 @@
           "pitch": 0,
           "roll": -54162,
           "tint": "B",
-          "role": "cross_6",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=6"
         },
         {
           "kind": "capsule",
@@ -1531,12 +1445,12 @@
           "pitch": 50906,
           "roll": -41125,
           "tint": "B",
-          "role": "cross_6",
           "pivot": [
             0,
             0,
             0
-          ]
+          ],
+          "when": "@stage>=6"
         },
         {
           "kind": "capsule",
@@ -1551,13 +1465,12 @@
           "pitch": 0,
           "roll": 0,
           "tint": "A",
-          "role": "tail_a",
           "pivot": [
             0,
             0,
             0
           ],
-          "when": "@stage=0"
+          "when": "@stage=a"
         },
         {
           "kind": "capsule",
@@ -1572,13 +1485,12 @@
           "pitch": 0,
           "roll": 0,
           "tint": "B",
-          "role": "tail_b",
           "pivot": [
             0,
             0,
             0
           ],
-          "when": "@stage=0"
+          "when": "@stage=b"
         },
         {
           "kind": "capsule",
@@ -1593,13 +1505,12 @@
           "pitch": 0,
           "roll": 0,
           "tint": "C",
-          "role": "tail_c",
           "pivot": [
             0,
             0,
             0
           ],
-          "when": "@stage=0"
+          "when": "@stage=c"
         },
         {
           "kind": "capsule",
@@ -1614,13 +1525,12 @@
           "pitch": 0,
           "roll": 0,
           "tint": "B",
-          "role": "tail_b",
           "pivot": [
             0,
             0,
             0
           ],
-          "when": "@stage=1"
+          "when": "@stage=b"
         },
         {
           "kind": "capsule",
@@ -1635,13 +1545,12 @@
           "pitch": 0,
           "roll": 0,
           "tint": "A",
-          "role": "tail_a",
           "pivot": [
             0,
             0,
             0
           ],
-          "when": "@stage=1"
+          "when": "@stage=a"
         },
         {
           "kind": "capsule",
@@ -1656,13 +1565,12 @@
           "pitch": 0,
           "roll": 0,
           "tint": "C",
-          "role": "tail_c",
           "pivot": [
             0,
             0,
             0
           ],
-          "when": "@stage=1"
+          "when": "@stage=c"
         },
         {
           "kind": "capsule",
@@ -1677,13 +1585,12 @@
           "pitch": 0,
           "roll": 0,
           "tint": "B",
-          "role": "tail_b",
           "pivot": [
             0,
             0,
             0
           ],
-          "when": "@stage=2"
+          "when": "@stage=b"
         },
         {
           "kind": "capsule",
@@ -1698,13 +1605,12 @@
           "pitch": 0,
           "roll": 0,
           "tint": "C",
-          "role": "tail_c",
           "pivot": [
             0,
             0,
             0
           ],
-          "when": "@stage=2"
+          "when": "@stage=c"
         },
         {
           "kind": "capsule",
@@ -1719,13 +1625,12 @@
           "pitch": 0,
           "roll": 0,
           "tint": "A",
-          "role": "tail_a",
           "pivot": [
             0,
             0,
             0
           ],
-          "when": "@stage=2"
+          "when": "@stage=a"
         },
         {
           "kind": "capsule",
@@ -1740,13 +1645,12 @@
           "pitch": 0,
           "roll": 0,
           "tint": "C",
-          "role": "tail_c",
           "pivot": [
             0,
             0,
             0
           ],
-          "when": "@stage=3"
+          "when": "@stage=c"
         },
         {
           "kind": "capsule",
@@ -1761,13 +1665,12 @@
           "pitch": 0,
           "roll": 0,
           "tint": "B",
-          "role": "tail_b",
           "pivot": [
             0,
             0,
             0
           ],
-          "when": "@stage=3"
+          "when": "@stage=b"
         },
         {
           "kind": "capsule",
@@ -1782,13 +1685,12 @@
           "pitch": 0,
           "roll": 0,
           "tint": "A",
-          "role": "tail_a",
           "pivot": [
             0,
             0,
             0
           ],
-          "when": "@stage=3"
+          "when": "@stage=a"
         },
         {
           "kind": "capsule",
@@ -1803,13 +1705,12 @@
           "pitch": 0,
           "roll": 0,
           "tint": "C",
-          "role": "tail_c",
           "pivot": [
             0,
             0,
             0
           ],
-          "when": "@stage=4"
+          "when": "@stage=c"
         },
         {
           "kind": "capsule",
@@ -1824,13 +1725,12 @@
           "pitch": 0,
           "roll": 0,
           "tint": "A",
-          "role": "tail_a",
           "pivot": [
             0,
             0,
             0
           ],
-          "when": "@stage=4"
+          "when": "@stage=a"
         },
         {
           "kind": "capsule",
@@ -1845,13 +1745,12 @@
           "pitch": 0,
           "roll": 0,
           "tint": "B",
-          "role": "tail_b",
           "pivot": [
             0,
             0,
             0
           ],
-          "when": "@stage=4"
+          "when": "@stage=b"
         },
         {
           "kind": "capsule",
@@ -1866,13 +1765,12 @@
           "pitch": 0,
           "roll": 0,
           "tint": "A",
-          "role": "tail_a",
           "pivot": [
             0,
             0,
             0
           ],
-          "when": "@stage=5"
+          "when": "@stage=a"
         },
         {
           "kind": "capsule",
@@ -1887,13 +1785,12 @@
           "pitch": 0,
           "roll": 0,
           "tint": "C",
-          "role": "tail_c",
           "pivot": [
             0,
             0,
             0
           ],
-          "when": "@stage=5"
+          "when": "@stage=c"
         },
         {
           "kind": "capsule",
@@ -1908,13 +1805,12 @@
           "pitch": 0,
           "roll": 0,
           "tint": "B",
-          "role": "tail_b",
           "pivot": [
             0,
             0,
             0
           ],
-          "when": "@stage=5"
+          "when": "@stage=b"
         },
         {
           "kind": "capsule",
@@ -1929,13 +1825,12 @@
           "pitch": 0,
           "roll": 0,
           "tint": "A",
-          "role": "tail_a",
           "pivot": [
             0,
             0,
             0
           ],
-          "when": "@stage=6"
+          "when": "@stage=a"
         },
         {
           "kind": "capsule",
@@ -1950,13 +1845,12 @@
           "pitch": 0,
           "roll": 0,
           "tint": "B",
-          "role": "tail_b",
           "pivot": [
             0,
             0,
             0
           ],
-          "when": "@stage=6"
+          "when": "@stage=b"
         },
         {
           "kind": "capsule",
@@ -1971,13 +1865,12 @@
           "pitch": 0,
           "roll": 0,
           "tint": "C",
-          "role": "tail_c",
           "pivot": [
             0,
             0,
             0
           ],
-          "when": "@stage=6"
+          "when": "@stage=c"
         }
       ],
       "palette": {
