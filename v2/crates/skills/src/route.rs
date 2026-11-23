@@ -27,7 +27,9 @@
 //!   link whose mouth is crowded ([`CROWD`] within [`CROWD_AT`]) is marked waiting for too, and taken in turns while
 //!   anyone waits for it (0.133 A2-4).
 //! - **As near as the crowd allows.** Held near its goal (within [`CROWDED`]) by a body at rest nearer it, the walk is
-//!   done short of it and says so: [`F_SHORT`] on its body, which the world names in the walk's `done` (A2-4).
+//!   done short of it and says so: [`F_SHORT`] on its body, which the world names in the walk's `done` (A2-4). A walk
+//!   to its own granted spot (N9) ends short only when a body at rest stands on that spot (within two radii of it), or
+//!   once held so [`CROWD_TICKS`] ticks in all: a way round and the world's ladder have had their turn first.
 //! - **Along an edge.** The mover slides the part of a step past the ground's edge along it. A step that left the body
 //!   where it was is tried next tick turned by 45 and then 70 degrees, either way (N7 tried them in the same tick on a
 //!   copy; through the host the skill sees each result a tick later, T1). For [`SLID`] ticks after the mover slid it,
@@ -96,6 +98,9 @@ pub const HOLD: u32 = 10;
 /// A walker held this near its goal, µm, by a body at rest nearer the goal has arrived: the crowd there is as
 /// near as it gets (#4215).
 pub const CROWDED: i64 = 3_000_000;
+/// A walk to its own granted spot (N9) held near it this many ticks in all, its spot not taken, ends as near as the
+/// crowd allows: past a way round's ticks, [`DETOUR_AFTER`] and [`DETOUR_TICKS`] (0.133 A2-4).
+pub const CROWD_TICKS: u32 = DETOUR_AFTER + DETOUR_TICKS;
 /// A body this much above or below a walker, µm, stands on another level: it neither pushes nor holds it (#4215).
 pub const LEVEL: i64 = 1_000_000;
 /// A walker held this many ticks in a row by a body at rest ahead looks for a way round it (A2-2).
@@ -172,6 +177,8 @@ pub struct Route {
     short: bool,
     /// Where it last landed from a link.
     landed: Option<Vec3>,
+    /// Ticks in all, on this route, a walk to its own spot was held near it by the crowd (A2-4).
+    crowd: u32,
 }
 
 impl Route {
@@ -198,6 +205,7 @@ impl Route {
             slide: None,
             short: false,
             landed: None,
+            crowd: 0,
         }
     }
 
@@ -460,7 +468,7 @@ impl Skill for Route {
         // A new route from the world (N10's reroute): walked from its first leg.
         if let Some((n, legs)) = route_of(host.field(body, F_ROUTE), self.route) {
             (self.route, self.legs, self.leg) = (n, legs, 0);
-            (self.crossing, self.last) = (None, None);
+            (self.crossing, self.last, self.crowd) = (None, None, 0);
             // Taken: the legs are the walk's own now. The field keeps the count alone, so a read of this body (each
             // walker near it reads it every tick) does not copy the legs (#3213).
             let taken = Value::Array(vec![Value::Uint(n), Value::Array(Vec::new())]);
@@ -802,6 +810,18 @@ impl Skill for Route {
                     && mark_of(host, n.id).is_none()
                     && !(self.spot && host.field(n.id, F_SETTLED).is_some())
             });
+            // A walk to its own granted spot ends short only when the spot is taken (a body at rest on it), or once
+            // held near it CROWD_TICKS ticks in all: a way round, and the world's make-way, come first (A2-4).
+            let taken = || {
+                near.iter().any(|n| {
+                    n.velocity.x == 0 && n.velocity.z == 0 && to_goal(n.position) < 2 * self.room
+                })
+            };
+            let held = held
+                && (!self.spot || taken() || {
+                    self.crowd += 1;
+                    self.crowd >= CROWD_TICKS
+                });
             if held {
                 // It says so on its body: the world names it in the walk's `done` (A2-4).
                 let _ = host.emit(

@@ -386,3 +386,50 @@ fn a5_a_body_staying_on_the_stair_is_left_out_and_passed() {
     assert!(!named && !r.first_mark.contains_key(&who));
     assert_eq!(w.pose.position, at, "it stays");
 }
+
+/// 0.133 A2-4 (review of #4364): grants at a crowded wide doorway are fair. A walker waits 1 m from the doorway's
+/// end while, tick after tick, a newcomer comes to wait nearer it (0.3 m) and the last one let in walks on inside.
+/// The nearest is let in first, but once the far waiter has been passed over `PASSED` times by later ones it goes
+/// next: no waiter is out-gapped for ever.
+#[test]
+fn a2_4_a_waiter_out_gapped_again_and_again_is_let_in() {
+    use sim::links::turns::{PASSED, narrow};
+    let (t, _) = town();
+    let l = t
+        .buildings
+        .iter()
+        .flat_map(|b| b.links.iter())
+        .find(|l| l.door.is_some() && !narrow(l) && l.ends.iter().all(Option::is_some))
+        .expect("a wide doorway")
+        .clone();
+    let mut turns = Turns::new();
+    let far = id(500);
+    let mut grants = Vec::new();
+    let mut inside: Option<Id> = None;
+    for k in 0..8u64 {
+        let f = Facts {
+            waiting: [vec![(1_000_000, far), (300_000, id(600 + k))], Vec::new()],
+            inside: inside.map(|w| (0, 1_000_000, w)).into_iter().collect(),
+            room: [true, true],
+        };
+        turns.write(l.owner, &l, &f, k as i64 * TICK).unwrap();
+        let g = turns.state(&l).and_then(|s| s.granted);
+        grants.push(g);
+        if g == Some(far) {
+            break;
+        }
+        inside = g;
+    }
+    println!(
+        "A2-4 fair turns: grants {:?}",
+        grants
+            .iter()
+            .map(|g| g.map(show).unwrap_or_default())
+            .collect::<Vec<_>>()
+    );
+    assert_eq!(
+        grants.iter().position(|g| *g == Some(far)),
+        Some(PASSED as usize + 1),
+        "the far waiter goes once passed over {PASSED} times by later ones"
+    );
+}

@@ -730,6 +730,8 @@ fn main() {
     let mut corner_parts: Vec<[i64; 4]> = Vec::with_capacity(ticks as usize);
     let mut route_us: Vec<i64> = Vec::new();
     let (mut finished, mut ended) = (0u64, 0u64);
+    // 0.133 A2-4: trips that ended short of their goal, as near as the crowd allows: how far short, µm.
+    let mut short_um: Vec<i64> = Vec::new();
     let mut worst: (Micros, usize) = (0, 0);
     let mut next_moment = if arm == "event" {
         seed.within(45_000_000, 120_000_000)
@@ -981,6 +983,18 @@ fn main() {
                         Some((_, Progress::Done)) => {
                             finished += 1;
                             route_us.push(at - p.since);
+                            if runner
+                                .fields
+                                .get(&who)
+                                .is_some_and(|f| f.contains_key(&replica::host::F_SHORT))
+                                && let Some(b) = runner.controller.body(who)
+                            {
+                                // The leg it ended on, as the ladder keeps it (its last leg's end is the goal).
+                                let to = ladder.leg(who).map_or(p.to, |(_, l)| l.to);
+                                let q = b.pose.position;
+                                let (dx, dz) = (i128::from(q.x - to.x), i128::from(q.z - to.z));
+                                short_um.push((dx * dx + dz * dz).isqrt() as i64);
+                            }
                         }
                         Some((_, Progress::Failed(name))) => {
                             ended += 1;
@@ -1253,6 +1267,13 @@ fn main() {
     if arm == "event" {
         println!("walkers: crowd moments {moments}, reactions {reacted}");
     }
+    short_um.sort_unstable();
+    println!(
+        "walkers: trips ended short (as near as the crowd allows) {}; short of the goal median {} mm, max {} mm",
+        short_um.len(),
+        short_um.get(short_um.len() / 2).copied().unwrap_or(0) / 1000,
+        short_um.last().copied().unwrap_or(0) / 1000
+    );
     if joins > 0 {
         let born = ids.len() - n;
         let (bm, bmax) = (

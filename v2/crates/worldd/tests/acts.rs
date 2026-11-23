@@ -1732,13 +1732,8 @@ fn full_place() -> Result<Bodies, replica::effects::Refusal> {
     Ok(b)
 }
 
-#[test]
-fn a2_4_a_walk_to_a_full_place_ends_done_as_near_as_the_crowd_allows() {
-    let run = lockstep_with(full_place);
-    let (answer, _) = walk_in(&run, east(), 400);
-    let r = run.replay();
-    let p = at(&r, w1());
-    let off = (i128::from(p.x - east().x).pow(2) + i128::from(p.z - east().z).pow(2)).isqrt();
+/// How each walk ended, as its `souls:move-ended` names it, in the log's order.
+fn moves_ended(run: &Run) -> Vec<String> {
     let log = run.store.0.lock().unwrap().bytes.clone();
     let mut how = Vec::new();
     for rec in recover(&log).unwrap().records {
@@ -1755,6 +1750,17 @@ fn a2_4_a_walk_to_a_full_place_ends_done_as_near_as_the_crowd_allows() {
             }
         }
     }
+    how
+}
+
+#[test]
+fn a2_4_a_walk_to_a_full_place_ends_done_as_near_as_the_crowd_allows() {
+    let run = lockstep_with(full_place);
+    let (answer, _) = walk_in(&run, east(), 400);
+    let r = run.replay();
+    let p = at(&r, w1());
+    let off = (i128::from(p.x - east().x).pow(2) + i128::from(p.z - east().z).pow(2)).isqrt();
+    let how = moves_ended(&run);
     println!("A2-4 full place: {answer:?}; ended {off} µm from the goal; move-ended {how:?}");
     assert!(matches!(answer, (1, Ok(_))), "a done: {answer:?}");
     assert!(
@@ -1765,6 +1771,73 @@ fn a2_4_a_walk_to_a_full_place_ends_done_as_near_as_the_crowd_allows() {
         how,
         vec![answers::DONE_SHORT.to_owned()],
         "it names that it stopped short"
+    );
+    run.world.stop();
+}
+
+/// 0.133 A2-4 (review of #4364, the reviewer's ring): eight bodies stand round the walk's goal, 0.6 m out: seven stay
+/// by their own orders, and the second body, on the walker's side, stands still with no order to stay. The goal's
+/// spot is free, the ring round it close (0.46 m between neighbours).
+fn ringed_goal() -> Result<Bodies, replica::effects::Refusal> {
+    let (town, ground) = town();
+    let frame = Frame {
+        node: ground,
+        slot: None,
+    };
+    let on = |dx: i64, dz: i64| Vec3::new(east().x + dx, 0, east().z + dz);
+    let p1 = town.surfaces[&ground].place(w1(), frame, at1(), Quat::IDENTITY)?;
+    let p2 = town.surfaces[&ground].place(w2(), frame, on(-600_000, 0), Quat::IDENTITY)?;
+    let ring = [
+        (600_000, 0),
+        (424_264, 424_264),
+        (0, 600_000),
+        (-424_264, 424_264),
+        (-424_264, -424_264),
+        (0, -600_000),
+        (424_264, -424_264),
+    ];
+    let mut places = Vec::new();
+    for (k, (dx, dz)) in ring.into_iter().enumerate() {
+        let who = id(60 + k as u64);
+        places.push((
+            who,
+            town.surfaces[&ground].place(who, frame, on(dx, dz), Quat::IDENTITY)?,
+        ));
+    }
+    let mut b = Bodies::new(town, 50_000)?;
+    b.add_body(humanoid(), p1)?;
+    b.add_body(humanoid(), p2)?;
+    for (who, placed) in places {
+        b.add_body(humanoid(), placed)?;
+        b.runner.staying.insert(who);
+    }
+    Ok(b)
+}
+
+/// The walk is not ended short of its free spot by the ring: a way round and the world's ladder have their turn. The
+/// world steps the still body aside (make-way), and the walk arrives on its spot, a plain `done`.
+#[test]
+fn a2_4_a_walk_to_a_spot_ringed_by_bodies_arrives_through_make_way() {
+    let run = lockstep_with(ringed_goal);
+    let (answer, rungs) = walk_in(&run, east(), 600);
+    let r = run.replay();
+    let p = at(&r, w1());
+    let off = (i128::from(p.x - east().x).pow(2) + i128::from(p.z - east().z).pow(2)).isqrt();
+    let how = moves_ended(&run);
+    println!(
+        "A2-4 ringed goal: {answer:?}; rungs {:?}; ended {off} µm from the goal; move-ended {how:?}; w2 at {:?}",
+        names(&rungs),
+        at(&r, w2())
+    );
+    assert!(matches!(answer, (1, Ok(_))), "a done: {answer:?}");
+    assert!(
+        rungs.iter().any(|r| r.1 == "souls:step-aside"),
+        "the still body in the ring was stepped aside"
+    );
+    assert_eq!(how, vec!["done".to_owned()], "a plain done, not short");
+    assert!(
+        off <= i128::from(skills::route::AT_SPOT),
+        "on its spot: {off} µm off"
     );
     run.world.stop();
 }

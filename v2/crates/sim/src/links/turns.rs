@@ -7,7 +7,10 @@
 //!   the marks of the last tick (T1, `v2/docs/TRUNK.md`), as [`Facts`], and writes its grants.
 //! - **A grant.** One walker at a time, the waiting one nearest the end the link lets in, and only when the far end
 //!   has room to step out into, every body inside going the same way is at least [`SPACING`] along, and no grant is
-//!   outstanding.
+//!   outstanding. At a crowded wide link the grants are fair (0.133 A2-4): a waiter passed over [`PASSED`] times by
+//!   ones that came to wait after it goes first, the longest waiting of those first, so no waiter is out-gapped for
+//!   ever. A narrow link keeps nearest first: its waiters stand in a queue, and a grant to one behind it would wait on
+//!   the queue stepping aside.
 //! - **A turn.** The direction changes when the link is empty and the other side waits, or, while the other side
 //!   waits, after [`RUN`] walkers or [`RUN_TIME`] in one direction (then no more are let in, and it changes once the
 //!   link is empty).
@@ -37,8 +40,22 @@ pub const WIDE_SPACING: i64 = 350_000;
 pub const ROOM: i64 = 600_000;
 /// Walkers let in one direction before the other side, waiting, gets its turn.
 pub const RUN: u32 = 8;
+/// At a crowded wide link, a waiter passed over this many times by walkers that came to wait after it is let in next
+/// (A2-4).
+pub const PASSED: u32 = 2;
 /// Time one direction may run before the other side, waiting, gets its turn, µs.
 pub const RUN_TIME: Micros = 10_000_000;
+
+/// The waiter at one end let in next: at a wide link, one passed over [`PASSED`] times, the longest waiting of those
+/// (then nearest, then id); else the nearest (then id).
+fn next(s: &State, end: &[(i64, Id)], narrow: bool) -> Option<Id> {
+    let since = |w: Id| s.waits.get(&w).copied().unwrap_or_default();
+    end.iter()
+        .filter(|&&(_, w)| !narrow && since(w).1 >= PASSED)
+        .min_by_key(|&&(g, w)| (since(w).0, g, w))
+        .or_else(|| end.iter().min())
+        .map(|&(_, w)| w)
+}
 
 /// Whether a link is taken in turns.
 pub fn narrow(l: &Link) -> bool {
@@ -80,6 +97,8 @@ pub struct State {
     pub granted: Option<Id>,
     /// Every change and grant, in order.
     pub timeline: Vec<Turn>,
+    /// Each walker waiting: since when, µs, and how many times one that came to wait after it was let in first.
+    pub waits: BTreeMap<Id, (Micros, u32)>,
 }
 
 /// The turn states of the narrow links, by owning node and link.
@@ -134,6 +153,12 @@ impl Turns {
         {
             s.granted = None;
         }
+        // Who waits, and since when: one no longer waiting is dropped.
+        s.waits
+            .retain(|w, _| f.waiting.iter().flatten().any(|x| x.1 == *w));
+        for &(_, w) in f.waiting.iter().flatten() {
+            s.waits.entry(w).or_insert((at, 0));
+        }
         let waits = [!f.waiting[0].is_empty(), !f.waiting[1].is_empty()];
         let empty = f.inside.is_empty() && s.granted.is_none();
         let spent = |s: &State, d: u8| {
@@ -173,11 +198,20 @@ impl Turns {
             && !spent(s, d)
             && clear
             && f.room[usize::from(1 - d)]
-            && let Some(&(_, who)) = f.waiting[usize::from(d)].iter().min()
+            && let Some(who) = next(s, &f.waiting[usize::from(d)], narrow(link))
         {
             s.granted = Some(who);
             s.entered += 1;
             s.timeline.push(Turn::Grant { at, who, end: d });
+            // Each waiting longer at that end is passed over once more.
+            let since = s.waits.get(&who).map_or(at, |w| w.0);
+            for &(_, w) in &f.waiting[usize::from(d)] {
+                if let Some(x) = s.waits.get_mut(&w)
+                    && x.0 < since
+                {
+                    x.1 += 1;
+                }
+            }
         }
         Ok(())
     }

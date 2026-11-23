@@ -569,8 +569,8 @@ fn a_crowded_wide_doorway_is_taken_in_turns() {
     )
     .unwrap();
     let b = t.buildings.iter().find(|b| b.link(door).is_some()).unwrap();
-    let l = b.link(door).unwrap();
-    assert!(!sim::links::turns::narrow(l), "a wide doorway");
+    let l = b.link(door).unwrap().clone();
+    assert!(!sim::links::turns::narrow(&l), "a wide doorway");
     let (out, inn, lo, li) = match (l.ends[0], l.ends[1]) {
         (Some(e0), Some(e1)) if e0.floor == t.ground => (e0, e1, l.line[0], l.line[1]),
         (Some(e0), Some(e1)) => (e1, e0, l.line[1], l.line[0]),
@@ -609,9 +609,56 @@ fn a_crowded_wide_doorway_is_taken_in_turns() {
             spot(mo, o, (k + 3) % 6),
         );
     }
-    w.run(1_200);
+    // Each tick: the grants its owner made while it was taken in turns, and the walkers carried through it, each with
+    // whether its crossing began while the doorway was taken in turns.
+    let into = |who: Id| u8::from(who >= id(40));
+    let mut grants = std::collections::BTreeSet::new();
+    let mut began: BTreeMap<Id, bool> = BTreeMap::new();
+    let mut both = 0;
+    for _ in 0..1_200 {
+        if w.runner.runs.is_empty() {
+            break;
+        }
+        w.tick();
+        let st = w.town.turns.as_ref().and_then(|x| x.state(&l)).cloned();
+        if let Some(st) = &st {
+            for e in &st.timeline {
+                if let sim::links::turns::Turn::Grant { at, who, end } = *e {
+                    grants.insert((at, who, end));
+                }
+            }
+        }
+        let crossing: Vec<Id> = w
+            .runner
+            .controller
+            .bodies()
+            .filter(|b| w.runner.controller.carrying(b.id) == Some(door))
+            .map(|b| b.id)
+            .collect();
+        began.retain(|k, _| crossing.contains(k));
+        for &k in &crossing {
+            began.entry(k).or_insert(st.is_some());
+        }
+        // One direction at a time: never two let in on its turns going opposite ways inside it together.
+        let dirs: std::collections::BTreeSet<u8> = began
+            .iter()
+            .filter(|(_, turns)| **turns)
+            .map(|(k, _)| into(*k))
+            .collect();
+        if dirs.len() > 1 {
+            both += 1;
+        }
+    }
     let ended = w.ended();
     let done = ended.values().filter(|(_, h)| h == "Done").count();
+    let ends: std::collections::BTreeSet<u8> = grants.iter().map(|g| g.2).collect();
+    println!(
+        "A2-4 doorway: {} grants, from ends {ends:?}; ticks with both directions inside on its turns {both}",
+        grants.len()
+    );
+    assert!(grants.len() >= 2, "turns were granted: {grants:?}");
+    assert_eq!(ends.len(), 2, "each way had its turn");
+    assert_eq!(both, 0, "one direction held at a time");
     let marked = w.marked.iter().any(|(_, v)| match v {
         Value::Array(a) => a.first().and_then(|x| replica::effects::read_id(x).ok()) == Some(door),
         _ => false,
