@@ -155,7 +155,8 @@ import { Wakes } from '../wake/wake.mjs';
 import { history } from '../history/history.mjs';
 import { readLog, soulDirOf } from '../memory/memory.mjs';
 import { clockOf, worldNow } from '../clock/clock.mjs';
-import { worldOps } from '../creator/world.mjs';
+import { worldOf, worldOps } from '../creator/world.mjs';
+import { shapeOps } from '../creator/shapes.mjs';
 import { exportOf, importOf } from '../creator/genesis.mjs';
 import { checkedFurnish, furnishOps } from '../creator/furnish.mjs';
 import { cloneFile, moveByOps } from '../creator/things.mjs';
@@ -1274,6 +1275,14 @@ async function worldBatch(req) {
       return { ok: false, code: 'land.unavailable', detail: `the land verbs need Node 22.18 or later, and packages/ground and zod beside this client: ${String(e.message ?? e).slice(0, 160)}` };
     }
     return land.landOps(copy, req.world);
+  }
+  // #3728: a road or an area, laid on the open ground (`creator/shapes.mjs`).
+  if (req.world.verb === 'place') {
+    // A plain kind is the world's pinned one, else the one its nodes already use (a served home holds no kinds text).
+    const found = worldOf(copy), want = String(req.world.kind ?? '');
+    let kind = want;
+    if (!want.includes('@') && !Object.keys(pinned()).length) for (const m of found.nodes.values()) if (String(m.get(2)).split('@')[0] === want) { kind = String(m.get(2)); break; }
+    return shapeOps(kind, req.world, found.ground?.id);
   }
   if (req.world.verb === 'furnish') return furnishBatch(req.world, req.claim);
   if (req.world.verb === 'move') return moveBatch(req.world);
