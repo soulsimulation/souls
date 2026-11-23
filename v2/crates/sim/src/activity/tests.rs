@@ -316,7 +316,7 @@ impl World {
             .leave(
                 &mut self.tree,
                 &mut self.c,
-                &self.moves,
+                &mut self.moves,
                 &mut self.due,
                 &mut self.mint,
                 ask,
