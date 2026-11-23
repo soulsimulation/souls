@@ -71,7 +71,7 @@ use sim::commit::spot;
 use sim::controller::Stance;
 use sim::controller::{Driver, Part};
 use sim::host::Runner;
-use sim::host::{Planned, ReachKey, ReachQuestion, Wants};
+use sim::host::{Batches, Planned, ReachKey, ReachQuestion, Wants};
 use sim::life::{Born, Life, Retired, Standing};
 use sim::mover::Body as Moved;
 use sim::moves::{Fired, Instance, Moves, Reach};
@@ -213,6 +213,9 @@ pub struct Bodies {
     late: Vec<(Micros, u64)>,
     /// The planner's answers for the next tick.
     planned: Planned,
+    /// Batches sent to the planner and taken back so far (S8): a request still out is not asked again.
+    sent: u64,
+    taken: u64,
     pub(crate) form_map: Arc<Versions>,
     pub(crate) form_answers: BTreeMap<FormKey, FormAnswer>,
     pub(crate) form_questions: BTreeMap<FormKey, FormQuestion>,
@@ -370,6 +373,8 @@ impl Bodies {
             schedule: BTreeMap::new(),
             late: Vec::new(),
             planned: Planned::default(),
+            sent: 0,
+            taken: 0,
             reached: BTreeMap::new(),
             waiting: Vec::new(),
             runner: Runner::new(tick),
@@ -849,10 +854,18 @@ impl Bodies {
         std::mem::take(&mut self.late)
     }
 
+    /// Hands a batch to the planner, counted (S8).
+    fn send(&mut self, w: Wants) {
+        let before = self.planner.pending();
+        self.planner.send(w);
+        self.sent += (self.planner.pending() - before) as u64;
+    }
+
     /// The planner's answers taken for the next tick: those [`Bodies::schedule`] names for this body tick, else every
     /// batch out, waiting at most [`Bodies::wait`] for each; a shortfall is kept for the recorder.
     fn take(&mut self) {
         let at = self.runner.now;
+        let before = self.planner.pending();
         let mut p = match self.schedule.remove(&at) {
             Some(n) => self
                 .planner
@@ -867,6 +880,7 @@ impl Bodies {
                 p
             }
         };
+        self.taken += (before - self.planner.pending()) as u64;
         // A previous map's route, line, reach or form result cannot enter any current cache.
         p.keep_map(&self.form_map);
         // A replaced move's in-flight answer cannot be used by a newer order on the same body/fixture/slot.
@@ -1072,7 +1086,7 @@ impl Bodies {
             .retain(|(body, _, _, _), _| !asked.iter().any(|w| w.body == *body));
         if !pairs.is_empty() {
             let reach = self.reach_of(pairs);
-            self.planner.send(Wants {
+            self.send(Wants {
                 form_map: Some(Arc::clone(&self.form_map)),
                 classes: self.town.body_classes.clone(),
                 reach,
@@ -1215,7 +1229,11 @@ impl Bodies {
             // A skill that panics is ended by K11's wrapper in the runner (`unit-panicked`); the tick goes on.
             crate::orders::step(self, at);
             self.wind_step(at);
-            let planned = std::mem::take(&mut self.planned);
+            let mut planned = std::mem::take(&mut self.planned);
+            planned.batches = Some(Batches {
+                taken: self.taken,
+                next: self.sent,
+            });
             self.unstuck.planned(&self.runner, &planned);
             let (mut wants, _) = self.runner.tick_planned(&mut self.town, &planned);
             // The never-stuck ladder (0.133 N1): walk-outs, then each walker's rungs; its records are the world's.
@@ -1244,7 +1262,8 @@ impl Bodies {
             wants.forms = std::mem::take(&mut self.form_questions)
                 .into_values()
                 .collect();
-            self.planner.send(wants);
+            debug_assert_eq!(planned.batches.map(|b| b.next), Some(self.sent));
+            self.send(wants);
             // Who hears each utterance the step started, as the bodies stand after it (B11, #3369): every body in the
             // zone, a seated or lying one included (#3393).
             let said = std::mem::take(&mut self.runner.said);

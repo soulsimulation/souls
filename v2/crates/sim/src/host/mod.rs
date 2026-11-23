@@ -621,6 +621,10 @@ pub struct Runner {
     pub threads: usize,
     /// How many such skills one thread takes at a time, in body order. The outcome does not depend on it either.
     pub chunk: usize,
+    /// The walks' place requests still out at the planner (S8): each walk's order and the batch it went in.
+    out_places: BTreeMap<Id, (Id, u64)>,
+    /// The walkers' line requests still out at the planner (S8): each walker's leg end and the batch it went in.
+    out_lines: BTreeMap<Id, (Vec3, u64)>,
 }
 
 fn decode_int(v: &Value) -> Option<i64> {
@@ -726,6 +730,26 @@ pub struct Planned {
     /// Route searches run for these answers (legs and lines).
     pub searched: u64,
     pub forms: BTreeMap<crate::planner::FormKey, crate::planner::FormAnswer>,
+    /// Where the planner's batches stand as this tick reads its answers (S8), set by whoever sends and takes them:
+    /// with it, a walk or a walker whose request is still out is not asked again; without, every tick asks again.
+    pub batches: Option<Batches>,
+}
+
+/// The planner's batches as a tick reads its answers (S8), counted from the first batch sent: those taken so far
+/// (every batch below `taken` has been answered or dropped) and the number of the batch this tick's wants go in.
+/// Counted on the clock's side, from what it sent and took, so a lockstep replay that takes the same batches at the
+/// same ticks (K12) asks the same questions.
+#[derive(Clone, Copy, Debug, Default, PartialEq, Eq)]
+pub struct Batches {
+    pub taken: u64,
+    pub next: u64,
+}
+
+impl Batches {
+    /// Whether a request that went in batch `sent` is still out.
+    fn out(self, sent: u64) -> bool {
+        sent >= self.taken
+    }
 }
 
 impl Planned {
@@ -768,6 +792,9 @@ impl Planned {
             }
         }
         self.searched += later.searched;
+        if later.batches.is_some() {
+            self.batches = later.batches;
+        }
     }
 }
 
@@ -911,6 +938,8 @@ impl Runner {
             units: Units::new(),
             threads: 1,
             chunk: CHUNK,
+            out_places: BTreeMap::new(),
+            out_lines: BTreeMap::new(),
         }
     }
 
@@ -1200,6 +1229,22 @@ impl Runner {
             .filter(|(who, _)| running.contains(*who) && !self.granted.contains_key(who))
             .map(|(who, (t, o))| (*who, *t, *o))
             .collect();
+        // Requests out at the planner are kept only while their walk waits on the same order, or the walker's
+        // request is still out; without the batches' count none is kept (S8).
+        let batches = planned.and_then(|p| p.batches);
+        match batches {
+            Some(b) => {
+                let (asks, granted) = (&self.asks, &self.granted);
+                self.out_places.retain(|who, (o, _)| {
+                    !granted.contains_key(who) && asks.get(who).is_some_and(|(_, order)| order == o)
+                });
+                self.out_lines.retain(|_, (_, sent)| b.out(*sent));
+            }
+            None => {
+                self.out_places.clear();
+                self.out_lines.clear();
+            }
+        }
         for (who, target, order) in waiting {
             let Some(body) = self.controller.body(who).copied() else {
                 continue;
@@ -1213,7 +1258,20 @@ impl Runner {
                         self.route(who, legs);
                     }
                     Some((o, Err(name))) if *o == order => self.end(who, named(name)),
-                    _ => wants.places.push((body, target, order)),
+                    // Asked again only once the batch it went in has been taken without its answer (S8).
+                    _ => match planned.batches {
+                        Some(b) => {
+                            if !self
+                                .out_places
+                                .get(&who)
+                                .is_some_and(|&(o, sent)| o == order && b.out(sent))
+                            {
+                                self.out_places.insert(who, (order, b.next));
+                                wants.places.push((body, target, order));
+                            }
+                        }
+                        None => wants.places.push((body, target, order)),
+                    },
                 }
                 continue;
             }
@@ -1254,6 +1312,21 @@ impl Runner {
             &mut self.units,
             &mut wants.lines,
         );
+        // A walker's line asked again only once the batch it went in has been taken without it (S8): until then it
+        // stands, as it does while its first request is out.
+        if let Some(b) = batches {
+            let out = &mut self.out_lines;
+            wants.lines.retain(|(body, to)| {
+                if out
+                    .get(&body.id)
+                    .is_some_and(|(t, sent)| t == to && b.out(*sent))
+                {
+                    return false;
+                }
+                out.insert(body.id, (*to, b.next));
+                true
+            });
+        }
         if planned.is_some() {
             wants.at = at;
             wants.marks = Some(marks);
