@@ -71,6 +71,40 @@ pub struct Ready {
     pub effects: Vec<Effect>,
 }
 
+impl Ready {
+    /// The seating as the walkers' ground sees it: the part's move and its joints, without the crew's node, which no
+    /// walkers' map holds (their tree takes only what changes geometry). A take is not written to their map at all, so
+    /// to them a part stays where it last rested until it is seated again.
+    pub fn town_part(&self) -> Vec<Effect> {
+        use replica::effects::{Body, Change, TransferRec};
+        let crew = self.activity;
+        let kept: std::collections::BTreeSet<Id> = self
+            .effects
+            .iter()
+            .filter_map(|e| match &e.body {
+                Body::Transfer(TransferRec::Leave { transfer, node, .. }) if *node != crew => {
+                    Some(*transfer)
+                }
+                _ => None,
+            })
+            .collect();
+        self.effects
+            .iter()
+            .filter(|e| e.envelope.node != crew)
+            .filter(|e| match &e.body {
+                Body::Transfer(TransferRec::Leave { node, .. }) => *node != crew,
+                Body::Transfer(TransferRec::Arrive { transfer, .. }) => kept.contains(transfer),
+                Body::Changes(cs) => cs.iter().all(|c| match &c.change {
+                    Change::Link { ends, .. } => !ends.contains(&crew),
+                    _ => true,
+                }),
+                _ => true,
+            })
+            .cloned()
+            .collect()
+    }
+}
+
 /// A crew setting its part in: where it goes, when the track ends, and whose intent asked.
 struct Setting {
     part: Id,
@@ -338,6 +372,11 @@ impl Seats {
             },
         );
         Ok(effects)
+    }
+
+    /// Whether a crew is setting a part in.
+    pub fn setting_in(&self) -> bool {
+        !self.setting.is_empty()
     }
 
     /// The seatings whose track has ended by `now`, written on `tree`: each waits in [`Seats::ready`], or is refused

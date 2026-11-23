@@ -69,7 +69,7 @@ fn rack(height: i64, crew: u64) -> Rack {
                     .replacen("\"default\": 1,", &format!("\"default\": {crew},"), 1);
             }
             let name = p.file_name().unwrap().to_string_lossy().into_owned();
-            (name, entry_to_kind(&json).expect("an entry"))
+            (name, entry_to_kind(&without_roles(&json)).expect("an entry"))
         })
         .collect();
     files.sort();
@@ -1039,4 +1039,14 @@ fn a3_each_check_counts_once_and_none_runs_when_no_bay_changes() {
 fn speed_bar_a3_one_check_under_a_millisecond_at_p99() {
     let (.., ns) = full_bay_checks(10_000);
     assert!(pct(&ns, 99) < 1_000_000, "p99 {} ns", pct(&ns, 99));
+}
+
+/// An entry without its `roles`: they make the crew's activity kind (`worldd::serve::activity_kinds`), not the kind's
+/// meaning, so K3's reader is given the rest (0.135 A2).
+fn without_roles(json: &str) -> String {
+    let mut e = replica::rules::json::parse(json).expect("an entry");
+    if let replica::rules::json::Value::Obj(o) = &mut e {
+        o.retain(|(k, _)| k != "roles");
+    }
+    e.to_json()
 }

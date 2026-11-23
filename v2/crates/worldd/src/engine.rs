@@ -11,17 +11,23 @@
 //!   activity's first two members, the first in front. `carrier:steer`, `carrier:stop` and `carrier:land` steer the
 //!   boat the Soul sits in ([`crate::carrier`], #3603): the target the boat, steer's 1 a point `[x, z]` µm (land's 1
 //!   optional, a point by its home).
+//! - **Seating parts** (0.135 A2, [`crate::seat`]): `part:take`, `part:unseat` and `part:seat`, the target the crew's
+//!   activity (its two members, the first in front). Take and unseat: 1 the part. Seat: 1 the node it goes in, 2 its
+//!   slot, or 3 a point `[x, y, z]` µm in that node's frame, 4 the parts it joins (ids; by default a bearing part
+//!   joins the bay's standing parts). Their commits go through the walkers' maps, so they are answered then.
 //! - **Written once, as the Soul's.** Each system writes through its own writer onto a copy of the tree; its entries,
 //!   caused by the intent and acted by its Soul, are applied to the world with the tick's other entries
 //!   ([`Engine::out`]), so the intent's receipt names them. An act is answered at once: a receipt, or its refusal by
-//!   name. A carry in progress is sampled each tick between its carriers ([`Engine::tick`]).
+//!   name (a take or a seating once its commit is written, below). A carry in progress is sampled each tick between its carriers ([`Engine::tick`]).
 //! - **A restart keeps its activities** (E26, #3329): once the bodies are back, [`Engine::restore`] reads them from
 //!   their nodes and membership links, so a member speaks in one and leaves it as before. Open offers and carries in
 //!   progress are not restored.
 //!
-//! Not here: activity kinds read from a world's entries (a world is given them, [`crate::answers::Config`]); bodies
-//! as nodes of the tree (Eden's Souls are not yet, so a join, a lift or a take there is refused by T2); the view
-//! tier addressing an offer to the bodies asked (#3368's follow-up).
+//! A served world reads its activity kinds from its entries (`crate::serve::activity_kinds`) and births its Souls'
+//! bodies as tree nodes (C3), so these acts run there as in a world given them (0.135 A2's served test,
+//! `tests/edit_served.rs`).
+//!
+//! Not here: the view tier addressing an offer to the bodies asked (#3368's follow-up).
 
 use std::collections::{BTreeMap, BTreeSet};
 
@@ -67,9 +73,19 @@ pub enum Verb {
     Steer,
     Land,
     Stop,
+    /// A crew takes a part, takes one out of a bay, or seats the part it carries (0.135 A2, [`crate::seat`]).
+    Take,
+    Unseat,
+    Seat,
 }
 
 impl Verb {
+    /// Whether the act is answered once its entries are committed through the walkers' maps, not at once (a take or
+    /// a seating, 0.135 A2).
+    pub fn deferred(self) -> bool {
+        matches!(self, Verb::Take | Verb::Unseat | Verb::Seat)
+    }
+
     /// The engine act a verb names, if it names one.
     pub fn of(verb: &str) -> Option<Verb> {
         Some(match verb {
@@ -85,6 +101,9 @@ impl Verb {
             "carrier:steer" => Verb::Steer,
             "carrier:land" => Verb::Land,
             "carrier:stop" => Verb::Stop,
+            "part:take" => Verb::Take,
+            "part:unseat" => Verb::Unseat,
+            "part:seat" => Verb::Seat,
             _ => return None,
         })
     }
@@ -117,6 +136,10 @@ pub struct Engine {
     steered: BTreeSet<Id>,
     /// The loads the world's entries state, by plain kind (0.135 C2, [`Engine::with_loads`]).
     loads: BTreeMap<String, Load>,
+    /// The crews' seating, when the world's kinds join parts (0.135 A2, [`Engine::with_structure`]).
+    seats: Option<crate::seat::Seats>,
+    /// Each take waiting for its commit: the crew's ground, its node's pose and its audience, to start its carry.
+    taking: BTreeMap<Id, (Id, Vec3, replica::pose::Quat)>,
 }
 
 /// A point `[x, y, z]` µm, parameter `k`.
@@ -214,7 +237,16 @@ impl Engine {
             out: Vec::new(),
             steered: BTreeSet::new(),
             loads: BTreeMap::new(),
+            seats: None,
+            taking: BTreeMap::new(),
         }
+    }
+
+    /// The engine seating parts by the joined-part rule `structure` (0.135 A2), when the world's kinds join any.
+    pub fn with_structure(mut self, structure: sim::structure::Structure) -> Engine {
+        let seats = crate::seat::Seats::new(self.header.clone(), self.rules.clone(), structure);
+        self.seats = seats.any().then_some(seats);
+        self
     }
 
     /// The activities `live` holds after a restart (their nodes and membership links are in the log), so a member can
@@ -340,9 +372,99 @@ impl Engine {
                 // A carry ends with its activity: what it carried stays where the last sample put it.
                 if self.activities.members(activity).is_none() {
                     self.carries.remove(&activity);
+                    if let Some(s) = self.seats.as_mut() {
+                        s.ended(activity);
+                    }
                 }
             }
             Verb::Steer | Verb::Land | Verb::Stop => {}
+            Verb::Take | Verb::Unseat | Verb::Seat => {
+                let seats = self
+                    .seats
+                    .as_mut()
+                    .ok_or_else(|| refusal("seating-off", "the world's kinds join no parts"))?;
+                let activity = target("seat-needs-a-crew")?;
+                let members = self
+                    .activities
+                    .members(activity)
+                    .ok_or_else(|| refusal("activity-missing", show(activity)))?;
+                if !members.iter().any(|m| m.body == a.body) {
+                    return Err(refusal("not-a-member", show(a.body)));
+                }
+                let (front, back) = match members {
+                    [f, b] => (f.body, b.body),
+                    _ => {
+                        return Err(refusal(
+                            "crew.size",
+                            format!("{} has {} members", show(activity), members.len()),
+                        ));
+                    }
+                };
+                let ((ground, f), (_, k)) = (stands(c, front)?, stands(c, back)?);
+                let by = (a.id, a.soul);
+                if a.verb == Verb::Seat {
+                    let carry = self
+                        .carries
+                        .get(&activity)
+                        .ok_or_else(|| refusal("part.not-held", show(activity)))?;
+                    let from = carry
+                        .track
+                        .last()
+                        .map(|(_, p, q)| (*p, *q))
+                        .ok_or_else(|| refusal("part.not-held", show(activity)))?;
+                    let to = param_id(&a.params, 1, "seat-needs-a-place")?;
+                    let slot = match a.params.get(&2) {
+                        Some(Value::Uint(n)) => Some(*n),
+                        None => None,
+                        _ => return Err(refusal("seat-needs-a-place", "parameter 2: a slot")),
+                    };
+                    let point = param_point(&a.params, 3, "seat-needs-a-place")?;
+                    let joins = match a.params.get(&4) {
+                        Some(Value::Array(v)) => Some(
+                            v.iter()
+                                .map(read_id)
+                                .collect::<Result<Vec<_>, _>>()
+                                .map_err(|_| refusal("seat-joins", "parameter 4: ids"))?,
+                        ),
+                        None => None,
+                        _ => return Err(refusal("seat-joins", "parameter 4: ids")),
+                    };
+                    let reach = slots.reach_of(front).min(slots.reach_of(back));
+                    let effects = seats.seat(
+                        &mut tree,
+                        &self.activities,
+                        &self.mint,
+                        now,
+                        by,
+                        activity,
+                        (to, slot, point),
+                        joins,
+                        reach,
+                        from,
+                        ground,
+                    )?;
+                    self.carries.remove(&activity);
+                    self.push(effects, Some(by));
+                } else {
+                    if self.carries.contains_key(&activity) {
+                        return Err(refusal("carry-lifted", show(activity)));
+                    }
+                    let part = param_id(&a.params, 1, "take-needs-a-part")?;
+                    let (at, turn) = seats.take(
+                        &mut tree,
+                        &self.activities,
+                        &mut self.mint,
+                        now,
+                        by,
+                        activity,
+                        part,
+                        (f, k),
+                        ground,
+                        a.verb == Verb::Unseat,
+                    )?;
+                    self.taking.insert(activity, (ground, at, turn));
+                }
+            }
             Verb::Lift | Verb::SetDown => {
                 let activity = target("carry-needs-an-activity")?;
                 let members = self
@@ -507,7 +629,54 @@ impl Engine {
                 self.carries.remove(&a);
             }
         }
+        if let Some(s) = self.seats.as_mut()
+            && s.setting_in()
+        {
+            let tr = tree.get_or_insert_with(|| live.frozen());
+            s.due(tr, &self.activities, &mut self.mint, now);
+        }
         self.collect(None);
+    }
+
+    /// The takes and seatings to commit through the walkers' maps (0.135 A2, `crate::answers`), and the seatings
+    /// refused when their track ended (the intent, its Soul and why).
+    pub fn seated(&mut self) -> (Vec<crate::seat::Ready>, Vec<(Id, Id, Refusal)>) {
+        match self.seats.as_mut() {
+            Some(s) => (std::mem::take(&mut s.ready), std::mem::take(&mut s.refused)),
+            None => (Vec::new(), Vec::new()),
+        }
+    }
+
+    /// A take or a seating was committed (`written`) or refused at its commit: a committed take starts its crew's
+    /// carry (B9's samples between its carriers); a refused one leaves the crew holding nothing.
+    pub fn seat_written(&mut self, r: &crate::seat::Ready, written: bool, now: Micros, live: &Tree) {
+        let taking = self.taking.remove(&r.activity);
+        if r.step != crate::seat::Step::Taken {
+            return;
+        }
+        let (Some(seats), Some((ground, at, turn))) = (self.seats.as_mut(), taking) else {
+            return;
+        };
+        let part = seats.held.get(&r.activity).copied();
+        let audience = live
+            .handle(r.activity)
+            .and_then(|h| live.node(h))
+            .map(|n| n.audience());
+        match (written, part, audience) {
+            (true, Some(part), Some(audience)) => {
+                let mut carry = Carry::new(
+                    r.activity,
+                    part,
+                    ground,
+                    audience,
+                    self.header.clone(),
+                    self.rules.clone(),
+                );
+                carry.track.push((now, at, turn));
+                self.carries.insert(r.activity, carry);
+            }
+            _ => seats.unwritten(r.activity, r.step),
+        }
     }
 
     /// The entries written since the last call, in order, to be numbered and applied.

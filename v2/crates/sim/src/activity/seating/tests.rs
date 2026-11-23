@@ -100,7 +100,7 @@ fn kinds() -> (Kinds, Vec<(String, String)>) {
         .map(|p| {
             let json = std::fs::read_to_string(&p).expect("read");
             let name = p.file_name().unwrap().to_string_lossy().into_owned();
-            (name, entry_to_kind(&json).expect("an entry"))
+            (name, entry_to_kind(&without_roles(&json)).expect("an entry"))
         })
         .collect();
     files.sort();
@@ -1159,3 +1159,13 @@ fn trace(out: &str, rows: &[Vec<Vec3>]) {
 
 #[path = "n19_tests.rs"]
 mod n19;
+
+/// An entry without its `roles`: they make the crew's activity kind (`worldd::serve::activity_kinds`), not the kind's
+/// meaning, so K3's reader is given the rest (0.135 A2).
+fn without_roles(json: &str) -> String {
+    let mut e = replica::rules::json::parse(json).expect("an entry");
+    if let replica::rules::json::Value::Obj(o) = &mut e {
+        o.retain(|(k, _)| k != "roles");
+    }
+    e.to_json()
+}

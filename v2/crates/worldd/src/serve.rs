@@ -677,7 +677,8 @@ fn build_with(cache: Option<&Path>, facts: &str, entries: &[(String, Json)]) -> 
             Kind {
                 owner: "activity".into(),
                 children: Default::default(),
-                slots: Default::default(),
+                // What its crew carries rides its slot 1 (B9's carry, B19's seating; 0.135 A2).
+                slots: [(1, ["thing".to_owned()].into())].into(),
                 hands: None,
             },
         );
@@ -3846,7 +3847,8 @@ mod tests {
                     Kind {
                         owner: "activity".into(),
                         children: Default::default(),
-                        slots: Default::default(),
+                        // What its crew carries rides its slot 1 (B9's carry, B19's seating; 0.135 A2).
+                        slots: [(1, ["thing".to_owned()].into())].into(),
                         hands: None,
                     },
                 );

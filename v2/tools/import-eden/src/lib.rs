@@ -361,7 +361,7 @@ fn joining_slots(entries: &[(String, String)]) -> Joining {
         };
         // The kind's admission only: its forms and timed fields are not read here (as `worldd` loads its forms).
         if let J::Obj(o) = &mut e {
-            o.retain(|(k, _)| k != "forms");
+            o.retain(|(k, _)| k != "forms" && k != "roles");
             if let Some((_, J::Obj(state))) = o.iter_mut().find(|(k, _)| k == "state") {
                 state.retain(|(_, f)| f.get("type").and_then(J::str) != Some("timed"));
             }

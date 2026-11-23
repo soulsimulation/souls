@@ -313,6 +313,8 @@ pub enum Event {
     /// A set-down checked off the clock thread by the edit checker's thread (E4's caller, #3604), with the walkers'
     /// maps prepared from its part when it changes what walkers go round, or its refusal.
     SetDown(Box<(Id, R<SetDownChecked>)>),
+    /// A crew's take or seating with the walkers' maps prepared from its part (0.135 A2), or its refusal.
+    Seat(Box<SeatChecked>),
     /// An undo or a redo checked off the clock thread (G4 served, #3694), or its refusal.
     Undone(Box<(Id, Result<crate::undo::Checked, Refused>)>),
     /// The directory's Souls file as it now reads, and where the answers to the intents it causes go (W11b).
@@ -1018,6 +1020,8 @@ struct Clock {
     editing: bool,
     /// Set-downs checked since the last tick, committed (or refused) at the next (#3604).
     set_down: Vec<(Id, R<SetDownChecked>)>,
+    /// Crews' takes and seatings with their maps, committed (or refused) at the next tick (0.135 A2).
+    seated: Vec<SeatChecked>,
     /// Edits checked since the last tick, committed (or refused) at the next.
     edited: Vec<(Id, Result<Checked, Refused>)>,
     /// The creator's edit history (G4, #3694): each committed edit's before-values, for undo and redo.
@@ -1091,6 +1095,8 @@ enum CheckJob {
     Undo(Box<(Id, Actor, bool, Vec<Effect>)>),
     /// A Soul's set-down (#3604).
     SetDown(crate::setdown::Ask),
+    /// A crew's take or seating (0.135 A2), with the replica's version when it was written.
+    Seat(Box<(crate::seat::Ready, u64)>),
     Wear(Box<WearRequest>),
     /// B12b: the same checked edit back, an affected body having walked out of its prepared triangle; placed again
     /// on its kept surfaces as the bodies stand now, nothing else prepared again.
@@ -1270,6 +1276,8 @@ enum Taken {
 /// A set-down checked off the clock, and the walkers' maps prepared from its part when it puts down a thing walkers
 /// go round (the same handoff an edit's commit takes: `buildsafe::PreparedMaps`, `Bodies::commit_map`).
 type SetDownChecked = (crate::setdown::Checked, Option<buildsafe::PreparedMaps>);
+/// A crew's take or seating (0.135 A2) and the walkers' maps prepared from its part (none without walkers), or why not.
+type SeatChecked = (crate::seat::Ready, R<Option<buildsafe::PreparedMaps>>);
 
 /// A form's arguments from an intent's parameter 1: `[[name as bytes, id or slot number], ...]`, a thing by its id
 /// (F4) and a slot of the node by its number, 1, 2, ... in its entry's order (C12).
@@ -2296,6 +2304,143 @@ impl Clock {
                     });
                 }
                 Err(r) => self.end(id, |c| c.refusal(actor, sequence, r.name)),
+            }
+        }
+        if !kept.is_empty()
+            && let Some(tx) = &self.edits
+        {
+            let _ = tx.send(CheckJob::Release(kept));
+        }
+    }
+
+    /// The engine's takes and seatings (0.135 A2) to the edit checker's thread, each to have the walkers' maps prepared
+    /// from its part as a set-down's are; a seating refused at its track's end is answered here.
+    fn seats_out(&mut self, (ready, refused): (Vec<crate::seat::Ready>, Vec<(Id, Id, Refusal)>)) {
+        for (id, _, r) in refused {
+            if let Some(o) = self.open.get(&id) {
+                let (actor, sequence) = (o.actor, o.sequence);
+                self.end(id, |c| c.refusal(actor, sequence, r.name));
+            }
+        }
+        for r in ready {
+            // A take changes no walker's map (`crate::seat::Ready::town_part`): written at the next tick as it is.
+            if r.step == crate::seat::Step::Taken {
+                self.seated.push((r, Ok(None)));
+                continue;
+            }
+            let job = CheckJob::Seat(Box::new((r, self.replica.version())));
+            match &self.edits {
+                Some(tx) => match tx.send(job) {
+                    Ok(()) => self.outstanding += 1,
+                    Err(e) => {
+                        if let CheckJob::Seat(j) = e.0 {
+                            self.seated.push((j.0, Ok(None)));
+                        }
+                    }
+                },
+                None => {
+                    if let CheckJob::Seat(j) = job {
+                        self.seated.push((j.0, Ok(None)));
+                    }
+                }
+            }
+        }
+    }
+
+    /// The tick's checked takes and seatings (0.135 A2): each written as one part, guarded by the joined-part rule,
+    /// through the walkers' prepared maps when it has them (`Bodies::commit_map`), so the ground walkers route on is
+    /// rebuilt with it; then its intent is answered and the engine told, or refused by name, nothing written.
+    fn seats(&mut self, now: Micros) {
+        let mut kept = Vec::new();
+        for (r, checked) in std::mem::take(&mut self.seated) {
+            let mut checked = checked;
+            if let (Ok(Some(maps)), Some(b)) = (&mut checked, &self.bodies)
+                && let Err(e) = b.check_map(maps)
+            {
+                kept.push(std::mem::take(&mut maps.surfaces));
+                checked = Err(Refusal {
+                    name: e.name,
+                    detail: e.detail,
+                });
+            }
+            // The walkers' map takes the seating as they see it (`town_part`), the replica the whole part.
+            let town = checked
+                .as_ref()
+                .ok()
+                .and_then(|m| m.as_ref())
+                .map(|m| Arc::clone(&m.part));
+            let done = checked.and_then(|maps| {
+                let (replica, structure) = (&mut self.replica, &self.structure);
+                let mut effects = r.effects.clone();
+                for (k, e) in effects.iter_mut().enumerate() {
+                    e.envelope.sequence = replica.version() + k as u64;
+                }
+                // The log takes the whole part; the walkers' and the planner's maps the part they were prepared from.
+                let mut real = None;
+                let shown = town.clone();
+                let committed = {
+                    let write = || {
+                        let part = sim::commit::write_guarded(replica, &effects, structure).map_err(
+                            |r| Refused {
+                                op: None,
+                                name: r.name,
+                                detail: r.detail,
+                            },
+                        )?;
+                        real = Some(Arc::clone(&part));
+                        Ok(sim::edit::Committed {
+                            part: shown.unwrap_or(part),
+                            names: BTreeMap::new(),
+                        })
+                    };
+                    match (&mut self.bodies, maps) {
+                        (Some(b), Some(maps)) => b.commit_map(maps, write),
+                        _ => write(),
+                    }
+                };
+                committed
+                    .map_err(|r| Refusal {
+                        name: r.name,
+                        detail: r.detail,
+                    })
+                    .and_then(|_| {
+                        real.ok_or_else(|| Refusal {
+                            name: "seat-unwritten",
+                            detail: String::new(),
+                        })
+                    })
+            });
+            let written = done.is_ok();
+            if let Some(e) = self.engine.as_mut() {
+                e.seat_written(&r, written, now, self.replica.tree());
+            }
+            let open = self.open.get(&r.intent).map(|o| (o.actor, o.sequence));
+            match done {
+                Ok(part) => {
+                    self.unsealed = true;
+                    if let (Some(w), Some(town)) = (&self.walkers, town) {
+                        w.committed(town, self.replica.version(), None);
+                    }
+                    self.receipts.index(&part.effects);
+                    self.effects.extend(part.effects.iter().cloned());
+                    self.parts.push(part);
+                    if let Some((actor, sequence)) = open {
+                        let id = r.intent;
+                        self.end(id, |k| Answer::Receipt {
+                            actor,
+                            sequence,
+                            intent: id,
+                            entries: k.receipts.entries(id).to_vec(),
+                            names: BTreeMap::new(),
+                        });
+                    }
+                }
+                Err(e) => {
+                    eprintln!("worldd: a crew's part was not written: {e}");
+                    if let Some((actor, sequence)) = open {
+                        self.end(r.intent, |c| c.refusal(actor, sequence, e.name));
+                    }
+                }
             }
         }
         if !kept.is_empty()
@@ -3803,6 +3948,8 @@ impl Clock {
                 }),
             };
             match r {
+                // A take or a seating is answered at its commit through the walkers' maps (0.135 A2).
+                Ok(()) if a.verb.deferred() => {}
                 Ok(()) => self.engine_done.push(a.id),
                 Err(r) => self.end(a.id, |c| c.refusal(actor, sequence, r.name)),
             }
@@ -3815,8 +3962,10 @@ impl Clock {
     /// written.
     fn write_forms(&mut self, now: Micros) {
         let mut effects = self.forms.out();
+        let mut seats = (Vec::new(), Vec::new());
         if let Some(e) = self.engine.as_mut() {
             effects.extend(e.out());
+            seats = e.seated();
         }
         if !effects.is_empty() && self.commit_forms(effects.clone()).is_err() {
             let mut groups: Vec<(Option<Id>, Vec<Effect>)> = Vec::new();
@@ -3868,6 +4017,7 @@ impl Clock {
                 });
             }
         }
+        self.seats_out(seats);
         for (id, how, why) in self.forms.ended() {
             self.form_ended(id, how, why, now);
         }
@@ -4183,6 +4333,7 @@ impl Clock {
         self.wears(now);
         // 4c. Checked set-downs (#3604): committed with lookups only, or refused by name.
         self.set_downs(now);
+        self.seats(now);
         self.start_forms(now);
         self.start_moves(now);
         self.write_forms(now);
@@ -5176,6 +5327,7 @@ pub fn start<S: Storage + 'static>(
         edits,
         editing,
         set_down: Vec::new(),
+        seated: Vec::new(),
         edited: Vec::new(),
         history: sim::edit::undo::History::default(),
         steps: BTreeMap::new(),
@@ -5191,7 +5343,10 @@ pub fn start<S: Storage + 'static>(
         engine: engine_parts
             // 0.135 C2: a load is carried as its kind's entry states.
             .map(|(rules, kinds)| {
-                Engine::new(engine_header, rules, kinds, engine_scope).with_loads(&engine_entries)
+                Engine::new(engine_header, rules, kinds, engine_scope)
+                    .with_loads(&engine_entries)
+                    // 0.135 A2: crews seat parts by the joined-part rule of the world's entries.
+                    .with_structure(sim::structure::Structure::from_entries(&engine_entries))
             }),
         engine_acts: Vec::new(),
         engine_done: Vec::new(),
@@ -5343,6 +5498,10 @@ pub fn start<S: Storage + 'static>(
                     Event::SetDown(k) => {
                         c.outstanding = c.outstanding.saturating_sub(1);
                         c.set_down.push(*k);
+                    }
+                    Event::Seat(k) => {
+                        c.outstanding = c.outstanding.saturating_sub(1);
+                        c.seated.push(*k);
                     }
                     Event::Undone(k) => {
                         c.outstanding = c.outstanding.saturating_sub(1);
@@ -5685,6 +5844,47 @@ fn edit_checker(
                         }
                         continue;
                     }
+                    // A crew's take or seating (0.135 A2): the walkers' maps from its part, as a set-down's.
+                    CheckJob::Seat(job) => {
+                        let (r, planned) = *job;
+                        let snapshot = walkers.current();
+                        let needed = snapshot
+                            .map
+                            .as_ref()
+                            .map_or(edited, |m| edited.max(m.version))
+                            .max(planned);
+                        let copy = publisher.wait_for(needed, Duration::from_secs(1));
+                        let checked = match &snapshot.map {
+                            _ if copy.version() < needed => Err(Refusal {
+                                name: "edit.stale",
+                                detail: "the published copy has not reached the map basis".into(),
+                            }),
+                            Some(source) => {
+                                let mut effects = r.town_part();
+                                for (k, e) in effects.iter_mut().enumerate() {
+                                    e.envelope.sequence = copy.version() + k as u64;
+                                }
+                                part_of(copy.header(), &effects).and_then(|p| {
+                                    buildsafe::PreparedMaps::prepare_part(
+                                        &copy,
+                                        Arc::new(p),
+                                        source,
+                                        &snapshot.movers,
+                                    )
+                                    .map(Some)
+                                    .map_err(|e| Refusal {
+                                        name: e.name,
+                                        detail: e.detail,
+                                    })
+                                })
+                            }
+                            None => Ok(None),
+                        };
+                        if events.send(Event::Seat(Box::new((r, checked)))).is_err() {
+                            break;
+                        }
+                        continue;
+                    }
                     CheckJob::Reprepare(_) | CheckJob::Release(_) => continue,
                     CheckJob::Wear(request) => {
                         let request = *request;
@@ -5806,6 +6006,22 @@ fn panic_text(p: &(dyn std::any::Any + Send)) -> String {
 }
 
 /// `effects` numbered from the replica's next sequence, made one part and applied to it: the part, or the refusal.
+/// `effects` as one part under `header`, unapplied (0.135 A2: a crew's part, for the walkers' maps).
+fn part_of(header: &replica::effects::Header, effects: &[Effect]) -> R<Part> {
+    let v = Value::Map(BTreeMap::from([
+        (1, Value::Bytes(header.hash().to_bytes())),
+        (
+            2,
+            Value::Array(effects.iter().map(Effect::to_value).collect()),
+        ),
+    ]));
+    let bytes = encode(&v).map_err(|e| Refusal {
+        name: "encoding",
+        detail: e.to_string(),
+    })?;
+    Part::read(&bytes)
+}
+
 fn applied(replica: &mut Replica, mut effects: Vec<Effect>) -> R<Part> {
     for (k, e) in effects.iter_mut().enumerate() {
         e.envelope.sequence = replica.version() + k as u64;

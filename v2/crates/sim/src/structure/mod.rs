@@ -131,7 +131,7 @@ impl Structure {
             .filter_map(|(name, entry)| {
                 let mut e = entry.clone();
                 if let J::Obj(o) = &mut e {
-                    o.retain(|(k, _)| k != "forms");
+                    o.retain(|(k, _)| k != "forms" && k != "roles");
                     if let Some((_, J::Obj(state))) = o.iter_mut().find(|(k, _)| k == "state") {
                         state.retain(|(_, f)| f.get("type").and_then(J::str) != Some("timed"));
                     }

@@ -90,11 +90,15 @@ fn a_joining_kind_takes_its_slots_from_its_entry() {
         "its slots admit uprights and beams: {:?}",
         got.slots
     );
-    // Its name follows its entry; a kind whose entry joins nothing (an upright), or with no entry, is the facts'.
+    // Its name follows its entry; a kind with no entry is the facts'.
     assert_ne!(kind(&bare, "mars:rack_bay").0, name);
-    assert_eq!(
-        kind(&bare, "mars:rack_upright").0,
-        kind(&joined, "mars:rack_upright").0
+    // An upright's entry names the crew that holds it among its children (0.135 A2): it admits that activity too.
+    let (upright, got) = kind(&joined, "mars:rack_upright");
+    assert_ne!(kind(&bare, "mars:rack_upright").0, upright);
+    assert!(
+        got.children.contains("mars:rack_upright_activity") && got.children.contains("thing"),
+        "{:?}",
+        got.children
     );
     assert_eq!(kind(&bare, "eden:chair").0, kind(&joined, "eden:chair").0);
 }
