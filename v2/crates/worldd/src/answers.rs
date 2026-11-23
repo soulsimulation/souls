@@ -4685,8 +4685,10 @@ pub fn start<S: Storage + 'static>(
     let mut order_records = Vec::new();
     // B16: the wind-down's records and the Souls' acts replayed, to rebuild it.
     let mut wind_records: Vec<Effect> = Vec::new();
-    // S6: when the wind-down began counting the bodies no record names, if a checkpoint carries it.
+    // S6: when the wind-down began counting the bodies no record names, if a checkpoint carries it, and when each body
+    // born in the log after the checkpoint was born (counted from then, not from the first start).
     let mut carried_since: Option<i64> = None;
+    let mut births: BTreeMap<Id, Micros> = BTreeMap::new();
     // A compacted log (#3837) holds no records before its cut: only a checkpoint at or after it can start the world.
     let held_from = found.first;
     if held_from > restored.as_ref().map_or(0, |r| r.root.record) {
@@ -4767,6 +4769,17 @@ pub fn start<S: Storage + 'static>(
                 })
                 .cloned(),
         );
+        for e in &part.effects {
+            if let Body::Changes(cs) = &e.body {
+                for c in cs {
+                    if let Change::Create { node, kind, .. } = &c.change
+                        && replica::world_model::plain(kind.as_str()) == "souls:body"
+                    {
+                        births.insert(*node, e.envelope.at);
+                    }
+                }
+            }
+        }
         read_back(&part, &mut placed, &mut last);
         // Nodes an edit placed took their ids on the intents' counter (G1b): never give one out again.
         for e in &part.effects {
@@ -4862,7 +4875,8 @@ pub fn start<S: Storage + 'static>(
     };
     // Body time is the next world tick start, not the real-time deadline returned by Ticker::due.
     let body_start = line.tick_start(last.map_or(0, |n| n + 1)).map_err(time)?;
-    // S6: when the wind-down counts a body no record names from: the first start's, carried by every checkpoint since.
+    // S6: when the wind-down counts a body no record names from: the first start's, carried by each start's checkpoint
+    // (K20 below; a running checkpoint carries every body's own state instead).
     let wind_since = carried_since.unwrap_or(body_start);
     // K20 (#3395): a tree holding changes no checkpoint has (a first start from the log, or the log after the newest
     // checkpoint) is sealed and checkpointed here, before the clock and its watchdog start: hashing the whole tree is
@@ -4878,7 +4892,11 @@ pub fn start<S: Storage + 'static>(
                 placed.clone(),
                 logged_last.unwrap_or(-1),
                 &order_records,
-                &wind_carry(&wind_records),
+                &births
+                    .iter()
+                    .map(|(&b, &at)| skills::wind_down::WindDown::born(b, wind_since.max(at)))
+                    .chain(wind_carry(&wind_records))
+                    .collect::<Vec<_>>(),
             );
             carry.wind_since = Some(wind_since);
             let version = Version {
@@ -5234,6 +5252,7 @@ pub fn start<S: Storage + 'static>(
                             &placed,
                             at,
                             wind_since,
+                            &births,
                         );
                         if let Some(w) = &c.walkers {
                             w.offer_map(&b, c.replica.version());
@@ -7581,9 +7600,16 @@ mod standing_order_carry_tests {
             "a's last record, b's last record, b's Soul's last act"
         );
         assert_eq!(rebuilt(&reduced), rebuilt(&log));
-        let carry = Carry::of(&Sequences::default(), 1, Placed::new(), 0, &[], &reduced);
+        let mut carry = Carry::of(&Sequences::default(), 1, Placed::new(), 0, &[], &reduced);
+        assert_eq!(Carry::read(&carry.to_bytes()).unwrap().wind_since, None);
+        carry.wind_since = Some(1_795_000_000_000_000);
         let back = Carry::read(&carry.to_bytes()).unwrap();
         assert_eq!(back.wind, carry.wind);
+        assert_eq!(
+            back.wind_since,
+            Some(1_795_000_000_000_000),
+            "field 7 round-trips"
+        );
         let mut w = WindDown::new(KNOBS);
         w.resume(&log, body_of, [a, b], 20);
         let header = crate::checkers::toggles::World::build(1, 1, 0)
