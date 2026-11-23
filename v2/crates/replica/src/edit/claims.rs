@@ -22,7 +22,8 @@
 //! an edit naming a claim that is not live is refused `edit.claim-unknown`. Where a thing is: the points of its
 //! outline (field 11) and line (16) when it has a shape, a road or a lawn standing at its parent's origin (#3962),
 //! else its origin, in the root's frame; a removal tests the whole subtree, a move each node before and after; a place
-//! tests its spot in its parent (a slot's offset aside); a set of an outline or line tests the old and the new shape.
+//! tests its spot in its parent (a slot's offset aside); a set of an outline or line tests the old and the new shape;
+//! a removal also tests the owning end of the doorway its field 7 names, whose rows the unlink rewrites.
 
 use super::{Edit, Op, Ref, Refused, refuse};
 use crate::apply::Replica;
@@ -43,6 +44,9 @@ pub const ROADS_MOST: usize = 32;
 pub const ROAD_POINTS_MOST: usize = 32;
 /// The farthest a coordinate may be from the root's origin, mm (1000 km).
 const FAR: i64 = 1_000_000_000;
+/// A door leaf's field naming its doorway link, and that link's type (`sim::ground::scene`).
+const DOOR_LINK: u64 = 7;
+const DOORWAY: &str = "eden:doorway";
 
 /// A live claim: its id, the part of the work it is for, its area `[x0, z0, x1, z1]` in mm, x0 < x1, z0 < z1, and the
 /// helper that builds under it (#3727): a creator-scope actor of its own, which may edit only under this claim.
@@ -472,6 +476,7 @@ pub fn judge_effects(copy: &Replica, effects: &[crate::effects::Effect]) -> Resu
                     }
                 }
                 Change::Remove { node } => points.extend(below(*node).into_iter().flat_map(at)),
+                // An unlink is written with its owning end's rows, a set judged above (#3934 review).
                 _ => {}
             }
         }
@@ -598,6 +603,20 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
     }
     // Nodes placed in this batch, by their batch name.
     let mut placed: BTreeMap<u64, Placed> = BTreeMap::new();
+    // Each node's doorway link (its field 7) as the batch leaves it: removing the node unlinks that doorway and
+    // rewrites its owning end's rows (`sim::edit`), so a removal touches the owner too (#3934 review).
+    let mut aimed: BTreeMap<Ref, Value> = BTreeMap::new();
+    let doorway_owner = |aimed: &BTreeMap<Ref, Value>, r: Ref| {
+        let link = aimed.get(&r).cloned().or_else(|| match r {
+            Ref::Node(id) => tree
+                .handle(id)
+                .and_then(|h| tree.node(h))
+                .and_then(|n| n.fields().get(&DOOR_LINK).cloned()),
+            Ref::New(_) => None,
+        })?;
+        let (ty, [owner, _], ..) = tree.link(crate::effects::read_id(&link).ok()?)?;
+        (ty.as_str() == DOORWAY).then_some(owner)
+    };
     for (i, op) in edit.ops.iter().enumerate() {
         let mut t = Touch::default();
         let add = |t: &mut Touch, ps: Vec<Option<Vec3>>| {
@@ -626,6 +645,9 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
                         shift: Some(Vec3::ZERO),
                     },
                 );
+                if let Some(v) = fields.get(&DOOR_LINK) {
+                    aimed.insert(Ref::New(*name), v.clone());
+                }
                 add(&mut t, points_of(tree, &placed, Ref::New(*name)));
             }
             Op::Move { node, at: spot } => {
@@ -692,6 +714,9 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
                 }
             }
             Op::Set { node, field, to } => {
+                if *field == DOOR_LINK {
+                    aimed.insert(*node, to.clone());
+                }
                 if *node == root.map_or(Ref::New(u64::MAX), Ref::Node) {
                     t.root = true;
                 } else {
@@ -715,6 +740,10 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
                 }
             }
             Op::Remove { node } => {
+                // The doorway's owning end is judged where it is: its outline's points when it has one (#3962).
+                if let Some(owner) = doorway_owner(&aimed, *node) {
+                    add(&mut t, points_of(tree, &placed, Ref::Node(owner)));
+                }
                 let mut stack = vec![*node];
                 while let Some(r) = stack.pop() {
                     add(&mut t, points_of(tree, &placed, r));

@@ -416,7 +416,7 @@ fn a1_a_form_that_fails_before_its_contact_links_nothing() {
     let now = b.now;
     {
         let (mut w, forms) = b.world();
-        forms.leave(&mut w, id(2), now).expect("left");
+        forms.leave(&mut w, id(2), None, now).expect("left");
     }
     assert_eq!(b.run(), "left");
     assert!(
