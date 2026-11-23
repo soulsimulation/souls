@@ -2926,7 +2926,10 @@ mod tests {
                 let s: Vec<(Vec3, i64)> = k.roles.iter().flat_map(|r| r.stands.clone()).collect();
                 assert_eq!(
                     s,
-                    vec![(Vec3::new(-250_000, 0, 0), 0), (Vec3::new(250_000, 0, 0), 0)]
+                    vec![
+                        (Vec3::new(-250_000, 0, 0), 0),
+                        (Vec3::new(250_000, 0, 0), 0)
+                    ]
                 );
             }
             if mv == "dance" {

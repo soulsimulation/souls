@@ -20,6 +20,12 @@
 //! - **A touch ends with its moves.** When every member's move of a touch has ended by itself, each member leaves it
 //!   ([`Activities::finish`]), so its role claims are let go: both arms are free, and the next touch between the
 //!   same two starts and plays its moves. A touch whose move holds (T2) is not ended this way.
+//! - **Following another Soul (0.135 G2).** A kind may name the role that follows
+//!   ([`replica::activity::ActivityKind::follows`]); the other member leads. The offer and its accept are the consent;
+//!   while it runs, worldd keeps the follower's own `souls:follow` order on the leader (`v2/docs/intents.md` rule 5,
+//!   `crate::orders`), so following is the one existing order and its skill. Either member's leave ends it for both;
+//!   the follower's own walk leaves it ([`Activities::walk_leaves`]); its order ending (displaced by the follower's
+//!   own act, expired, the leader gone) ends it too ([`Activities::following`]).
 //! - **Members take their places (0.135 G3).** A role whose kind says where its members stand has them walk there
 //!   and turn to their facing when the activity starts, before its moves begin ([`places`], [`Activities::to_take`]).
 //! - **A held move lasts while both stay (0.134 T2).** A role's move whose last phase holds (`hold_hand`) holds until
@@ -63,7 +69,6 @@ use crate::structure::Structure;
 use crate::timers::{DueList, Timer};
 
 pub mod carry;
-pub mod follow;
 pub mod offer;
 pub mod places;
 pub mod seating;

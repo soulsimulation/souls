@@ -1,7 +1,7 @@
 // Touch by offer and accept (0.134 T1, T2): a handshake, a hug, a high five or holding hands, offered to one Soul.
 // Dancing together (T3) is offered to up to seven at once; each who accepts dances, all on one beat. Following
-// (0.135 G2): `together offer follow <body id>` asks to follow that Soul; once it accepts, this Soul walks 1 m behind
-// it wherever it walks, until either leaves or this Soul walks on its own. When the other accepts,
+// (0.135 G2): `together offer follow <body id>` asks to follow that Soul; once it accepts, this Soul's own follow
+// order walks it along that Soul's trail, 1 to 2.5 m behind, until either leaves or this Soul acts on its own. When the other accepts,
 // the activity starts and the world aims each one's move at the other (`content/kinds/together/`, each role naming
 // its move). Each command is the intents it sends, built here with no daemon and no world, so it is read and tested
 // on its own.
@@ -17,7 +17,7 @@
 /** Each touch's activity kind, as the world pins it from its entry (`serve::activity_kinds`), and the offerer's role. */
 export const KINDS = Object.freeze({
   follow: 'eden:follow_activity@1220390b841bf789d26cfe815f2f44765945b061efce3c95e01c3f86ead53b5ea588',
-  dance: 'eden:dance_together_activity@1220a3ede05c7ef3bdc371c94c11e865fc9da0a19efc4ac736ddeea2dbfd53d3333b',
+  dance: 'eden:dance_together_activity@1220d1b1f5c438e9e7b3ba287320f4f18114892f5d4777e5e044844a0ebd5333ad5d',
   handshake: 'eden:handshake_activity@1220b6204784ae7087cc16cd7d3b0b22bc7f851c2de8c2af7ae6b677d0a59b381682',
   'high-five': 'eden:high_five_activity@1220fd403508fcecb98fb4aff58e9b5450e67696a75b6fef0c7307b130be85453111',
   'hold-hands': 'eden:hold_hands_activity@1220117af957e071c2126cdc18220b7ec1220944908b29afadb24f89e9a5ef6531f5',

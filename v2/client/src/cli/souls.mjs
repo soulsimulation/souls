@@ -39,7 +39,7 @@
 //   souls.mjs together offer <handshake|hug|high-five|hold-hands> <body id>   offers that body a touch; when it accepts, each
 //                                             one's move is aimed at the other (0.134 T1); hands stay held until either leaves or walks (T2)
 //   souls.mjs together offer dance <body id> [<body id> ...]   up to seven; all who accept dance on one beat (T3)
-//   souls.mjs together offer follow <body id>   once it accepts, this Soul walks 1 m behind it (0.135 G2)
+//   souls.mjs together offer follow <body id>   once it accepts, this Soul follows its trail (0.135 G2)
 //   souls.mjs together accept|decline <offer id>   accepts the touch, or declines it and nobody moves
 //   souls.mjs lie <id>                        lies down on that bed (stand again with act <ns>:rise)
 //   souls.mjs pray "<words>"                  a prayer to the world's creator (G11); the answer comes to `wait`

@@ -234,8 +234,6 @@ pub struct Bodies {
     pub unstuck: crate::unstick::Unstuck,
     /// The rule's own move going on each body, by its intent id.
     wind_moves: BTreeMap<Id, Id>,
-    /// Each follower's walk the world sent (0.135 G2): its id and where it is going.
-    follow_moves: BTreeMap<Id, (Id, Vec3)>,
     /// Each member's walk to its place in an activity (0.135 G3), by (activity, body).
     place_moves: BTreeMap<(Id, Id), Id>,
     /// Each body the rule put to sleep on the ground: the driver holding it lying.
@@ -406,7 +404,6 @@ impl Bodies {
             wind_log: Vec::new(),
             unstuck: crate::unstick::Unstuck::default(),
             wind_moves: BTreeMap::new(),
-            follow_moves: BTreeMap::new(),
             place_moves: BTreeMap::new(),
             sleeping: BTreeMap::new(),
         })
@@ -1593,58 +1590,18 @@ impl Bodies {
         }
     }
 
-    /// The follows running (0.135 G2, `sim::activity::follow`): `(activity, leader, follower, follower's Soul)`. Each
-    /// follower whose place behind its leader has moved on is sent a walk there, by the path every walk intent takes
-    /// ([`Bodies::start`]), under a fresh id, as its Soul's own; a follower whose follow has ended is stopped where
-    /// it is.
-    pub fn follow(&mut self, follows: &[(Id, Id, Id, Id)]) {
-        use sim::activity::follow::{again, place};
-        let now: BTreeSet<Id> = follows.iter().map(|f| f.2).collect();
-        let ended: Vec<Id> = self
-            .follow_moves
-            .keys()
-            .filter(|b| !now.contains(b))
-            .copied()
-            .collect();
-        for body in ended {
-            if let Some((id, _)) = self.follow_moves.remove(&body) {
-                self.cancel(id);
-            }
+    /// A walk the world starts for `body` to `to` on the open ground, under `id` (0.135 G3): N7's walk as an intent's,
+    /// but nothing else is committed with it, so no other body's waiting sit, lie or rise result is taken or lost
+    /// (that is [`Bodies::start`]'s, with its answers).
+    fn walk_own(&mut self, body: Id, to: Vec3, id: Id) -> R<()> {
+        let goal = self.goal(body, self.town.ground, Some(Vec3::new(to.x, 0, to.z)));
+        self.replace(body);
+        let walk = Box::new(Route::sent(WALK, self.runner.tick));
+        let r = goal.and_then(|g| self.runner.send(body, walk, g, id));
+        if r.is_ok() {
+            self.live.insert(body, (id, Live::Walk));
         }
-        for &(_, leader, follower, soul) in follows {
-            let c = &self.runner.controller;
-            let (Some(l), Some(f)) = (c.body(leader), c.body(follower)) else {
-                continue;
-            };
-            if sim::index::place_of(l).0 != self.town.ground
-                || sim::index::place_of(f).0 != self.town.ground
-            {
-                continue;
-            }
-            let to = place(l.pose.position, f.pose.position);
-            let aimed = self.follow_moves.get(&follower).map(|m| m.1);
-            if !again(aimed, f.pose.position, to) {
-                continue;
-            }
-            let Ok(id) = self.mint.mint() else { continue };
-            let node = self.town.ground;
-            let ask = Ask::Walk {
-                node,
-                point: Some(Vec3::new(to.x, 0, to.z)),
-            };
-            let started = self.start(vec![(
-                id,
-                Asked {
-                    body: follower,
-                    actor: Actor::Soul(soul),
-                    ask,
-                    fallbacks: Vec::new(),
-                },
-            )]);
-            if started.iter().all(|(_, r)| r.is_ok()) {
-                self.follow_moves.insert(follower, (id, to));
-            }
-        }
+        r
     }
 
     /// Members taking their places (0.135 G3, `sim::activity::places`): `(activity, body, Soul, place, facing)`. Each
@@ -1653,7 +1610,7 @@ impl Bodies {
     /// short still ends the taking. Returns the members that have taken their places, by (activity, body).
     pub fn take_places(&mut self, todo: &[(Id, Id, Id, Vec3, Quat)]) -> Vec<(Id, Id)> {
         let mut done = Vec::new();
-        for &(activity, body, soul, to, facing) in todo {
+        for &(activity, body, _, to, facing) in todo {
             let Some(at) = self.runner.controller.body(body).map(|m| m.pose.position) else {
                 done.push((activity, body));
                 continue;
@@ -1669,20 +1626,7 @@ impl Bodies {
                 self.place_moves.remove(&(activity, body));
             } else if !near {
                 let Ok(id) = self.mint.mint() else { continue };
-                let ask = Ask::Walk {
-                    node: self.town.ground,
-                    point: Some(Vec3::new(to.x, 0, to.z)),
-                };
-                let started = self.start(vec![(
-                    id,
-                    Asked {
-                        body,
-                        actor: Actor::Soul(soul),
-                        ask,
-                        fallbacks: Vec::new(),
-                    },
-                )]);
-                if started.iter().all(|(_, r)| r.is_ok()) {
+                if self.walk_own(body, to, id).is_ok() {
                     self.place_moves.insert((activity, body), id);
                     continue;
                 }
