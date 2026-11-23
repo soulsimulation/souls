@@ -1429,3 +1429,89 @@ fn i4187_a_late_start_has_its_runs_deadline_behind_a_long_walk() {
         "it ran past the 10 s an act gets on arrival"
     );
 }
+
+/// 0.132 A1-5: a seat a thing's form takes writes the body's `posture` field (the slot's `sit`, or `lie`), and its
+/// rise writes `stand`, so the body's own `stand` (which needs its posture not `stand`) is run while it sits. A body's
+/// own form writes its posture in its own effects: its rise writes nothing here.
+#[test]
+fn a_seat_taken_or_left_writes_the_bodys_posture() {
+    use replica::world_model::{Audience, Draft, Node, plain};
+    use skills::form_runner::Step;
+    let kinds = parse_kinds(KINDS).expect("kinds");
+    let full = |p: &str| {
+        kinds
+            .keys()
+            .find(|k| plain(k) == p)
+            .expect("a kind")
+            .clone()
+    };
+    let cases = [
+        ("sit", false, false, vec!["sit", "stand"]),
+        ("lie", true, false, vec!["lie", "stand"]),
+        ("own rise", false, true, vec!["sit"]),
+    ];
+    for (case, lie, own_rise, want) in cases {
+        let (mut b, body, chair, slot, _) = seat_bench();
+        let root = b.mint.mint().expect("id");
+        let node = |id, kind, parent| Node {
+            id,
+            kind,
+            parent,
+            slot: None,
+            audience: Audience::Everyone,
+            fields: BTreeMap::new(),
+        };
+        let draft = Draft {
+            kinds: kinds.clone(),
+            souls: Default::default(),
+            audiences: BTreeMap::new(),
+            nodes: vec![
+                node(root, full("souls:place"), None),
+                node(body, full("souls:body"), Some(root)),
+            ],
+            links: Vec::new(),
+        };
+        b.tree = Tree::load(&draft).expect("loads").0;
+        b.forms.postures.insert(full("souls:body"), 28);
+        let sit = Step::Sit {
+            slot,
+            lie,
+            stand: false,
+        };
+        let mut written = Vec::new();
+        let mut run = |b: &mut Bench, node, steps, n| {
+            b.steps(body, node, steps, intent(body, n), Limits::default())
+                .expect("started");
+            while !b.forms.is_empty() && b.now < 30_000_000 {
+                b.tick();
+                for e in b.forms.out.drain(..) {
+                    let Body::Changes(cs) = e.body else { continue };
+                    for c in cs {
+                        if let Change::Set {
+                            node,
+                            field: 28,
+                            to,
+                            ..
+                        } = c.change
+                        {
+                            assert_eq!(node, body, "{case}: on the body");
+                            written.push(to);
+                        }
+                    }
+                }
+            }
+        };
+        if own_rise {
+            run(&mut b, chair, vec![sit], 0);
+            run(&mut b, body, vec![Step::Rise], 1);
+        } else {
+            run(&mut b, chair, vec![sit, Step::Rise], 0);
+        }
+        let want: Vec<_> = want.iter().map(|w| Value::Text(super::name(w))).collect();
+        assert_eq!(written, want, "{case}");
+        assert!(
+            b.slots.as_ref().and_then(|s| s.held_by(body)).is_none(),
+            "{case}: out of the slot"
+        );
+    }
+}

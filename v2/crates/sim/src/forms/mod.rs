@@ -468,7 +468,13 @@ pub struct Forms {
     settled: BTreeMap<Id, Driver>,
     /// By body, a Soul's new act waiting for its run's posture step to end (#4187).
     waiting: BTreeMap<Id, Waiting>,
+    /// The number of each kind's `posture` field, by the kind's full name: a seat a thing's form takes or leaves
+    /// writes it on the body ([`Forms::seat_posture`]).
+    postures: BTreeMap<String, u64>,
 }
+
+/// The state field a body's kind keeps its posture in (`stand`, `sit`, `lie`, ...), by name.
+const POSTURE: &str = "posture";
 
 /// The claim that holds a settled body's legs and its ground posture (C25, #3496): any later claim on its legs ends
 /// it, and the body stands.
@@ -1180,6 +1186,68 @@ impl Forms {
     /// [`Forms::new`] or [`Forms::recover`], and again when kinds load.
     pub fn kinds(&mut self, kinds: &replica::kinds::Kinds) {
         self.limits = amounts::limits(kinds);
+        self.postures = kinds
+            .admits()
+            .keys()
+            .filter_map(|k| kinds.get(k))
+            .filter_map(|def| {
+                let (n, _) = def.state.iter().find(|(_, f)| f.name.as_str() == POSTURE)?;
+                Some((def.name.as_str().to_owned(), *n))
+            })
+            .collect();
+    }
+
+    /// A seat a thing's form took or left (its sit or lie, or its rise, ended `done`) is written on the body's
+    /// `posture` field, when its kind has one: the slot's `sit` or `lie`, or `stand`. A body's own form writes its
+    /// posture in its own effects, so nothing is written for it here.
+    fn seat_posture(&mut self, tree: &Tree, run: RunId, at: Micros) {
+        let Some(fr) = self.runs.get(&run) else {
+            return;
+        };
+        if fr.node == fr.body {
+            return;
+        }
+        let to = match fr.runner.step() {
+            Some(Step::Sit {
+                lie, stand: false, ..
+            }) => {
+                if *lie {
+                    "lie"
+                } else {
+                    "sit"
+                }
+            }
+            Some(Step::Rise) => "stand",
+            _ => return,
+        };
+        let kind = tree
+            .handle(fr.body)
+            .and_then(|h| tree.node(h))
+            .map(|n| n.kind().as_str().to_owned());
+        let Some(&field) = kind.as_deref().and_then(|k| self.postures.get(k)) else {
+            return;
+        };
+        self.out.push(Effect {
+            envelope: Envelope {
+                sequence: 0,
+                at,
+                cause: Cause::Intent(fr.intent.id),
+                actor: fr.intent.actor,
+                audience: Audience::Everyone,
+                node: fr.body,
+            },
+            body: Body::Changes(vec![ChangeRec {
+                change: Change::Set {
+                    node: fr.body,
+                    field,
+                    to: Value::Text(name(to)),
+                    by: None,
+                },
+                rest: Rest::new(),
+            }]),
+            events: None,
+            rest: Rest::new(),
+        });
     }
 
     /// The zone's header, which B4's transfer (a take or a put) writes under.
@@ -1730,6 +1798,9 @@ impl Forms {
                         && fr.mv.take().is_some()
                     {
                         let how = rec.ended.map_or_else(|| name("done"), |e| e.how);
+                        if how.as_str() == "done" {
+                            self.seat_posture(w.tree, run, t.due);
+                        }
                         self.wake(w, run, Woke::Moved(how), t.due);
                     }
                 }
