@@ -6,5 +6,6 @@
 pub mod accounts;
 pub mod backup;
 pub mod directory;
+pub mod durable;
 pub mod pairing;
 pub mod worlds;
