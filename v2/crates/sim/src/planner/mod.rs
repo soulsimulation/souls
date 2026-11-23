@@ -26,11 +26,14 @@
 
 use crate::host::{Planned, Wants};
 use crate::walk::World;
-use crate::walk::town::{Rebuilt, Town};
+use crate::walk::town::{ClassScratch, Lines, Rebuilt, Spent, Split, Town, View};
 use replica::effects::Part;
+use replica::kinds::sizes::Size;
 use replica::pose::Vec3;
+use std::cell::Cell;
 use std::panic::{AssertUnwindSafe, catch_unwind};
 use std::sync::Arc;
+use std::sync::Mutex;
 use std::sync::mpsc::{Receiver, RecvTimeoutError, Sender, channel};
 use std::thread::JoinHandle;
 use std::time::Duration;
@@ -157,14 +160,29 @@ impl GroundTrace {
     }
 }
 
+/// The most threads a batch's form walk questions are answered on (S9, 0.133), the planner's own included: each is a
+/// full search for a place to stand near a thing ([`View::stand_near_shape`]) and a route there, and at 750 agents
+/// they are the planner's whole load. The others are named [`FORM_THREAD`], so their cores are their own gauge.
+pub const FORM_THREADS: usize = 4;
+/// The name of the threads that help the planner with form walk questions.
+pub const FORM_THREAD: &str = "planner-forms";
+/// Form walk questions a thread takes at a time.
+const FORM_CHUNK: usize = 2;
+
 /// The planner over its own town.
 pub struct Planner {
     pub town: Town,
+    /// The most threads a batch's form walk questions are answered on (at least one: the planner's own). The
+    /// answers are the same whatever the count.
+    pub threads: usize,
 }
 
 impl Planner {
     pub fn new(town: Town) -> Planner {
-        Planner { town }
+        Planner {
+            town,
+            threads: FORM_THREADS,
+        }
     }
 
     /// Answers one tick's wants: the spot tables written from its marks, then each waiting walk's place and legs,
@@ -245,42 +263,23 @@ impl Planner {
         if let Some(map) = &w.form_map
             && **map == self.town.versions
         {
+            // The walk questions first, side by side (S9); then every answer in the batch's order.
+            let walks: Vec<(usize, Size)> = w
+                .forms
+                .iter()
+                .enumerate()
+                .filter(|(_, q)| matches!(q.query, FormQuery::Walk { .. }))
+                .map(|(i, q)| (i, self.town.size_of(q.body.id)))
+                .collect();
+            let threads = crate::ground::fan_out(self.threads, walks.len().div_ceil(FORM_CHUNK));
+            let mut walked = answer_walks(&mut self.town, &w.forms, &walks, threads).into_iter();
             for q in &w.forms {
                 out.searched += 1;
                 let result = match q.query {
-                    FormQuery::Walk {
-                        node,
-                        at,
-                        reach,
-                        door,
-                        ring,
-                    } => {
-                        let view = match self.town.view_for(q.body.id) {
-                            Ok(v) => v,
-                            Err(_) => continue,
-                        };
-                        let legs = view
-                            .on_floor(node, at)
-                            .and_then(|(floor, at, _)| {
-                                // A ring is given on the floor itself (`node` is the floor).
-                                let ring = ring.as_ref().filter(|_| floor == node);
-                                let to = view
-                                    .stand_near_shape(
-                                        floor,
-                                        at,
-                                        ring.map(|(r, on)| (&r[..], *on)),
-                                        reach,
-                                        Some(&q.body),
-                                        door,
-                                    )
-                                    .or_else(|| {
-                                        (floor == crate::walk::node_of(&q.body)).then_some(at)
-                                    })?;
-                                view.plan(&q.body, floor, to).ok()
-                            })
-                            .unwrap_or_default();
-                        FormResult::Walk(legs)
-                    }
+                    FormQuery::Walk { .. } => match walked.next() {
+                        Some((_, Some(legs))) => FormResult::Walk(legs),
+                        _ => continue,
+                    },
                     FormQuery::Line { to } => FormResult::Line(self.town.line(&q.body, to)),
                 };
                 out.forms.insert(
@@ -295,6 +294,106 @@ impl Planner {
         }
         out
     }
+}
+
+/// A form walk question's legs (#3688, #4072): to the place to stand near its point or its thing's outline, on the
+/// floor at the point, or to the point itself on the body's own floor when no place is; none when no way is.
+fn form_walk(view: &View<'_>, q: &FormQuestion) -> Vec<crate::walk::Leg> {
+    let FormQuery::Walk {
+        node,
+        at,
+        reach,
+        door,
+        ring,
+    } = q.query
+    else {
+        return Vec::new();
+    };
+    view.on_floor(node, at)
+        .and_then(|(floor, at, _)| {
+            // A ring is given on the floor itself (`node` is the floor).
+            let ring = ring.as_ref().filter(|_| floor == node);
+            let to = view
+                .stand_near_shape(
+                    floor,
+                    at,
+                    ring.map(|(r, on)| (&r[..], *on)),
+                    reach,
+                    Some(&q.body),
+                    door,
+                )
+                .or_else(|| (floor == crate::walk::node_of(&q.body)).then_some(at))?;
+            view.plan(&q.body, floor, to).ok()
+        })
+        .unwrap_or_default()
+}
+
+/// The legs of each form walk question `walks` names (its index in `forms` and its body's class), in that order, on
+/// `threads` threads (S9): the planner's own, and the rest named [`FORM_THREAD`], each with its own route search
+/// scratch, taking [`FORM_CHUNK`] questions at a time. `None` where the class's geometry is not prepared. The
+/// answers do not depend on the thread count. A panic on a helper goes on as the planner's own (the batch's catch).
+fn answer_walks(
+    town: &mut Town,
+    forms: &[FormQuestion],
+    walks: &[(usize, Size)],
+    threads: usize,
+) -> Vec<(usize, Option<Vec<crate::walk::Leg>>)> {
+    if walks.is_empty() {
+        return Vec::new();
+    }
+    let Split {
+        shared,
+        scratches,
+        spent,
+        ..
+    } = town.split(threads.max(1));
+    let queue = Mutex::new(walks.chunks(FORM_CHUNK));
+    type Walked = (Vec<(usize, Option<Vec<crate::walk::Leg>>)>, Spent);
+    let work = |scratch: &mut ClassScratch| -> Walked {
+        let cost = Cell::new(Spent::default());
+        let mut out = Vec::new();
+        while let Some(c) = queue.lock().ok().and_then(|mut q| q.next()) {
+            for &(i, size) in c {
+                let mut found = Vec::new();
+                let legs = shared
+                    .view_for(size, scratch, Lines::Part(&mut [], &mut found), &cost)
+                    .ok()
+                    .map(|view| form_walk(&view, &forms[i]));
+                out.push((i, legs));
+            }
+        }
+        (out, cost.get())
+    };
+    let work = &work;
+    let done: Vec<Walked> = match scratches.split_first_mut() {
+        Some((first, others)) if !others.is_empty() => std::thread::scope(|sc| {
+            let handles: Vec<_> = others
+                .iter_mut()
+                .filter_map(|s| {
+                    std::thread::Builder::new()
+                        .name(FORM_THREAD.into())
+                        .spawn_scoped(sc, move || work(s))
+                        .ok()
+                })
+                .collect();
+            let mut all = vec![work(first)];
+            for h in handles {
+                all.push(h.join().unwrap_or_else(|p| std::panic::resume_unwind(p)));
+            }
+            all
+        }),
+        Some((first, _)) => vec![work(first)],
+        None => Vec::new(),
+    };
+    let mut total = spent.get();
+    let mut out = Vec::with_capacity(walks.len());
+    for (part, cost) in done {
+        total.add(&cost);
+        out.extend(part);
+    }
+    spent.set(total);
+    out.sort_by_key(|(i, _)| *i);
+    out
 }
 
 enum Input {

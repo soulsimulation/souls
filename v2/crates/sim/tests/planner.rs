@@ -573,3 +573,62 @@ fn s8_a_walkers_line_is_asked_once_while_the_request_is_out() {
     }
     assert!(arrived(&r, id(1)).is_some(), "the walker arrived");
 }
+
+/// S9: form walk questions answered on several threads get the same answers, in the same order, as on the planner's
+/// own thread alone: forty walkers each asking for a place to stand near its own point (reach 1.5 m) and a route there.
+#[test]
+fn s9_form_walks_answered_side_by_side_are_the_same_as_on_one_thread() {
+    use sim::planner::{FormKey, FormKind, FormQuery, FormQuestion};
+    let t = town();
+    let n = 40;
+    let forms: Vec<FormQuestion> = (0..n)
+        .map(|k| {
+            let (body, to) = walker(&t, k, n);
+            FormQuestion {
+                key: FormKey {
+                    body: body.id,
+                    intent: id(20_000 + k),
+                    stage: 0,
+                    step: 0,
+                    kind: FormKind::Walk,
+                },
+                generation: 1,
+                body,
+                query: FormQuery::Walk {
+                    node: t.ground,
+                    at: to,
+                    reach: 1_500_000,
+                    door: None,
+                    ring: None,
+                },
+            }
+        })
+        .collect();
+    let wants = sim::host::Wants {
+        form_map: Some(std::sync::Arc::new(t.versions.clone())),
+        forms,
+        ..Default::default()
+    };
+    let answers = |threads: usize| {
+        let mut p = Planner::new(t.copy().unwrap());
+        p.threads = threads;
+        // Twice: the second batch reads the caches the first left in each thread's scratch.
+        let first = p.answer(&wants);
+        let second = p.answer(&wants);
+        let text = |a: &Planned| {
+            a.forms
+                .iter()
+                .map(|(k, a)| format!("{k:?} {} {:?}", a.generation, a.result))
+                .collect::<Vec<_>>()
+        };
+        (text(&first), text(&second))
+    };
+    let one = answers(1);
+    assert_eq!(one.0.len(), n as usize, "every question answered");
+    assert!(
+        one.0.iter().filter(|a| a.contains("Walk([]")).count() < n as usize / 2,
+        "most walks found a place and a way"
+    );
+    assert_eq!(answers(4), one, "the same answers on four threads");
+    assert_eq!(one.0, one.1, "and on a second batch");
+}
