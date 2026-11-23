@@ -128,6 +128,9 @@ struct Sent {
     minutes: Vec<Minute>,
     /// Refusals by `<verb> <name>`, over the run.
     refused_by: BTreeMap<String, u64>,
+    /// Acts the agent's own later act replaced before their first answer (`claim-taken` once a later sequence was
+    /// sent): the open loop's doing, not the world telling a Soul no, so not counted as refusals (#4171).
+    replaced: u64,
     /// X10: second receipts for one sequence, intents sent again (after a lost socket or `world.restarting`), and
     /// `world.restarting` answers.
     duplicates: u64,
@@ -741,6 +744,8 @@ async fn agent(
     // socket.
     let mut pending: BTreeMap<u64, (Instant, u64, Vec<u8>)> = BTreeMap::new();
     let mut verb_of: HashMap<u64, Name> = HashMap::new();
+    // The newest sequence sent: a `claim-taken` on an older act is this agent's own act replacing it.
+    let mut newest = 0u64;
     // Sequences with a receipt (kind 1): a second is a duplicate.
     let mut receipted: std::collections::HashSet<u64> = std::collections::HashSet::new();
     // Intents answered `world.restarting`: sent again at their time.
@@ -803,6 +808,7 @@ async fn agent(
                     if let (true, Some(t)) = (d.verb.as_str().ends_with(":take"), d.target) {
                         takes.insert(d.sequence, t);
                     }
+                    newest = newest.max(d.sequence);
                     verb_of.insert(d.sequence, d.verb);
                     out.late_us.push(now.duration_since(d.at).as_micros() as u64);
                     if tx.send(Message::Binary(d.bytes.into())).await.is_err() {
@@ -867,6 +873,17 @@ async fn agent(
                         {
                             out.restarting += 1;
                             retry.push_back((now + RESTARTING_RETRY, s));
+                        }
+                        Heard::Refused(s, reason)
+                            if reason == "claim-taken" && newest > s && pending.contains_key(&s) =>
+                        {
+                            verb_of.remove(&s);
+                            let (sent_at, sent_ms, _) = pending.remove(&s).expect("pending");
+                            let ms = unix_ms();
+                            out.trace.push(format!("first {k} {s} {sent_ms} {ms} claim-taken replaced-by {newest}"));
+                            out.minute(s0, now).latency_us.push(now.duration_since(sent_at).as_micros() as u64);
+                            out.replaced += 1;
+                            out.other += 1;
                         }
                         Heard::Refused(s, reason) if pending.contains_key(&s) => {
                             let verb = verb_of.remove(&s).map_or("?".into(), |v| v.as_str().to_owned());
@@ -1537,6 +1554,7 @@ async fn main() {
     let duplicates: u64 = sent.iter().map(|x| x.duplicates).sum();
     let resent: u64 = sent.iter().map(|x| x.resent).sum();
     let restarting: u64 = sent.iter().map(|x| x.restarting).sum();
+    let replaced: u64 = sent.iter().map(|x| x.replaced).sum();
     let mut viewers = Vec::new();
     for v in watching {
         if let Ok(v) = v.await {
@@ -1590,6 +1608,7 @@ async fn main() {
         .raw("withheld", counts(&withheld))
         .raw("standIns", counts(&stand_ins))
         .raw("refusedBy", counts(&refused_by))
+        .n("replacedByOwnAct", replaced as f64)
         .raw("perMinute", serde_like::list(&minutes))
         .n("duplicateReceipts", duplicates as f64)
         .n("resent", resent as f64)
@@ -1662,6 +1681,9 @@ async fn main() {
         println!("  minute {}", m.json());
     }
     println!("  refused by verb {}", counts(&refused_by));
+    println!(
+        "  replaced by the agent's own next act (claim-taken, not counted as refused): {replaced}"
+    );
     if a.reconnect || a.drop.is_some() || !viewers.is_empty() {
         println!(
             "  faults: duplicate receipts {duplicates}, sent again {resent}, world.restarting answers {restarting}"
