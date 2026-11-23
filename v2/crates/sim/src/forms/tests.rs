@@ -159,7 +159,7 @@ struct Bench {
     forms: Forms,
     now: Micros,
     /// Seats a form's sit takes, when the bench has any (#4187).
-    seats: Option<crate::slots::Slots>,
+    slots: Option<crate::slots::Slots>,
 }
 
 fn points(entry: &json::Value) -> BTreeMap<String, Vec3> {
@@ -209,7 +209,7 @@ impl Bench {
             snap: Snap::default(),
             forms: Forms::new(),
             now: 0,
-            seats: None,
+            slots: None,
         }
     }
 
@@ -244,7 +244,7 @@ impl Bench {
                 mint: &mut self.mint,
                 moves: &mut self.moves,
                 library: &self.library,
-                places: self.seats.as_mut().map(|slots| super::Places {
+                places: self.slots.as_mut().map(|slots| super::Places {
                     slots,
                     floors: &self.surfaces,
                 }),
@@ -1095,9 +1095,9 @@ fn i4187_a_new_act_waits_for_a_seat_taken_or_left_then_starts() {
             floor: fixture(1),
         };
         let stand = at.stand().expect("a stand point");
-        let mut seats = crate::slots::Slots::new();
-        seats.add(at).expect("a place");
-        b.seats = Some(seats);
+        let mut slots = crate::slots::Slots::new();
+        slots.add(at).expect("a place");
+        b.slots = Some(slots);
         let body = b.mint.mint().expect("id");
         let frame = Frame {
             node: fixture(1),
@@ -1162,7 +1162,7 @@ fn i4187_a_new_act_waits_for_a_seat_taken_or_left_then_starts() {
         };
         let (how, ended) = (left.how.clone(), left.at);
         let pose = b.c.body(body).expect("a body").pose;
-        let seated = b.seats.as_ref().and_then(|s| s.held_by(body));
+        let seated = b.slots.as_ref().and_then(|s| s.held_by(body));
         println!(
             "#4187 mid-{mid}: new act at {sent} µs; the old run left at {ended} µs, after its {mid}; body seated {:?}, \
              support {:?}, at {:?}; the new run open: {}",
@@ -1179,11 +1179,11 @@ fn i4187_a_new_act_waits_for_a_seat_taken_or_left_then_starts() {
         );
         match mid {
             "sit" => {
-                assert_eq!(seated, Some(chair), "in the seat, not half seated");
+                assert_eq!(seated, Some(chair), "in the slot, not half seated");
                 assert_eq!(pose.support, replica::pose::Support::Slot);
             }
             _ => {
-                assert_eq!(seated, None, "out of the seat");
+                assert_eq!(seated, None, "out of the slot");
                 assert_ne!(pose.support, replica::pose::Support::Slot);
                 assert_eq!(
                     (pose.position.x, pose.position.z),
@@ -1213,11 +1213,11 @@ fn i4187_a_new_act_waits_for_a_seat_taken_or_left_then_starts() {
             i64::try_from((d(p.x, stand.x) + d(p.y, stand.y) + d(p.z, stand.z)).isqrt()).unwrap()
         };
         println!(
-            "#4187 mid-{mid}: longest step between ticks {longest} µm; the seat's hand-off {hand_off} µm"
+            "#4187 mid-{mid}: longest step between ticks {longest} µm; the slot's hand-off {hand_off} µm"
         );
         assert!(
             longest <= hand_off + 1,
-            "{mid}: no jump beyond the seat's own hand-off"
+            "{mid}: no jump beyond the slot's own hand-off"
         );
     }
 }
@@ -1242,9 +1242,9 @@ fn seat_bench() -> (Bench, Id, Id, u64, Vec3) {
         floor: fixture(1),
     };
     let stand = at.stand().expect("a stand point");
-    let mut seats = crate::slots::Slots::new();
-    seats.add(at).expect("a place");
-    b.seats = Some(seats);
+    let mut slots = crate::slots::Slots::new();
+    slots.add(at).expect("a place");
+    b.slots = Some(slots);
     let body = b.mint.mint().expect("id");
     let frame = Frame {
         node: fixture(1),
