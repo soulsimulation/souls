@@ -24,6 +24,8 @@ fn g1_a_walk_names_the_gaits_on_dry_ground() {
         .collect();
     assert_eq!(named, DRY);
     assert!(DRY.iter().all(|g| g.allowed(sim::gaits::Ground::Dry)));
+    // 0.135 G2: a follower keeps up with a leader at the fastest of them.
+    assert_eq!(skills::close::FASTEST, RUN.speed);
 }
 
 /// Standard base64, for the terrain written in a test.

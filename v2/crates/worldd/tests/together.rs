@@ -1113,6 +1113,38 @@ fn g2_a_soul_follows_another_over_a_walk_with_two_turns() {
     run.stop();
 }
 
+/// 0.135 G2 after G1: the follower walks at the leader's gait. Soul 1 jogs 12 m east, then runs 16 m east (`gait:jog`,
+/// `gait:run`, parameter 2); Soul 2 keeps within 2.5 m of its place 1 m behind (at walking pace's closing cap,
+/// 2.4 m/s, it fell more than 6 m behind on the run), and never moves more than the run's 0.2 m in a tick, plus 5 %.
+#[test]
+fn g2_a_follower_keeps_the_leaders_gait() {
+    let run = serve("follow-gait");
+    let (mut a, mut b) = (run.client(1), run.client(2));
+    let follow = run.created(&b.offer(FOLLOW, 1).expect("Soul 2 offers to follow"));
+    a.act("activity:accept", Some(follow), &[])
+        .expect("Soul 1 accepts");
+    let from = run.rows().len();
+    for (x, gait) in [(-28_000_000, "gait:jog"), (-12_000_000, "gait:run")] {
+        a.act(
+            "eden:walk",
+            Some(ground()),
+            &[(1, walk_to(x, 30_000_000)), (2, Value::Text(name(gait)))],
+        )
+        .unwrap_or_else(|e| panic!("Soul 1 goes to x {x} at {gait}: {e}"));
+    }
+    std::thread::sleep(Duration::from_millis(2_000));
+    let (worst, step, leader, follower) = track(&run, from);
+    println!(
+        "g2 gait: the follower within {} mm of its place; at most {} mm a tick; ended {} mm from the leader",
+        worst / 1000,
+        step / 1000,
+        (follower.x - leader.x).abs() / 1000
+    );
+    assert!(worst <= 2_500_000, "within 2.5 m of its place: {worst} µm");
+    assert!(step <= 210_000, "at most a run's tick: {step} µm");
+    run.stop();
+}
+
 /// 0.135 G2, review R1 and R2: a follow survives a restart. The follower's order is taken up from the log as it is;
 /// an intent arriving after the restart never takes the order's id (the world made the order on the intents'
 /// counter); and the leader's leave then ends the follow for both and cancels the order, in the same tick.
