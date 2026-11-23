@@ -5002,6 +5002,7 @@ pub fn start<S: Storage + 'static>(
     )?;
     let publisher = Arc::new(Publisher::new(&world));
     let (kinds, library) = (rules.kinds.clone(), acts::library()?);
+    let engine_entries = rules.kinds.clone();
     let structure = Arc::new(sim::structure::Structure::from_entries(&rules.kinds));
     let (header, engine_header) = (world.header().clone(), world.header().clone());
     // The ids the forms and the engine mint (links, transfers, things made): a scope of their own for each start,
@@ -5196,7 +5197,10 @@ pub fn start<S: Storage + 'static>(
         },
         forming: Vec::new(),
         engine: engine_parts
-            .map(|(rules, kinds)| Engine::new(engine_header, rules, kinds, engine_scope)),
+            // 0.135 C2: a load is carried as its kind's entry states.
+            .map(|(rules, kinds)| {
+                Engine::new(engine_header, rules, kinds, engine_scope).with_loads(&engine_entries)
+            }),
         engine_acts: Vec::new(),
         engine_done: Vec::new(),
         order_records,
