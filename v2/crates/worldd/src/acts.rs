@@ -52,8 +52,12 @@
 //!   world's own state, links, seats and hands included ([`crate::needs`]): an unmet need is refused by its reason's
 //!   name and index before any walk or effect. Reach is the move's own, measured at its start (C22).
 //!
+//! - **A restart** (N2, 0.133). The forms are read back from the log ([`Acts::recover`]): a run open at the kill is
+//!   ended `restart` in the first tick, so its reservation is freed and the log holds its end. Its intent, never
+//!   answered, is taken afresh when the gateway sends it again: a walk is planned again from where the body stands.
+//!
 //! Not here: a form's reservation (F3's link needs both ends in the tree, so a form reserves nothing until bodies are
-//! nodes); resuming a run after a restart.
+//! nodes); resuming a run mid-way after a restart.
 
 use replica::host::WalkPlan;
 use sim::ground::Versions;
@@ -1292,6 +1296,26 @@ impl Reach for Sight<'_> {
         };
         Some(with_height(flat([a.x, a.z], [b.x, b.z]), v))
     }
+
+    /// The thing argument this body's run named, for a move at it ([`AT_ARG`]). The record that names it is seen by
+    /// everyone, so a thing in a closed container is not named (#4339): the record keeps the form's own node.
+    fn aimed(&self, body: Id, point: &Name) -> Option<Id> {
+        if point.as_str() != AT_ARG {
+            return None;
+        }
+        let thing = *self.toward.get(&body)?;
+        let mut up = self.tree.node(self.tree.handle(thing)?)?.parent();
+        while let Some(p) = up {
+            let n = self.tree.node(self.tree.handle(p)?)?;
+            if entry_in(self.kinds, self.tree, &n)
+                .is_some_and(|e| crate::closed::Closed::closes(&e))
+            {
+                return None;
+            }
+            up = n.parent();
+        }
+        Some(thing)
+    }
 }
 
 /// The point a move with no `at` and no `toward` reaches (C23, #3494): the body itself, always in reach (a wave, a
@@ -1471,6 +1495,28 @@ pub struct Acts {
     planning: RefCell<Planning>,
     /// The code hatches' modules this world ships (F8, #3713), loaded and checked once, by their SHA-256 multihash.
     hatches: BTreeMap<Vec<u8>, replica::hatch::Loaded>,
+    /// The zone's header, which the forms write a take or a put under: given again to forms read back at a restart.
+    zone: replica::effects::Header,
+}
+
+/// The entries' amounts as F4 reads them (`Forms::kinds`): each entry without its forms, a timed field left out.
+fn loaded(kinds: &Json) -> replica::kinds::Kinds {
+    let mut loaded = replica::kinds::Kinds::default();
+    for (_, entry) in kinds.obj().unwrap_or(&[]) {
+        let mut e = entry.clone();
+        if let Json::Obj(o) = &mut e {
+            o.retain(|(k, _)| k != "forms");
+            // A timed field (a kettle's heat) is not an amount, and the kind format cannot hold its default yet:
+            // left out, so the entry's amounts load (#3715).
+            if let Some((_, Json::Obj(state))) = o.iter_mut().find(|(k, _)| k == "state") {
+                state.retain(|(_, f)| f.get("type").and_then(Json::str) != Some("timed"));
+            }
+        }
+        if let Ok(text) = replica::kinds::entry::entry_to_kind(&e.to_json()) {
+            loaded.load(&[("entry", text.as_str())]);
+        }
+    }
+    loaded
 }
 
 /// The refusal of a thing argument the caller left out whose selector finds nothing (#3914): `form-rules` names the
@@ -1777,23 +1823,8 @@ impl Acts {
         // A form's `create` names its kind plainly; the world makes it as the header pins it (#3703).
         let kinds = pin_made(kinds, &header.kinds);
         let mut forms = Forms::new();
-        let mut loaded = replica::kinds::Kinds::default();
-        for (_, entry) in kinds.obj().unwrap_or(&[]) {
-            let mut e = entry.clone();
-            if let Json::Obj(o) = &mut e {
-                o.retain(|(k, _)| k != "forms");
-                // A timed field (a kettle's heat) is not an amount, and the kind format cannot hold its default yet:
-                // left out, so the entry's amounts load (#3715).
-                if let Some((_, Json::Obj(state))) = o.iter_mut().find(|(k, _)| k == "state") {
-                    state.retain(|(_, f)| f.get("type").and_then(Json::str) != Some("timed"));
-                }
-            }
-            if let Ok(text) = replica::kinds::entry::entry_to_kind(&e.to_json()) {
-                loaded.load(&[("entry", text.as_str())]);
-            }
-        }
-        forms.kinds(&loaded);
-        forms.zone(header);
+        forms.kinds(&loaded(&kinds));
+        forms.zone(header.clone());
         Acts {
             forms,
             kinds,
@@ -1811,7 +1842,19 @@ impl Acts {
             blocked: BTreeMap::new(),
             planning: RefCell::new(Planning::default()),
             hatches: BTreeMap::new(),
+            zone: header,
         }
+    }
+
+    /// N2 (0.133): the forms read back from the log at a restart at `now` (`Forms::recover`): every run the log shows
+    /// started and not ended is ended `restart` now, its ending entry (which frees what it reserved) written with the
+    /// first tick. Its intent is not answered here: the gateway sends it again and it starts afresh from where the
+    /// body stands. `log` is the restart's replayed entries of the Souls' acts, in order.
+    pub fn recover(&mut self, log: &[Effect], now: Micros) {
+        let mut forms = Forms::recover(log, now);
+        forms.kinds(&loaded(&self.kinds));
+        forms.zone(self.zone.clone());
+        self.forms = forms;
     }
 
     /// Loads the code hatches' modules the world ships (`<world>/hatches/*.wasm`, #3713), each named by the hash of
@@ -2336,9 +2379,22 @@ impl Acts {
         let timers = self.timers.keys().copied().collect::<BTreeSet<Id>>();
         let mut watch = std::mem::take(&mut self.watch);
         let mut blocked = Vec::new();
+        // Intents rule 10 (0.134 I4): a Soul's own walk replaces its open run. In the run's walk its claim on the legs
+        // ends the run (`claim-taken`); a hand move holds no legs, so the run is left, at the move's next phase end
+        // (its contact or its end: never mid-contact).
+        let walking: Vec<Id> = bodies.as_deref().map_or_else(Vec::new, |b| {
+            b.runner
+                .running_bodies()
+                .into_iter()
+                .filter(|body| self.forms.in_hand_move(*body))
+                .collect()
+        });
         let mut stalled = Vec::new();
         let made_way = self.made_way.clone();
         let fired = self.with(tree, bodies.as_deref_mut(), tick, |forms, w| {
+            for body in walking {
+                let _ = forms.leave(w, body, None, now);
+            }
             forms.tick(w, now);
             let asked = std::mem::take(&mut *w.geometry.asked.borrow_mut());
             watch.keep(&asked.keys().copied().collect());

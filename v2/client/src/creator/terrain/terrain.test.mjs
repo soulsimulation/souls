@@ -30,10 +30,12 @@ test('a hill: its place, the patched tiles, and each resting thing on it lifted 
   const hill = { id: 'h', kind: 'bump', c: [16, 16], r: 8, h: 6 };
   const { ops, patched } = expand({ ground: g, landform: hill, things, placeKind: 'eden:place@x', outline: [[8, 8], [24, 8], [24, 24], [8, 24]] });
   assert.equal(patched, 4, 'the hill sits where four tiles meet');
-  assert.deepEqual(ops.map((o) => o.op), ['place', 'set', 'move'], 'only the thing on the hill moves');
+  assert.deepEqual(ops.map((o) => o.op), ['place', 'rows', 'move'], 'only the thing on the hill moves');
   assert.equal(ops[0].fields[F.PLACE_OF], 'eden:landform');
   assert.equal(ops[1].field, F.TILES);
-  const after = tilesOf(ops[1].value);
+  assert.equal(ops[1].op, 'rows', 'only the changed tiles are sent');
+  assert.equal(ops[1].rows.length, 4);
+  const after = tilesOf(ops[1].rows);
   const rise = heightAt(after, g.tileMm, 16n * M, 22n * M);
   assert.ok(rise > 0n);
   assert.deepEqual(ops[2], { op: 'move', node: 'box', atUm: [16_000_000, Number(rise), 22_000_000], orientation: [1000000, 0, 0, 0], support: { which: 0 } });
@@ -47,7 +49,7 @@ test('a pond is a water place with its level over the carved bed', () => {
   assert.equal(ops[0].fields[F.PLACE_OF], 'eden:water');
   assert.equal(ops[0].fields[F.WATER_LEVEL], -200);
   assert.deepEqual(ops[0].fields[F.OUTLINE][1], [12000, 4000]);
-  const after = tilesOf(ops[1].value);
+  const after = tilesOf(ops[1].rows);
   assert.equal(heightAt(after, N * 1000, 8n * M, 8n * M), -1_200_000n, 'the bed in the middle');
 });
 
@@ -101,8 +103,8 @@ test('#3728: the ground grows flat from its edge, and only grows', async () => {
   // The batch: every tile, the extent place, and a thing resting off the old ground moved to the new ground's height.
   const box = { id: 'box', position: [40n * M, 0n, 20n * M], orientation: [1000000, 0, 0, 0], support: { which: 0 } };
   const out = extentOps({ ...g, things: [box], bodies: [], placeKind: 'eden:place@x', extent: null }, { land: 'extend', toward: 'e', metres: '16' });
-  assert.deepEqual(out.ops.map((o) => o.op), ['set', 'place', 'move']);
-  assert.equal(out.ops[0].value.length, 6);
+  assert.deepEqual(out.ops.map((o) => o.op), ['rows', 'place', 'move']);
+  assert.deepEqual(out.ops[0].rows.map(([tx, tz]) => [tx, tz]), [[2, 0], [2, 1]], 'only the new tiles are sent');
   assert.deepEqual(out.ops[1].fields, { [F.OUTLINE]: [[0, 0], [48000, 0], [48000, 32000], [0, 32000]], [F.PLACE_OF]: 'eden:extent' });
   assert.deepEqual(out.ops[2].atUm, [40_000_000, 10_000_000, 20_000_000]);
   // Again with the extent place there: its outline is set; asking for no more is refused by name.

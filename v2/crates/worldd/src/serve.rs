@@ -647,11 +647,16 @@ fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
 fn build_with(cache: Option<&Path>, facts: &str, entries: &[(String, Json)]) -> R<Built> {
     let (prepared, kept) = courses_cached(cache, facts, entries)?;
     stamp("facts: courses");
+    // A kind whose entry joins parts (a rack bay, a beam, a frame stand) takes its slots from its entry (0.135).
+    let texts: Vec<(String, String)> = entries
+        .iter()
+        .map(|(k, e)| (k.clone(), e.to_json()))
+        .collect();
     // A kept text that does not load is never the start's end: it is computed again.
-    let mut im = match import_eden::load(&prepared) {
+    let mut im = match import_eden::load_with(&prepared, &texts) {
         Err(e) if kept => {
             eprintln!("worldd: the kept facts' courses do not load ({e}); computing them again");
-            import_eden::load(&courses(facts, entries)?)?
+            import_eden::load_with(&courses(facts, entries)?, &texts)?
         }
         im => im?,
     };
@@ -2298,6 +2303,15 @@ fn serve(args: &[String]) -> R<()> {
         kinds: Json::Obj(kinds),
         moves,
     };
+    // The joined-part rule the world checks every write on (B18, B20 #3356), read from its entries.
+    let joined = sim::structure::Structure::from_entries(&rules.kinds);
+    let (bays, standing, bearing) = joined.kinds();
+    println!(
+        "joined parts: bays [{}], standing [{}], bearing [{}]",
+        bays.join(", "),
+        standing.join(", "),
+        bearing.join(", ")
+    );
     let bucket = arg(args, "--store")
         .cloned()
         .or_else(|| std::env::var("WORLDD_STORE").ok())
