@@ -84,8 +84,8 @@ pub const REPLAN_WITHIN: Micros = 1_000_000;
 /// Whether a body with abilities `has` may stand on `ground` (the routes' own rule, N11c #3218).
 pub use crate::routes::may_stand;
 
-/// The smallest step that takes a still body at `at` on `node` out of the walker's `line` (from, to): across the line
-/// to [`CLEAR`] from it, the nearer side first, then each side a [`CLEAR`] further, up to three; a point on legal
+/// The smallest step that takes a still body at `at` on `node` out of the walker's `line` (from, to), when it is on
+/// that line (within [`CLEAR`] across it, between the walker and the line's end): across the line to [`CLEAR`] from it, the nearer side first, then each side a [`CLEAR`] further, up to three; a point on legal
 /// ground and at least two standard radii from every body in `taken`. None when no such point is found.
 fn aside(
     world: &impl Unstick,
@@ -109,6 +109,16 @@ fn aside(
     let n = len(Vec3::ZERO, Vec3::new(nx, 0, nz));
     if n == 0 {
         return None;
+    }
+    // Only a body on the way: across the line within [`CLEAR`], and not behind the walker or past the line's end.
+    if d > 0 {
+        let along = (i128::from(at.x - a.x) * i128::from(dx)
+            + i128::from(at.z - a.z) * i128::from(dz))
+            / i128::from(d);
+        let r = crate::ground::HUMAN_RADIUS * 1000;
+        if lat.abs() >= CLEAR || along < i128::from(-r) || along > i128::from(d + CLEAR) {
+            return None;
+        }
     }
     let side = if lat < 0 { -1 } else { 1 };
     let apart = 2 * crate::ground::HUMAN_RADIUS * 1000;
