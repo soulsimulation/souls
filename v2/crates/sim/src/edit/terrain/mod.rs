@@ -276,7 +276,7 @@ pub fn guard(
         return Ok(None);
     };
     let sets_tiles = checked.edit.ops.iter().any(|op| {
-        matches!(op, Op::Set { node: Ref::Node(n), field, .. }
+        matches!(op, Op::Set { node: Ref::Node(n), field, .. } | Op::Rows { node: Ref::Node(n), field, .. }
             if *n == ground && (*field == F_TILES || *field == F_TILE_SIZE))
     });
     if !sets_tiles {

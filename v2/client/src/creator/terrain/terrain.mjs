@@ -1,8 +1,8 @@
 // A landform's expansion into one creator's edit (Engine v2 G5, #2762), called by souls-god's `land` verbs (#3695).
 //
 // The batch, in `replica::edit::Op`'s shapes: the landform's place node under the open ground (its outline, its
-// parameters as JSON bytes; for a lake or a pond, the water itself, as N1 imports Eden's waters), the open ground's
-// tiles with the changed ones patched (`v2/tools/terrain`, today's `packages/ground`), and a move for each thing resting
+// parameters as JSON bytes; for a lake or a pond, the water itself, as N1 imports Eden's waters), the changed tiles
+// of the open ground as rows that replace them (#3728), patched (`v2/tools/terrain`, today's `packages/ground`), and a move for each thing resting
 // on the open ground whose origin's ground rises or falls, by exactly that much: a pose change written in the batch,
 // never a silent move. The world refuses the batch whole if a Soul stands where the ground changes, a building stands
 // there, or a resting thing is not moved (`sim::edit::terrain`). Heights under a point are read as the engine reads
@@ -92,7 +92,8 @@ export function expand({ ground, landform, water, things = [], placeKind, outlin
   fields[F.LANDFORM] = hexOf(new TextEncoder().encode(JSON.stringify(landform)));
   const ops = [
     { op: 'place', name: 1, kind: placeKind, in: ground.id, at: [0, 0, 0], fields },
-    { op: 'set', node: ground.id, field: F.TILES, value: tiles.map((t) => [t.tx, t.tz, hexOf(t.heights), hexOf(t.classes)]) },
+    // Only the tiles the landform changes (#3728): `rows` replaces each by its (tx, tz).
+    { op: 'rows', node: ground.id, field: F.TILES, rows: patched.map((t) => [t.tx, t.tz, hexOf(t.heights), hexOf(t.classes)]) },
   ];
   for (const th of things) {
     const [x, y, z] = th.position.map(BigInt);
