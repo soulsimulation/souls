@@ -779,6 +779,7 @@ const OPS = new Set([
   'history',
   'inspect',
   'lie',
+  'listen',
   'look',
   'now',
   'object',
@@ -1078,7 +1079,7 @@ async function answer(req) {
     return keyed(req);
   }
   // R13: a command from the model's turn shows that what a reader was handed was taken.
-  if (!['wait', 'status', 'pending'].includes(req.op)) wakes.confirm();
+  if (!['wait', 'status', 'pending', 'listen'].includes(req.op)) wakes.confirm();
   switch (req.op) {
     case 'pending': {
       // R20 (#3328): whether a turn has anything to serve: an open message, or wakes the budget lets through now. It
@@ -1173,6 +1174,21 @@ async function answer(req) {
       const said = got.some((e) => e.kind === 'heard' || e.kind === 'prayer-answered') ? { note: QUOTED_NOTE } : {};
       return closing({ ok: true, events: got, ...said, ...(handed.length ? { wakes: handed } : {}), ...(timedOut ? { timedOut: true } : {}) },
         (rows) => ({ events: got.map((e) => (e.kind === 'heard' ? named(rows, [e])[0] : e)) }));
+    }
+    case 'listen': {
+      // D2: the owner's messages as they arrive, read from the numbered events, so nothing is taken from `wait`. No
+      // `since`: the messages open now, else the next to arrive. Returns at the first, or empty at the timeout.
+      const ms = Math.min(Math.max(Number(req.seconds ?? 30), 0), WAIT_MOST_S) * 1000, until = Date.now() + ms;
+      const fresh = (since) => logged.filter((e) => e.kind === 'mail' && e.n > since).map(({ n, ...m }) => m);
+      // A cursor past this daemon's newest is a former daemon's (a restart): read from the open messages again.
+      const from = req.since === undefined || Number(req.since) > eventN ? undefined : Math.max(Number(req.since) || 0, 0);
+      const since = from ?? eventN;
+      let got = from === undefined ? [...mail.values()].map((m) => ({ kind: 'mail', id: m.id, text: String(m.text), at: m.at })) : fresh(since);
+      while (got.length === 0 && Date.now() < until) {
+        await new Promise((ok) => { const t = setTimeout(ok, Math.max(until - Date.now(), 0)); wakers.push(() => { clearTimeout(t); ok(); }); });
+        got = fresh(since);
+      }
+      return { ok: true, cursor: eventN, daemon: process.pid, mail: got, ...(got.length ? {} : { timedOut: true }) };
     }
     case 'can': {
       const intent = Array.isArray(req.acts) ? actsOf(req.acts)[0] : req.intent;
