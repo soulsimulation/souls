@@ -1498,6 +1498,9 @@ impl Clock {
     ) {
         let frame = self.frame(answer);
         self.sequences.answered(&key, sequence, frame.clone());
+        if let Some(id) = id {
+            self.receipts.ended(id);
+        }
         let mut row = BTreeMap::from([
             (1, Value::Bytes(key)),
             (2, Value::Uint(sequence)),
@@ -3863,6 +3866,8 @@ impl Clock {
         // what a script set for this one, is taken now. The words on the disk as the tick starts are what the
         // directory's notices read by (#4134): in lockstep that is every word queued before it.
         let words_durable = self.text.marks().1;
+        // Ended intents' receipt entries go ten minutes after they end (A1-4): nothing reads them once answered.
+        self.receipts.trim(now);
         self.births(now);
         self.notices(now, words_durable);
         self.tell_states();
@@ -4569,6 +4574,7 @@ pub fn start<S: Storage + 'static>(
             }
             if let Some(id) = m.get(&3).and_then(|v| replica::effects::read_id(v).ok()) {
                 next_intent = next_intent.max(id.counter() + 1);
+                receipts.ended(id);
             }
         }
     }
