@@ -197,6 +197,7 @@ mod tests {
     /// 11.8 MB), where the directory's client is refused it; a store that does not answer is still out of reach
     /// within the 5 s it always had.
     #[test]
+    #[allow(clippy::disallowed_methods)] // a real store's timeout is real time
     fn a_world_store_reads_an_object_past_ten_mib_and_still_times_out() {
         let s = StandIn::start(10).expect("a stand-in");
         let big: Vec<u8> = (0..30u32 << 20).map(|i| (i % 251) as u8).collect();

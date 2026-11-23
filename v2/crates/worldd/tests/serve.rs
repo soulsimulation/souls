@@ -836,6 +836,45 @@ fn o3c_a2_a3_ships_history_to_an_s3_bucket_across_three_kills() {
 /// #1960: a restart whose first reads of an S3 bucket go unanswered past the client's timeout tries them again and
 /// starts; with the bucket out of reach for good it still ends, with the store's refusal, in bounded time.
 // A real process on the real clock: the stalls and the bound are real time.
+/// 0.132.1: a fresh seed whose entries have a stand point C13 moves (the chess table's, inside its own solids) serves.
+/// The seed built its header before the move and `serve` after it, so since G3 put an activity's stands in its kind
+/// every start of such a seed was refused `header-mismatch`.
+#[test]
+fn a_seed_whose_stand_point_is_moved_serves() {
+    let d = scratch("rn-stand");
+    let facts = d.join("facts.json");
+    std::fs::write(
+        &facts,
+        testworld::generate(1, 0).expect("the test world").text,
+    )
+    .expect("facts");
+    let dir = d.join("w");
+    let entries = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds/games");
+    let out = worldd()
+        .args(["seed", "--facts"])
+        .arg(&facts)
+        .arg("--dir")
+        .arg(&dir)
+        .arg("--entries")
+        .arg(&entries)
+        .args(["--souls", "1", "--at", "-40,30"])
+        .output()
+        .expect("seed runs");
+    let said = String::from_utf8_lossy(&out.stdout);
+    assert!(
+        out.status.success(),
+        "seed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    assert!(
+        said.contains("stand point: eden:chess_table"),
+        "the chess table's stand point is moved: {said}"
+    );
+    let w = serve_env(&dir, &d.join("s"), &[], &[]);
+    w.line("listening");
+    w.kill();
+}
+
 /// 0.132.1 (production, 23 Nov): a fresh Eden's first start on an S3 store writes a stream-recovery object of 11.8 MB;
 /// its restart must read it back. Over ureq's 10 MiB cap the restart's public stream stopped before its first flush
 /// and the world refused to serve (`public-stream: stopped before its first flush`), again and again. With the world's

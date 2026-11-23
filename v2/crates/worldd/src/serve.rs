@@ -1155,6 +1155,14 @@ fn seed_in(args: &[String]) -> R<String> {
     if let Some(e) = arg(args, "--entries") {
         entries(Path::new(e), &mut found)?;
     }
+    // C13's stand-point repair first: the header is built from the entries the folder keeps, the ones `serve` builds
+    // it from again at each start. Built before the repair, an activity's stands (G3) differed and every start of a
+    // fresh seed was refused `header-mismatch` (0.132.1).
+    if arg(args, "--entries").is_some() {
+        for line in import_eden::clear_stand_points(&import_eden::load(&text)?, &mut found) {
+            println!("stand point: {line}");
+        }
+    }
     let built = build(&text, &found)?;
     std::fs::create_dir_all(dir.join("entries")).map_err(io(&dir))?;
     std::fs::write(dir.join("facts.json"), &text).map_err(io(&dir))?;
@@ -1162,10 +1170,6 @@ fn seed_in(args: &[String]) -> R<String> {
         std::fs::write(dir.join("bodies.json"), text).map_err(io(&dir))?;
     }
     if arg(args, "--entries").is_some() {
-        // C13: preserve the current main stand-point repair while keeping activity loading above.
-        for line in import_eden::clear_stand_points(&import_eden::load(&text)?, &mut found) {
-            println!("stand point: {line}");
-        }
         for (kind, v) in &found {
             let p = dir
                 .join("entries")
