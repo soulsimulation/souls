@@ -15,6 +15,7 @@ import { dirname, join, resolve } from 'node:path';
 import { after, before, test } from 'node:test';
 import { fileURLToPath, pathToFileURL } from 'node:url';
 import { createServer as createHttp } from 'node:http';
+import { crc32, deflateSync } from 'node:zlib';
 import { DEFAULT_PKG } from '../daemon/client.mjs';
 import { readSeat } from '../home/home.mjs';
 import { pair } from '../pair/pair.mjs';
@@ -24,6 +25,7 @@ const here = dirname(fileURLToPath(import.meta.url));
 const v2 = resolve(here, '../../..');
 const GATEWAYD = process.env.GATEWAYD ?? join(v2, 'target/debug/gatewayd');
 const WORLDD = process.env.WORLDD ?? join(v2, 'target/debug/worldd');
+const ASSETS_CHECK = process.env.ASSETS_CHECK ?? join(dirname(GATEWAYD), 'assets-check');
 const PKG = process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG;
 const GOD = join(here, 'souls-god.mjs');
 // The world `worldd gateway-link --creator` pins (`worldd::checkers::toggles::kinds`): the creator's kinds text.
@@ -46,11 +48,18 @@ const printed = []; // every line a command printed
 let relay;
 
 function makeRelay(port) {
-  const r = { up: 0, port: 0 };
+  // `target` is the gateway it forwards to; `posts` are the plain HTTP connections (uploads), which a test that moves
+  // `target` closes, so the daemon's next upload opens a new one to the new gateway.
+  const r = { up: 0, port: 0, target: port, posts: new Set() };
   const server = createServer((down) => {
-    const upstream = createConnection(port, '127.0.0.1');
+    const upstream = createConnection(r.target, '127.0.0.1');
     let entries = null; // the daemon's entries fetch at sign-in (#3760) is not a request to the world
-    down.on('data', (d) => { entries ??= d.subarray(0, 15).toString('latin1') === 'GET /v2/entries'; if (!entries) r.up += d.length; upstream.write(d); });
+    down.on('data', (d) => {
+      entries ??= d.subarray(0, 15).toString('latin1') === 'GET /v2/entries';
+      if (d.subarray(0, 5).toString('latin1') === 'POST ') r.posts.add(down);
+      if (!entries) r.up += d.length;
+      upstream.write(d);
+    });
     upstream.on('data', (d) => down.write(d));
     for (const s of [down, upstream]) { s.on('error', () => {}); s.on('close', () => { down.destroy(); upstream.destroy(); }); }
   });
@@ -99,7 +108,8 @@ before(async () => {
     if (Date.now() > until) throw new Error('no world socket');
     await new Promise((r) => setTimeout(r, 20));
   }
-  const [, addr] = await run(GATEWAYD, ['--listen', '127.0.0.1:0', '--world', world, '--tokens', tokens, '--build', `1220${'ab'.repeat(32)}`], /listening (\S+)\n/);
+  const [, addr] = await run(GATEWAYD, ['--listen', '127.0.0.1:0', '--world', world, '--tokens', tokens, '--build', `1220${'ab'.repeat(32)}`,
+    '--uploads', join(dir, 'uploads'), '--assets-check', ASSETS_CHECK], /listening (\S+)\n/);
   relay = await makeRelay(Number(addr.split(':').pop()));
   mkdirSync(join(home, 'kinds'), { recursive: true });
   writeFileSync(join(home, 'config.json'), JSON.stringify({ worlds: { local: { url: 'http://127.0.0.1/', gateway: `ws://127.0.0.1:${relay.port}/v2/ws` } } }));
@@ -729,4 +739,67 @@ test('#3697: a creator defines a kind and a kit of its own, places one and is re
   assert.equal(both.ok, true, JSON.stringify(both));
   const d3 = await god('describe');
   assert.equal(d3.kinds[full], undefined, 'a removed definition is no longer a kind here');
+});
+
+/** An 8 by 8 RGBA PNG whose tEXt chunk carries `text`. */
+function png(text) {
+  const chunk = (type, data) => {
+    const len = Buffer.alloc(4); len.writeUInt32BE(data.length);
+    const body = Buffer.concat([Buffer.from(type), data]);
+    const crc = Buffer.alloc(4); crc.writeUInt32BE(crc32(body));
+    return Buffer.concat([len, body, crc]);
+  };
+  const ihdr = Buffer.alloc(13); ihdr.writeUInt32BE(8, 0); ihdr.writeUInt32BE(8, 4); ihdr.set([8, 6, 0, 0, 0], 8);
+  return Buffer.concat([Buffer.from('89504e470d0a1a0a', 'hex'), chunk('IHDR', ihdr), chunk('tEXt', Buffer.from(text)),
+    chunk('IDAT', deflateSync(Buffer.alloc(8 * 33))), chunk('IEND', Buffer.alloc(0))]);
+}
+
+test('#3697: a creator uploads a picture through the check and hold point; an allowed one is served by hash', async () => {
+  await connected();
+  const file = join(dir, 'mural.png');
+  writeFileSync(file, png('GPSLatitude 52.52 N'));
+  const up = await god('upload', file);
+  assert.equal(up.ok, true, JSON.stringify(up));
+  assert.equal(up.state, 'allowed');
+  assert.match(up.hash, /^1220[0-9a-f]{64}$/);
+  assert.ok(up.url.endsWith(`/v2/uploads/${up.hash}`), up.url);
+  const served = await fetch(up.url);
+  assert.equal(served.status, 200);
+  assert.equal(served.headers.get('content-type'), 'image/png');
+  const bytes = Buffer.from(await served.arrayBuffer());
+  assert.ok(!bytes.includes('GPSLatitude'), 'the metadata is stripped');
+  // A file the check refuses, by its name, with a fix; a file that is no model or picture, by the command.
+  const junk = join(dir, 'junk.png');
+  writeFileSync(junk, 'not a picture');
+  const bad = await god('upload', junk);
+  assert.equal(bad.ok, false);
+  assert.match(bad.code, /^upload\./, JSON.stringify(bad));
+  assert.equal((await god('upload', join(dir, 'notes.txt'))).code, 'usage');
+});
+
+test('#4022: in a world that holds uploads for review, souls-god reports a held upload as held, and it is not served', async () => {
+  await connected();
+  // A second gateway that holds every upload (`--uploads-hold`), its own uploads folder; the upload asks no world. Its
+  // tokens file is a copy in its own folder, since a gateway's control socket is kept beside its tokens file.
+  const held = join(dir, 'held-gateway');
+  mkdirSync(held, { recursive: true });
+  writeFileSync(join(held, 'tokens.txt'), readFileSync(join(dir, 'tokens.txt')));
+  const [, addr] = await run(GATEWAYD, ['--listen', '127.0.0.1:0', '--world', join(held, 'no-world.sock'), '--tokens', join(held, 'tokens.txt'),
+    '--build', `1220${'ab'.repeat(32)}`, '--uploads', join(dir, 'uploads-held'), '--assets-check', ASSETS_CHECK, '--uploads-hold'], /listening (\S+)\n/);
+  const port = Number(addr.split(':').pop()), was = relay.target;
+  for (const c of relay.posts) c.destroy();
+  relay.posts.clear();
+  relay.target = port;
+  const file = join(dir, 'poster.png');
+  writeFileSync(file, png('a poster for review'));
+  let up;
+  try { up = await god('upload', file); } finally { relay.target = was; for (const c of relay.posts) c.destroy(); }
+  console.log(`held upload: ${JSON.stringify(up)}`);
+  assert.equal(up.ok, true, JSON.stringify(up));
+  assert.equal(up.state, 'held', 'reported as held');
+  assert.ok(typeof up.reason === 'string' && up.reason.length > 0, 'with its reason');
+  assert.match(up.hash, /^1220[0-9a-f]{64}$/);
+  assert.equal(up.url, undefined, 'a held upload has no url to show');
+  assert.equal((await fetch(`http://127.0.0.1:${port}/v2/uploads/${up.hash}`)).status, 404, 'a held upload is not served');
+  assert.ok(statSync(join(dir, 'uploads-held', 'held', up.hash)).isFile(), 'kept apart for the owner\'s review');
 });

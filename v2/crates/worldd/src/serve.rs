@@ -1964,6 +1964,7 @@ fn creator(spec: &str, built: &Built) -> R<Arc<Creator>> {
 /// `--compact-after` bytes of it (default 64 MiB, `compactor`). The clock's rate is world µs per real µs (default 1/1); a start whose rate differs from the
 /// last logged applies a new mapping, and the mapping in force is on the zone root for every copy (E7b, #3516).
 pub fn run(args: &[String]) -> i32 {
+    crate::stopped::install(); // D6: a SIGTERM or SIGINT leaves one line naming it
     match serve(args) {
         Ok(()) => 0,
         Err(e) => {
