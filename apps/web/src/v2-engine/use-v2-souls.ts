@@ -11,6 +11,8 @@ import type { Souls } from '../useSouls.ts';
 import type { V2Bridge } from './bridge.ts';
 import { streamNotice } from './stream-health.ts';
 import { EdgeLog, WorldState, type LayerLike } from './world-state.ts';
+import { CreatorKinds } from './creator-kinds.ts';
+import { setAssetSource } from '../gen-mesh/gltf-assets.ts';
 import { historyBase, setV2History, V2History } from './history.ts';
 
 const STREAM = /^\/s\/[A-Za-z0-9._/-]+\/$/;
@@ -37,11 +39,13 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
   if (!s.current) s.current = empty(quietConnection(worldId ?? (window as unknown as { __simConfig?: { worldId?: string } }).__simConfig?.worldId ?? 'v2'));
   useEffect(() => {
     const st = s.current!, conn = st.conn;
-    let bridge: V2Bridge | null = null, failed = false, stopped = false, lastSouls: unknown = null, lastError: string | null = null, lastEntities: unknown = null;
+    let bridge: V2Bridge | null = null, members: { stop(): void } | null = null, failed = false, stopped = false, lastSouls: unknown = null, lastError: string | null = null, lastEntities: unknown = null;
     const startedAt = performance.now();
     // #4176: doors, lamps and the weather as v2 has them, brought to the page's entity layer by its own world diffs
     const world = new WorldState(), edges = new EdgeLog();
     let said: readonly unknown[] = [], seenSpeech: unknown = null, seenTurns: unknown = null;
+    // 0.133 V1: a creator's kinds that exist only in the new format, drawn by the entity layer from their records
+    const kinds = new CreatorKinds(undefined, setAssetSource);
     let seenParts = 0, lastPartAt: number | null = null, errorAtParts: number | null = null, seenTo: number | null = null;
     // The scenery the page binds is the world's own (/v1/scene, published with the world); takes carry its rules version.
     void (async () => {
@@ -56,7 +60,9 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
       // R2: the old page's rewind reads this world's past from its history export (history.ts)
       const past = historyBase(stream, (window as unknown as { __simConfig?: unknown }).__simConfig);
       if (past) setV2History(new V2History(past, () => makeHistoryReader(new URL(apiPath('/replica.js'), location.href).href), frame));
-      bridge.start(stream, () => world.watch(makeReader(new URL(apiPath('/replica.js'), location.href).href)));
+      bridge.start(stream, () => kinds.watch(world.watch(makeReader(new URL(apiPath('/replica.js'), location.href).href))));
+      members = (await import('./member-turns.ts')).memberTurns((h) => bridge?.heard(h), (grants) => bridge?.bodiesOf(grants) ?? []); // R3b: private turns, to their members
+      if (stopped) members.stop();
       // read-only, for checks and proof: what the stream gave (parts played, newest time, the reader's last error)
       (window as unknown as { __soulsV2?: unknown }).__soulsV2 = bridge.view;
       // The world's body catalogue, where its config (or `?bodies=`, as on the v2 page) names the v2 body assets: each
@@ -97,12 +103,14 @@ export function useV2Souls(stream: string, worldId: string | undefined): Souls {
         // what the Souls said aloud (take-speech.ts; the speech layer and dialogue dock read it as public) and the world
         // diffs, in one log: a diff is never dropped when the speech changes
         st.edge = edges.step(said, diff) as typeof st.edge;
+        const made = kinds.next((window as unknown as { __soulsEntity?: { layer?: LayerLike } }).__soulsEntity?.layer, Date.now(), diff?.seq);
+        if (made) st.edge = edges.step(said, made) as typeof st.edge;
       }
       // one visible state for every way the stream can fail or stall: the page's own status line (LiveWorld, ViewerFrame)
       st.streamNotice = streamNotice({ failed, error: bridge?.view.error ?? null, errorAtParts, parts: seenParts, startedAt, lastPartAt, now: performance.now() });
       force((n) => n + 1);
     }, 200);
-    return () => { stopped = true; clearInterval(t); bridge?.stop(); setV2History(null); };
+    return () => { stopped = true; clearInterval(t); bridge?.stop(); members?.stop(); setV2History(null); };
   }, [stream]);
   return s.current;
 }

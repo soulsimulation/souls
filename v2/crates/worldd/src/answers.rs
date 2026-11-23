@@ -23,8 +23,8 @@
 //! (`claim-taken`, `resource-held`, `out-of-reach`, ...). A gateway walk (C29) gets its planned route's time at walking
 //! speed, plus a margin and crossings, from the tick its route is planned, with no total cap and never beyond the
 //! intent's expiry. Its deadline is written as C20's entry and it receives C20's one progress answer in that tick
-//! (W11, #4087). C21's watch ends a stalled walk `walk.blocked`; waiting at a link and being carried do not count as
-//! stalled walking.
+//! (W11, #4087). A walk that makes no progress is the never-stuck ladder's (0.133 N1, `crate::unstick`): routed again,
+//! still bodies stepped aside, a shoulder turn, then its order ended `goal-unreachable` at 15 s.
 //! No move outlives its act: a walk still going at its act's deadline stops in that tick and ends `act.timed-out`; a
 //! sit, a lie or a rise runs to its end (a seat is never left half taken) and ends so then; a walk a new move
 //! replaces ends `claim-taken` in the tick the new move starts.
@@ -555,6 +555,9 @@ pub struct Config {
     pub lockstep: bool,
     /// K5's checkpoints: their folder and the log bytes between two.
     pub checkpoints: Option<(PathBuf, u64)>,
+    /// The newest checkpoint of that folder, already being read on another thread (S5: a serve reads it while it
+    /// builds the world's facts); none: [`start`] reads it itself.
+    pub restoring: Option<std::thread::JoinHandle<R<Option<checkpoint::Restored>>>>,
     /// Starts the view tier (R3) on the log, which each synced tick is handed to.
     pub views: bool,
     /// Nodes the auditor checks a tick (K11).
@@ -701,6 +704,7 @@ impl Config {
             clock: None,
             lockstep: false,
             checkpoints: None,
+            restoring: None,
             views: false,
             audit: 64,
             roots: None,
@@ -1182,7 +1186,11 @@ fn reserve_edit(edit: &Edit, lineage: Scope, next: &mut u64) -> Result<Minter, R
     let reserved = Minter::at(lineage, *next);
     let mut end = reserved.clone();
     for op in &edit.ops {
-        if matches!(op, edit::Op::Place { .. } | edit::Op::Doorway { .. }) {
+        // Every operation the edit lowering names a new id for (`sim::edit`'s `names`): a link too (#3934).
+        if matches!(
+            op,
+            edit::Op::Place { .. } | edit::Op::Doorway { .. } | edit::Op::Link { .. }
+        ) {
             end.mint().map_err(|e| Refused {
                 op: None,
                 name: "edit.ids-exhausted",
@@ -4606,10 +4614,14 @@ pub fn start<S: Storage + 'static>(
     mut world: Replica,
     rules: Rules,
     storage: S,
-    cfg: Config,
+    mut cfg: Config,
 ) -> R<World> {
-    let restored = match &cfg.checkpoints {
-        Some((dir, _)) if dir.exists() => checkpoint::restore(dir)?,
+    let restored = match (&cfg.checkpoints, cfg.restoring.take()) {
+        (Some(_), Some(reading)) => reading.join().map_err(|_| Refusal {
+            name: "checkpoint-restore-panicked",
+            detail: "the checkpoint's reader stopped".into(),
+        })??,
+        (Some((dir, _)), None) if dir.exists() => checkpoint::restore(dir)?,
         _ => None,
     };
     for (name, why) in restored.iter().flat_map(|r| &r.rejected) {
@@ -5810,6 +5822,32 @@ mod tests {
     use replica::sync::{self, wire};
     use sim::log::{Mem, recover};
     use std::sync::{Condvar, Mutex};
+
+    /// K2 (#3934): a link is named a new id when the edit is lowered, so it is reserved at intake as a place is. Before,
+    /// an import's links took ids the live counter then gave again: the next edit was refused `id-duplicate`.
+    #[test]
+    fn k2_a_links_id_is_reserved_at_intake() {
+        let id = |n| Id::new(Scope([0x42; 16]), n).unwrap();
+        let link = edit::Op::Link {
+            name: 1,
+            ty: Name::new("eden:doorway").unwrap(),
+            ends: [edit::Ref::Node(id(2)), edit::Ref::Node(id(3))],
+            owner: replica::world_model::End::First,
+            field: 22,
+            row: Vec::new(),
+            door: None,
+        };
+        let e = Edit {
+            intent: id(9),
+            actor: Actor::Creator(id(8)),
+            planned: 0,
+            ops: vec![link],
+            claim: None,
+        };
+        let mut next = 5;
+        reserve_edit(&e, Scope([0x42; 16]), &mut next).unwrap();
+        assert_eq!(next, 6, "the link's id is reserved");
+    }
 
     /// #4117 review (0.132 scaling, #1960): a motion sample whose pose the log's reader refuses fails the tick's
     /// motion part in every build (this runs in release in CI too), so `write_motion` takes its per-sample fallback:

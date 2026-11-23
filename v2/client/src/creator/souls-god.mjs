@@ -6,6 +6,8 @@
 //
 //   souls-god.mjs pair <world url> --creator <creator grant>   asks the world's directory for the creator's token
 //   souls-god.mjs describe                       what is there (id, kind, parent) and what each kind admits
+//   souls-god.mjs map                            the world at a glance: the extent of what stands, its buildings, named
+//                                                things, roads and zones, each with its centre and size in metres (R8d)
 //   souls-god.mjs place <kind> --in <id> [--at x,y,z] [--slot n] [--field n=v ...]   a new thing; mm in the parent
 //   souls-god.mjs move <id> --at x,y,z [--slot n]                                     to another spot, same parent
 //   souls-god.mjs set <id> <field> <value>       one numbered field: an integer, true, false or a name
@@ -36,11 +38,17 @@
 //   souls-god.mjs upload <file.glb|png|jpg>     a model or a picture, through the world's check and hold point:
 //                                                {hash, state: allowed|held}; an allowed one is served at `url`
 //   souls-god.mjs check <any of these, or batch> ...   the same, checked on the copy only; nothing is sent
+//   souls-god.mjs export [file]                  every node of the world (not its Souls) to a file, world.souls.json
+//   souls-god.mjs import <file>                  such a file's nodes into this world, as edits, parents first
 //   place <kind> --in <id> --beside <id> [--dir n|ne|e|se|s|sw|w|nw] [--dist mm]   beside another (default e, 1000)
 //   place <kind> --on <id>                       in or on another: its first free slot for a thing, if it has one
 //   place|move ... --facing <id|n|e|s|w>         turned to face another, or a compass point
 //   any edit verb --build <name> --step <name>  a build's step (#3694): one batch the world keeps under that name
 //   souls-god.mjs undo [--build <name>] | redo   the newest edit undone (a whole build, step by step), or redone
+//   souls-god.mjs build start <name> --steps a,b,c [--brief '<words>']   a build session (R8e): until `build done`,
+//                                                every edit carries its name and current step (see --build --step)
+//   souls-god.mjs build step <step> [<build>] | build show [<build>] | build done [<build>]   move on a step; its steps
+//                                                with each one's status and edits sent and refused; close it
 //   souls-god.mjs build district [<id>]           the district plans, or one plan with each plot's status and the next
 //                                                chapter to claim (#3701)
 //   souls-god.mjs build district <id> --file plan.json   records a plan once (today's plan file: metres, radians)
@@ -110,6 +118,11 @@ import { F_HOURS, hoursRows } from '../schedule/hours.mjs';
 import { parseShoot, runShoot } from '../shoot/shoot.mjs';
 import { parseSpace, runSpace } from './space.mjs';
 import { TRACE_MOST } from './trace.mjs';
+import { mapOf } from './map.mjs';
+import { kindsIn } from '../check/state.mjs';
+import { inSession, recordEdit, sessionAct } from './session.mjs';
+/** R8e: the build acts answered from the home's sessions. */
+const SESSION_ACTS = ['start', 'step', 'show', 'done'];
 
 export const VERBS = [
   'about',
@@ -124,13 +137,16 @@ export const VERBS = [
   'define-kit',
   'describe',
   'event',
+  'export',
   'find',
   'free',
   'hours',
+  'import',
   'land',
   'layers',
   'listen',
   'look',
+  'map',
   'move',
   'own',
   'pair',
@@ -169,7 +185,7 @@ export const FIX = {
   'edit.kind-unknown': 'use a kind describe lists under kinds (your own kinds too, once defined)',
   'kind.invalid': 'a souls-entry/1 record as content/kinds holds them: whole numbers, sections it can hold (no roles), its kind loads',
   'kind.too-large': 'a record is at most 64 KiB and its bounds_mm at most 1 km: fewer parts, a shorter text or smaller bounds',
-  'kind.effects': 'a form creates only a kind describe lists (its full name) into a slot that admits it, and timers that start each other wait 50 ms or more',
+  'kind.effects': 'a form creates only a kind describe lists (its full name) into a slot that admits it (a kind with solids only into a hand), and timers that start each other wait 50 ms or more',
   'kind.audience': 'define a kind for everyone (no audience)',
   'kind.namespace': 'name it in your own namespace (not souls: or eden:, nor one the world\'s own kinds use)',
   'kind.collision': 'that kind is defined already: place it by the full name describe lists',
@@ -226,6 +242,10 @@ export const FIX = {
   'land.smooth': 'use flatten',
   'land.unavailable': 'use Node 22.18 or later, and the client a world serves (it carries the ground model) or a checkout with packages/ground and zod installed',
   'strike.off-the-ground': 'strike somewhere on the world\'s ground',
+  'import.file': 'import <file>: a file export wrote, readable here',
+  'import.format': 'import a souls-world/1 file, as export writes it',
+  'import.unplaced': 'some nodes name a parent or support that was not placed: export the source again and import that',
+  'export.file': 'export [file]: a file path to write',
   'edit.off-ground': 'put it somewhere on the world\'s ground: describe shows where things stand',
   'not-a-creator': 'pair with --creator <the world\'s creator grant>',
   'edit.claimed': 'that is inside a live claim: send it with --claim <that claim>, or build release <claim>',
@@ -433,7 +453,13 @@ export function requestOf(argv) {
     return { listen: { seconds: Number(secs), follow }, creator };
   }
   if (verb === 'visitors') return { directory: '/v1/worlds/visitors', body: {}, creator };
+  // R8d: the world at a glance, read from the copy (map.mjs)
+  if (verb === 'map') { if (rest.length) throw usage('map'); return { map: true, creator }; }
   if (verb === 'status' || verb === 'stop' || verb === 'describe' || verb === 'redo') return { req: { op: verb }, creator };
+  if (verb === 'export' || verb === 'import') {
+    if (rest.length > 1 || (verb === 'import' && !rest[0])) throw usage(`${verb} ${verb === 'import' ? '<file>' : '[file]'}`);
+    return { req: { op: verb, file: absolute(rest[0] ?? 'world.souls.json') }, creator };
+  }
   if (verb === 'upload') {
     if (rest.length !== 1 || !/\.(glb|png|jpe?g)$/i.test(rest[0])) throw usage('upload <file.glb|png|jpg>');
     return { req: { op: 'upload', path: absolute(rest[0]) }, creator };
@@ -547,6 +573,15 @@ export function buildOf(words) {
   const flag = (f) => { const k = args.indexOf(f); if (k >= 0) args.splice(k, 1); return k >= 0; };
   const helper = flag('--helper'), dry = flag('--dry');
   const [what, id] = args;
+  // R8e: a build session, kept in the home (session.mjs)
+  const brief = takeOpt(args, '--brief'), steps = takeOpt(args, '--steps');
+  if (what === 'start') {
+    const list = String(steps ?? '').split(',').map((x) => x.trim()).filter(Boolean);
+    if (!id || !list.length || args.length > 2) throw usage("build start <name> --steps a,b,c [--brief '<words>']");
+    return { act: 'start', name: id, steps: list, ...(brief !== undefined ? { brief } : {}) };
+  }
+  if (what === 'step') { if (!id || args.length > 3) throw usage('build step <step> [<build>]'); return { act: 'step', step: id, ...(args[2] ? { name: args[2] } : {}) }; }
+  if (what === 'show' || what === 'done') { if (args.length > 2) throw usage(`build ${what} [<build>]`); return { act: what, ...(id ? { name: id } : {}) }; }
   if (what === 'rewind') {
     if (!id || to === undefined) throw usage('build rewind <build> --to <step> [--dry]');
     return { act: 'rewind', build: id, to, ...(dry ? { dry } : {}) };
@@ -868,14 +903,30 @@ if (isMain(import.meta.url)) {
       if (!asked.req) { out(withFix(when)); process.exit(1); }
     }
     const pkg = process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG;
-    const ask = (req, ms = 60_000) => call(home, creator, req, { pkg, ms: req.world?.verb === 'land' ? 130_000 : ms });
+    const ask = (req, ms = 60_000) => call(home, creator, req, { pkg, ms: req.op === 'import' ? 3_600_000 : req.op === 'export' ? 120_000 : req.world?.verb === 'land' ? 130_000 : ms });
     // A relation is resolved on the daemon's copy: describe first, then the batch with its places filled in.
     let req = asked.relation ? resolve(asked.req, asked.relation, await ask({ op: 'describe' }, 15_000)) : asked.req;
     // A helper's home sends every edit under its claim (#3727).
     const scoped = helperClaim(home);
     if (scoped && req && (req.op === 'edit' || req.op === 'check') && req.claim === undefined) req = { ...req, claim: scoped };
+    if (asked.map) {
+      const d = await ask({ op: 'describe' }, 15_000), root = d.ok === false ? null : await ask({ op: 'fields' }, 15_000);
+      const said = d.ok === false ? d : mapOf(d, root?.ok === false ? {} : root?.fields ?? {}, kindsIn(join(home, 'kinds')));
+      out(withFix(said));
+      if (said.ok === false) process.exitCode = 1;
+      process.exit();
+    }
+    if (asked.build && SESSION_ACTS.includes(asked.build.act)) {
+      const said = sessionAct(home, asked.build);
+      out(withFix(said));
+      if (said.ok === false) process.exitCode = 1;
+      process.exit();
+    }
+    // R8e: an edit sent while a build session is open carries its name and step, and is recorded under them
+    req = inSession(home, req);
     const answer = asked.build ? await runBuild(asked.build, ask, (minutes, claim) => mintHelper(home, creator, minutes, claim)) : asked.layer ? await runLayer(asked.layer, ask) : await ask(req);
-    out(withFix({ ...answer, ...(asked.say ?? {}) }));
+    recordEdit(home, req, answer);
+    out(withFix({ ...answer, ...(asked.say ?? {}), ...(req?.build !== undefined && answer.build === undefined ? { build: req.build, step: req.step } : {}) }));
     if (answer.ok === false) process.exitCode = 1;
   } catch (e) {
     out(withFix({ ok: false, code: e.code ?? 'failed', detail: String(e.message ?? e).slice(0, 200) }));

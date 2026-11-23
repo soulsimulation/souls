@@ -661,6 +661,10 @@ fn take_intent(
             "intent-not-granted",
         );
     }
+    // I2: a kind definition naming an uploaded model this world does not hold as allowed never reaches the world
+    if let Some(reason) = crate::uploads::edit_refusal(gw, &intent) {
+        return refuse(gw, grant, actor, intent.sequence, reason);
+    }
     let left = intent.expiry.saturating_sub(unix_us());
     let (sequence, verb) = (intent.sequence, intent.verb.clone());
     match gw
