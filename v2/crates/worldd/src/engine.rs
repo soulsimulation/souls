@@ -143,6 +143,8 @@ pub struct Engine {
     asm: Option<crate::assembly::Assembly>,
     /// Each take waiting for its commit: the crew's ground, its node's pose and its audience, to start its carry.
     taking: BTreeMap<Id, (Id, Vec3, replica::pose::Quat)>,
+    /// The entries the joined-part rule was read from, to read it again for the activities after a restart.
+    joining: Option<Json>,
 }
 
 /// Where bodies stand, read from the controller before a move needs them (0.134 T1): a move one member of an activity
@@ -272,6 +274,7 @@ impl Engine {
             loads: BTreeMap::new(),
             asm: None,
             taking: BTreeMap::new(),
+            joining: None,
             library: crate::moves::library().unwrap_or_else(|r| {
                 eprintln!("worldd: no moves for activities: {r}");
                 Vec::new()
@@ -302,10 +305,20 @@ impl Engine {
     }
 
     /// The engine seating parts by the joined-part rule `structure` (0.135 A2), when the world's kinds join any.
-    pub fn with_structure(mut self, structure: sim::structure::Structure) -> Engine {
-        let asm =
-            crate::assembly::Assembly::new(self.header.clone(), self.rules.clone(), structure);
-        self.asm = asm.any().then_some(asm);
+    /// The joined-part rule of the world's `entries` (B18) also guards the activities' own writes: a holder leaving a
+    /// part that would then hang is refused `support.none`, as it is after a restart.
+    pub fn with_structure(mut self, entries: &Json) -> Engine {
+        let structure = sim::structure::Structure::from_entries;
+        let asm = crate::assembly::Assembly::new(
+            self.header.clone(),
+            self.rules.clone(),
+            structure(entries),
+        );
+        if asm.any() {
+            self.activities.structure = structure(entries);
+            self.asm = Some(asm);
+            self.joining = Some(entries.clone());
+        }
         self
     }
 
@@ -316,6 +329,9 @@ impl Engine {
         let kinds = self.kinds.clone();
         self.activities =
             Activities::restore(self.header.clone(), self.rules.clone(), kinds, live, c)?;
+        if let Some(e) = &self.joining {
+            self.activities.structure = sim::structure::Structure::from_entries(e);
+        }
         self.steered = crate::carrier::restore(live, slots)?;
         Ok(())
     }
@@ -452,6 +468,15 @@ impl Engine {
             Verb::Start => e.start(&mut tree, c, ask, target("start-needs-an-activity")?)?,
             Verb::Leave => {
                 let activity = target("leave-needs-an-activity")?;
+                // A crew holding a part in its slot is not left: it puts the part down first (0.135 A2). Its activity
+                // would otherwise end with the part inside it.
+                if self
+                    .asm
+                    .as_ref()
+                    .is_some_and(|s| s.held.contains_key(&activity))
+                {
+                    return Err(refusal("crew.holds-a-part", show(activity)));
+                }
                 e.leave(
                     &mut tree,
                     c,
@@ -554,6 +579,7 @@ impl Engine {
                         (f, k),
                         ground,
                         a.verb == Verb::Unseat,
+                        slots.reach_of(front).min(slots.reach_of(back)),
                     )?;
                     self.taking.insert(activity, (ground, at, turn));
                 }
@@ -645,6 +671,10 @@ impl Engine {
                     if let Err(r) = done {
                         self.carries.insert(activity, carry);
                         return Err(r);
+                    }
+                    // A crew's part set down is no longer its own (0.135 A2).
+                    if let Some(s) = self.asm.as_mut() {
+                        s.ended(activity);
                     }
                 }
             }
@@ -742,7 +772,45 @@ impl Engine {
             let tr = tree.get_or_insert_with(|| live.frozen());
             s.due(tr, &self.activities, &mut self.mint, now);
         }
+        if let Some(tr) = tree.as_mut() {
+            self.stop_refused(tr, now);
+        }
         self.collect(None);
+    }
+
+    /// The seatings refused at their track's end or at their commit (0.135 A2): each crew's node handed back from its
+    /// track to its mover where the track ended, and its carry started again from there, the part still in its slot.
+    fn stop_refused(&mut self, tree: &mut Tree, now: Micros) {
+        let Some(asm) = self.asm.as_mut() else { return };
+        for (activity, s) in std::mem::take(&mut asm.stopped) {
+            let audience = tree
+                .handle(activity)
+                .and_then(|h| tree.node(h))
+                .map(|n| n.audience());
+            let (Some(audience), Ok(effects)) = (audience, asm.stop(tree, now, activity, &s))
+            else {
+                eprintln!(
+                    "worldd: a refused seating was not stopped: {}",
+                    show(activity)
+                );
+                continue;
+            };
+            for mut e in effects {
+                e.envelope.cause = Cause::Intent(s.by.0);
+                e.envelope.actor = Actor::Soul(s.by.1);
+                self.out.push(e);
+            }
+            let mut carry = Carry::new(
+                activity,
+                s.part,
+                s.ground,
+                audience,
+                self.header.clone(),
+                self.rules.clone(),
+            );
+            carry.track.push((now, s.end.0, s.end.1));
+            self.carries.insert(activity, carry);
+        }
     }
 
     /// The takes and seatings to commit through the walkers' maps (0.135 A2, `crate::answers`), and the seatings
@@ -764,7 +832,13 @@ impl Engine {
         live: &Tree,
     ) {
         let taking = self.taking.remove(&r.activity);
+        if let Some(asm) = self.asm.as_mut() {
+            asm.written(r.activity, r.step, written);
+        }
         if r.step != crate::assembly::Step::Taken {
+            // A seating refused at its commit is stopped where its track ended.
+            let mut tree = live.frozen();
+            self.stop_refused(&mut tree, now);
             return;
         }
         let (Some(asm), Some((ground, at, turn))) = (self.asm.as_mut(), taking) else {
@@ -788,7 +862,7 @@ impl Engine {
                 carry.track.push((now, at, turn));
                 self.carries.insert(r.activity, carry);
             }
-            _ => asm.unwritten(r.activity, r.step),
+            _ => asm.written(r.activity, r.step, false),
         }
     }
 
