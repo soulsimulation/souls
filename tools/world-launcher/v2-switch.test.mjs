@@ -34,7 +34,8 @@ test('one command switches the old page to the v2 stream and --back switches it 
   assert.equal(existsSync(binding), false, 'a refused switch writes nothing');
 
   const on = await run('--binding', binding, '--slug', 'eden', '--stream', '/s/eden/', '--routes', routes, '--client', client, '--static', staticDir, '--bodies', bodies, '--port', String(P));
-  assert.deepEqual(on.page, { status: 200, v2Stream: '/s/eden/', v2Bodies: '/w/eden/v2/bodies/' }, 'the page names the stream and the body catalogue');
+  assert.deepEqual(on.page, { status: 200, v2Stream: '/s/eden/', v2Bodies: '/w/eden/v2/bodies/', v2Gateway: '/w/eden/v2/ws', v2Directory: '/' },
+    'the page names the stream, the body catalogue, and (B3-2b) the gateway and the directory the owner\'s box reaches, as the front door routes them');
   assert.equal(on.engine, 'v2');
   assert.equal(JSON.parse(readFileSync(binding, 'utf8')).oldWorldId, 'eden-1', 'the registry id of a world without one (worldIdOf)');
   assert.equal(await (await fetch(`${base}/w/eden/replica.js`)).text(), 'test module', 'the page\'s replica, from the client folder');
@@ -46,7 +47,7 @@ test('one command switches the old page to the v2 stream and --back switches it 
   assert.equal((await fetch(`${base}/w/eden/v1/world/snapshot`)).headers.get('x-souls-static'), 'published', 'the static scene from the static folder');
 
   const back = await run('--binding', binding, '--back', '--port', String(P));
-  assert.deepEqual(back.page, { status: 200, v2Stream: null, v2Bodies: null }, 'back: the page names neither');
+  assert.deepEqual(back.page, { status: 200, v2Stream: null, v2Bodies: null, v2Gateway: null, v2Directory: null }, 'back: the page names none of them');
   assert.equal(back.engine, 'old');
   assert.equal(existsSync(join(staticDir, 'manifest.json')), false, 'back: the published views are removed');
   assert.equal((await fetch(`${base}/w/eden/v1/world/snapshot`)).headers.get('x-souls-static'), null, 'back: the old world answers');

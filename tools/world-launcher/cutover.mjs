@@ -37,18 +37,23 @@ function answer(dir, path) {
 }
 // The same public stream path the v2 origin's routes accept (v2/tools/origin/world-routes.mjs): `/s/…/`, no dot segments.
 const publicStream = (s) => typeof s === 'string' && /^\/s\/[A-Za-z0-9._/-]+\/$/.test(s) && !s.split('/').some(p => p === '.' || p === '..');
+// B3-2b: the owner's box reaches the world's gateway (a same-origin WebSocket path) and the directory (this origin's
+// `/v1/account/*`, which the front door sends to it), as the v2 page does on soul.game (v2/tools/ops/proxy/soul-game.caddy)
+const samePath = (s) => typeof s === 'string' && /^\/[A-Za-z0-9._/-]*$/.test(s) && !s.startsWith('//') && !s.split('/').some(p => p === '.' || p === '..');
 const sameOriginDir = (s) => typeof s === 'string' && /^\/[A-Za-z0-9._/-]*\/$/.test(s) && !s.startsWith('//') && !s.split('/').some(p => p === '.' || p === '..');
 const CONFIG = /<script>window\.__simConfig=(\{.*?\})<\/script>/s;
 /** #4177: the world page with `v2Stream` (and `v2Bodies`, when given) written into its inline config
  *  (apps/server/src/inline-config.ts writes that `<script>` first in <head>; the page's v2-engine reads the fields).
- *  A page without one is returned unchanged. */
-export function withV2Stream(html, stream, bodies = null) {
+ *  `fields` is the body catalogue's directory, or (B3-2b) an object of the page's other v2 fields (`v2Bodies`,
+ *  `v2Gateway`, `v2Directory`). A page without one is returned unchanged. */
+export function withV2Stream(html, stream, fields = null) {
+  const extra = typeof fields === 'string' ? { v2Bodies: fields } : Object.fromEntries(Object.entries(fields ?? {}).filter(([, v]) => v));
   const m = CONFIG.exec(html);
   if (!m) return html;
   let config;
   try { config = JSON.parse(m[1]); } catch { return html; }
   if (!config || typeof config !== 'object' || Array.isArray(config)) return html;
-  return html.slice(0, m.index) + `<script>window.__simConfig=${scriptJson({ ...config, v2Stream: stream, ...(bodies ? { v2Bodies: bodies } : {}) })}</script>` + html.slice(m.index + m[0].length);
+  return html.slice(0, m.index) + `<script>window.__simConfig=${scriptJson({ ...config, v2Stream: stream, ...extra })}</script>` + html.slice(m.index + m[0].length);
 }
 // #4177: the old page's static content of a world routed to v2 (its scene, snapshot, items, platforms, config and kernel),
 // published once at route time from the old world's own read-only views into the binding's `staticDir`, the directory the
@@ -88,6 +93,7 @@ export function cutoverFence({ binding, file = process.env.SOULS_CUTOVER_BINDING
     inspect: (registry) => load()?.inspect(registry),
     v2Stream: (w) => load()?.v2Stream(w) ?? null,
     v2Bodies: (w) => load()?.v2Bodies(w) ?? null,
+    v2Fields: (w) => load()?.v2Fields(w) ?? null,
     publish: (w, read) => load()?.publish(w, read) ?? Promise.resolve(null),
     handle: (req, res, w, url) => load()?.handle(req, res, w, url) ?? false,
   };
@@ -95,7 +101,8 @@ export function cutoverFence({ binding, file = process.env.SOULS_CUTOVER_BINDING
 
 function fenceOf(binding) {
   if (!binding || typeof binding.oldWorldId !== 'string' || !binding.oldWorldId.length || binding.oldWorldId.length > 256 || /[\x00-\x1f\x7f]/.test(binding.oldWorldId) || !/^[a-z0-9][a-z0-9-]{0,62}$/.test(binding.canonicalSlug)
-      || !isAbsolute(binding.routesFile ?? '') || !isAbsolute(binding.clientDir ?? '') || (binding.staticDir !== undefined && !isAbsolute(binding.staticDir)) || (binding.v2Bodies !== undefined && !sameOriginDir(binding.v2Bodies)) || (binding.bodiesDir !== undefined && !isAbsolute(binding.bodiesDir))) throw Error('cutover.binding-invalid');
+      || !isAbsolute(binding.routesFile ?? '') || !isAbsolute(binding.clientDir ?? '') || (binding.staticDir !== undefined && !isAbsolute(binding.staticDir)) || (binding.v2Bodies !== undefined && !sameOriginDir(binding.v2Bodies)) || (binding.bodiesDir !== undefined && !isAbsolute(binding.bodiesDir))
+      || (binding.v2Gateway !== undefined && !samePath(binding.v2Gateway)) || (binding.v2Directory !== undefined && binding.v2Directory !== '/')) throw Error('cutover.binding-invalid');
   // v2Bodies: the same-origin directory serving the v2 body catalogue (bodies.json and its models), as the operator places it.
   // bodiesDir (B3-1): a built body-assets folder (V2_BODY_ASSETS) this launcher serves at the world's `v2/bodies/` while
   // routed; v2Bodies then defaults to that path.
@@ -149,6 +156,13 @@ function fenceOf(binding) {
     },
     /** #4177: the body catalogue's directory for the page, under the same rule as `v2Stream` (routed, else null). */
     v2Bodies(w) { return v2Bodies && this.v2Stream(w) ? v2Bodies : null; },
+    /** B3-2b: every v2 field the routed page's inline config carries beside `v2Stream` (null when not routed): the body
+     *  catalogue's directory, and where the owner's box finds the gateway and the directory (the binding's, else the
+     *  front door's paths: `/w/<world>/v2/ws` and `/`). */
+    v2Fields(w) {
+      if (!this.v2Stream(w)) return null;
+      return { ...(v2Bodies ? { v2Bodies } : {}), v2Gateway: binding.v2Gateway ?? `/w/${canonicalSlug}/v2/ws`, v2Directory: binding.v2Directory ?? '/' };
+    },
     /** #4177: at route time, the old world's static views (`read(path)` -> `{ status, body }` from its process) written
      *  into staticDir, each file whole (`.tmp`, then renamed; the origin never serves a `.tmp`), the manifest last. Once
      *  per routing: a later call for the same stream does nothing. Resolves to the manifest, or null (not routed, or no

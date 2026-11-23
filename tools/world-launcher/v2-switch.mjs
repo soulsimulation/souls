@@ -51,12 +51,13 @@ export function v2Switch({ binding: file, back = false, slug, oldWorld, stream, 
   return { binding, route };
 }
 
-/** What the world's page on a launcher at `port` carries now: its inline config's v2 fields (null when it names none). */
+/** What the world's page on a launcher at `port` carries now: its inline config's v2 fields (null when it names none):
+ *  the stream, the body catalogue, and where the owner's box finds the gateway and the directory (B3-2b). */
 export async function pageFields(port, slug) {
   const r = await fetch(`http://127.0.0.1:${port}/w/${slug}/`, { headers: { accept: 'text/html' }, signal: AbortSignal.timeout(30_000) });
   const config = /<script>window\.__simConfig=(\{.*?\})<\/script>/s.exec(await r.text())?.[1];
-  const { v2Stream = null, v2Bodies = null } = config ? JSON.parse(config) : {};
-  return { status: r.status, v2Stream, v2Bodies };
+  const { v2Stream = null, v2Bodies = null, v2Gateway = null, v2Directory = null } = config ? JSON.parse(config) : {};
+  return { status: r.status, v2Stream, v2Bodies, v2Gateway, v2Directory };
 }
 
 if (isMain(import.meta.url)) {
