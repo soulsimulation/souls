@@ -1,11 +1,11 @@
 // Actual native sequencer/SQLite and anonymous TCP/Hono/Hub checkpoint. Explicit
 // manual source ticks; this proves publication/replay, not real-time audio pacing.
+import { isMain } from '../../../../../tools/lib/is-main.mjs';
 import assert from 'node:assert/strict';
 import {mkdtempSync,rmSync,readFileSync} from 'node:fs';
 import {createHash} from 'node:crypto';
 import {join} from 'node:path';
 import {tmpdir} from 'node:os';
-import {fileURLToPath} from 'node:url';
 import {createServer} from 'node:http';
 import {once} from 'node:events';
 import {setImmediate} from 'node:timers/promises';
@@ -136,4 +136,4 @@ export async function generateStationFixture(){
       transport:{anonymousTcpGET:true,anonymousHubWS:true,streamedAnchor:true,reconnectLatestSameCue:true,restartRequiresFreshAnchor:true,privateMarkerMatches:0},paid:0}));
   }finally{for(const ws of sockets)ws.terminate();if(hub)hub.wss.close();if(server?.listening)await new Promise<void>(resolve=>server!.close(()=>resolve()));db.close();rmSync(directory,{recursive:true,force:true});}
 }
-if(process.argv[1]===fileURLToPath(import.meta.url))process.stdout.write(JSON.stringify(await generateStationFixture(),null,2)+'\n');
+if(isMain(import.meta.url))process.stdout.write(JSON.stringify(await generateStationFixture(),null,2)+'\n');

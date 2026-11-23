@@ -107,7 +107,9 @@ pub fn audience(form: Form, body: Id) -> Audience {
 }
 
 /// `v` with each `{23: words}` kept in `store` for `audience` by `author` and replaced by `{21: id}`; the references
-/// kept, with each one's length in characters, in the order found.
+/// kept, with each one's length in characters, in the order found. The words are queued, not yet on the disk (#4134):
+/// the clock never waits for the store's sync; the answers thread waits for it before the tick's records go to the
+/// log (`crate::answers`), so the log never holds a reference to words a crash would lose.
 pub fn keep(
     v: Value,
     store: &Store,
@@ -118,7 +120,7 @@ pub fn keep(
     Ok(match v {
         Value::Map(m) => match m.get(&WORDS) {
             Some(Value::Bytes(words)) => {
-                let id = store.write(words, audience, author)?;
+                let (id, _) = store.write_queued(words, audience, author)?;
                 kept.push((id, String::from_utf8_lossy(words).chars().count()));
                 Value::Map(BTreeMap::from([(REFERENCE, id.to_value())]))
             }

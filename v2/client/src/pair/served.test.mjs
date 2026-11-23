@@ -170,7 +170,8 @@ test('A2: pairing to worldd serve writes the history it advertises, and history 
     answers.push(...(await request(daemon.socket, { op: 'read' })).events.filter((e) => e.kind === 'answer' && sent.includes(e.sequence)));
     observed.answers = answers.slice(0, 4).map((a) => ({ answer: Number.isInteger(a.answer) ? a.answer : null,
       reason: ['completed', 'started', 'accepted', 'act-deadline', 'act-cancelled', 'out-of-reach', 'intent.expired', 'intent.stale-seq', 'intent.no-body', 'intent.ids-exhausted', 'intent.not-a-form-on-a-node'].includes(a.reason) ? a.reason : 'other' }));
-    return answers.length === sent.length;
+    // A walk is answered accepted as its route is planned (C20, W11 #4087), then at its end: count the ends.
+    return new Set(answers.filter((a) => a.answer !== 3).map((a) => a.sequence)).size === sent.length;
   });
 
   // `history --at <place>`: the world's own place, which holds everything, answers from the archive with both walks'

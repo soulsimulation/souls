@@ -28,7 +28,7 @@ test('ci.yml: nothing stands in for main\'s full run; pushes run newest only, th
   // run has its own group, which nothing cancels (cancel-in-progress is false for schedule).
   assert.match(workflow, /\n  schedule:\n    - cron: '23 6 \* \* \*'\n/);
   assert.equal(workflow.match(/^  group: (.*)$/m)[1], "${{ github.event_name == 'push' && 'ci-main' || github.event_name == 'schedule' && 'ci-daily' || format('ci-{0}', github.event.pull_request.number || inputs.pr || github.ref) }}");
-  assert.equal(workflow.match(/^  cancel-in-progress: (.*)$/m)[1], "${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'labeled') }}");
+  assert.equal(workflow.match(/^  cancel-in-progress: (.*)$/m)[1], "${{ github.event_name == 'push' || github.event_name == 'pull_request' }}");
   assert.ok(workflow.includes('.github/scripts/ci-main.test.mjs'), 'the repo job runs this test');
 });
 

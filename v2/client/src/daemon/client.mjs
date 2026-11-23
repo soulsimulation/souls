@@ -7,6 +7,7 @@
 //     [--for <message id>] (an act serving an owner's message) [--seconds <n>] (wait's, R13: a harness's reader)
 //   The home is SOULS_HOME, else the nearest .souls; the library is SOULS_REPLICA_PKG, else v2/target/wasm-load/pkg.
 
+import { isMain } from '../../../../tools/lib/is-main.mjs';
 import { spawn } from 'node:child_process';
 import { openSync } from 'node:fs';
 import { createConnection } from 'node:net';
@@ -68,7 +69,7 @@ export async function call(home, soul, req, { pkg = DEFAULT_PKG, within = 5000, 
   }
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const args = process.argv.slice(2);
   const opt = (n) => { const k = args.indexOf(n); return k >= 0 ? args[k + 1] : undefined; };
   const home = findHome({ cwd: process.cwd(), env: process.env, homedir: homedir() });

@@ -34,7 +34,9 @@ cargo run -p import-accounts --release -- <backup set> [--world <file.db>]… --
 - **Private:** the old-to-new Soul ids (`imported_souls_v1`, for R18), the aliases and the Souls' details stay in the
   account store and are never posted. The births and the directory hold no account id; the row prints counts only.
 - **The row.** Accounts (stage, old worlds', aliases, conflicts, all equal), then per world: live, retired (not
-  brought), brought, unowned (owner is no account: not brought), no kind by preset, creator kept, and read back equal
+  brought), brought, unowned (owner is no account: not brought), operator test (the operator's TEST Souls, owner
+  `op:test-operator`: no person's, not brought, and not unclean), no kind by preset, default body by reason (mapped
+  mode, below), creator kept, and read back equal
   to the backup. Then the state hash: SHA-256 over every row of the store, the directory's objects and the births. A
   second run into the same `<dir>` changes nothing and prints the same hash. It exits 1 when the import is not clean.
 
@@ -57,6 +59,6 @@ Souls file; the ordinary C3 join still births the body. The directory never birt
 
 ### Released body placement
 
-For a release, use `import-accounts <backup> --out <output> --bodies <prepared-catalogue>`. The catalogue is the exact prepared `bodies.json`, including its public canonical legacy definitions. Mapped mode validates every owned live body before creating output; unknown/custom/edited bodies refuse rather than reset. The legacy library wrapper preserves its earlier reporting contract and does not prove preset placement. Historical private look hashes remain unchanged.
+For a release, use `import-accounts <backup> --out <output> --bodies <prepared-catalogue>`. The catalogue is the exact prepared `bodies.json`, including its public canonical legacy definitions. A catalogue that is not valid refuses before any output. Each owned live body the catalogue carries is born in its hash; one it cannot carry (`custom-humanoid`: a look made in today's humanoid editor, which v2 has no kind for yet; `unknown-definition`; `url-form`: a model URL in a form the mapping does not place) is brought in the default body, counted by reason in the row's `defaulted`, and its whole old body is kept in the private store (`legacy_looks_v1`, reason and body) for a later migration. No Soul is dropped for its body. The legacy library wrapper preserves its earlier reporting contract and does not prove preset placement. Historical private look hashes remain unchanged.
 
 Place each resulting `births/<world>.json` as that served world's private `births.json` before activation, together with the exact admitted catalogue. The loader checks the real header lineage/zone, catalogue SHA and unique admitted choices. This file is never public support or copied to a fork. Ordinary C3 creates an unborn imported Soul with its mapped hash and build; an existing body or a later recorded wear remains authoritative. No account token is copied and no birth is forced.

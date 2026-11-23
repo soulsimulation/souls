@@ -18,6 +18,7 @@
 //
 // The version is stamped at release (docs/process/versioning.md), never in a pull request.
 
+import { isMain } from '../../../tools/lib/is-main.mjs';
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { createRequire } from 'node:module';
@@ -133,7 +134,7 @@ export function build({ out, version, min = '0.0.0', pkg, strict = false }) {
   return soulClient;
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const args = process.argv.slice(2);
   const opt = (n) => { const k = args.indexOf(n); return k >= 0 ? args[k + 1] : undefined; };
   if (!opt('--out') || !opt('--version')) {

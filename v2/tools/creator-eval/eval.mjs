@@ -18,6 +18,7 @@
 //   keeps the transcript. `--external-driver` writes private `ready.json` paths for a native worker, then waits up
 //   to twenty minutes for its `transcript.jsonl` and `complete` marker before the same grading and cleanup.
 
+import { isMain } from '../../../tools/lib/is-main.mjs';
 import { execFile, spawn } from 'node:child_process';
 import { randomBytes } from 'node:crypto';
 import { appendFileSync, copyFileSync, existsSync, mkdirSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -168,7 +169,7 @@ function built(home, before) {
   }));
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const pairOnly = args.includes('--pair-only');
   const externalDriver = args.includes('--external-driver');
   if (!pairOnly && !externalDriver && !process.env.SEAT_CONFIG_DIR) { console.error('set SEAT_CONFIG_DIR to a signed-in Claude config directory'); process.exit(2); }

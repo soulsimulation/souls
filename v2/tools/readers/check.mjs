@@ -3,7 +3,7 @@
 // again once the pointer names it, through the same address: it must arrive, whole (its SHA-256 equal to its ETag).
 // A cache that kept the 404 (Fact 3: three minutes on Cloudflare by default) fails here.
 // Usage: node check.mjs <base URL> <stream path>. Prints one `check {json}` line; exits 1 when a check fails.
-import { fileURLToPath } from 'node:url';
+import { isMain } from '../../../tools/lib/is-main.mjs';
 import { agentFor, get, readPointer, sha256 } from './readers.mjs';
 
 export async function check(base, stream) {
@@ -51,7 +51,7 @@ export async function check(base, stream) {
   return out;
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const [base, stream] = process.argv.slice(2);
   if (!stream) throw new Error('usage: node check.mjs <base URL> <stream path>');
   const r = await check(base, stream);
