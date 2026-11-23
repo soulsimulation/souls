@@ -19,7 +19,7 @@ import { crc32, deflateSync } from 'node:zlib';
 import { DEFAULT_PKG } from '../daemon/client.mjs';
 import { readSeat } from '../home/home.mjs';
 import { pair } from '../pair/pair.mjs';
-import { areaOf, buildOf, eventOps, layerOf, opsOf, outlineOf, planRow, requestOf, resolve as resolveRelation } from './souls-god.mjs';
+import { areaOf, buildOf, eventOps, historyOf, layerOf, opsOf, outlineOf, planRow, requestOf, resolve as resolveRelation } from './souls-god.mjs';
 
 const here = dirname(fileURLToPath(import.meta.url));
 const v2 = resolve(here, '../../..');
@@ -148,6 +148,11 @@ after(async () => {
 test('the verbs make G1 batches, and a refusal names its usage', () => {
   assert.deepEqual(opsOf('place', ['room', '--in', 'aa-0', '--at', '1,0,2']), [{ op: 'place', name: 1, kind: 'room', in: 'aa-0', at: [1, 0, 2] }]);
   assert.deepEqual(opsOf('set', ['aa-3', '1', 'true']), [{ op: 'set', node: 'aa-3', field: 1, value: true }]);
+  // R8c: history asks one place, thing or Soul, with an optional span in world µs
+  assert.deepEqual(historyOf(['--at', 'square']), { op: 'history', at: 'square' });
+  assert.deepEqual(historyOf(['--thing', 'aa-3', '--since', '100', '--until', '200']), { op: 'history', thing: 'aa-3', since: 100, until: 200 });
+  for (const bad of [[], ['--at', 'a', '--thing', 'b'], ['--soul', 'x', '--since', 'yesterday'], ['--at', 'a', 'extra']])
+    assert.throws(() => historyOf(bad), (e) => e.code === 'usage', bad.join(' '));
   // R8a: a row or a grid is one batch of places, centred on --at, named 1..n in order
   assert.deepEqual(opsOf('place', ['lamp', '--in', 'aa-0', '--at', '0,0,5000', '--row', '3', '--gap', '2000']).map((o) => [o.name, o.at]),
     [[1, [-2000, 0, 5000]], [2, [0, 0, 5000]], [3, [2000, 0, 5000]]]);
@@ -959,6 +964,14 @@ test('#3697: a creator uploads a picture through the check and hold point; an al
   assert.equal(bad.ok, false);
   assert.match(bad.code, /^upload\./, JSON.stringify(bad));
   assert.equal((await god('upload', join(dir, 'notes.txt'))).code, 'usage');
+});
+
+test('R8c: history reaches the daemon\'s history answer; a world that advertises no history says so by name', async () => {
+  await connected();
+  const h = await god('history', '--at', 'square');
+  assert.equal(h.ok, false, JSON.stringify(h));
+  assert.equal(h.code, 'no-history', 'this test world (gateway-link) publishes no history, and its pairing recorded none');
+  assert.equal((await god('history', '--at', 'a', '--thing', 'b')).code, 'usage');
 });
 
 test('R8b: describe <id> reads one thing from the copy: its frames, spot, fields and what is in it; an unknown id is refused', async () => {
