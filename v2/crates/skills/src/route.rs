@@ -67,7 +67,7 @@ pub const HOLD: u32 = 10;
 /// A walker held this near its goal, µm, by a body at rest nearer the goal has arrived: the crowd there is as
 /// near as it gets (#4215).
 pub const CROWDED: i64 = 3_000_000;
-/// A yielding walker backs away from the lower id holding it for this many ticks, at half its free speed.
+/// A yielding walker stands this many ticks while the lower id holding it is near.
 pub const BACK: u32 = 10;
 
 /// The turns a stalled step is tried at, in order: none, then 45 degrees either way, then 70 either way (cosine and
@@ -111,7 +111,7 @@ pub struct Route {
     /// Ticks into the window its progress is judged over, and where the window began.
     held: u32,
     window: Option<Vec3>,
-    /// Yielding: the body it backs away from and the ticks left.
+    /// Yielding: the body it stands for and the ticks left.
     yielding: Option<(Id, u32)>,
 }
 
@@ -490,7 +490,10 @@ impl Skill for Route {
         if !shoulder && !calm {
             for n in &near {
                 let settled = self.spot && host.field(n.id, F_SETTLED).is_some();
-                if (wait || mark_of(host, n.id).is_none()) && !settled {
+                // Only a body ahead pushes: one behind would press the walker into an edge (#4215).
+                let ahead =
+                    (n.position.x - p.x) * (aim.x - p.x) + (n.position.z - p.z) * (aim.z - p.z) > 0;
+                if ahead && (wait || mark_of(host, n.id).is_none()) && !settled {
                     pushers.push((*n, dist(n)));
                 }
             }
@@ -513,16 +516,13 @@ impl Skill for Route {
         // The hard rule under the push: no step into another body's space (#4215).
         let room = 2 * self.room + SLACK;
         let mut want = turned(v, TURNS[turn]);
-        // Yielding: held by a lower id, it backs away from it a while, so the lowest id of a knot goes first.
+        // Yielding: held by a lower id, it stands a while, so the lowest id of a knot goes first.
         if let Some((from, left)) = self.yielding {
-            match near.iter().find(|n| n.id == from) {
-                Some(n) if left > 0 => {
-                    let o = [p.x - n.position.x, p.z - n.position.z];
-                    let l = len(o).max(1);
-                    want = [o[0] * (self.speed / 2) / l, o[1] * (self.speed / 2) / l];
-                    self.yielding = Some((from, left - 1));
-                }
-                _ => self.yielding = None,
+            if left > 0 && near.iter().any(|n| n.id == from) {
+                want = [0, 0];
+                self.yielding = Some((from, left - 1));
+            } else {
+                self.yielding = None;
             }
         }
         let step = guard([p.x, p.z], want, self.tick, &near, room);
