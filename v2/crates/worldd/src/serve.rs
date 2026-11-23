@@ -2134,11 +2134,7 @@ fn off_machine(
 /// each [`CREATOR_EVERY`] on a thread of its own: a change replaces it (there is never more than one), and a failed
 /// read keeps the last.
 fn creator(spec: &str, built: &Built) -> R<Arc<Creator>> {
-    let store = Patient::new(
-        supervisor::bucket::Bucket::from_spec(spec)
-            .map_err(refusal)?
-            .for_world(),
-    );
+    let store = Patient::new(supervisor::bucket::Bucket::from_spec(spec).map_err(refusal)?);
     let (lineage, zone) = (built.header.lineage.0, built.header.zone);
     let read = Arc::new(move || directory_creator_of(&store, &lineage, zone));
     let admission = Arc::clone(&read);

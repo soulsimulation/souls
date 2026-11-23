@@ -833,9 +833,6 @@ fn o3c_a2_a3_ships_history_to_an_s3_bucket_across_three_kills() {
     let _ = std::fs::remove_dir_all(&d);
 }
 
-/// #1960: a restart whose first reads of an S3 bucket go unanswered past the client's timeout tries them again and
-/// starts; with the bucket out of reach for good it still ends, with the store's refusal, in bounded time.
-// A real process on the real clock: the stalls and the bound are real time.
 /// 0.132.1: a fresh seed whose entries have a stand point C13 moves (Eden's chess table's, inside its own solids)
 /// serves. The seed built its header before the move and `serve` after it, so since G3 put an activity's stands in
 /// its kind every start of a fresh Eden was refused `header-mismatch`. C13 moves a stand point only for a kind the world
@@ -944,6 +941,9 @@ fn eden_restarts_on_an_s3_store_whose_stream_recovery_object_passes_10_mib() {
     w.kill();
 }
 
+/// #1960: a restart whose first reads of an S3 bucket go unanswered past the client's timeout tries them again and
+/// starts; with the bucket out of reach for good it still ends, with the store's refusal, in bounded time.
+// A real process on the real clock: the stalls and the bound are real time.
 #[allow(clippy::disallowed_methods)]
 #[test]
 fn i1960_a_world_starts_through_slow_store_reads_and_ends_on_an_unreachable_store() {

@@ -89,6 +89,8 @@ REL=$DATA/releases/$SHA
 [ -f "$REL/manifest.json" ] || die "release $SHA is not staged ($REL/manifest.json): a release-v2 dry run stages it"
 [ "$(sed -n 's/^{"commit":"\([0-9a-f]\{40\}\)".*/\1/p' "$REL/manifest.json")" = "$SHA" ] || die "$REL/manifest.json is not release $SHA's"
 NEW=$(sed -n 's/^{"name":"worldd","hash":"\(1220[0-9a-f]\{64\}\)".*/\1/p' "$REL/manifest.json")
+VERSION=$(sed -n 's/^{"commit":"[0-9a-f]\{40\}","version":"\([0-9.]*\)".*/\1/p' "$REL/manifest.json")
+[ -n "$VERSION" ] || die "no version in $REL/manifest.json"
 [ -n "$NEW" ] || die "no worldd in $REL/manifest.json"
 NEW_WORLDD=$ROOT/builds/$NEW/worldd
 [ -x "$NEW_WORLDD" ] && [ "$("$LIB/supervisor" hash "$NEW_WORLDD")" = "$NEW" ] || die "$NEW_WORLDD is missing or not $NEW"
@@ -145,7 +147,7 @@ echo "reseed: label            $STAMP$([ -n "$RESUME" ] && echo ' (resuming)')"
 echo "reseed: its folder       $([ "$done2" = yes ] && echo "aside at $ASIDE_DIR" || echo "$OLD_DIR ($(du -sh "$OLD_DIR" | cut -f1)), moves to $ASIDE_DIR")"
 echo "reseed: pinned now       $PINNED"
 echo "reseed: the old build    $OLD"
-echo "reseed: the release      $SHA, its worldd $NEW"
+echo "reseed: the release      $VERSION at $SHA, its worldd $NEW"
 echo "reseed: store            $STORE_WHAT"
 echo "reseed: one-off tool     $TOOL, sha256 $ASIDE_TOOL_SHA256 (checked)"
 echo "reseed: facts            $SRC_DIR/facts.json, sha256 $(sha256 "$SRC_DIR/facts.json")"
@@ -177,7 +179,7 @@ if [ "$done3" = yes ]; then echo "reseed: 3. the bucket objects: already aside";
 fi
 grep -qx 'bucket=moved' "$RECEIPT" || echo 'bucket=moved' >> "$RECEIPT"
 if [ "$done5" = yes ]; then echo "reseed: 4-5. the fresh seed: already in place"; else
-  echo "reseed: 4. a fresh seed with today's build"
+  echo "reseed: 4. a fresh seed with the release's build"
   if [ -e "$SEED_DIR" ]; then mv "$SEED_DIR" "$SEED_DIR.stopped-$(date -u +%Y%m%dT%H%M%SZ)"; fi
   args=(seed --facts "$ASIDE_DIR/facts.json" --dir "$SEED_DIR" --entries "$ENTRIES" --souls 0 --at "$AT")
   if [ -n "$CREATOR" ]; then args+=(--creator "$CREATOR"); fi
@@ -189,12 +191,12 @@ if [ "$done5" = yes ]; then echo "reseed: 4-5. the fresh seed: already in place"
   mkdir -p "$OLD_DIR/views" "$OLD_DIR/history" "$OLD_DIR/receipts"
   if [ -z "${RESEED_DATA:-}" ] && id souls > /dev/null 2>&1; then chown -R souls:souls "$OLD_DIR"; fi
 fi
-echo "reseed: 6. pin today's build"
+echo "reseed: 6. pin the release's build"
 "$LIB/supervisor" pin "$WORLD" "$NEW"
 [ "$("$REL/bin/deploy" pinned "$WORLD")" = "$NEW" ] || die "the pin did not take"
 echo "reseed: 7. start the gateway; the world stays stopped until release-v2 starts it"
 systemctl start "souls-gateway@$WORLD"
 echo "reseed: done: $WORLD is fresh, pinned to ${NEW:0:16}…, its world stopped, its gateway started"
 echo "reseed: next, release-v2 again:"
-echo "  gh workflow run release-v2.yml --ref main -f version=<this release's version> -f sha=$SHA -f dry_run=false -f target=production"
+echo "  gh workflow run release-v2.yml --ref main -f version=$VERSION -f sha=$SHA -f dry_run=false -f target=production"
 echo "reseed: undo: bash $(dirname "$0")/reseed-eden-undo.sh $STAMP check"

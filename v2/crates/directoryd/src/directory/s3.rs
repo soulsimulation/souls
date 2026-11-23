@@ -99,11 +99,12 @@ impl S3 {
     /// This store as a world's (`worldd`'s history, checkpoints, log parts and stream recovery): reads of whole objects
     /// up to [`WORLD_READ_LIMIT`], where ureq's own cap is 10 MiB and a fresh Eden's stream-recovery object is already
     /// 11.8 MB (its checkpoint 10.1 MB, its import part 9.6 MB). A store out of reach is still found within [`TIMEOUT`]:
-    /// the connection, the request and the answer's head each have that long; only an object's body, sent or
+    /// the name's lookup, the connection, the request and the answer's head each have that long; only an object's body, sent or
     /// received, has [`BODY_TIMEOUT`].
     pub fn for_world(mut self) -> S3 {
         self.agent = ureq::Agent::config_builder()
             .timeout_global(None)
+            .timeout_resolve(Some(TIMEOUT))
             .timeout_connect(Some(TIMEOUT))
             .timeout_send_request(Some(TIMEOUT))
             .timeout_recv_response(Some(TIMEOUT))

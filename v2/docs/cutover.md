@@ -180,7 +180,7 @@ the switch back.
 
 A build whose header differs from the one Eden's log was written under cannot read that log (`worldd serve:
 header-mismatch`), so release-v2's rehearsal refuses it. Pre-release, Eden starts fresh instead, under the same world
-name, so its name, routes, gateway and pairing stay as they are: `bash v2/tools/ops/cutover/reseed-eden.sh check`,
+name, so its name, routes, gateway and pairing stay as they are: `bash v2/tools/ops/cutover/reseed-eden.sh <sha> check`,
 then `run` (root on the host, before release-v2; `reseed-eden-undo.sh <label> check|run` undoes it). It sets the world's
 folder aside, sets its objects in the directory's bucket aside with `world-aside` (`v2/tools/ops/src/world_aside.rs`:
 each object copied to `aside/<label>/`, read back and compared before any original is deleted), seeds the same facts
