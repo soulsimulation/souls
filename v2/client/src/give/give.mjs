@@ -9,6 +9,8 @@
 // The offer's id: the taker's `wait` shows `{"kind":"give","what":"offered","offer":..,"thing":..,"from":..}`. A
 // refused accept names why (`give.no-free-hand`, `give.too-far`, `give.not-held`) and leaves the offer open.
 
+import { togetherIntents } from '../together/together.mjs';
+
 /** The give kind's pinned name (`give.diag`) and the giver's role. */
 export const KIND = 'souls:give@1220ffaec2e627417fcf692041788f4295876214a2afb85bda4cf6ff29fb68f3137f';
 export const KIND_PLAIN = 'souls:give';
@@ -21,6 +23,8 @@ const no = (code, detail) => ({ code, detail });
 export function giveIntents(req, { place }) {
   switch (req.do) {
     case 'offer': {
+      // 0.134 T1: `together offer` comes here too (the CLI sends it as a give): a touch offered, nothing handed over.
+      if (req.touch !== undefined) return togetherIntents(req, { place });
       if (!ID.test(String(req.thing ?? '')) || !ID.test(String(req.to ?? ''))) return no('give-usage', 'give <thing id> --to <body id>');
       if (!ID.test(String(place ?? ''))) return no('give-no-place', 'this Soul stands nowhere in its copy yet: look first');
       return [{ verb: 'activity:offer', target: place, params: { 1: KIND, 2: GIVER, 3: [req.to], 4: req.thing } }];

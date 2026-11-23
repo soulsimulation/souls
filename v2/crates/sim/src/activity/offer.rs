@@ -33,7 +33,8 @@
 use std::collections::{BTreeMap, BTreeSet, VecDeque};
 
 use replica::activity::{
-    F_EXPIRES, F_MEMBERS, MEMBER, Member, Node, OFFER, OFFER_DECLINED, OFFER_LAPSED, State,
+    ActivityKind, F_EXPIRES, F_MEMBERS, MEMBER, Member, Node, OFFER, OFFER_DECLINED, OFFER_LAPSED,
+    State,
 };
 use replica::effects::{Actor, Cause, Change, Refusal};
 use replica::encode::{Name, Value};
@@ -263,6 +264,13 @@ impl Activities {
             },
         );
         Ok(id)
+    }
+
+    /// The kind and the asking body of `offer` while it is open (0.134 T1: the engine checks a touch's reach before
+    /// an accept starts it).
+    pub fn offered(&self, offer: Id) -> Option<(&ActivityKind, Id)> {
+        let o = self.offers.open.get(&offer)?;
+        Some((self.kinds.get(&o.kind)?, o.asker))
     }
 
     fn answerable(&self, offer: Id, body: Id, now: Micros) -> R<Open> {
