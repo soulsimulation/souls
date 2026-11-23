@@ -658,8 +658,7 @@ fn t2_holding_hands_lasts_until_either_leaves_or_walks() {
         BTreeSet::from([soul(1), soul(2)]),
         "a leave frees both hands"
     );
-    a.act("activity:leave", Some(held), &[])
-        .expect("Soul 1 leaves too");
+    assert_eq!(run.lefts(), 2, "the hold is over: Soul 1 left it too");
     let after_leave = run.ended().len();
 
     // Held again, then Soul 1 walks 2 m off: its walk leaves the activity, and both hands come free.
@@ -684,11 +683,9 @@ fn t2_holding_hands_lasts_until_either_leaves_or_walks() {
     assert!(walked.iter().all(|(_, how)| how == "released"));
     assert_eq!(
         run.lefts(),
-        lefts + 1,
-        "the walk left the activity as a leave does"
+        lefts + 2,
+        "the walk left the activity as a leave does, and the hold is over for both"
     );
-    b.act("activity:leave", Some(again), &[])
-        .expect("Soul 2 leaves");
     println!(
         "t2: held 1.5 s; a leave freed both hands; held again, a walk freed both ({} released)",
         walked.len()
@@ -818,5 +815,54 @@ fn t1_each_touch_ends_with_its_moves_and_the_next_one_plays() {
     println!(
         "t1: a handshake, a hug and a high-five each ended with its moves, and each played again"
     );
+    run.stop();
+}
+
+/// Lane B's find on 0.134 T2: a body that had held hands once got no held move again, because the one who stayed
+/// was still in the old hold. Now when one leaves, the hold is over for both. Two holds in a row between the same
+/// two, then one Soul with a second partner: each hold writes both `souls:hold_hand` moves, releases both, and both
+/// leave it.
+#[test]
+fn t2_holds_again_and_with_another_partner() {
+    let run = serve("hold-again");
+    let (mut a, mut b, mut c) = (run.client(1), run.client(2), run.client(3));
+    let holds = |run: &Run| -> usize {
+        run.touches()
+            .iter()
+            .filter(|t| t.1 == "souls:hold_hand")
+            .count()
+    };
+    let released = |run: &Run| -> usize {
+        run.ended()
+            .iter()
+            .filter(|(_, how)| how == "released")
+            .count()
+    };
+    let hold = |asker: &mut Client, other: &mut Client, to: u64, round: &str| {
+        let (h, r, l) = (holds(&run), released(&run), run.lefts());
+        let held = run.created(&asker.offer(HOLD, to).expect("offered"));
+        other
+            .act("activity:accept", Some(held), &[])
+            .unwrap_or_else(|e| panic!("{round}: accepted: {e}"));
+        assert_eq!(holds(&run), h + 2, "{round}: both hold");
+        std::thread::sleep(Duration::from_millis(800));
+        other
+            .act("activity:leave", Some(held), &[])
+            .unwrap_or_else(|e| panic!("{round}: left: {e}"));
+        assert_eq!(released(&run), r + 2, "{round}: both released");
+        assert_eq!(run.lefts(), l + 2, "{round}: the hold is over, both left");
+    };
+    hold(&mut a, &mut b, 2, "first");
+    hold(&mut a, &mut b, 2, "again, the same two");
+    // Soul 3 comes to stand 0.5 m east of Soul 1 and holds its hand.
+    let to = Value::Array(vec![
+        Value::Nint(39_499_999),
+        Value::Uint(0),
+        Value::Uint(30_000_000),
+    ]);
+    c.act("eden:walk", Some(ground()), &[(1, to)])
+        .expect("Soul 3 comes over");
+    hold(&mut a, &mut c, 3, "with another partner");
+    println!("t2: three holds, each with both moves and both released");
     run.stop();
 }
