@@ -8,7 +8,9 @@
 //! - **Parameters.** The target is the place (propose, offer), the activity (join, start, leave, lift, set down) or the
 //!   offer (accept, decline). Propose: 1 the activity's kind. Offer: 1 the kind, 2 the asker's role, 3 the bodies
 //!   asked (ids). Join: 1 the role, 2 the revision (default 1). Lift: 1 the thing carried, 2 where its front goes (optional, `[x, y, z]` µm: the way there is swept first, 0.135 C2). Its two carriers are the
-//!   activity's first two members, the first in front. `carrier:steer`, `carrier:stop` and `carrier:land` steer the
+//!   activity's first two members, the first in front. Only a load is lifted, a kind whose entry states its grips
+//!   (`lift-not-a-load`), and only in a carry, an activity whose kind has a slot 1 for a thing (`not-a-carry`, 0.135
+//!   C4). `carrier:steer`, `carrier:stop` and `carrier:land` steer the
 //!   boat the Soul sits in ([`crate::carrier`], #3603): the target the boat, steer's 1 a point `[x, z]` µm (land's 1
 //!   optional, a point by its home).
 //! - **Written once, as the Soul's.** Each system writes through its own writer onto a copy of the tree; its entries,
@@ -408,6 +410,21 @@ impl Engine {
             Verb::Steer | Verb::Land | Verb::Stop => {}
             Verb::Lift | Verb::SetDown => {
                 let activity = target("carry-needs-an-activity")?;
+                // 0.135 C4: a carry is an activity whose kind has the slot a load rides in, for a thing.
+                let kind = tree
+                    .handle(activity)
+                    .and_then(|h| tree.node(h))
+                    .map(|n| n.kind().as_str().to_owned())
+                    .ok_or_else(|| refusal("activity-missing", show(activity)))?;
+                let carries = self.rules.kinds.get(&kind).is_some_and(|k| {
+                    k.owner == "activity"
+                        && k.slots
+                            .get(&sim::activity::carry::SLOT)
+                            .is_some_and(|s| s.contains("thing"))
+                });
+                if !carries {
+                    return Err(refusal("not-a-carry", plain(&kind).to_owned()));
+                }
                 let members = self
                     .activities
                     .members(activity)
@@ -438,44 +455,60 @@ impl Engine {
                         .handle(board)
                         .and_then(|h| tree.node(h))
                         .ok_or_else(|| refusal("lift-needs-a-thing", show(board)))?;
-                    let load = self.loads.get(plain(node.kind().as_str())).copied();
-                    if let Some(load) = &load {
-                        // 0.135 C4: its middle, wherever its origin is (a laid-flat upright's is at its end).
-                        let middle = match (node.parent(), node.place()) {
-                            (Some(p), Some(at)) if p == ground => {
-                                let m = at
-                                    .orientation
-                                    .rotate(load.middle)
-                                    .map_err(|e| refusal("carry-pose", format!("{e:?}")))?;
-                                Vec3::new(at.position.x + m.x, 0, at.position.z + m.z)
-                            }
-                            _ => {
-                                return Err(refusal(
-                                    "carry-grip-out-of-reach",
-                                    format!(
-                                        "{} is not on the floor its carriers stand on",
-                                        show(board)
-                                    ),
-                                ));
-                            }
-                        };
-                        let to = param_point(&a.params, 2, "lift-destination")?;
-                        let fixed = match to {
-                            Some(_) => Some(
-                                Fixed::of(&tree, ground)
-                                    .map_err(|e| refusal("carry-geometry", e))?,
-                            ),
-                            None => None,
-                        };
-                        let xz = |v: Vec3| [v.x, v.z];
-                        load.check(
-                            crew,
-                            xz(f),
-                            xz(k),
-                            xz(middle),
-                            to.map(xz).zip(fixed.as_ref()),
-                        )?;
-                    }
+                    // 0.135 C4: only a load, a kind whose entry states its grips and crew, is carried.
+                    let mut load =
+                        *self.loads.get(plain(node.kind().as_str())).ok_or_else(|| {
+                            refusal(
+                                "lift-not-a-load",
+                                format!("{} ({})", show(board), plain(node.kind().as_str())),
+                            )
+                        })?;
+                    let pose = |e| refusal("carry-pose", format!("{e:?}"));
+                    // Its middle, wherever its origin is (a laid-flat upright's is at its end).
+                    let (middle, axis) = match (node.parent(), node.place()) {
+                        (Some(p), Some(at)) if p == ground => {
+                            let m = at.orientation.rotate(load.middle).map_err(pose)?;
+                            let middle = Vec3::new(at.position.x + m.x, 0, at.position.z + m.z);
+                            (middle, load.lies_along(at.orientation)?)
+                        }
+                        _ => {
+                            return Err(refusal(
+                                "carry-grip-out-of-reach",
+                                format!(
+                                    "{} is not on the floor its carriers stand on",
+                                    show(board)
+                                ),
+                            ));
+                        }
+                    };
+                    // Its grips along its own long axis; the front at its − end lifts it the other way round.
+                    let axis = match axis {
+                        Some(v)
+                            if i128::from(v[0]) * i128::from(f.x - k.x)
+                                + i128::from(v[1]) * i128::from(f.z - k.z)
+                                < 0 =>
+                        {
+                            load = load.reversed()?;
+                            Some([-v[0], -v[1]])
+                        }
+                        v => v,
+                    };
+                    let to = param_point(&a.params, 2, "lift-destination")?;
+                    let fixed = match to {
+                        Some(_) => Some(
+                            Fixed::of(&tree, ground).map_err(|e| refusal("carry-geometry", e))?,
+                        ),
+                        None => None,
+                    };
+                    let xz = |v: Vec3| [v.x, v.z];
+                    load.check(
+                        crew,
+                        xz(f),
+                        xz(k),
+                        xz(middle),
+                        axis,
+                        to.map(xz).zip(fixed.as_ref()),
+                    )?;
                     let audience = tree
                         .handle(activity)
                         .and_then(|h| tree.node(h))
@@ -489,7 +522,7 @@ impl Engine {
                         self.header.clone(),
                         self.rules.clone(),
                     );
-                    carry.load = load.unwrap_or_else(Load::board);
+                    carry.load = load;
                     carry.lift(&mut tree, now, f, k, transfer)?;
                     self.carries.insert(activity, carry);
                 } else {
@@ -575,13 +608,14 @@ impl Engine {
                 self.header.clone(),
                 self.rules.clone(),
             );
-            // 0.135 C4: set down the way it lies, as its entry states it.
-            if let Some(l) = tr
-                .handle(load)
-                .and_then(|h| tr.node(h))
-                .and_then(|n| self.loads.get(plain(n.kind().as_str())))
-            {
-                carry.load = *l;
+            // 0.135 C4: set down the way it is held, as its entry states it.
+            if let Some((l, held)) = tr.handle(load).and_then(|h| tr.node(h)).and_then(|n| {
+                Some((
+                    self.loads.get(plain(n.kind().as_str()))?,
+                    n.place()?.orientation,
+                ))
+            }) {
+                carry.load = Load { turn: held, ..*l };
             }
             match break_off(
                 &mut carry,

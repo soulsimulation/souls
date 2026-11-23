@@ -320,11 +320,20 @@ fn entries() -> Json {
       "motion": { "how": "one_hand" }, "loose": { "ever": true } }"#,
     )
     .unwrap();
+    // 0.135 C4: only a load is carried, a kind whose entry states its size, grips and crew: a 2 m plank, held at
+    // its ends.
+    let plank = parse(
+        r#"{ "format": "souls-entry/1", "kind": "test:plank", "owner": "thing",
+      "points": { "end_a": { "role": "grip", "at_mm": [-1000, 25, 0] }, "end_b": { "role": "grip", "at_mm": [1000, 25, 0] } },
+      "geometry": { "bounds_mm": [2000, 50, 300] } }"#,
+    )
+    .unwrap();
     Json::Obj(vec![
         (VESSEL.into(), vessel),
         (RACK.into(), rack),
         (COURT.into(), court),
         (CAN.into(), can),
+        (PLANK.into(), plank),
     ])
 }
 

@@ -906,7 +906,7 @@ mod from_entry {
             ("beam", Load::of(&entry("rack_beam.json")).unwrap(), true),
         ] {
             let [b, f] = load.places();
-            let r = load.check(2, [f, 0], [b, 0], [0, 0], Some(([20 * M, 0], &fixed)));
+            let r = load.check(2, [f, 0], [b, 0], [0, 0], None, Some(([20 * M, 0], &fixed)));
             match ok {
                 true => assert!(r.is_ok(), "{name}: {r:?}"),
                 false => assert_eq!(r.map_err(|e| e.name), Err("carry-board-clips"), "{name}"),
@@ -914,9 +914,38 @@ mod from_entry {
         }
         let beam = Load::of(&entry("rack_beam.json")).unwrap();
         let [b, f] = beam.places();
-        let crew = beam.check(1, [f, 0], [b, 0], [0, 0], None);
+        let crew = beam.check(1, [f, 0], [b, 0], [0, 0], None, None);
         assert_eq!(crew.map_err(|e| e.name), Err("carry-crew-too-small"));
-        let off = beam.check(2, [f + GRIP_REACH + 400_000, 0], [b, 0], [0, 0], None);
+        let off = beam.check(2, [f + GRIP_REACH + 400_000, 0], [b, 0], [0, 0], None, None);
         assert_eq!(off.map_err(|e| e.name), Err("carry-grip-out-of-reach"));
+    }
+
+    /// 0.135 C4: the grips lie along the load's own long axis. A beam lying with its length along z is taken by
+    /// carriers at its ends (either way round), not by carriers standing beside it; a standing upright is taken along
+    /// the line its carriers stand on.
+    #[test]
+    fn c4_carriers_stand_at_the_ends_of_the_load_as_it_lies() {
+        use replica::pose::Quat;
+        let beam = Load::of(&entry("rack_beam.json")).unwrap();
+        let axis = beam
+            .lies_along(Quat::IDENTITY)
+            .unwrap()
+            .expect("it lies flat");
+        assert_eq!(axis, [0, beam.half_length]);
+        let [b, f] = beam.places();
+        let ends = beam.check(2, [0, f], [0, b], [0, 0], Some(axis), None);
+        assert!(ends.is_ok(), "at its ends: {ends:?}");
+        let beside = beam.check(2, [f, 0], [b, 0], [0, 0], Some(axis), None);
+        assert_eq!(beside.map_err(|e| e.name), Err("carry-grip-out-of-reach"));
+        let back = beam.reversed().unwrap();
+        let [b, f] = back.places();
+        let other = back.check(2, [0, -f], [0, -b], [0, 0], Some([0, -axis[1]]), None);
+        assert!(other.is_ok(), "the other way round: {other:?}");
+        let upright = Load::of(&entry("rack_upright.json")).unwrap();
+        assert_eq!(
+            upright.lies_along(Quat::IDENTITY).unwrap(),
+            None,
+            "it stands"
+        );
     }
 }

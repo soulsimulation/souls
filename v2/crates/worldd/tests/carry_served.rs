@@ -2,9 +2,10 @@
 //! through a real gateway, one connection and one token each, as C1's steps: walk, offer and accept, lift, carry 25 m
 //! and set down. The carry is the content entry `content/kinds/construction/carry.json` (its two roles make it an
 //! activity kind, its slot admitting a thing is where the load rides), and each load is carried as its own entry
-//! states. Held and set down, the load's long axis runs between its carriers.
+//! states; a thing that is not a load is refused `lift-not-a-load`. Held and set down, the load's long axis runs
+//! between its carriers, who stand at its ends.
 //!
-//! N2's test world, its yard, and one upright lying loose on the open ground (the yard's frames stand in their
+//! N2's test world, its yard, and one upright standing loose on the open ground (the yard's frames stand in their
 //! stand's slots, and a lift takes a load from the floor its carriers stand on). The Souls are born at the yard's
 //! north edge.
 
@@ -442,8 +443,19 @@ async fn gateway(socket: &Path, souls: &[Id]) -> (String, Vec<Token>) {
     (url, out)
 }
 
-/// Both walk to their places at a load whose middle is `at`, Soul 1 in front (east), then Soul 1 offers the carry to
-/// Soul 2 and Soul 2 accepts; the carry's activity. Before the accept, Soul 1 alone is refused its lift by name.
+/// Where a carrier stands at a load whose middle is `at`: `along` µm from it, north (+z) along a load lying along z,
+/// or east (+x) along one that stands (it is taken along the line its carriers stand on).
+fn spot(at: Vec3, along: i64, north: bool) -> Vec3 {
+    match north {
+        true => Vec3::new(at.x, 0, at.z + along),
+        false => Vec3::new(at.x + along, 0, at.z),
+    }
+}
+
+/// Both walk to their places at the ends of a load whose middle is `at`, Soul 1 in front, then Soul 1 offers the
+/// carry to Soul 2 and Soul 2 accepts; the carry's activity. Before the accept, Soul 1 alone is refused its lift by
+/// name.
+#[allow(clippy::too_many_arguments)]
 async fn gather(
     a: &mut Soul,
     b: &mut Soul,
@@ -452,11 +464,12 @@ async fn gather(
     load: Id,
     entry: &json::Value,
     at: Vec3,
+    north: bool,
 ) -> Id {
     let [back, front] = Load::of(entry).unwrap().places();
-    a.send("eden:walk", ground, point(Vec3::new(at.x + front, 0, at.z)))
+    a.send("eden:walk", ground, point(spot(at, front, north)))
         .await;
-    b.send("eden:walk", ground, point(Vec3::new(at.x + back, 0, at.z)))
+    b.send("eden:walk", ground, point(spot(at, back, north)))
         .await;
     let (wa, wb) = (a.answer().await, b.answer().await);
     wa.expect("Soul 1 walks to its place in front");
@@ -485,7 +498,9 @@ async fn gather(
     carry
 }
 
-/// Soul 1 lifts `load`, both walk 25 m east, Soul 2 sets it down and both leave.
+/// Soul 1 lifts `load`, both walk 25 m east (side by side when they stand at a beam's ends), Soul 2 sets it down and
+/// both leave.
+#[allow(clippy::too_many_arguments)]
 async fn carry_east(
     a: &mut Soul,
     b: &mut Soul,
@@ -494,23 +509,17 @@ async fn carry_east(
     load: Id,
     entry: &json::Value,
     at: Vec3,
+    north: bool,
 ) {
     let [back, front] = Load::of(entry).unwrap().places();
     a.act("carry:lift", carry, BTreeMap::from([(1, load.to_value())]))
         .await
         .expect("lifted");
-    a.send(
-        "eden:walk",
-        ground,
-        point(Vec3::new(at.x + front + CARRIED, 0, at.z)),
-    )
-    .await;
-    b.send(
-        "eden:walk",
-        ground,
-        point(Vec3::new(at.x + back + CARRIED, 0, at.z)),
-    )
-    .await;
+    let east = |p: Vec3| Vec3::new(p.x + CARRIED, 0, p.z);
+    a.send("eden:walk", ground, point(east(spot(at, front, north))))
+        .await;
+    b.send("eden:walk", ground, point(east(spot(at, back, north))))
+        .await;
     let (wa, wb) = (a.answer().await, b.answer().await);
     wa.expect("the front carries it 25 m");
     wb.expect("the back carries it 25 m");
@@ -526,8 +535,16 @@ async fn carry_east(
 
 /// The load's lift and its set-down, from the log: held in the carry's slot with its `long` axis (its own frame,
 /// µm from its middle) along the carry's +x, and set down with its middle 25 m east of `at` and its long axis still
-/// east to west.
-fn held_and_set_down(dir: &Path, name: &str, load: Id, entry: &json::Value, long: Vec3, at: Vec3) {
+/// between where its carriers stood (north to south, or east to west).
+fn held_and_set_down(
+    dir: &Path,
+    name: &str,
+    load: Id,
+    entry: &json::Value,
+    long: Vec3,
+    at: Vec3,
+    north: bool,
+) {
     let l = Load::of(entry).unwrap();
     let moved = moves_of(dir, load);
     let [lift, down] = moved[..] else {
@@ -557,9 +574,13 @@ fn held_and_set_down(dir: &Path, name: &str, load: Id, entry: &json::Value, long
         (middle.x - at.x - CARRIED).abs() < 600_000 && (middle.z - at.z).abs() < 600_000,
         "{name}: set down 25 m east: {middle:?}"
     );
+    let (along, across) = match north {
+        true => (end.z, end.x),
+        false => (end.x, end.z),
+    };
     assert!(
-        (end.x.abs() - l.half_length).abs() < 20_000 && end.z.abs() < 20_000,
-        "{name}: set down lengthwise along the way it was carried: {end:?}"
+        (along.abs() - l.half_length).abs() < 20_000 && across.abs() < 20_000,
+        "{name}: set down lengthwise between where its carriers stood: {end:?}"
     );
 }
 
@@ -574,10 +595,11 @@ async fn c4_a_served_world_carries_a_beam_and_an_upright_by_souls_intents_length
     assert!(activities.contains(CARRY), "the carry is an activity kind");
     served.line("listening ", 180);
     let im = import_eden::load(&facts).unwrap();
-    let (ground, beam, upright) = (
+    let (ground, beam, upright, stand) = (
         im.nodes["ground"],
         im.nodes["yard-beam-4"],
         im.nodes["loose-upright"],
+        im.nodes["yard-stand"],
     );
     let lineage = im.nodes["world"].scope();
     let (url, tokens) = gateway(&socket, &souls).await;
@@ -588,8 +610,36 @@ async fn c4_a_served_world_carries_a_beam_and_an_upright_by_souls_intents_length
         construction("rack_beam.json"),
         construction("rack_upright.json"),
     );
-    let first = gather(&mut a, &mut b, &dir, ground, beam, &beam_entry, beam_at()).await;
-    carry_east(&mut a, &mut b, ground, first, beam, &beam_entry, beam_at()).await;
+    // The beam lies with its length along z: its carriers stand at its ends, Soul 1 at the north end.
+    let first = gather(
+        &mut a,
+        &mut b,
+        &dir,
+        ground,
+        beam,
+        &beam_entry,
+        beam_at(),
+        true,
+    )
+    .await;
+    // A thing that is not a load (its kind's entry states no grips): refused by name, and nothing moves.
+    let not = a
+        .act("carry:lift", first, BTreeMap::from([(1, stand.to_value())]))
+        .await;
+    assert_eq!(not, Err("lift-not-a-load".to_owned()), "the frame stand");
+    assert!(moves_of(&dir, stand).is_empty(), "the stand never moved");
+    carry_east(
+        &mut a,
+        &mut b,
+        ground,
+        first,
+        beam,
+        &beam_entry,
+        beam_at(),
+        true,
+    )
+    .await;
+    // The upright stands: its carriers take it along the line they stand on, Soul 1 east.
     let second = gather(
         &mut a,
         &mut b,
@@ -598,6 +648,7 @@ async fn c4_a_served_world_carries_a_beam_and_an_upright_by_souls_intents_length
         upright,
         &upright_entry,
         upright_at(),
+        false,
     )
     .await;
     carry_east(
@@ -608,6 +659,7 @@ async fn c4_a_served_world_carries_a_beam_and_an_upright_by_souls_intents_length
         upright,
         &upright_entry,
         upright_at(),
+        false,
     )
     .await;
     // The last parts reach the log in the tick after the last answer.
@@ -622,6 +674,7 @@ async fn c4_a_served_world_carries_a_beam_and_an_upright_by_souls_intents_length
         &beam_entry,
         Vec3::new(0, 0, Load::of(&beam_entry).unwrap().half_length),
         beam_at(),
+        true,
     );
     let up = Load::of(&upright_entry).unwrap();
     held_and_set_down(
@@ -630,11 +683,12 @@ async fn c4_a_served_world_carries_a_beam_and_an_upright_by_souls_intents_length
         upright,
         &upright_entry,
         Vec3::new(0, up.half_length, 0),
-        Vec3::new(upright_at().x, 0, upright_at().z),
+        upright_at(),
+        false,
     );
     println!(
         "C4: a served world carried the beam and the upright 25 m by two Souls' intents through the gateway (walk, \
-         offer, a Soul alone refused carry-needs-two, accept, lift, carry, set down, leave), each held and set down \
-         lengthwise between its carriers"
+         offer, a Soul alone refused carry-needs-two, accept, a thing not a load refused lift-not-a-load, lift, \
+         carry, set down, leave), each held and set down lengthwise between its carriers"
     );
 }

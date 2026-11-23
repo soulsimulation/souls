@@ -109,6 +109,8 @@ pub struct Load {
     pub middle: Vec3,
     /// Half its side that stands upright once turned, µm: how high its middle rests when it is set down.
     pub rest: i64,
+    /// The end of its long axis in its own frame, from its middle, µm (half its length along that axis, +).
+    pub long: Vec3,
 }
 
 impl Load {
@@ -122,7 +124,26 @@ impl Load {
             turn: Quat::IDENTITY,
             middle: Vec3::ZERO,
             rest: 0,
+            long: Vec3::new(HALF_LENGTH, 0, 0),
         }
+    }
+
+    /// Its long axis on the plan, lying turned `o` (µm, from its middle to the + end of its length); none when that
+    /// axis stands more than half upright (a standing frame: its carriers take it along the line they stand on).
+    pub fn lies_along(&self, o: Quat) -> R<Option<Xz>> {
+        let v = o.rotate(self.long).map_err(pose_refusal)?;
+        Ok((2 * len([v.x, v.z]) >= self.half_length).then_some([v.x, v.z]))
+    }
+
+    /// The load lifted the other way round, its + end behind (0.135 C4): its grips swapped, and a half turn more so it
+    /// does not swing round as it is lifted.
+    pub fn reversed(&self) -> R<Load> {
+        let half = Quat::from_yaw_mdeg(180_000).map_err(pose_refusal)?;
+        Ok(Load {
+            grips: [-self.grips[1], -self.grips[0]],
+            turn: half.then(self.turn).map_err(pose_refusal)?,
+            ..*self
+        })
     }
 
     /// Where the load is held in the carry's slot (0.135 C4): its middle at the slot's origin, its long axis between
@@ -210,6 +231,11 @@ impl Load {
             turn: turn.map_err(|e| format!("a load's turn: {e:?}"))?,
             middle: Vec3::new(0, h * 500, 0),
             rest: up * 500,
+            long: match axis {
+                0 => Vec3::new(w * 500, 0, 0),
+                1 => Vec3::new(0, h * 500, 0),
+                _ => Vec3::new(0, 0, d * 500),
+            },
         })
     }
 
@@ -219,15 +245,17 @@ impl Load {
     }
 
     /// The checks before the lift (see the module's notes): `crew` carriers, the front at `front` and the back at
-    /// `back`, the load's middle at `middle` (each the open ground's plan, µm); and, if the lift names one, the front's
-    /// destination `to` and the fixed geometry on the way. `carry-crew-too-small`, `carry-grip-out-of-reach`,
-    /// `carry-board-clips`, `carry-route-too-short`.
+    /// `back`, the load's middle at `middle` (each the open ground's plan, µm), its grips along `axis` on the plan from
+    /// the back toward the front ([`Load::lies_along`]; the carriers' own line when it stands); and, if the lift names
+    /// one, the front's destination `to` and the fixed geometry on the way. `carry-crew-too-small`,
+    /// `carry-grip-out-of-reach`, `carry-board-clips`, `carry-route-too-short`.
     pub fn check(
         &self,
         crew: usize,
         front: Xz,
         back: Xz,
         middle: Xz,
+        axis: Option<Xz>,
         to: Option<(Xz, &Fixed)>,
     ) -> R<()> {
         if (crew as u64) < self.crew {
@@ -238,11 +266,13 @@ impl Load {
         }
         let d = [front[0] - back[0], front[1] - back[1]];
         let l = len(d);
+        // 0.135 C4: the grips lie along the load's own long axis, so carriers beside it are not at its grips.
+        let a = axis.unwrap_or(d);
         for (who, at, along) in [
             ("front", front, self.grips[1]),
             ("back", back, self.grips[0]),
         ] {
-            let u = scale(d, along, l);
+            let u = scale(a, along, len(a));
             let grip = [middle[0] + u[0], middle[1] + u[1]];
             let off = len([at[0] - grip[0], at[1] - grip[1]]);
             if off > GRIP_REACH {
