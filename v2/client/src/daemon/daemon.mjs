@@ -147,6 +147,7 @@ import { moveForm, moveVerdict, seatedAfter } from './moves.mjs';
 import { BATCH_MOST, BATCH_READS, catalog, context, query } from './reads.mjs';
 import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check/check.mjs';
 import { risesFromSeat } from '../check/stand.mjs';
+import { ORDER_ENDED, STUCK, stuckOf, whyOf } from './stuck.mjs';
 import { kindsHeld, kindsIn, stateOf } from '../check/state.mjs';
 import { actWords, nearestIds, nearestOffers, offerNamed, offersOf } from '../check/offers.mjs';
 import { Table } from '../reflex/reflex.mjs';
@@ -748,6 +749,8 @@ function remember(entries) {
  * to the reflexes and to memory. This Soul's own body's id is its Soul's (`soul`) there, so neither takes its own acts
  * for another's. Utterances arrive addressed, with their words (`onItem`), and are not taken twice.
  */
+/** The world's ladder's ended orders of my body, newest last (stuck.mjs). */
+const stuckSeen = [];
 function onEntry(e) {
   counts.entries++;
   // The version after an entry is its sequence and one (`replica::apply`).
@@ -755,6 +758,11 @@ function onEntry(e) {
   const actor = e.actor === ME ? soul : e.actor;
   const events = e.events.filter((ev) => ev.name !== SAID);
   for (const ev of events) fire({ name: ev.name, fields: ev.fields, actor, toMe: Object.values(ev.fields).includes(ME), sequence: e.sequence });
+  // A walk of mine the world's ladder ended (N1): what it waited for, for that walk's receipt (stuck.mjs).
+  for (const ev of events) {
+    const s = ev.name === ORDER_ENDED ? stuckOf(ev, [ME, [...rowsOf(copy).values()].find((r) => r.soul === ME)?.id].filter(Boolean)) : null;
+    if (s) { stuckSeen.push({ ...s, seenAt: Date.now() }); if (stuckSeen.length > 8) stuckSeen.shift(); }
+  }
   // E26: an invitation to a conversation, or the answer to this Soul's own, wakes a `wait`.
   const offers = events.filter((ev) => OFFER_EVENTS[ev.name]);
   if (offers.length) {
@@ -1669,7 +1677,12 @@ async function answer(req, conn = null) {
       // fallback took), read from the copy brought current.
       const done = r.answers.at(-1)?.answer === 'receipt';
       // R1b: an act the world refused names one offer of the same thing that would work, from this client's own offers.
-      const instead = r.answers.at(-1)?.answer === 'refused' ? suggestionFor(r) : null;
+      // A walk that could not get there (`walk.blocked`, N1's `goal-unreachable`) names what it waited for, and no other
+      // offer of its target: each needs the same way there.
+      const stuck = STUCK.has(r.answers.at(-1)?.reason);
+      const why = stuck ? whyOf(r, stuckSeen) : null;
+      if (why) got.receipt.why = why;
+      const instead = r.answers.at(-1)?.answer === 'refused' && !stuck ? suggestionFor(r) : null;
       if (instead) got.receipt.try = instead;
       return closing(got, done ? (rows) => { const h = heldBy(rows, ME, r); return h ? { receipt: { ...got.receipt, held: h } } : {}; } : null, { now: !done });
     }
