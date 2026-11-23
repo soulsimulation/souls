@@ -253,6 +253,12 @@ importers:
         specifier: ^22.19.19
         version: 22.20.4
 
+  packages/camera:
+    devDependencies:
+      '@types/node':
+        specifier: ^22.19.19
+        version: 22.19.19
+
   packages/client:
     dependencies:
       '@souls/engine-contract':

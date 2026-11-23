@@ -10,7 +10,7 @@ const scene = (over = {}) => ({ name: 'a', seconds: 10, world: { template: 'worl
   beats: [{ at: 0, souls: ['ada'], do: ['say', 'hi'] }], ...over });
 
 test('the committed scenes are valid, and a bad one is refused with its reasons', () => {
-  for (const f of ['hamlet-stroll', 'hamlet-cottage-dolly']) assert.deepEqual(checkScene(JSON.parse(readFileSync(new URL(`./scenes/${f}.json`, import.meta.url), 'utf8'))), [], f);
+  for (const f of ['hamlet-stroll', 'hamlet-cottage-dolly', 'hamlet-planned']) assert.deepEqual(checkScene(JSON.parse(readFileSync(new URL(`./scenes/${f}.json`, import.meta.url), 'utf8'))), [], f);
   assert.deepEqual(checkScene(scene()), []);
   const errs = checkScene(scene({ name: 'A B', beats: [{ at: -1, souls: ['cy'], do: [] }], camera: { follow: 'cy' } }));
   for (const w of ['name', 'beats[0].souls', 'beats[0].do', 'beats[0].at', 'camera']) assert.ok(errs.some((e) => e.startsWith(w)), `${w}: ${errs}`);

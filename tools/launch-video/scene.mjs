@@ -13,8 +13,10 @@
 //    would. No model runs, and nothing reaches into the world another way.
 // 4. The take: capture.mjs records the canvas and the game's sound, uncut and at real speed, from the scene's camera:
 //    `{"follow": "<soul>"}`, `{"fixed": {position, target, fov}}`, or `{"path": [{at, position, target, fov}, …]}`
-//    (metres in the world's frame; a path's poses are eased between, its last held). No camera: the page's own
-//    (Broadcast).
+//    (metres in the world's frame; a path's poses are eased between, its last held), recorded as the scene plays; or
+//    `{"plan": {"subjects"?: ["ada"], "moves"?: [...], "framings"?: [...]}}`: the scene plays, @souls/camera's
+//    pathfinder plans the best move around the world's solids from its history (shoot.mjs), and the take replays the
+//    scene's span on the page from its first tick at ×1 with that camera. No camera: the page's own (Broadcast).
 //
 // scene/2:
 //   { "name", "seconds", "hour"?: "HH:MM", "size"?: "1280x720",
@@ -22,7 +24,7 @@
 //     "souls": [{ "id": "ada" }],
 //     "setup"?: [{ "souls": ["ada"] | "*", "do": ["act", "?bench", "--wait"] }],
 //     "beats": [{ "at": 0, "souls": ["ada", "bo"] | "*", "do": ["say", "hello"], "stagger"?: 1.5 }],
-//     "camera"?: { "follow": "ada" } | { "fixed": {…} } | { "path": [{…}] } }
+//     "camera"?: { "follow": "ada" } | { "fixed": {…} } | { "path": [{…}] } | { "plan": {…} } }
 // In a command, "?<words>" is the first thing the Soul's own copy finds for those words (`find`), so a scene carries no
 // ids, which differ from world to world, and "@<soul>" is that Soul's body.
 //
@@ -40,6 +42,7 @@ import { REPO_ROOT } from '../lib/paths.mjs';
 import { startOldPage } from '../playtest/arena/new-engine/old-page.mjs';
 import { pairSeat } from '../playtest/arena/new-engine/seat.mjs';
 import { capture } from './capture.mjs';
+import { shoot } from './shoot.mjs';
 
 const sleep = (s) => new Promise((ok) => setTimeout(ok, s * 1000));
 
@@ -56,7 +59,8 @@ export function checkScene(scene) {
     if (k === 'beats' && !(b.at >= 0)) errs.push(`beats[${i}].at: seconds into the take`);
   });
   const c = scene?.camera;
-  if (c && !((typeof c.follow === 'string' && ids.includes(c.follow)) || pose(c.fixed) || (Array.isArray(c.path) && c.path.length && c.path.every((p) => pose(p) && p.at >= 0)))) errs.push('camera: {follow: <soul>}, {fixed: {position, target, fov}} or {path: [{at, position, target, fov}]}');
+  const plan = c?.plan && typeof c.plan === 'object' && (c.plan.subjects === undefined || (Array.isArray(c.plan.subjects) && c.plan.subjects.every((id) => ids.includes(id))));
+  if (c && !((typeof c.follow === 'string' && ids.includes(c.follow)) || pose(c.fixed) || (Array.isArray(c.path) && c.path.length && c.path.every((p) => pose(p) && p.at >= 0)) || plan)) errs.push('camera: {follow: <soul>}, {fixed: {position, target, fov}}, {path: [{at, position, target, fov}]} or {plan: {subjects?, moves?, framings?}}');
   return errs;
 }
 const vec = (v) => Array.isArray(v) && v.length === 3 && v.every(Number.isFinite);
@@ -116,17 +120,29 @@ export async function stage(scene, { out, keep = false, size = null, headed = fa
     save();
     const [w, h] = (size ?? scene.size ?? '1280x720').split('x').map(Number);
     const camera = scene.camera ?? null;
-    const shot = camera && !camera.follow ? cameraShot(camera, scene.seconds, w / h) : null;
     let t0 = null;
     const beats = [];
-    const sidecar = await capture({ url: world.page, out: join(dir, `${scene.name}.mp4`), seconds: scene.seconds, size: `${w}x${h}`, hour: scene.hour ?? '12:00', headed,
-      shot, follow: camera?.follow ? seats[camera.follow].soul : null, log,
-      onPlay: () => {
-        t0 = Date.now();
-        for (const b of scene.beats ?? []) whoOf(b).forEach((id, i) => beats.push(sleep(b.at + i * (b.stagger ?? 0)).then(() => doOne(id, b.do, (Date.now() - t0) / 1000))));
-      } });
-    await Promise.all(beats);
-    run.take = { file: `${scene.name}.mp4`, startedAtMs: t0, seconds: sidecar.seconds, gpu: sidecar.gpu, fps: sidecar.pacing?.fps ?? null, camera: camera ? Object.keys(camera)[0] : 'page' };
+    const play = () => {
+      t0 = Date.now();
+      for (const b of scene.beats ?? []) whoOf(b).forEach((id, i) => beats.push(sleep(b.at + i * (b.stagger ?? 0)).then(() => doOne(id, b.do, (Date.now() - t0) / 1000))));
+    };
+    const take = { url: world.page, out: join(dir, `${scene.name}.mp4`), seconds: scene.seconds, size: `${w}x${h}`, hour: scene.hour ?? '12:00', headed, log };
+    let sidecar, planned = null;
+    if (camera?.plan) {
+      // a planned camera: the scene plays first, then its span is planned from the world's history (shoot.mjs, the
+      // pathfinder) and replayed on the page from its first tick at the world's own speed
+      play(); await sleep(scene.seconds); await Promise.all(beats);
+      run.take = { startedAtMs: t0, seconds: scene.seconds }; save();
+      await sleep(3);
+      const p = camera.plan;
+      planned = (await shoot({ recording: dir, from: 0, seconds: scene.seconds, aspect: w / h, subjects: p.subjects ?? null, moves: p.moves, framings: p.framings, log })).shot;
+      writeFileSync(join(dir, `${scene.name}.shot.json`), JSON.stringify(planned));
+      sidecar = await capture({ ...take, shot: planned });
+    } else {
+      sidecar = await capture({ ...take, shot: camera && !camera.follow ? cameraShot(camera, scene.seconds, w / h) : null, follow: camera?.follow ? seats[camera.follow].soul : null, onPlay: play });
+      await Promise.all(beats);
+    }
+    run.take = { file: `${scene.name}.mp4`, startedAtMs: t0, seconds: sidecar.seconds, gpu: sidecar.gpu, fps: sidecar.pacing?.fps ?? null, camera: camera ? Object.keys(camera)[0] : 'page', ...(planned ? { move: planned.move, score: planned.score } : {}) };
     save();
     return { dir, clip: join(dir, `${scene.name}.mp4`), run, sidecar, world };
   } finally {
