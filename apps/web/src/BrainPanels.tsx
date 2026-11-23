@@ -1,4 +1,4 @@
-import { useState } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import type { BrainCall } from '@souls/protocol';
 import type { Api, Souls } from './useSouls.ts';
 
@@ -117,15 +117,38 @@ export function NarrativePanel({ sim }: { sim: Souls }) {
   );
 }
 
+type Cut = { t: number; key: string; label: string };
+/** V5 (0.133): a world the new engine runs has no server director, so its camera line is the page's own broadcast
+ *  director (WorldBroadcast.ts): its latest cut (`__soulsBroadcastCuts`) and the shot it draws now (the canvas's
+ *  `data-camera-shot`), read once a second. Null on the old socket, whose server sends the line. */
+function usePageCamera(on: boolean, tick: number): Souls['camera'] {
+  const [line, setLine] = useState<Souls['camera']>(null);
+  const now = useRef(tick), chosen = useRef<{ t: number; tick: number } | null>(null);
+  now.current = tick;
+  useEffect(() => {
+    if (!on) return;
+    const read = () => {
+      const cut = (globalThis as { __soulsBroadcastCuts?: Cut[] }).__soulsBroadcastCuts?.at(-1);
+      const shot = document.querySelector<HTMLCanvasElement>('canvas[data-camera-shot]')?.dataset.cameraShot ?? '';
+      if (cut && chosen.current?.t !== cut.t) chosen.current = { t: cut.t, tick: now.current }; // the tick it was first seen at
+      setLine(cut ? { tick: chosen.current!.tick, text: `${cut.label} (the page's broadcast director)`, heldSec: Math.round(Date.now() / 1000 - cut.t), shot: { key: cut.key, shot } } : null);
+    };
+    read(); const t = setInterval(read, 1000);
+    return () => clearInterval(t);
+  }, [on]);
+  return line;
+}
+
 export function BroadcastPanel({ sim }: { sim: Souls }) {
-  const c = sim.camera;
+  const v2 = sim.streamNotice !== undefined, page = usePageCamera(v2, sim.conn.replica.tick);
+  const c = v2 ? page : sim.camera;
   return (
     <section>
       <h2>Broadcast — what an anonymous viewer would be shown</h2>
-      {c ? <><div><b>CAMERA</b> {c.text} <span className="dim">(held {c.heldSec}s, chosen at t{c.tick})</span></div><pre className="json" style={{ maxHeight: 110 }}>{JSON.stringify(c.shot)}</pre></> : <p className="dim">The director runs while at least one client is connected; first shot arrives within a few seconds.</p>}
+      {c ? <><div><b>CAMERA</b> {c.text} <span className="dim">(held {c.heldSec}s, chosen at t{c.tick})</span></div><pre className="json" style={{ maxHeight: 110 }}>{JSON.stringify(c.shot)}</pre></> : <p className="dim">{v2 ? 'The page\'s broadcast director has not cut yet: switch the camera to Broadcast.' : 'The director runs while at least one client is connected; first shot arrives within a few seconds.'}</p>}
       <div style={{ marginTop: 8 }}><b>TICKER</b></div>
       <div className="scroll" style={{ maxHeight: 180 }}>{sim.ticker.length ? sim.ticker.slice().reverse().map((l, i) => <div key={i}><span className="dim">t{l.tick}</span> {l.text}</div>) : <span className="dim">nothing announced yet</span>}</div>
-      <p className="note">The shot is a Mars-engine ShotSpec chosen by Jev among code-enumerated candidates. The suggested shot is shown here as data; use the follow control to follow a Soul in the scene.</p>
+      <p className="note">{v2 ? 'On the new engine no server suggests a shot: this is the cut the page itself chose.' : 'The shot is a Mars-engine ShotSpec chosen by Jev among code-enumerated candidates.'} The suggested shot is shown here as data; use the follow control to follow a Soul in the scene.</p>
     </section>
   );
 }

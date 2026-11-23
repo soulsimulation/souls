@@ -3369,7 +3369,9 @@ function decide(input       )          {
   // chooses it (worldd `Acts`, #3802); none free is refused by name before any need is read.
   const chosen = chosenSlots(kinds, act, state, asker.sees);
   if ('none' in chosen && !chosen.thing) return { verdict: 'no', reason: 'slot_taken', need: -1, detail: { node: act.this, arg: chosen.none, free: 0 }, fix: null, read };
-  if ('unknown' in chosen) return { verdict: 'unknown', need: -1, node: chosen.unknown, read };
+  // A closed container the asker may not see into: the unknown names the container and its `closed` section only,
+  // never a slot, a thing in it or a count, so it tells nothing of what the container holds.
+  if ('unknown' in chosen) return { verdict: 'unknown', need: -1, node: chosen.unknown, field: 'closed', read };
   // A thing its selector finds none of is told only once every need holds (worldd checks who may and reach first), so
   // a far act is never a way to learn what a hiding place holds.
   const noneSelected = 'none' in chosen ? chosen.none : null;
