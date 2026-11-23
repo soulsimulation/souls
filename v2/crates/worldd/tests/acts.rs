@@ -1451,7 +1451,13 @@ fn n1_a_still_body_in_the_only_way_is_stepped_aside_and_the_walker_arrives() {
         "where the world put it"
     );
     assert!(matches!(answer, (1, Ok(_))), "the walk arrives: {answer:?}");
-    assert_eq!(at(&r, w1()), east(), "the walker arrived");
+    // Arrived: within the walk's reach of its spot (`skills::route::AT_SPOT`); where in it depends on its last steps.
+    let (p, e) = (at(&r, w1()), east());
+    let off = (i128::from(p.x - e.x).pow(2) + i128::from(p.z - e.z).pow(2)).isqrt();
+    assert!(
+        off <= i128::from(skills::route::AT_SPOT),
+        "the walker arrived: {off} µm off"
+    );
     run.world.stop();
 }
 
