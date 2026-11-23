@@ -1,5 +1,5 @@
 // #4018 (X9): one driver process of the v2 viewers bench (v2.mjs forks several). Each viewer does what the page's
-// stream worker does (v2/web/src/source/worker.ts), without playing: the pointer (read with replica's own
+// stream worker does (apps/web/src/v2-engine/source/worker.ts), without playing: the pointer (read with replica's own
 // `readPointer`), the bundle's header, the generation's baseline and its words (the first picture), then every part
 // from the generation's first, AHEAD at a time (with its words while far behind, as the page's catch-up does), then
 // the pointer every 250 ms and each new part. A handoff to the next generation is drained and crossed with no new
@@ -14,9 +14,9 @@ import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { fileType, record } from './v2-stats.mjs';
+import { BEHIND_US, CUT_US, PERIOD_US } from '../../../../apps/web/src/v2-engine/source/clock.ts'; // the page's clock
 
 const AHEAD = 16, POLL_MS = 250, TIMEOUT_MS = 10_000;
-const PERIOD_US = 500_000, BEHIND_US = 4 * PERIOD_US, CUT_US = 20_000_000; // v2/web/src/clock/clock.ts
 const sleep = (ms) => new Promise((r) => setTimeout(r, Math.max(0, ms)));
 let cfg, readPointer;
 const viewers = new Set(), slow = new Set();

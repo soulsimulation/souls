@@ -210,3 +210,19 @@ fn the_touch_moves_reach_a_named_point_of_the_other_body_within_an_arm() {
         .unwrap();
     assert_eq!(touch.contact.as_str(), "souls:surface");
 }
+
+/// 0.134 (lane T's T2): `hold_hand` reaches the other body's left hand within an arm, and its last phase holds until
+/// the move is released.
+#[test]
+fn hold_hand_reaches_the_other_hand_and_holds_until_released() {
+    let lib = worldd::acts::library().unwrap();
+    let m = lib
+        .iter()
+        .find(|m| m.name.as_str() == "souls:hold_hand")
+        .expect("hold_hand in the library");
+    assert_eq!(m.contact.as_str(), "souls:hand-left");
+    assert!(m.reach <= replica::moves::REACH_MOST);
+    let last = m.phases.last().expect("phases");
+    assert!(last.held, "the last phase holds");
+    assert!(m.phases.iter().rev().skip(1).all(|p| !p.held));
+}

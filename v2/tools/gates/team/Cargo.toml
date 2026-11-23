@@ -1,0 +1,20 @@
+[package]
+name = "team-gate"
+version = "0.0.0"
+edition.workspace = true
+publish.workspace = true
+description = "The team gate (0.135 C1, #4051): two Souls, each on its own gateway connection, carry a load together; the rung reached is printed on every release head."
+
+[dependencies]
+
+[dev-dependencies]
+replica = { path = "../../../crates/replica" }
+sim = { path = "../../../crates/sim" }
+worldd = { path = "../../../crates/worldd" }
+gatewayd = { path = "../../../crates/gatewayd" }
+import-eden = { path = "../../import-eden" }
+testworld = { path = "../../testworld" }
+axum = { version = "0.8", default-features = false, features = ["http1", "tokio", "ws"] }
+tokio = { version = "1", features = ["rt-multi-thread", "macros", "net", "time"] }
+tokio-tungstenite = "0.29"
+futures-util = { version = "0.3", default-features = false, features = ["sink"] }

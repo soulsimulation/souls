@@ -194,6 +194,11 @@ impl Watch {
         !(on_left || on_corner || on_aim)
     }
 
+    /// Walker `who` is watched again from when it is next seen.
+    pub fn forget(&mut self, who: Id) {
+        self.walkers.remove(&who);
+    }
+
     /// Only the walkers in `walking` (their walks asked their way this tick) are watched on; any other starts again
     /// when next seen.
     pub fn keep(&mut self, walking: &BTreeSet<Id>) {

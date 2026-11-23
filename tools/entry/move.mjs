@@ -17,9 +17,11 @@ import {parseEntry, canonical} from './format.mjs';
 export const MOVE_FORMAT = 'souls-move/1';
 export const RESOURCE_CLASSES = Object.freeze(['locomotion', 'manipulator', 'gaze', 'voice']);
 export const CANCELS_ON = Object.freeze(['claim_taken', 'out_of_reach']);
-export const EFFECTORS = Object.freeze(['hand', 'held_point']);
-export const PHASES = Object.freeze(['start_up_us', 'slide_us', 'pour_us', 'consume_us', 'strike_us', 'pump_us', 'recovery_us']);
+export const EFFECTORS = Object.freeze(['hand', 'held_point', 'aim']);
+export const PHASES = Object.freeze(['start_up_us', 'slide_us', 'pour_us', 'consume_us', 'strike_us', 'pump_us', 'recovery_us', 'hold_us']);
 export const REACH_MAX_MM = 700;
+/** An aimed move (`effector: aim`: a point, a wave, a look) touches nothing; its reach is sight, up to 20 m (0.134 B1). */
+export const AIM_MAX_MM = 20000;
 const KEYS = ['format', 'move', 'claims', 'blocks', 'cancels_on', 'effector', 'reach_mm', 'contact', 'phases'];
 const IDENT = /^[a-z][a-z0-9_]*$/;
 const TICK = /(?:^|[_\W])[Tt]icks?(?:$|[_\W])|[a-z]Ticks?\b/;
@@ -50,14 +52,16 @@ export function validateMove(m) {
   if (!Array.isArray(m.cancels_on)) err('cancels_on', 'a list');
   else m.cancels_on.forEach((c, i) => { if (!CANCELS_ON.includes(c)) err(`cancels_on.${i}`, `one of ${CANCELS_ON.join(', ')}`); });
   if (!EFFECTORS.includes(m.effector)) err('effector', `one of ${EFFECTORS.join(', ')}`);
-  // `contact` (optional): the named point of the thing or body it reaches, fixed by the move (a handshake reaches the
-  // other's right hand); with none, the form's step names it (`at`).
   if (m.contact !== undefined && (typeof m.contact !== 'string' || !IDENT.test(m.contact))) err('contact', 'a lower_snake_case point name');
-  if (!(Number.isSafeInteger(m.reach_mm) && m.reach_mm > 0 && m.reach_mm <= REACH_MAX_MM)) err('reach_mm', `whole millimetres, 1 to ${REACH_MAX_MM} (under a full arm)`);
+  const most = m.effector === 'aim' ? AIM_MAX_MM : REACH_MAX_MM;
+  if (!(Number.isSafeInteger(m.reach_mm) && m.reach_mm > 0 && m.reach_mm <= most)) err('reach_mm', m.effector === 'aim' ? `whole millimetres, 1 to ${AIM_MAX_MM} (sight)` : `whole millimetres, 1 to ${REACH_MAX_MM} (under a full arm)`);
   if (!isObj(m.phases)) err('phases', 'a table of phase lengths in microseconds');
   else {
     for (const k of Object.keys(m.phases)) if (!PHASES.includes(k)) err(`phases.${k}`, `unknown phase; durations are named ${PHASES.join(', ')} (microseconds, never ticks)`);
-    for (const k of ['start_up_us', 'recovery_us']) if (m.phases[k] === undefined) err(`phases.${k}`, 'required');
+    // A last `hold_us` holds until the move is released (holding hands); it takes the place of `recovery_us`.
+    const keys = Object.keys(m.phases), holds = m.phases.hold_us !== undefined;
+    if (holds && keys[keys.length - 1] !== 'hold_us') err('phases.hold_us', 'the last phase');
+    for (const k of holds ? ['start_up_us'] : ['start_up_us', 'recovery_us']) if (m.phases[k] === undefined) err(`phases.${k}`, 'required');
     for (const [k, v] of Object.entries(m.phases)) if (!(Number.isSafeInteger(v) && v > 0)) err(`phases.${k}`, 'whole microseconds above zero');
   }
   if (isObj(m.phases) && ['slide_us', 'pour_us', 'consume_us', 'strike_us', 'pump_us'].filter(k => m.phases[k] !== undefined).length > 1) err('phases', 'a move slides, pours, consumes, strikes or pumps, not more than one');
