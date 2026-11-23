@@ -17,6 +17,9 @@
 //   souls-god.mjs move <id> --at x,y,z [--slot n]                                     to another spot, same parent
 //   souls-god.mjs move <id> [<id> ...] --by dx,dz [--yaw r]   each that far over (metres), what is in it riding along;
 //                                                on the open ground it keeps its height over the ground
+//   souls-god.mjs select [--kind k] [--name words] [--in id] [--area x0,z0,x1,z1] [--near x,z [--radius m]]
+//                         [--remove | --by dx,dz [--yaw r]]   what matches (at most 1000), or all of it removed or
+//                                                moved in one edit (metres)
 //   souls-god.mjs clone <id> [--at x,z] [--count n] [--step dx,dz] [--yaw r]   copies of it and all in it (doorways
 //                                                and stairs too), the first one step away unless --at (metres)
 //   souls-god.mjs set <id> <field> <value>       one numbered field: an integer, true, false or a name
@@ -176,6 +179,7 @@ export const VERBS = [
   'redo',
   'remove',
   'secret',
+  'select',
   'set',
   'sky',
   'status',
@@ -194,7 +198,7 @@ export const VERBS = [
   'zone-suggest',
 ];
 /** The world's verbs (#3695): the daemon makes their sets on the world node from its copy (`world.mjs`). */
-export const WORLD_VERBS = ['weather', 'sky', 'strike', 'land', 'time', 'expand', 'furnish', 'clone'];
+export const WORLD_VERBS = ['weather', 'sky', 'strike', 'land', 'time', 'expand', 'furnish', 'clone', 'select'];
 /** A world verb by its words, made on the daemon's copy (#3728): a place by its shape (a road or an area, on the
  *  open ground it knows) and `move --by`; `move --at` is G1's move. */
 const SHAPES = ['--path', '--area', '--rect', '--circle'];
@@ -285,6 +289,9 @@ export const FIX = {
   'clone.count': '--count is 1 to 100',
   'clone.flag': 'clone <id> [--at x,z] [--count n] [--step dx,dz] in metres [--yaw r in radians]',
   'clone.off-the-ground': 'start nearer, or with fewer copies or a smaller step: the world\'s ground ends there',
+  'select.flag': 'select [--kind k] [--name words] [--in id] [--area x0,z0,x1,z1] [--near x,z --radius m] [--remove | --by dx,dz]',
+  'select.nothing': 'nothing matches: describe, or widen the filters',
+  'select.too-many': 'select fewer: one edit changes at most 256 things',
   'export.file': 'export [file]: a file path to write',
   'edit.off-ground': 'put it somewhere on the world\'s ground: describe shows where things stand',
   'not-a-creator': 'pair with --creator <the world\'s creator grant>',
@@ -469,7 +476,9 @@ export function worldVerbOf(verb, words) {
     place: ['path', 'width', 'area', 'rect', 'circle', 'in'],
     move: ['by', 'yaw'],
     clone: ['at', 'count', 'step', 'yaw'],
+    select: ['kind', 'name', 'in', 'area', 'near', 'radius', 'by', 'yaw'],
   }[verb];
+  if (verb === 'select') { const k = args.indexOf('--remove'); if (k >= 0) { args.splice(k, 1); out.remove = true; } }
   for (const f of flags) { const v = takeOpt(args, `--${f}`); if (v !== undefined) out[f] = v; }
   if (verb === 'strike' && out.at === undefined && args[0] !== undefined) out.at = args.shift();
   if (verb === 'time') {

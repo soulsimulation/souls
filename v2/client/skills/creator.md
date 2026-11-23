@@ -48,6 +48,7 @@ node ids the same way. This keeps the whole world out of your tool output. Refre
 | `place <kind> --area '[[x,z],...]' \| --rect cx,cz,w,d \| --circle cx,cz,r` | a lawn, pitch, bed or named area (`eden:place`, with `--field 15=<its kind>`) over an area |
 | `move <id> --at x,y,z [--slot n]` | to another spot in the same parent |
 | `move <id> [<id> ...] --by dx,dz [--yaw r]` | each that far over (metres), what is in it riding along; on the open ground it keeps its height over the ground |
+| `select [--kind k] [--name words] [--in id] [--area x0,z0,x1,z1] [--near x,z --radius m]` | what matches (id, kind, name, spot in metres); add `--remove` or `--by dx,dz [--yaw r]` to remove or move all of it in one edit |
 | `clone <id> [--at x,z] [--count n] [--step dx,dz] [--yaw r]` | copies of it and everything in it (its doorways and stairs too), the first one step away unless `--at` (metres); with `--claim`, each of its edits goes under that claim |
 | `set <id> <field> <value>` | one numbered field: an integer, `true`, `false` or a name |
 | `remove <id>` | it and everything in it |

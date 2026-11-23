@@ -196,6 +196,7 @@ test('the verbs make G1 batches, and a refusal names its usage', () => {
   assert.deepEqual(requestOf(['move', 'aa-3', '--at', '1,2,3']).req.ops[0].op, 'move');
   assert.deepEqual(requestOf(['check', 'clone', 'aa-3', '--count', '3', '--step', '4,0']).req, { op: 'check', world: { verb: 'clone', count: '3', step: '4,0', ref: 'aa-3' } });
   assert.throws(() => requestOf(['clone']), /clone <id>/);
+  assert.deepEqual(requestOf(['select', '--kind', 'lamp_post', '--near', '100,-30', '--radius', '20', '--remove']).req, { op: 'edit', world: { verb: 'select', remove: true, kind: 'lamp_post', near: '100,-30', radius: '20' } });
 });
 
 test('#3695: a creator sets the weather and the sky palette and strikes lightning; each has a dry run and a refusal', async () => {
@@ -524,6 +525,29 @@ test('#3728: move --by and clone go to the claims judge as any edit: refused by 
   assert.equal(movedUnder.ok, true, JSON.stringify(movedUnder));
   const clonedUnder = await god('clone', room, '--at', '63,63', '--claim', c);
   assert.equal(clonedUnder.ok, true, JSON.stringify(clonedUnder));
+  assert.equal((await god('build', 'release', c)).ok, true);
+});
+
+test('#3728: select\'s remove and move go to the claims judge as one edit: refused edit.claimed in a claim they are not under', async () => {
+  await connected();
+  const place = (await god('describe')).nodes.find((n) => n.kind === 'souls:place');
+  const made = await god('place', 'room', '--in', place.id, '--at', '91000,0,91000');
+  assert.equal(made.ok, true, JSON.stringify(made));
+  const room = made.names['1'];
+  assert.equal((await god('place', 'souls:item', '--in', room, '--at', '500,0,500')).ok, true);
+  const claimed = await god('build', 'claim', 'shed', '--area', '90000,90000,94000,94000');
+  assert.equal(claimed.ok, true, JSON.stringify(claimed));
+  const c = claimed.claim.id;
+  assert.equal((await god('select', '--in', room)).selected, 1, 'a list is not an edit');
+  const moved = await god('select', '--in', room, '--by', '0.5,0');
+  assert.deepEqual([moved.ok, moved.code], [false, 'edit.claimed'], JSON.stringify(moved));
+  const removed = await god('select', '--in', room, '--remove');
+  assert.deepEqual([removed.ok, removed.code], [false, 'edit.claimed'], JSON.stringify(removed));
+  // Under the claim, both are made.
+  assert.equal((await god('select', '--in', room, '--by', '0.5,0', '--claim', c)).ok, true);
+  const gone = await god('select', '--in', room, '--remove', '--claim', c);
+  assert.equal(gone.ok, true, JSON.stringify(gone));
+  assert.equal((await god('select', '--in', room)).selected, 0);
   assert.equal((await god('build', 'release', c)).ok, true);
 });
 
