@@ -2956,7 +2956,7 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
         let y = souls[b].end().await;
         assert_eq!((x.kind, y.kind), (1, 1), "{what}: {x:?} {y:?}");
     }
-    let crew_kind = pinned_activity(&w, "mars:rack_upright_activity");
+    let crew_kind = pinned_activity(&w, "mars:carry_activity");
     // A crew on `place` (the ground, or a part it then holds): Soul `a` offers in front, Soul `b` accepts.
     let crew = async |souls: &mut [GwSoul], (a, b): (usize, usize), place: Id| {
         let body = body_of(&w, w.souls[b]);
@@ -2966,13 +2966,13 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
                 place,
                 BTreeMap::from([
                     (1, crew_kind.clone()),
-                    (2, Value::Text(Name::new("mars:crew-front").unwrap())),
+                    (2, Value::Text(Name::new("mars:front").unwrap())),
                     (3, Value::Array(vec![body.to_value()])),
                 ]),
             )
             .await;
         assert_eq!(got.kind, 1, "offered: {got:?}");
-        let c = created_by(&w, &got.entries, "mars:rack_upright_activity@");
+        let c = created_by(&w, &got.entries, "mars:carry_activity@");
         let got = souls[b].act("activity:accept", c, BTreeMap::new()).await;
         assert_eq!(got.kind, 1, "accepted: {got:?}");
         c
@@ -3001,16 +3001,19 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
     };
     // Crew `c` of Souls `ab` takes `p` (a frame across x, a beam along z), carries it to `to` and puts it there.
     let frame_across = |at: Vec3| (v3(at.x + H, 0, at.z), v3(at.x - H, 0, at.z));
+    // A frame's carriers stand 2.2 m either side of it along z, clear of the stand, the beams and the other frame, so
+    // they walk side by side and keep their span (a carry whose carriers drift apart breaks off, C3).
+    let frame_ends = |at: Vec3| (v3(at.x, 0, at.z - 2_200_000), v3(at.x, 0, at.z + 2_200_000));
     let beam_along = |at: Vec3| (v3(at.x, 0, at.z + 2_200_000), v3(at.x, 0, at.z - 2_200_000));
 
     // Build. Frame A by crew A (Souls 1, 2).
-    let (f0, f1) = frame_across(where_is(&w, fa).2);
+    let (f0, f1) = frame_ends(where_is(&w, fa).2);
     both(&mut souls, g, (0, 1), f0, f1, "to frame A").await;
     let crew_a = crew(&mut souls, (0, 1), g).await;
     let got = souls[0].act("part:take", crew_a, part(fa)).await;
     assert_eq!(got.kind, 1, "frame A taken: {got:?}");
     let ua = slot_of(bay, slots["upright_a"]);
-    let (f0, f1) = frame_across(ua);
+    let (f0, f1) = frame_ends(ua);
     both(&mut souls, g, (0, 1), f0, f1, "frame A to the bay").await;
     let got = souls[0]
         .act("part:put", crew_a, in_slot(bay, slots["upright_a"]))
@@ -3025,13 +3028,13 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
     )
     .await;
     // Frame B by crew B (Souls 1, 3).
-    let (f0, f1) = frame_across(where_is(&w, fb).2);
+    let (f0, f1) = frame_ends(where_is(&w, fb).2);
     both(&mut souls, g, (0, 2), f0, f1, "to frame B").await;
     let crew_b = crew(&mut souls, (0, 2), g).await;
     let got = souls[0].act("part:take", crew_b, part(fb)).await;
     assert_eq!(got.kind, 1, "frame B taken: {got:?}");
     let ub = slot_of(bay, slots["upright_b"]);
-    let (f0, f1) = frame_across(ub);
+    let (f0, f1) = frame_ends(ub);
     both(&mut souls, g, (0, 2), f0, f1, "frame B to the bay").await;
     let got = souls[0]
         .act("part:put", crew_b, in_slot(bay, slots["upright_b"]))
@@ -3158,7 +3161,7 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
     leave(&mut souls, 3, crew_d, "crew D goes").await;
     // Each frame out by a crew of two on it, its last holder then going; back to its slot on the stand.
     for (f, hold, holder, at, stand_slot) in [(fb, hold_b, 0, ub, 2), (fa, hold_a, 2, ua, 1)] {
-        let (f0, f1) = frame_across(at);
+        let (f0, f1) = frame_ends(at);
         both(&mut souls, g, (1, 3), f0, f1, "to the frame").await;
         let out = crew(&mut souls, (1, 3), f).await;
         leave(
@@ -3172,7 +3175,7 @@ async fn a3_four_souls_build_a_bay_and_take_it_down() {
         println!("frame {} out of the bay: {got:?}", f.counter());
         assert_eq!(got.kind, 1, "frame out");
         let to = slot_of(stand, stand_slot);
-        let (f0, f1) = frame_across(to);
+        let (f0, f1) = frame_ends(to);
         both(&mut souls, g, (1, 3), f0, f1, "the frame to the stand").await;
         let got = souls[1]
             .act("part:put", out, in_slot(stand, stand_slot))
