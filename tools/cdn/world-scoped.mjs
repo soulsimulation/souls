@@ -6,10 +6,10 @@
 // The reviewed per-file provenance lives in world-scoped.json (checked in). `apply` re-fetches every object from its
 // public served URL, records that dated evidence, and uploads exactly those served bytes, so nothing the live site does
 // not already serve to that world can be published. `plan`, `evidence` and `manifest` never read credentials.
+import { isMain } from '../lib/is-main.mjs';
 import { createHash } from 'node:crypto';
 import { readFile, writeFile } from 'node:fs/promises';
 import { extname, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { CACHE, TYPES, shaFile } from './inventory.mjs';
 import { BUCKET, SCOPED_KEY, loadCredentials, signRequest } from './publish.mjs';
 import { withNewReceipt } from './receipt.mjs';
@@ -212,4 +212,4 @@ async function main() {
     console.log(JSON.stringify({ ok: true, worldPaths: added, out }));
   }
 }
-if (import.meta.url === pathToFileURL(process.argv[1] ?? '').href) main().catch(error => { console.error(error.message); process.exitCode = 1; });
+if (isMain(import.meta.url)) main().catch(error => { console.error(error.message); process.exitCode = 1; });

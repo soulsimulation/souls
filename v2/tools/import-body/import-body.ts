@@ -23,11 +23,11 @@
 //
 // writes <dir>/<slug>.diag (the kind), <dir>/<slug>.json (what the crowd loads) and <dir>/models/<sha256>.glb|.mesh,
 // and prints the summary as JSON. A refusal prints {refused: {code, message, field?, measured?, limit?}} and exits 1.
+import { isMain } from '../../../tools/lib/is-main.mjs';
 import { spawnSync } from 'node:child_process';
 import { createHash } from 'node:crypto';
 import { copyFileSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import * as THREE from '../../web/node_modules/three/build/three.module.js';
 import { inPlace, merge, parseModel, fitRigid, bakeModel } from '../../web/src/crowd/bake.ts';
 import { decodedGeometry } from './decode-draco.ts';
@@ -280,7 +280,7 @@ export function write(b: Imported, out: string) {
   };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (isMain(import.meta.url)) {
   const a = process.argv.slice(2), o = a.indexOf('--out'), out = o >= 0 ? a.splice(o, 2)[1] : null;
   if (a.length !== 2 || !out) {
     console.error('usage: node v2/tools/import-body/import-body.ts <body.glb> <manifest.json> --out <dir>');

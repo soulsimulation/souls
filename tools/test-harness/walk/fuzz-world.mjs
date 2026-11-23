@@ -11,6 +11,7 @@
 // (god.act, one batch per place: a refusal is scored, not fatal), then furnishes each building in `furnish` the same way.
 // Each root thing's name is its place; the audit scores per place (bad / one-way / goalless / floats / unusable seats and
 // beds), and walk.mjs compares with baseline/fuzz.json like any other world.
+import { isMain } from '../../lib/is-main.mjs';
 import structures from '../../../packages/world-compiler/src/core-kit/structures.json' with { type: 'json' };
 import vocabW3 from '../../../packages/world-compiler/src/core-kit/vocab-w3.json' with { type: 'json' };
 
@@ -127,7 +128,7 @@ export function fuzzWorld(seed = FUZZ_SEED) {
   return { seed, genesis, build, furnish };
 }
 
-if (process.argv[1] && new URL(import.meta.url).pathname === process.argv[1]) {
+if (isMain(import.meta.url)) {
   const w = fuzzWorld(process.argv[2] ?? FUZZ_SEED);
   console.log(JSON.stringify({ seed: w.seed, terrain: w.genesis.batches[0].ops.length, build: w.build.length, furnish: w.furnish.length, types: BUILDING_TYPES.length }));
 }

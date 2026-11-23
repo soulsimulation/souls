@@ -6,8 +6,8 @@
 //
 // The file is the driver's input (v2/tools/driver/README.md): the describe line, then one act a line, in time order,
 // `<due ms> <agent> <kind> <verb>`, with `-` for a kind no v2 intent carries yet.
+import { isMain } from '../../../tools/lib/is-main.mjs';
 import { writeFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 import { SHAPES, describe, schedule, summarize } from '../../../tools/bench/capacity/profiles/shapes.mjs';
 
 /** Each shape kind's v2 intent (its verb, v2/docs/intents.md rule 4). A kind missing here is sent as nothing,
@@ -67,7 +67,7 @@ export function scheduleFile(load, sched) {
   return `${head}\n${acts.map(([t, i, k]) => `${t} ${i} ${k} ${VERBS[k] ?? '-'}`).join('\n')}\n`;
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const [load, ...rest] = process.argv.slice(2);
   const opt = (k, d) => { const j = rest.indexOf(`--${k}`); return j < 0 ? d : rest[j + 1]; };
   const out = opt('out'), make = LOADS[load];

@@ -1,7 +1,7 @@
 // Native installed commons. Fake human owner, real SQLite/WorldHost inputs,
 // take/capture publications and model-free reconstruction. No live bootstrap.
+import { isMain } from '../../../../../tools/lib/is-main.mjs';
 import assert from 'node:assert/strict';
-import { fileURLToPath } from 'node:url';
 import { mkdtempSync, rmSync, readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { tmpdir } from 'node:os';
@@ -101,4 +101,4 @@ export async function generateInstalledCommons(){
    ...publication,positions,checkpoints,reconstruction:{tick:1460,bodyHash,kernelHash:meaningHash,snapshot:'exact',hostGenesis:'exact',inclusiveGenesis:'exact',incompatibleOldFactory:'refused before fallback without DB edits'},faultCount:0,violations:[],paid:0}));
  }finally{db.close();rmSync(dir,{recursive:true,force:true});}
 }
-if(process.argv[1]===fileURLToPath(import.meta.url))process.stdout.write(JSON.stringify(await generateInstalledCommons(),null,2)+'\n');
+if(isMain(import.meta.url))process.stdout.write(JSON.stringify(await generateInstalledCommons(),null,2)+'\n');

@@ -20,9 +20,10 @@
 //! ([`MOVE_STARTED`]); the bodies step to the tick's world time; when it ends it writes another ([`MOVE_ENDED`], with
 //! how) and is answered: a receipt naming its entries when done, else a refusal naming how it ended
 //! (`claim-taken`, `resource-held`, `out-of-reach`, ...). A gateway walk (C29) gets its planned route's time at walking
-//! speed, plus a margin and crossings, with no total cap and never beyond the intent's expiry. Its deadline is written
-//! as C20's entry and it receives C20's one progress answer if still going at 10 s. C21's watch ends a stalled walk
-//! `walk.blocked`; waiting at a link and being carried do not count as stalled walking.
+//! speed, plus a margin and crossings, from the tick its route is planned, with no total cap and never beyond the
+//! intent's expiry. Its deadline is written as C20's entry and it receives C20's one progress answer in that tick
+//! (W11, #4087). C21's watch ends a stalled walk `walk.blocked`; waiting at a link and being carried do not count as
+//! stalled walking.
 //! No move outlives its act: a walk still going at its act's deadline stops in that tick and ends `act.timed-out`; a
 //! sit, a lie or a rise runs to its end (a seat is never left half taken) and ends so then; a walk a new move
 //! replaces ends `claim-taken` in the tick the new move starts.
@@ -826,10 +827,6 @@ struct Open {
     sequence: u64,
     body: Id,
     expiry: Micros,
-    /// Its deadline at its arrival, world time.
-    due: Micros,
-    /// A form or gateway walk: its own deadline, from its start (C20/C29).
-    run_due: Option<Micros>,
     intent: Value,
     waiters: Vec<Reply>,
     stamps: Stamps,
@@ -878,9 +875,10 @@ struct Clock {
     fresh: Vec<(Hash, Vec<u8>)>,
     checked: Vec<(Act, Checks)>,
     replies: Vec<Out>,
-    /// Progress answers (C20), by act: sent after the tick's sync with its answers, as they are, never kept or logged;
-    /// one whose act ends in the same tick is dropped, as its answer says more.
-    progress: Vec<(Id, Vec<Reply>, Vec<u8>)>,
+    /// Progress answers (C20), by act: to whom, its actor and sequence, and the µs it has left. Framed at the tick's
+    /// end with the tick's last version and sent after the tick's sync and its answers, so no stream sees a version go
+    /// back (W11, #4087); never kept or logged; one whose act ends in the same tick is dropped, as its answer says more.
+    progress: Vec<(Id, Vec<Reply>, Actor, u64, Micros)>,
     rows: Vec<Value>,
     effects: Vec<Effect>,
     parts: Vec<Arc<Part>>,
@@ -1246,8 +1244,8 @@ pub const LEFT: u64 = 5;
 
 /// A progress answer (C20, #3469): `{1: version, 2: {1: actor, 2: sequence, 3: 3, 4: intent id, 5: µs left}}`, T10's
 /// accepted (`replica::intents::Answer::Accepted`) with how long the act has left until its deadline. It is not the
-/// act's answer: that follows, by the deadline, and a repeat is never given this one. Sent, with no block, when a
-/// form or gateway walk is still running at its arrival deadline and its own deadline is later.
+/// act's answer: that follows, by the deadline, and a repeat is never given this one. Sent, with no block, with the
+/// answers of the tick in which a form's run or a gateway walk's route gets its deadline (W11, #4087).
 pub fn progress(version: &Value, actor: Actor, sequence: u64, intent: Id, left: Micros) -> Vec<u8> {
     let mut answer = match (Answer::Accepted {
         actor,
@@ -1264,6 +1262,27 @@ pub fn progress(version: &Value, actor: Actor, sequence: u64, intent: Id, left: 
         [(1, version.clone()), (2, Value::Map(answer))].into(),
     ))
     .unwrap_or_default()
+}
+
+/// Whether `frame` is a progress answer ([`progress`]: accepted, with the µs left), which an act's own answer follows.
+pub fn is_progress(frame: &[u8]) -> bool {
+    progress_of(frame).is_some()
+}
+
+/// A progress answer's actor (its encoding) and sequence, which name its act; `None` for any other frame.
+pub fn progress_of(frame: &[u8]) -> Option<(Vec<u8>, u64)> {
+    let Value::Map(m) = decode(frame).ok()?.value else {
+        return None;
+    };
+    let Some(Value::Map(a)) = m.get(&2) else {
+        return None;
+    };
+    match (a.get(&1), a.get(&2), a.get(&3), a.get(&LEFT)) {
+        (Some(actor), Some(Value::Uint(s)), Some(Value::Uint(3)), Some(Value::Uint(_))) => {
+            Some((encode(actor).ok()?, *s))
+        }
+        _ => None,
+    }
 }
 
 /// The backstop refusal of an intent holding a text that is not a name (#3765).
@@ -1968,8 +1987,6 @@ impl Clock {
                 sequence,
                 body,
                 expiry: intent.expiry,
-                due,
-                run_due: None,
                 intent: value,
                 waiters: vec![reply],
                 stamps,
@@ -2491,8 +2508,6 @@ impl Clock {
                 sequence,
                 body,
                 expiry: intent.expiry,
-                due,
-                run_due: None,
                 intent: value,
                 waiters: vec![reply],
                 stamps,
@@ -3636,8 +3651,7 @@ impl Clock {
 
     /// A form's run started (C20, #3469): its act's deadline becomes the run's own, its start plus its steps' span
     /// (`sim::forms::span`: its walk, its moves and its pauses), written as an [`ACT_DEADLINE`] entry its receipt
-    /// names. The due list keeps the sooner of that and the deadline set at its arrival: an act still running at its
-    /// arrival deadline with a later run deadline is answered in progress then ([`Clock::still_running`]).
+    /// names, and the act is answered in progress then ([`Clock::run_started`]).
     fn form_started(&mut self, id: Id, run: sim::forms::RunId, now: Micros) {
         let Some(due) = self.forms.forms.due(run) else {
             return;
@@ -3645,39 +3659,28 @@ impl Clock {
         self.run_started(id, due, now);
     }
 
-    /// C20's deadline entry and single progress answer also serve a planned gateway walk (C29).
+    /// C20's deadline entry and single progress answer also serve a planned gateway walk (C29). The progress answer
+    /// goes now, with this tick's answers, so an act that starts a walk is answered accepted within a tick or two of
+    /// its arrival rather than at its arrival deadline (W11, #4087), and the act is due at its run's own deadline from
+    /// here on. One whose act ends in this tick is dropped, as its answer says more.
     fn run_started(&mut self, id: Id, due: Micros, now: Micros) {
-        let Some(o) = self.open.get_mut(&id) else {
+        let Some(o) = self.open.get(&id) else {
             return;
         };
         let due = due.min(o.expiry);
-        o.run_due = Some(due);
-        let (body, first) = (o.body, o.due.min(due));
-        self.deadlines.close(body, id);
-        self.deadlines.open(body, id, first);
-        self.note_with(id, ACT_DEADLINE, None, Some(due), now);
-    }
-
-    /// A deadline of act `id` passed at `now` (C20): when it is a form's act whose run's deadline is later, its
-    /// deadline moves there and it is answered in progress ([`progress`]), so the gateway waits for it rather than
-    /// answering `act.timed-out` itself. Whether it did.
-    fn still_running(&mut self, id: Id, now: Micros) -> bool {
-        let Some(o) = self.open.get(&id) else {
-            return false;
-        };
-        let Some(due) = o.run_due.filter(|d| *d > now) else {
-            return false;
-        };
-        let frame = progress(
-            &self.version(),
+        let body = o.body;
+        let answer = (
+            id,
+            o.waiters.clone(),
             o.actor,
             o.sequence,
-            id,
             due.saturating_sub(now),
         );
-        self.progress.push((id, o.waiters.clone(), frame));
-        self.deadlines.open(o.body, id, due);
-        true
+        self.progress.retain(|p| p.0 != id);
+        self.progress.push(answer);
+        self.deadlines.close(body, id);
+        self.deadlines.open(body, id, due);
+        self.note_with(id, ACT_DEADLINE, None, Some(due), now);
     }
 
     /// A form's run ended: an entry naming how (and for a walk that stalled, what blocked it: C21), then its intent's
@@ -3720,7 +3723,7 @@ impl Clock {
         let started = b.start(asks);
         for (&body, &(_, id)) in &b.runner.asks {
             if started.iter().any(|(i, r)| *i == id && r.is_ok()) {
-                self.walks.insert(id, acts::Walk::new(body, id, now));
+                self.walks.insert(id, acts::Walk::new(body, id));
             }
         }
         // A walk a new move replaced stopped in this tick: its end is written now, before the new move's start.
@@ -3819,10 +3822,6 @@ impl Clock {
         // 1. Due timers: acts whose deadline passed. A walk going for one stops in this tick and its end is written
         // by the deadline's name; a sit, a lie or a rise runs to its end, and the act ends with it.
         while let Some(id) = self.deadlines.due(now) {
-            // A form's act whose run is due later is answered in progress, and kept to the run's deadline (C20).
-            if self.still_running(id, now) {
-                continue;
-            }
             let Some(o) = self.open.get(&id) else {
                 continue;
             };
@@ -3999,9 +3998,13 @@ impl Clock {
         let bytes = inputs.as_ref().map_or(0, Vec::len) + record.as_ref().map_or(0, Vec::len);
         let written = u64::from(inputs.is_some()) + u64::from(record.is_some());
         let handed = mark();
+        // Framed now, with the tick's last version: every answer of the tick carries that version or an older one.
+        let version = self.version();
         let progress: Vec<_> = std::mem::take(&mut self.progress)
             .into_iter()
-            .map(|(_, to, frame)| (to, frame))
+            .map(|(id, to, actor, sequence, left)| {
+                (to, progress(&version, actor, sequence, id, left))
+            })
             .collect();
         if written > 0 || !replies.is_empty() || !progress.is_empty() || !parts.is_empty() {
             let _ = self.answers.send(Tick {
@@ -4881,7 +4884,8 @@ pub fn start<S: Storage + 'static>(
                         if !lockstep {
                             b.wait = Some(planner_wait.unwrap_or(tick / 10));
                         }
-                        b.schedule = planned_at;
+                        // Kept with any the bodies were made with (a test's late planner, W11 #4087); the log's win.
+                        b.schedule.extend(planned_at);
                         // Those the log last had in a seat sit in it again, the seat held (K18c).
                         for (body, why) in b.seat_placed(&placed, at) {
                             eprintln!(

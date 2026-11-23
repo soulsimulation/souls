@@ -621,6 +621,18 @@ impl Forms {
             .collect()
     }
 
+    /// Each body whose step in progress is a walk right before a `move`: the move's name, so the world can end the walk
+    /// within that move's own reach of the thing (#4072: a `touch` on a long bench).
+    pub fn walk_moves(&self) -> BTreeMap<Id, Name> {
+        self.runs
+            .values()
+            .filter_map(|fr| match (fr.runner.step()?, fr.runner.next_step()?) {
+                (Step::WalkTo { .. }, Step::Move { name, .. }) => Some((fr.body, name.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// The bodies whose run's step in progress is an approach walk, the walk the binding adds before a form's first
     /// move at a point (#3688), so the world can aim it at clear ground on the body's side of that point.
     pub fn approaches(&self) -> std::collections::BTreeSet<Id> {

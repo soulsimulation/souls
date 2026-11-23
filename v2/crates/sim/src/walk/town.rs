@@ -1912,6 +1912,11 @@ pub fn ground_boxes(buildings: &[Building], ground: Id) -> Vec<Option<[i64; 4]>>
 /// Whether `p` (µm, the frame of `node`) lies in a doorway or on a stair: within [`CLEAR`] of the end on `node` of a
 /// link, or within half the link's width and half [`CLEAR`] of its line. On the open ground a building outside its
 /// box in `boxes` ([`ground_boxes`]) is skipped; with no boxes, every building is tested.
+///
+/// Two limits (#4072): on a building's own floor, a flight's line counts only where it lies from a step below `p`'s
+/// height to a body's height above it ([`level_part`]), so a landing over a stair's foot is no stair (the open
+/// ground's plan has no heights, so there the whole line counts). And a step's width lies along its edge, which its ends hold: its line
+/// counts only within half [`CLEAR`], so a porch front 9 m wide is no doorway 4.85 m deep through the wall behind it.
 pub fn in_passage(
     buildings: &[Building],
     boxes: &[Option<[i64; 4]>],
@@ -1956,6 +1961,12 @@ pub fn in_passage_but(
                 }
                 // The line is in the building's frame: read on the open ground or on the building's own floors (not
                 // on another thing's floor a step or a flight lands on).
+                let flight = matches!(l.kind, Kind::Stairs | Kind::Ramp | Kind::Ladder);
+                let reach = if l.kind == Kind::Step {
+                    CLEAR / 2
+                } else {
+                    l.width / 2 + CLEAR / 2
+                };
                 on && (node == ground || b.floors.contains_key(&node))
                     && l.line.windows(2).any(|s| {
                         let (a, c) = if node == ground {
@@ -1966,10 +1977,37 @@ pub fn in_passage_but(
                         } else {
                             (s[0], s[1])
                         };
-                        to_segment(p, a, c) < l.width / 2 + CLEAR / 2
+                        if flight && node != ground {
+                            level_part(a, c, p.y).is_some_and(|(a, c)| to_segment(p, a, c) < reach)
+                        } else {
+                            to_segment(p, a, c) < reach
+                        }
                     })
             })
     })
+}
+
+/// The part of a flight's line segment `a`–`c` (µm) a body standing at height `y` meets ([`in_passage_but`]): from a
+/// step ([`crate::ground::STEP`]) below `y`, its foot, to the body's height ([`crate::ground::BODY_HIGH`]) above; `None`
+/// when no part does. A flight lower than a step under `y` runs beneath that floor.
+pub fn level_part(a: Vec3, c: Vec3, y: i64) -> Option<(Vec3, Vec3)> {
+    let (under, over) = (crate::ground::STEP * 1000, crate::ground::BODY_HIGH * 1000);
+    let (a, c) = if a.y <= c.y { (a, c) } else { (c, a) };
+    let rise = i128::from(c.y - a.y);
+    if rise == 0 {
+        return (a.y >= y - under && a.y <= y + over).then_some((a, c));
+    }
+    // Along the segment from `a` (0) to `c` (`rise`), as heights above `a`.
+    let lo = i128::from(y - under - a.y).max(0);
+    let hi = i128::from(y + over - a.y).min(rise);
+    if lo > hi {
+        return None;
+    }
+    let at = |t: i128| {
+        let f = |u: i64, v: i64| u + (i128::from(v - u) * t / rise) as i64;
+        Vec3::new(f(a.x, c.x), f(a.y, c.y), f(a.z, c.z))
+    };
+    Some((at(lo), at(hi)))
 }
 
 /// The town as the spot tables read it (N9): N5's map for walkable ground and routes, N6's surfaces for a straight
@@ -2508,6 +2546,21 @@ impl<'a> View<'a> {
         from: Option<&Body>,
         door: Option<Id>,
     ) -> Option<Vec3> {
+        self.stand_near_shape(node, at, None, reach, from, door)
+    }
+
+    /// [`View::stand_near_door`] for a thing whose footprint is `ring` (#4072: its corners in `node`'s frame, `at`
+    /// its middle, and whether the walk ends on it): within `reach` of its outline, or on it
+    /// ([`crate::spots::within_footprint`]); with no ring, of `at`.
+    pub fn stand_near_shape(
+        &self,
+        node: Id,
+        at: Vec3,
+        ring: Option<(&[Vec3], bool)>,
+        reach: i64,
+        from: Option<&Body>,
+        door: Option<Id>,
+    ) -> Option<Vec3> {
         let from = from.map(|b| (node_of(b), b.pose.position));
         let mut scratch = self.scratch.borrow_mut();
         let (tree, surfaces, buildings, ground) =
@@ -2521,7 +2574,36 @@ impl<'a> View<'a> {
             boxes: OnceCell::new(),
             door,
         };
-        crate::spots::within(&mut g, Target::new(node, at), reach, from)
+        match ring {
+            Some((ring, on)) => {
+                crate::spots::within_footprint(&mut g, Target::new(node, at), ring, on, reach, from)
+            }
+            None => crate::spots::within(&mut g, Target::new(node, at), reach, from),
+        }
+    }
+
+    /// A thing's footprint `corners` (its own frame, [`crate::spots::footprint`]) and its middle, the thing placed at
+    /// `at` turned by `turn` in node `parent`'s frame (its place in the world's tree: a loose thing need not be in this
+    /// view's), carried onto the floor a body stands on ([`View::on_floor`]): the floor, the corners and the middle in
+    /// its frame. `None` when they do not all land on one floor.
+    pub fn footprint_on_floor(
+        &self,
+        parent: Id,
+        at: Vec3,
+        turn: Quat,
+        corners: &[Vec3; 4],
+    ) -> Option<(Id, [Vec3; 4], Vec3)> {
+        let placed = |c: Vec3| at.plus(turn.rotate(c).ok()?).ok();
+        let (floor, middle, _) = self.on_floor(parent, at)?;
+        let mut ring = [Vec3::ZERO; 4];
+        for (r, c) in ring.iter_mut().zip(corners) {
+            let (f, p, _) = self.on_floor(parent, placed(*c)?)?;
+            if f != floor {
+                return None;
+            }
+            *r = p;
+        }
+        Some((floor, ring, middle))
     }
 
     /// The legs a form's walk takes from where `body` stands to `goal` (µm, `node`'s frame), across the links on the
@@ -3122,6 +3204,180 @@ mod prepared_transport_tests {
         assert_eq!(
             live[0].0.floors[&floor].1.pieces[0].triangles,
             vec![[0, 1, 2]]
+        );
+    }
+}
+
+#[cfg(test)]
+mod passage_tests {
+    use super::*;
+    use crate::ground::Patch;
+    use crate::ground::scene::Xform;
+    use crate::links::{End, Link};
+    use replica::ids::Scope;
+
+    fn id(n: u64) -> Id {
+        Id::new(Scope([94; 16]), n).unwrap()
+    }
+
+    fn v(x: i64, y: i64, z: i64) -> Vec3 {
+        Vec3::new(x, y, z)
+    }
+
+    fn link(
+        n: u64,
+        kind: Kind,
+        nodes: [Id; 2],
+        width: i64,
+        ends: [End; 2],
+        line: Vec<Vec3>,
+    ) -> Link {
+        Link {
+            id: id(n),
+            kind,
+            nodes,
+            owner: nodes[0],
+            width,
+            ends: [Some(ends[0]), Some(ends[1])],
+            line,
+            door: None,
+            blocked: None,
+        }
+    }
+
+    fn building(floors: &[(Id, i64)], links: Vec<Link>) -> Building {
+        let patch = || Patch {
+            radius: HUMAN_RADIUS,
+            pieces: Vec::new(),
+            meets: Vec::new(),
+        };
+        Building {
+            thing: id(1),
+            links,
+            floors: floors.iter().map(|&(f, y)| (f, (y, patch()))).collect(),
+            place: Xform::IDENTITY,
+            loose: Vec::new(),
+        }
+    }
+
+    fn end(floor: Id, x0: i64, x1: i64, y: i64, z: i64) -> End {
+        End {
+            floor,
+            a: v(x0, y, z),
+            b: v(x1, y, z),
+        }
+    }
+
+    /// #4072 (the cottage e_989779ca's landing lamp): a flight 1 m wide rising 2.8 m along +z from a floor to a
+    /// landing whose floor also reaches back over its foot. On the landing, 0.34 m in plan from the line where the
+    /// flight is 0.1 to 0.6 m up, is no stair (it was: 0.34 m against 0.85 m); the flight's top on the landing, its
+    /// foot on the floor below and the floor under it within a body's height still are.
+    #[test]
+    fn a_landing_over_a_stairs_foot_is_no_stair() {
+        let (ground, f0, f1) = (id(2), id(3), id(4));
+        let stair = link(
+            5,
+            Kind::Stairs,
+            [f0, f1],
+            1_000_000,
+            [
+                end(f0, -200_000, 200_000, 0, 0),
+                end(f1, -200_000, 200_000, 2_800_000, 4_000_000),
+            ],
+            vec![v(0, 0, 0), v(0, 2_800_000, 4_000_000)],
+        );
+        let b = [building(&[(f0, 0), (f1, 2_800)], vec![stair])];
+        let at = |node, p| in_passage(&b, &[], ground, node, p);
+        assert!(
+            !at(f1, v(340_000, 2_800_000, 500_000)),
+            "the landing over the foot"
+        );
+        assert!(
+            at(f1, v(340_000, 2_800_000, 3_900_000)),
+            "the flight's top on the landing"
+        );
+        assert!(
+            at(f1, v(0, 2_800_000, 4_500_000)),
+            "within CLEAR of its top end"
+        );
+        assert!(
+            at(f0, v(340_000, 0, 500_000)),
+            "the flight's foot on the floor"
+        );
+        assert!(at(f0, v(0, 0, -600_000)), "within CLEAR of its foot end");
+        // Under the flight: where it is 1.4 m up, a body standing there meets a body on it, so it is still a stair;
+        // where it is 2.5 m up, over a standing body's height and more than half its width and half CLEAR in plan from
+        // where it is 1.8 m up, it is not (whether a body may stand there is the floor's patch's to say, cut round the
+        // flight's solids).
+        assert!(
+            at(f0, v(0, 0, 2_000_000)),
+            "the floor under the flight's middle"
+        );
+        assert!(
+            !at(f0, v(0, 0, 3_600_000)),
+            "the floor under the flight's top"
+        );
+    }
+
+    /// #4072 (the old-town arcade shops' bookshelves): a porch front 9 m wide steps down from the floor to the ground
+    /// along z = 0, the shop's floor behind it at z < 0. A place 3 m inside the shop is no doorway (it was: within
+    /// 4.85 m of the step's short line); the step's own band on the floor and on the ground still is, and a doorway's
+    /// band keeps its width.
+    #[test]
+    fn a_wide_steps_doorway_is_its_own_edge() {
+        let (ground, f0, f1) = (id(2), id(3), id(4));
+        let step = link(
+            5,
+            Kind::Step,
+            [f0, ground],
+            9_000_000,
+            [
+                end(f0, -4_300_000, 4_300_000, 0, -300_000),
+                end(ground, -4_300_000, 4_300_000, 0, 400_000),
+            ],
+            vec![v(0, 0, -300_000), v(0, 0, 400_000)],
+        );
+        let door = link(
+            6,
+            Kind::Doorway,
+            [f0, f1],
+            1_000_000,
+            [
+                end(f0, -200_000, 200_000, 0, -10_300_000),
+                end(f1, -200_000, 200_000, 0, -9_700_000),
+            ],
+            vec![v(0, 0, -10_300_000), v(0, 0, -9_700_000)],
+        );
+        let b = [building(&[(f0, 0), (f1, 0)], vec![step, door])];
+        let at = |node, p| in_passage(&b, &[], ground, node, p);
+        assert!(
+            !at(f0, v(-2_000_000, 0, -3_000_000)),
+            "the shop behind the porch"
+        );
+        assert!(
+            !at(f0, v(0, 0, -1_200_000)),
+            "behind the step's line, past its band"
+        );
+        assert!(
+            at(f0, v(-2_000_000, 0, -800_000)),
+            "the step's band on the floor"
+        );
+        assert!(
+            at(f0, v(4_400_000, 0, -300_000)),
+            "the step's band at its end"
+        );
+        assert!(
+            at(ground, v(3_000_000, 0, 900_000)),
+            "the step's band on the ground"
+        );
+        // A doorway's band: 0.8 m across its line keeps half its width and half CLEAR (0.85 m); 0.9 m is past it.
+        assert!(
+            at(f0, v(800_000, 0, -10_000_000)),
+            "beside the doorway's line"
+        );
+        assert!(
+            !at(f0, v(900_000, 0, -10_000_000)),
+            "past the doorway's band"
         );
     }
 }

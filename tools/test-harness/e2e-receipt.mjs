@@ -1,6 +1,6 @@
+import { isMain } from '../lib/is-main.mjs';
 import { readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { join, relative, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { join, relative } from 'node:path';
 
 const roots = {'V6-scenarios':'e2e','V6-party':'e2e-party','V6-souls-r2':'e2e-r2','V6-join-clerk':'e2e-join','V6-join-dev':'e2e-join','V6-mars-two':'e2e-mars-two','V6-lm-two':'e2e-lm-two','V6-launcher':'e2e-launcher'};
 export function collect(step, root, out, since) {
@@ -24,6 +24,6 @@ export function collect(step, root, out, since) {
   writeFileSync(join(out,`${step}-cases.json`),JSON.stringify(receipt,null,2)+'\n');
   return receipt;
 }
-if (process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   try { collect(...process.argv.slice(2)); } catch(e) { console.error(e.message); process.exitCode=1; }
 }

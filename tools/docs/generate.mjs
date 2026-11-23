@@ -9,10 +9,10 @@
 //   node tools/docs/generate.mjs              say what would be generated, or exit 1 if the generator can't run
 //   node tools/docs/generate.mjs --json       print { "actions.md": <full page>, ... }: what the docs build reads
 //   node tools/docs/generate.mjs --out <dir>  write the full pages there, to read them locally
+import { isMain } from '../lib/is-main.mjs';
 import { execFileSync } from 'node:child_process';
 import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { GENERATED_MARK, ROOT } from './lint.mjs';
 
 /** Each generated page: its file in docs/site and the heading the generated part starts at. */
@@ -176,7 +176,7 @@ export function fullPages(facts, root = ROOT) {
   return PAGES.map((p) => ({ file: p.file, text: splice(readFileSync(join(root, 'docs/site', p.file), 'utf8'), p.heading, p.render(facts)) }));
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const pages = fullPages(collect()), i = process.argv.indexOf('--out');
   if (process.argv.includes('--json')) process.stdout.write(JSON.stringify(Object.fromEntries(pages.map((p) => [p.file, p.text]))));
   else {

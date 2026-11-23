@@ -3,9 +3,9 @@
 // result-sent, turn↔request cost join). The first re-score keeps the originals as oracles.jsonl.v1 / metrics.json.v1.
 // The ledger (Reviewer verdicts and their oracle vetoes) is not re-scored.
 // node tools/playtest/review/rescore-oracles.mjs <run-dir> [<run-dir> …] [--all <runs-root>]
+import { isMain } from '../../lib/is-main.mjs';
 import { copyFileSync, existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve, basename } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { readJson } from '../lib/jsonl.mjs';
 import { loadRun } from './run.mjs';
 import { runOracles } from './oracles.mjs';
@@ -23,7 +23,7 @@ export function rescoreRun(runDir) {
   return { run: basename(runDir), requests: run.evidence.length, inferredLinks: run.evidence.filter((e) => e.chatTurnsInferred).length, basics: metrics.basics, truth: metrics.fidelity.truthfulnessPassRate };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const a = process.argv.slice(2); const i = a.indexOf('--all');
   const dirs = i >= 0 ? readdirSync(resolve(a[i + 1])).map((d) => join(resolve(a[i + 1]), d)).filter((d) => existsSync(join(d, 'oracles.jsonl')) || existsSync(join(d, 'oracles.jsonl.v1'))) : a.map((d) => resolve(d));
   if (!dirs.length) { process.stderr.write('usage: rescore-oracles.mjs <run-dir> [...] | --all <runs-root>\n'); process.exit(2); }
