@@ -1,6 +1,6 @@
 {
   "format": "souls-entry/1",
-  "kind": "eden:checkers_board",
+  "kind": "eden:checkers_table",
   "owner": "thing",
   "state": {
     "phase": { "n": 28, "type": "enum", "values": ["waiting", "playing"], "default": "waiting", "audience": { "rule": "everyone" } },
