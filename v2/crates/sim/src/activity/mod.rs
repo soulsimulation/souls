@@ -17,6 +17,10 @@
 //! - **A role may name a move (0.134 T1).** When an activity of such a kind starts, each member whose role names
 //!   one aims it at the other member through [`Activities::aim`] ([`Activities::begin_moves`]), and the move's record
 //!   goes out for viewers as a form's does (`souls:form-move`): a handshake, a hug, a high-five.
+//! - **A held move lasts while both stay (0.134 T2).** A role's move whose last phase holds (`hold_hand`) holds until
+//!   a member leaves: then every member's held move is released, so both hands come free, and each release goes out
+//!   for viewers as its record again, ended `released` ([`Activities::leave`]). A walk sent by a member ends it the same
+//!   way ([`Activities::holding_hands`] names the activity; worldd sends the leave).
 //! - **A leave completes within the time the kind states.** Membership ends at once, in the log. A body with no move
 //!   in progress is let go at once; a body in a move is let go at the move's next phase end, or at the kind's
 //!   `leave_within`, whichever is first, by a timer in K9's due list ([`Activities::fire`]).
@@ -71,6 +75,13 @@ fn as_bytes(v: Value) -> Value {
         Value::Map(m) => Value::Map(m.into_iter().map(|(k, v)| (k, as_bytes(v))).collect()),
         v => v,
     }
+}
+
+/// Whether move `n` is live and has a phase that holds until released (0.134 T2): its record ends it never.
+fn held(moves: &Moves, n: Instance) -> bool {
+    moves
+        .record(n)
+        .is_some_and(|r| r.ends.contains(&Micros::MAX))
 }
 
 fn name(s: &'static str) -> Name {
@@ -685,7 +696,7 @@ impl Activities {
         &mut self,
         tree: &mut Tree,
         c: &mut Controller,
-        moves: &Moves,
+        moves: &mut Moves,
         due: &mut DueList,
         mint: &mut Minter,
         ask: Ask,
@@ -695,6 +706,11 @@ impl Activities {
         let Some(l) = self.live.get(&activity) else {
             return Ok(ask.at);
         };
+        if !l.node.members.iter().any(|m| m.body == body) {
+            return Ok(ask.at);
+        }
+        self.let_go(tree, c, moves, due, ask, activity)?;
+        let l = self.live.get(&activity).expect("live above");
         let Some(i) = l.node.members.iter().position(|m| m.body == body) else {
             return Ok(ask.at);
         };
@@ -762,6 +778,50 @@ impl Activities {
             },
         );
         Ok(at)
+    }
+
+    /// The started activity holding `body` in which a member's move holds (0.134 T2: holding hands), if any: a walk
+    /// `body` sends ends it as a leave does.
+    pub fn holding_hands(&self, moves: &Moves, body: Id) -> Option<Id> {
+        let a = *self.holding.get(&body)?;
+        let l = self.live.get(&a)?;
+        l.moves.values().any(|n| held(moves, *n)).then_some(a)
+    }
+
+    /// Releases every member's held move in `activity` (0.134 T2), so both hands come free, each written for viewers
+    /// as its record again, ended `released`, caused by `ask`.
+    fn let_go(
+        &mut self,
+        tree: &mut Tree,
+        c: &mut Controller,
+        moves: &mut Moves,
+        due: &mut DueList,
+        ask: Ask,
+        activity: Id,
+    ) -> R<()> {
+        let Some(l) = self.live.get(&activity) else {
+            return Ok(());
+        };
+        let audience = l.audience;
+        let held: Vec<(Id, Instance)> = l
+            .moves
+            .iter()
+            .filter(|(_, n)| held(moves, **n))
+            .map(|(b, n)| (*b, *n))
+            .collect();
+        for (body, n) in held {
+            let Some(r) = moves.release(c, due, n, ask.at) else {
+                continue;
+            };
+            let fields = BTreeMap::from([
+                (1, activity.to_value()),
+                (2, body.to_value()),
+                (3, as_bytes(r.to_value())),
+            ]);
+            let by = (ask.at, Actor::Soul(ask.soul), Cause::Intent(ask.intent));
+            self.emit(tree, activity, audience, by, FORM_MOVE, fields, Vec::new())?;
+        }
+        Ok(())
     }
 
     /// Runs a timer the due list handed back: `None` when it is not a leave's. The leaving body's move is cancelled
