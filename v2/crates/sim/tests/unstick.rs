@@ -366,6 +366,14 @@ fn a1_the_eight_scenes_end_within_20_s() {
             );
         }
         assert!(last <= 20_000_000, "{}: ended at {last} us", s.name);
+        // 0.132 A2-3: where still bodies are the only way, the world steps them aside and every walker arrives.
+        if ["a still body in a doorway", "a body ringed by still bodies"].contains(&s.name) {
+            assert!(
+                ends.iter().all(|(_, e)| matches!(e, End::Arrived(_))),
+                "{}: every walker arrives: {ends:?}",
+                s.name
+            );
+        }
     }
 }
 
@@ -494,10 +502,11 @@ fn a3_a_body_in_a_piece_with_no_way_out_is_named() {
     assert_eq!((found[0].body, found[0].why), (id(900), "no-way-out"));
 }
 
-/// A4: a still body with no order to stay is sent `make-way` and never moved; a body staying by its own order in the
-/// same place is sent nothing and is passed.
+/// A4 (as Gene decided for 0.132 A2-3: no Soul is left stuck): a still body with no order to stay is sent
+/// `make-way`, and the world steps it aside by the smallest step that clears the way, a record naming it; the walker
+/// arrives. A body staying by its own order in the same place is sent nothing, never moved, and is passed.
 #[test]
-fn a4_make_way_goes_only_to_a_still_body_with_no_order_to_stay() {
+fn a4_make_way_steps_aside_only_a_still_body_with_no_order_to_stay() {
     for staying in [false, true] {
         let mut s = scenes().remove(2);
         if staying {
@@ -519,16 +528,41 @@ fn a4_make_way_goes_only_to_a_still_body_with_no_order_to_stay() {
                     _ => None,
                 })
                 .collect();
-        assert_eq!(body_of(&s, id(200)).pose.position, at, "never moved");
+        let stepped: Vec<(Id, Vec3, Vec3)> =
+            s.l.log
+                .iter()
+                .filter_map(|r| match r.rung {
+                    Rung::StepAside { body, from, to, .. } => Some((body, from, to)),
+                    _ => None,
+                })
+                .collect();
+        assert!(
+            matches!(ends[0].1, End::Arrived(_)),
+            "{name}: the walker arrives: {:?}",
+            ends[0].1
+        );
         if staying {
             assert!(asked.is_empty(), "sent nothing: {asked:?}");
-            assert!(
-                matches!(ends[0].1, End::Arrived(_)),
-                "passed: {:?}",
-                ends[0].1
-            );
+            assert!(stepped.is_empty(), "never stepped aside: {stepped:?}");
+            assert_eq!(body_of(&s, id(200)).pose.position, at, "never moved");
         } else {
             assert_eq!(asked, vec![id(200)], "make-way to the still body");
+            let [(body, from, to)] = stepped.as_slice() else {
+                panic!("one step aside: {stepped:?}")
+            };
+            let step = dist(*from, *to);
+            println!("no order to stay: stepped aside {step} um, from {from:?} to {to:?}");
+            assert_eq!(
+                (*body, *from),
+                (id(200), at),
+                "the still body, from where it stood"
+            );
+            assert_eq!(
+                body_of(&s, id(200)).pose.position,
+                *to,
+                "where the world put it"
+            );
+            assert!(step <= 3 * sim::unstick::CLEAR, "a small step: {step} um");
         }
     }
     // Thirty to one point: every make-way goes to a still body (one that has arrived), none to a walker.
