@@ -19,8 +19,9 @@
 //   address  a forged X-Forwarded-For is never the address today's launcher keys a request on
 //   site     /changelog, /changelog.md, /v1/feed and /ops answer from today's launcher
 //   stream   <stream>pointer (--stream, default /s/<v2>/) answers 200 from the new system
-//   gateway  /w/<v2>/v2/ws reaches the new system's agents' relay; /w/<today>/v2/ws stays with today's launcher
-//   pairing  /pair is the new system's pairing card; /v1/pair/* and /v1/agent/account reach the new system
+//   gateway  /w/<v2>/v2/ws and /w/<v2>/v1/bootstrap reach the new system; for --today both stay with today's launcher
+//   pairing  /pair is the new system's pairing card; /v1/pair/*, /v1/agent/account and /v1/account/view-token reach the
+//            new system
 //   poster   (asked for) --stopped, a page behind a stopped origin, shows "back in a moment" as 503 with Retry-After
 // --map reaches a name at another address (a local stand-in); redirects are still checked against the names.
 // Read-only: GETs and HEADs, plus a POST to an unknown path that each older domain redirects before anything reads it.
@@ -170,16 +171,18 @@ export async function frontCheck({ public: pub = 'https://soul.game', primary = 
     gateway: async () => {
       for (const [slug, want] of [[v2, 'v2'], [today, 'today']]) {
         if (!slug) continue;
-        const r = await done(await get(`${pub}/w/${slug}/v2/ws`));
-        seen.push(`gateway: /w/${slug}/v2/ws -> ${r.status} ${system(r)}`);
-        if (system(r) !== want || r.status === 502) bad('gateway', `/w/${slug}/v2/ws answered ${r.status} from ${system(r)}, want ${want}'s answer`);
+        for (const path of ['v2/ws', 'v1/bootstrap']) {
+          const r = await done(await get(`${pub}/w/${slug}/${path}`));
+          seen.push(`gateway: /w/${slug}/${path} -> ${r.status} ${system(r)}`);
+          if (system(r) !== want || r.status === 502) bad('gateway', `/w/${slug}/${path} answered ${r.status} from ${system(r)}, want ${want}'s answer`);
+        }
       }
     },
     pairing: async () => {
       const card = await get(`${pub}/pair`, { headers: { accept: 'text/html' } }), html = await card.text();
       seen.push(`pairing: /pair -> ${card.status} ${system(card)}`);
       if (card.status !== 200 || system(card) !== 'v2' || !/<html/i.test(html)) bad('pairing', `/pair answered ${card.status} from ${system(card)}, want the new pairing card (200 from v2)`);
-      for (const path of ['/v1/pair/poll', '/v1/agent/account']) {
+      for (const path of ['/v1/pair/poll', '/v1/agent/account', '/v1/account/view-token']) {
         const r = await done(await get(pub + path, { headers: { accept: 'application/json' } }));
         seen.push(`pairing: ${path} -> ${r.status} ${system(r)}`);
         if (system(r) !== 'v2' || r.status === 502) bad('pairing', `${path} answered ${r.status} from ${system(r)}, want the new system's directory`);

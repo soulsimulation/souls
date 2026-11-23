@@ -16,8 +16,11 @@
 # - A switched world's gateway: /w/<slug>/v2/(ws|creator-token|entries) to the agents' relay (7330, #4152), only for a
 #   slug with an activation file in /var/lib/souls-routes/slugs (routes.mjs, run each minute by souls-routes.timer).
 #   Every other address under /w/<slug>/ stays with today's launcher; an unmapped slug's v2 paths do too.
+# - A switched world's bootstrap, /w/<slug>/v1/bootstrap, to the viewers' origin (7320), under the same activation
+#   rule: the new Soul client reads it to pair with the world.
 # - Pairing, for the new Soul client: /pair (the pairing card, from the new page's files), /v1/pair/* and
-#   /v1/agent/account[/*] to the directory (7310). The card's own /assets/* files come from the new page's folder where
+#   /v1/agent/account[/*] to the directory (7310), and /v1/account/view-token (the old page's sign-in exchanged for the
+#   owner's message box, #4250); every other /v1/account/* path and /v1/auth/config stay with today's launcher. The card's own /assets/* files come from the new page's folder where
 #   such a file exists, else today's.
 # - The visitor's address: X-Forwarded-For is replaced with {client_ip}, trusted only from cdn-trust.snippet's ranges.
 # - Pages refuse framing by other sites; API answers are not indexed. Neither replaces a header the answer already has.
@@ -50,6 +53,26 @@ https://soul.game {
 			}
 		}
 	}
+	# A switched world's bootstrap, which the new Soul client reads to pair (`souls.mjs pair https://soul.game/w/<slug>/`)
+	@bootstrap path_regexp bootstrap ^/w/([a-z0-9][a-z0-9-]{0,62})/v1/bootstrap$
+	handle @bootstrap {
+		@active file {
+			root /var/lib/souls-routes/slugs
+			try_files /{re.bootstrap.1}
+		}
+		handle @active {
+			header X-Souls-System v2
+			reverse_proxy localhost:7320 {
+				header_up X-Forwarded-For {client_ip}
+			}
+		}
+		handle {
+			header X-Souls-System today
+			reverse_proxy localhost:@@PRODUCTION_PORT@@ {
+				header_up X-Forwarded-For {client_ip}
+			}
+		}
+	}
 	@pair path /pair /pair/
 	handle @pair {
 		header X-Souls-System v2
@@ -69,7 +92,8 @@ https://soul.game {
 		root * /usr/local/lib/souls/web
 		file_server
 	}
-	@pairing path /v1/pair/* /v1/agent/account /v1/agent/account/*
+	# /v1/account/view-token: the old page exchanges its sign-in there for the owner's message box (#4250)
+	@pairing path /v1/pair/* /v1/agent/account /v1/agent/account/* /v1/account/view-token
 	handle @pairing {
 		header X-Souls-System v2
 		reverse_proxy localhost:7310 {

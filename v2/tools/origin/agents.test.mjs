@@ -20,8 +20,12 @@ test('the front door sends every agent path to the relay on 7330; the page and i
   assert.equal(upstream('agents'), '7330');
   for (const base of ['/w/eden', '/w/new-town']) {
     for (const path of ['v2/ws', 'v2/creator-token', 'v2/entries']) assert.ok(agents.test(`${base}/${path}`), `${base}/${path} reaches the relay`);
-    for (const path of ['', 'v1/bootstrap', 'views/world.json', 'eden.mjs', 'v1/config']) assert.ok(!agents.test(`${base}/${path}`), `${base}/${path} stays with today's launcher`);
+    for (const path of ['', 'views/world.json', 'eden.mjs', 'v1/config']) assert.ok(!agents.test(`${base}/${path}`), `${base}/${path} stays with today's launcher`);
   }
+  // a switched world's bootstrap goes to the viewers' origin, for the new Soul client's pairing (F4)
+  const bootstrap = matcher('bootstrap');
+  assert.equal(upstream('bootstrap'), '7320');
+  assert.ok(bootstrap.test('/w/eden/v1/bootstrap') && !bootstrap.test('/w/eden/v1/bootstrapx') && !agents.test('/w/eden/v1/bootstrap'));
   assert.doesNotMatch(caddy, /@native|@page|preview/, 'no page, native read or preview route to the new system');
   for (const path of ['/w/eden/v2/ws/x', '/w/eden/v2/wsx', '/v2/ws', '/w/eden/s/v2/ws', '/preview/w/eden/v2/ws']) assert.ok(!agents.test(path), path);
 });
