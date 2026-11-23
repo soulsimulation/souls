@@ -978,9 +978,7 @@ pub fn follow(
 // A stream observer has its own durable publication cursor. The canonical source copy validates WHOLE parts
 // before any projection is exposed; the public copy never receives the source's private ledger.
 use directoryd::directory::store::{Store as ObjectStore, When};
-use replica::stream::public::{
-    PublicPlayer, baseline as public_baseline, context as public_context, digest, project,
-};
+use replica::stream::public::{PublicPlayer, baseline as public_baseline, digest, project};
 use replica::views::{Redactions, View};
 
 /// The public place names a value's public nodes reference (#3574), under #3571's rule: a node of the public
@@ -2964,10 +2962,13 @@ impl<S: ObjectStore> PublicWriter<S> {
             .map(|(i, v)| (*i, *v))
             .collect::<Vec<_>>();
         let context = match (&after, &delta) {
-            (Some(after), _) => public_context(
+            // The digests are already worked out: the player's state's, and the cut's above (#4192). Hashing either
+            // state again was a sixth of the writer's core at 500 agents.
+            (Some(after), _) => replica::stream::public::context_with(
                 &self.baseline,
-                self.player.state(),
-                after,
+                self.player.digest(),
+                &after_digest,
+                replica::stream::public::context_delta(self.player.state(), after)?,
                 self.cursor,
                 &self.duplicates,
                 &changed,

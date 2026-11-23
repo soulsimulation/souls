@@ -470,6 +470,21 @@ pub fn context(
     duplicates: &[(u64, Id)],
     changed: &[(Id, u64)],
 ) -> R<Vec<u8>> {
+    context_with(
+        baseline,
+        &digest(before)?,
+        &digest(after)?,
+        context_delta(before, after)?,
+        record,
+        duplicates,
+        changed,
+    )
+}
+
+/// The delta [`context`] carries from `before` to `after`: per-id rows for the keyed fields, whole values for the
+/// rest. A writer that already holds both digests passes it to [`context_with`] and gets [`context`]'s bytes without
+/// hashing either state again (#4192).
+pub fn context_delta(before: &Value, after: &Value) -> R<Value> {
     let old = map(before)?;
     let new = map(after)?;
     let mut delta = BTreeMap::new();
@@ -492,15 +507,7 @@ pub fn context(
             delta.insert(*k, v.clone());
         }
     }
-    context_with(
-        baseline,
-        &digest(before)?,
-        &digest(after)?,
-        Value::Map(delta),
-        record,
-        duplicates,
-        changed,
-    )
+    Ok(Value::Map(delta))
 }
 
 /// [`context`] from the digests of the states before and after and the delta between them, already worked out (#3799):
