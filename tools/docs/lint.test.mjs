@@ -46,6 +46,9 @@ test('refusals: each broken page names its problem', () => {
   assert.ok(codes(page(FM, '# A page\n\n```\ncurl http://127.0.0.1:4980/\n```')).includes('private.local-host'));
   assert.ok(codes(page(FM, '# A page\n\nThe box at 192.168.1.20.')).includes('private.ip'));
   assert.ok(codes(page(FM, '# A page\n\nWrite to someone@example.com.')).includes('private.email'));
+  // The terms page's one role address is public; any other address on the same page still is not.
+  assert.ok(!codes(page(FM, '# A page\n\nWrite to hello@soul.game.')).includes('private.email'));
+  assert.ok(codes(page(FM, '# A page\n\nWrite to hello@soul.game or other@soul.game.')).includes('private.email'));   // scrub-guard: allow
 });
 
 test('frontmatter edge cases and the writing rules the lint enforces', () => {

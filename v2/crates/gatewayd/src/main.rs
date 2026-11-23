@@ -10,7 +10,10 @@
 //! With `--creator <32 hex>-<n> --directory <addr:port>`, a page signed in as that creator exchanges its session for a
 //! short token (W5, `creator.rs`). With `--entries <dir>` (the world's `<world>/entries`) a signed-in client fetches
 //! the world's kind entries at `GET /v2/entries` (#3760, `entries.rs`); a folder that is unreadable or holds no
-//! entry stops it at start. Without the flag it says so on stderr and clients get no kinds.
+//! entry stops it at start. Without the flag it says so on stderr and clients get no kinds. With `--uploads <dir>` a
+//! creator uploads a model or a picture through the check and hold point, and allowed ones are served by hash
+//! (#3697, `uploads.rs`; the checker is `assets-check` beside this program unless `--assets-check <path>`;
+//! `--uploads-hold` holds every upload for review).
 //!
 //! On SIGTERM or SIGINT it stops accepting, closes every signed-in socket with 1012 and exits within [`DRAIN`]
 //! (O16, #2809; `v2/docs/runbook/gateway-upgrade.md`).
@@ -144,6 +147,31 @@ async fn main() {
         None => eprintln!(
             "gatewayd: no --entries: paired clients get none of the world's kinds (#3760)"
         ),
+    }
+    if let Some(dir) = arg("--uploads") {
+        let program = arg("--assets-check").map_or_else(
+            || {
+                std::env::current_exe()
+                    .ok()
+                    .and_then(|e| e.parent().map(|p| p.join("assets-check")))
+                    .unwrap_or_default()
+            },
+            PathBuf::from,
+        );
+        match gatewayd::uploads::Uploads::open(
+            std::path::Path::new(&dir),
+            program,
+            args.iter().any(|a| a == "--uploads-hold"),
+        ) {
+            Ok(u) => {
+                (gw.log)(&format!("uploads: taken at {}", gatewayd::uploads::PATH));
+                let _ = gw.uploads.set(u);
+            }
+            Err(why) => {
+                eprintln!("gatewayd: --uploads cannot be taken: {why}");
+                std::process::exit(2);
+            }
+        }
     }
     let views = arg("--views").map_or_else(
         || PathBuf::from(&world).with_extension("views"),
