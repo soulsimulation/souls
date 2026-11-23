@@ -187,7 +187,10 @@ function oneFence(binding) {
      *  front door's paths: `/w/<world>/v2/ws` and `/`). */
     v2Fields(w) {
       if (!this.v2Stream(w)) return null;
-      return { ...(v2Bodies ? { v2Bodies } : {}), v2Gateway: binding.v2Gateway ?? `/w/${canonicalSlug}/v2/ws`, v2Directory: binding.v2Directory ?? '/' };
+      // R2 (0.133): the world's public history export (its route's `history`, `/s/…/`), for the page's past time
+      let history = null;
+      try { const r = route(); history = publicStream(r.history) ? r.history : null; } catch { /* none */ }
+      return { ...(v2Bodies ? { v2Bodies } : {}), v2Gateway: binding.v2Gateway ?? `/w/${canonicalSlug}/v2/ws`, v2Directory: binding.v2Directory ?? '/', ...(history ? { v2History: history } : {}) };
     },
     /** #4177: at route time, the old world's static views (`read(path)` -> `{ status, body }` from its process) written
      *  into staticDir, each file whole (`.tmp`, then renamed; the origin never serves a `.tmp`), the manifest last. Once

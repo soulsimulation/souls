@@ -906,6 +906,37 @@ function marksOf(row) {
   return { marks: { ...(owner !== undefined ? { owner: who } : {}), ...(access !== undefined ? { access: Number(access) } : {}) } };
 }
 
+/** K3 (0.133): the uploaded models the batch's definitions name (`looks.model: "upload:<hash>"`), or a refusal when
+ *  one is written wrong. A model is the hash `upload` answered: `1220` and the SHA-256 in hex. */
+const UPLOAD_MODEL = /^upload:(1220[0-9a-f]{64})$/;
+function modelsOf(ops) {
+  const hashes = [];
+  for (const o of ops ?? []) {
+    if (o?.op !== 'define') continue;
+    let r;
+    try { r = typeof o.entry === 'string' ? JSON.parse(o.entry) : o.entry; } catch { continue; } // the copy's check names it
+    const m = r?.looks?.model;
+    if (typeof m !== 'string' || !m.startsWith('upload:')) continue;
+    const hit = UPLOAD_MODEL.exec(m);
+    if (!hit) return { code: 'kind.model', detail: `looks.model ${JSON.stringify(m).slice(0, 80)}: upload:1220 and 64 hex` };
+    hashes.push(hit[1]);
+  }
+  return { hashes };
+}
+/** Whether the gateway serves the upload (an allowed one; a held or unknown one is not served), or the refusal. */
+async function modelAllowed(hash) {
+  const u = new URL(seat.gateway);
+  u.protocol = u.protocol === 'wss:' ? 'https:' : u.protocol === 'ws:' ? 'http:' : u.protocol;
+  u.pathname = `${u.pathname.replace(/\/v2\/ws$/, '')}/v2/uploads/${hash}`;
+  u.search = ''; u.hash = '';
+  try {
+    const r = await fetch(u, { method: 'HEAD', signal: AbortSignal.timeout(10_000) });
+    return r.status === 200 ? null : { code: 'kind.model-unknown', detail: `${hash} is not an allowed upload of this world` };
+  } catch {
+    return { code: 'upload.unreachable', detail: 'the gateway did not answer' };
+  }
+}
+
 /** The batch as replica's `ops_of` reads it: kinds by full name, positions in µm (a creator writes mm). */
 async function editOnce(req) {
   if (seat.grant.actor !== 'creator') return { ok: false, code: 'edit.not-the-creator', detail: 'this home holds a Soul\'s token, not a creator\'s' };
@@ -916,6 +947,12 @@ async function editOnce(req) {
   // #3695: weather, sky and strike are sets on the world node, made from the copy as it is now, after the sync.
   const w = undo ? { ops: [] } : await worldBatch(req);
   if (w.ok === false) return closing({ ...w, sent: false, local: true }, null, { age });
+  // K3: a definition whose look is an uploaded model names an allowed upload of this world, else nothing is sent
+  if (!undo) {
+    const m = modelsOf(w.ops);
+    if (m.code) return closing({ ok: false, ...m, sent: false, local: true }, null, { age });
+    for (const h of m.hashes) { const no = await modelAllowed(h); if (no) return closing({ ok: false, ...no, sent: false, local: true }, null, { age }); }
+  }
   const batch = undo ? null : batchOf(w.ops, req.claim);
   let defines;
   if (!undo) {

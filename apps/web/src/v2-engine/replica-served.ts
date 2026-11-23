@@ -3,7 +3,7 @@
 // world routed to v2 (`<world>/replica.js` and `replica_bg.wasm`, the deployed v2 client's own files; the launcher's
 // cutover.mjs), so its bytes are always the running world's. The page's reader (reader.ts) posts that address to the
 // worker before the stream; it is taken here, ahead of the worker's own handler.
-type Replica = { default: () => Promise<unknown>; StreamPlayer: unknown; readPointer: unknown };
+type Replica = { default: () => Promise<unknown>; StreamPlayer: unknown; readPointer: unknown; historyAt: unknown };
 
 let address: (url: string) => void = () => {};
 const served = new Promise<string>((y) => { address = y; });
@@ -19,10 +19,13 @@ const served = new Promise<string>((y) => { address = y; });
 export let StreamPlayer: any;
 // eslint-disable-next-line @typescript-eslint/no-explicit-any
 export let readPointer: any;
+/** R2: a past moment, for the old page's history worker (history-worker.ts). */
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+export let historyAt: any;
 
 /** Loads the served replica.js, which fetches replica_bg.wasm beside itself (wasm-bindgen's `--target web` init). */
 export default async function init(): Promise<void> {
   const m = await import(/* @vite-ignore */ await served) as Replica;
   await m.default();
-  ({ StreamPlayer, readPointer } = m);
+  ({ StreamPlayer, readPointer, historyAt } = m);
 }
