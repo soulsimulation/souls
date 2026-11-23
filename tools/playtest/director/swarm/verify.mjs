@@ -1,9 +1,9 @@
 // The cast's success condition, checked from world truth only: the presence log (public Soul placePath) and the speech
 // log (public Soul speech events) the orchestrator recorded, against the directions it sent. Plus per-seat cost.
 // node tools/playtest/director/swarm/verify.mjs <run-dir>   → director/verdict.json + director/VERDICT.md
+import { isMain } from '../../../lib/is-main.mjs';
 import { existsSync, readdirSync, writeFileSync } from 'node:fs';
 import { join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { readJson, readJsonl, writeJson } from '../../lib/jsonl.mjs';
 import { normalizeCast } from './cast.mjs';
 
@@ -116,7 +116,7 @@ export function verifyRun(runDir, cast = null) {
   return { ...v, cost };
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const r = verifyRun(resolve(process.argv[2]));
   process.stdout.write(JSON.stringify({ pass: r.pass, checks: r.checks, costUsd: r.cost.total.costUsd }) + '\n');
 }

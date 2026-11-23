@@ -12,6 +12,7 @@
 // folder supplies the files its commands read (final versions only). --cli-only checks every row against the CLI's
 // own reading (parseFlags + checkArgs) without a world: a recorded accepted command the CLI now refuses is a
 // regression; a recorded CLI refusal the CLI now sends is a loosening.
+import { isMain } from '../../lib/is-main.mjs';
 import { copyFileSync, existsSync, mkdirSync, mkdtempSync, readdirSync, readFileSync, rmSync, statSync, writeFileSync } from 'node:fs';
 import { tmpdir } from 'node:os';
 import { basename, dirname, join, relative, resolve } from 'node:path';
@@ -172,4 +173,4 @@ async function main(argv) {
   }
   if (flag('json')) writeFileSync(resolve(flag('json')), JSON.stringify(report, null, 1) + '\n');
 }
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) await main(process.argv.slice(2));
+if (isMain(import.meta.url)) await main(process.argv.slice(2));

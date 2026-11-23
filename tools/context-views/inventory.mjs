@@ -1,9 +1,10 @@
 #!/usr/bin/env node
 // One unchanged offline template per invocation. No server, render, inference or live credentials.
+import { isMain } from '../lib/is-main.mjs';
 import { createHash } from 'node:crypto';
 import { existsSync, mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { replay } from '../meaning/materialize.mjs';
 import { contextTargets, contextEnclosed } from '../../apps/server/src/god/context-view-scene.ts';
 
@@ -53,7 +54,7 @@ export function inventory(name, destination) {
     summary, targets }, null, 2) + '\n');
   return { name, resumed: false, ...summary };
 }
-if (process.argv[1] && pathToFileURL(resolve(process.argv[1])).href === import.meta.url) {
+if (isMain(import.meta.url)) {
   const [name, output] = process.argv.slice(2);
   if (!name || !output) throw Error('inventory.mjs <template-name> <explicit-output-directory>');
   console.log(JSON.stringify(inventory(name, output)));

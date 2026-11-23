@@ -621,6 +621,18 @@ impl Forms {
             .collect()
     }
 
+    /// Each body whose step in progress is a walk right before a `move`: the move's name, so the world can end the walk
+    /// within that move's own reach of the thing (#4072: a `touch` on a long bench).
+    pub fn walk_moves(&self) -> BTreeMap<Id, Name> {
+        self.runs
+            .values()
+            .filter_map(|fr| match (fr.runner.step()?, fr.runner.next_step()?) {
+                (Step::WalkTo { .. }, Step::Move { name, .. }) => Some((fr.body, name.clone())),
+                _ => None,
+            })
+            .collect()
+    }
+
     /// The bodies whose run's step in progress is an approach walk, the walk the binding adds before a form's first
     /// move at a point (#3688), so the world can aim it at clear ground on the body's side of that point.
     pub fn approaches(&self) -> std::collections::BTreeSet<Id> {
@@ -917,6 +929,20 @@ impl Forms {
             && let Some(p) = w.tree.handle(node).and_then(|h| w.tree.node(h)?.place())
         {
             form_runner::turn(&mut steps, p.orientation)?;
+        }
+        // A move on the body itself (a wave, a stretch) is made where it stands: no approach walk to its own point,
+        // which a seated body's legs would refuse (`resource-held`, #4143).
+        if node == body {
+            steps.retain(|s| {
+                !matches!(
+                    s,
+                    Step::WalkTo {
+                        on: None,
+                        approach: true,
+                        ..
+                    }
+                )
+            });
         }
         let reserves = node != body && !self.shared.contains(&node);
         if reserves && let Some(holder) = self.holder(node) {

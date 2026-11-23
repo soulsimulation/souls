@@ -5,6 +5,7 @@
 // (lower flight x 87.2..88 going north, turn landing, upper flight x 88.2..89 going south, exit landing onto the floor).
 // The live stair-well guards (office-stair-guards/1) already fence the well on the upper floors.
 // Pure and deterministic: node tools/upper-floors/old-eden-office.mjs <out-dir> writes office.fact.json + office.spots.json.
+import { isMain } from '../lib/is-main.mjs';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 
@@ -84,7 +85,7 @@ export function officeSpots() {
   return spots;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const out = process.argv[2]; if (!out) { console.error('usage: old-eden-office.mjs <out-dir>'); process.exit(2); }
   mkdirSync(out, { recursive: true });
   writeFileSync(join(out, 'office.fact.json'), JSON.stringify(officeFact(), null, 1) + '\n');

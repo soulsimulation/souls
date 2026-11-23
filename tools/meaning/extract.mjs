@@ -1,7 +1,6 @@
 #!/usr/bin/env node
+import { isMain } from '../lib/is-main.mjs';
 import{writeFileSync}from'node:fs';
-import{resolve}from'node:path';
-import{pathToFileURL}from'node:url';
 import{hashOf}from'../../packages/world-compiler/src/index.ts';
 import{materialize}from'./materialize.mjs';
 export function extract(name){
@@ -18,4 +17,4 @@ export function extract(name){
  }
  return{schema:'meaning-candidates/1',worldId:name,source:{template:`worlds/templates/${name}.json`,sha:hashOf(template),provenance},candidates};
 }
-if(process.argv[1]&&pathToFileURL(resolve(process.argv[1])).href===import.meta.url){const[name,out]=process.argv.slice(2);if(!name||!out)throw Error('extract.mjs <template> <output.json>');const result=extract(name);writeFileSync(out,JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify({name,candidates:result.candidates.length,out}));}
+if(isMain(import.meta.url)){const[name,out]=process.argv.slice(2);if(!name||!out)throw Error('extract.mjs <template> <output.json>');const result=extract(name);writeFileSync(out,JSON.stringify(result,null,2)+'\n');console.log(JSON.stringify({name,candidates:result.candidates.length,out}));}

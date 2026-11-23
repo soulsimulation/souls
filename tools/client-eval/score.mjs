@@ -1,5 +1,5 @@
+import { isMain } from '../lib/is-main.mjs';
 import { readFileSync, writeFileSync } from 'node:fs';
-import { pathToFileURL } from 'node:url';
 
 // Adapters collect public observations. Assertions do not enter client prompts.
 // Missing evidence never becomes a pass, and estimates never become billing.
@@ -62,7 +62,7 @@ export function score(run) {
   return { schema: 'eden-client-score/1', attemptId: run.attemptId, retestOf: run.retestOf ?? null, source: run.source, cohort: run.cohort, scenarios, usage: run.usage ?? null, firstFailure: run.firstFailure ?? null };
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) {
+if (isMain(import.meta.url)) {
   const [input, output] = process.argv.slice(2);
   if (!input || !output) throw new Error('Usage: node score.mjs evidence.json new-score.json');
   writeFileSync(output, `${JSON.stringify(score(JSON.parse(readFileSync(input, 'utf8'))), null, 2)}\n`, { flag: 'wx' });
