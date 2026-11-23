@@ -2283,6 +2283,8 @@ fn serve(args: &[String]) -> R<()> {
         .map_err(|e| format!("refusing to start: {}", refusal(e)))?;
     println!("{backup}");
     cfg.synced = Some(tx);
+    // A failed log or text store ends the process by name; the unit restarts the world from its log (#4134).
+    cfg.halted = Some(answers::exit_on_halt());
     // E6's day, night and weather on Eden's calendar, written at the first tick of a world whose node holds none (C5).
     cfg.sky = Some(eden_sky(built.header.lineage));
     cfg.hatches = hatches(&dir.join("hatches"))?;
