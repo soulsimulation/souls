@@ -11,7 +11,7 @@ use replica::effects::{Refusal, read_id};
 use replica::encode::Value;
 use replica::ids::Id;
 use replica::moves::Move;
-use replica::time::Micros;
+use replica::time::{Mapping, Micros, Tempo, TickRate, Timeline};
 
 use super::{Activities, Near, PAIR, World, header, moves, n, pair, rules, world};
 
@@ -29,12 +29,26 @@ fn handshake() -> Move {
     mv
 }
 
+/// Holding a hand (0.134 T2): the handshake's one hand, its last phase held until released (B's `hold_hand`).
+fn hold_hand() -> Move {
+    let mut mv = handshake();
+    mv.name = n("souls:hold_hand");
+    mv.contact = n("souls:hand-left");
+    mv.phases.last_mut().expect("a phase").held = true;
+    mv
+}
+
 /// `k` bodies whose pair's roles each name the handshake.
 fn touching(k: usize, seed: u8) -> World {
+    with_move(k, seed, "souls:handshake")
+}
+
+/// `k` bodies whose pair's roles each name move `mv`.
+fn with_move(k: usize, seed: u8, mv: &str) -> World {
     let mut w = world(k, seed);
     let mut kind = pair();
     for r in &mut kind.roles {
-        r.mv = Some(n("souls:handshake"));
+        r.mv = Some(n(mv));
     }
     w.acts = Activities::new(
         header(w.root),
@@ -74,10 +88,41 @@ impl World {
             &mut self.moves,
             &mut self.due,
             &mut self.mint,
-            &[handshake()],
+            &[handshake(), hold_hand()],
             &Near,
+            &Timeline::start(
+                Mapping::new(0, 0, 1, 1).expect("rate one"),
+                TickRate::new(0, 0, 20).expect("20 a second"),
+                Tempo::per_minute(0, 0, 120).expect("120 a minute"),
+            )
+            .expect("a line"),
             at,
         )
+    }
+
+    /// Each `souls:form-move` written: the body and how its move ended, if it has (`released`).
+    fn endings(&self) -> Vec<(Id, Option<String>)> {
+        self.acts
+            .stream
+            .iter()
+            .flat_map(|e| e.events.iter().flatten())
+            .filter(|ev| ev.name.as_str() == "souls:form-move")
+            .map(|ev| {
+                let Value::Map(r) = &ev.fields[&3] else {
+                    panic!("a move record")
+                };
+                let how = match r.get(&9) {
+                    Some(Value::Map(e)) => match e.get(&2) {
+                        Some(Value::Bytes(b)) => {
+                            Some(String::from_utf8(b.clone()).expect("a name"))
+                        }
+                        other => panic!("how it ended: {other:?}"),
+                    },
+                    _ => None,
+                };
+                (read_id(&ev.fields[&2]).expect("a body"), how)
+            })
+            .collect()
     }
 
     /// Each `souls:form-move` written: the body and its move's contact time.
@@ -153,15 +198,26 @@ fn t1_an_accepted_handshake_writes_both_moves_touching_together() {
     assert_eq!(r.name, "target-outside-activity");
     assert_eq!(w.acts.stream.len(), written);
 
-    // The moves end, the members take their roles back, and either may leave.
+    // The moves end, and the touch ends with them: both members leave it, and both are held by nothing.
     let _ = w.run(LASTS);
     assert!(w.moves.is_empty(), "both moves ended");
+    let refused = w.acts.finish(
+        &mut w.tree,
+        &mut w.c,
+        &mut w.moves,
+        &mut w.due,
+        &mut w.mint,
+        LASTS,
+    );
+    assert!(refused.is_empty(), "{refused:?}");
+    assert!(w.acts.members(pair).is_none(), "the touch ended");
+    assert!(w.free(b0) && w.free(b1), "both arms free");
     let ask = w.ask(0, LASTS);
     w.acts
         .leave(
             &mut w.tree,
             &mut w.c,
-            &w.moves,
+            &mut w.moves,
             &mut w.due,
             &mut w.mint,
             ask,
@@ -195,4 +251,64 @@ fn t1_a_declined_or_lapsed_handshake_moves_nobody() {
     assert!(w.touches().is_empty(), "nobody moved");
     assert!(w.moves.is_empty());
     println!("t1: a declined and a lapsed handshake: no move written");
+}
+
+#[test]
+fn t2_hands_held_while_both_stay_and_freed_when_either_leaves() {
+    let mut w = with_move(2, 0x73, "souls:hold_hand");
+    let (b0, b1) = (w.bodies[0], w.bodies[1]);
+    let offer = w.offer_to(0, 1, 1_000);
+    let ask = w.ask(1, 2_000);
+    let pair = w
+        .acts
+        .accept(
+            &mut w.tree,
+            &mut w.mint,
+            &mut w.c,
+            &mut w.due,
+            ask,
+            b1,
+            offer,
+        )
+        .expect("accepted");
+    let refused = w.begin(2_000);
+    assert!(refused.is_empty(), "{refused:?}");
+    assert_eq!(w.touches().len(), 2, "both members hold a hand");
+    // Long after the reach: no timer is left for the held moves, and both still hold.
+    let _ = w.run(2_000 + LASTS);
+    assert!(w.due.is_empty(), "a held move sets no timer");
+    assert!(!w.moves.is_empty(), "both still hold");
+    assert_eq!(w.acts.walk_leaves(&w.moves, b0), Some(pair));
+    assert_eq!(w.acts.walk_leaves(&w.moves, b1), Some(pair));
+
+    // Soul 1 leaves: both holds are released at once, each written again ended `released`, and both hands are free.
+    let at = 3_000 + LASTS;
+    let ask = w.ask(1, at);
+    let let_go = w
+        .acts
+        .leave(
+            &mut w.tree,
+            &mut w.c,
+            &mut w.moves,
+            &mut w.due,
+            &mut w.mint,
+            ask,
+            b1,
+            pair,
+        )
+        .expect("a leave is always accepted");
+    assert_eq!(let_go, at, "let go at once");
+    assert!(w.moves.is_empty(), "both holds released");
+    let released: BTreeSet<Id> = w
+        .endings()
+        .into_iter()
+        .filter(|(_, how)| how.as_deref() == Some("released"))
+        .map(|(b, _)| b)
+        .collect();
+    assert_eq!(released, BTreeSet::from([b0, b1]));
+    assert!(w.free(b1), "the one who left holds nothing");
+    assert_eq!(w.acts.walk_leaves(&w.moves, b0), None);
+    println!(
+        "t2: held past {LASTS} µs with no timer; one leave freed both hands, each written `released`"
+    );
 }

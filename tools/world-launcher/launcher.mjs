@@ -14,7 +14,7 @@
 //   GET  /__sim/worlds.json      local-worlds/1, extended with slug/name/template/god/entities
 //   GET  /__sim/templates.json   genesis templates (worlds/templates/*.json) + the empty plain
 //   GET  /__sim/my-souls.json    my-souls/1 (#2466): the signed-in account's own Souls across these worlds (my-souls.mjs), read
-//                                from each world's store (a sleeping world stays asleep); 401 signed out. GET /__sim/soul-photo/
+//                                from each world's store (a sleeping world stays asleep; a moved world's from the v2 directory); 401 signed out. GET /__sim/soul-photo/
 //                                <slug>/<soulId>/<sha256>.png: a live Soul's stored photo or portrait by its hash, immutable
 //   POST /__sim/worlds           {name, template} → creates, waits for /healthz → {slug, url}
 //   GET  /__sim/worlds/<slug>    one world + what the launcher has seen (looks, agent, previews)
@@ -140,7 +140,7 @@ import { isUnlisted, publicWorlds } from './listing.mjs';
 import { NOINDEX, robotsTxt, sitemapXml } from './crawl.mjs';
 import { mcpServerJson, siteLlmsTxt } from './mcp-card.mjs';
 import { opSoul, opSetTest } from './op-souls.mjs';
-import { accountSouls, soulPhoto } from './my-souls.mjs';
+import { accountSouls, directorySouls, soulPhoto } from './my-souls.mjs';
 import { THUMB, THUMB_CACHE, THUMB_PATH, adminVetoes, clearThumbnail, intakeThumbnail, pruneThumbnails, rateRefusal, templateThumbs, thumbnailFile, thumbnailOf, thumbnailRate, writeThumbnail } from './thumbnail.mjs';
 // The host check's last result, if the sim-worlds-health timer runs; stale (>30 min) counts as not ok.
 /** <data>/launcher-settings.json (written by deploy/install.sh unload-still), read once at each launcher's start, so a
@@ -674,12 +674,16 @@ export async function openLauncher(cfg = {}) {
     if (!tok || tok.startsWith('god_')) return null;
     const account = auth ? await verifiedCreator(authorization, auth.child, publicOrigin, root) : tok.startsWith('dev:') && tok.length > 4 ? `dev:${tok.slice(4, 40)}` : null;
     if (!account) return null;
-    const worlds = registry.worlds.filter((w) => !w.fork && !closing.has(w.slug));
+    const all = registry.worlds.filter((w) => !w.fork && !closing.has(w.slug));
+    // MS (0.132.1): a moved world's Souls are the new engine's, listed by its directory; its old store is not read
+    const moved = new Map(all.flatMap((w) => { const v2 = cutover?.v2World(w); return v2 ? [[v2, w]] : []; }));
+    const worlds = all.filter((w) => ![...moved.values()].includes(w));
+    const newEngine = moved.size ? movedSouls(tok, moved) : Promise.resolve([]);
     const opts = { file: (w) => join(registry.worldDir(w.slug), 'sim.db'), worldId: worldIdOf, url: (w) => describe(w).url,
       photo: (w, id, hash) => `${B}/__sim/soul-photo/${w.slug}/${encodeURIComponent(id)}/${hash}.png` };
     const souls = accountSouls(worlds, account, opts);
     const live = [...new Set(souls.flatMap((s) => s.worlds.map((x) => x.slug)))].filter((slug) => pool.status(slug).status === 'running');
-    if (!live.length) return souls;
+    if (!live.length) return [...souls, ...await newEngine];
     const current = new Map();
     await Promise.all(live.map(async (slug) => {
       try {
@@ -688,7 +692,19 @@ export async function openLauncher(cfg = {}) {
         current.set(slug, new Map((Array.isArray(me?.souls) ? me.souls : []).flatMap((s) => typeof s?.profile?.photo?.hash === 'string' ? [[s.id, s.profile.photo.hash]] : [])));
       } catch { /* its stored portrait stands */ }
     }));
-    return accountSouls(worlds, account, { ...opts, current });
+    return [...accountSouls(worlds, account, { ...opts, current }), ...await newEngine];
+  }
+  // MS (0.132.1): the directory's list of the person's own Souls (`POST /v1/account/souls`), asked with their own sign-in
+  // as the directory checks it (a local dev sign-in as its test person, as the page's view-token exchange does), so it
+  // answers that account's Souls and no one else's. `moved` maps a new-engine world name to its launcher world.
+  const directoryUrl = (cfg.v2DirectoryUrl ?? process.env.SOULS_V2_DIRECTORY ?? 'http://127.0.0.1:7310').replace(/\/$/, '');   // the install's (v2/docs/runbook/install.md)
+  async function movedSouls(tok, moved) {
+    const dev = !auth && tok.startsWith('dev:');
+    try {
+      const r = await fetch(`${directoryUrl}/v1/account/souls`, { method: 'POST', signal: AbortSignal.timeout(3000),
+        headers: { 'content-type': 'application/json', ...(dev ? {} : { authorization: `Bearer ${tok}` }) }, body: JSON.stringify(dev ? { test_person: tok.slice(4, 40) } : {}) });
+      return r.ok ? directorySouls((await r.json())?.souls, moved, (w) => describe(w).url) : [];
+    } catch { return []; }   // the directory unreachable: the moved world's Souls are not listed, every other world's are
   }
   /** `readBody` runs only once the owner is known (null: over the size limit). Every await is followed by a check that
    *  the world was not archived meanwhile, so nothing is written into a folder that has moved (the restore would refuse). */
