@@ -101,7 +101,7 @@ pub struct Route {
     crossing: Option<Crossing>,
     /// The mark last set on the body.
     waiting: Option<(Id, i64)>,
-    /// Last tick's position, velocity wanted and turn tried, for a step cut at an edge.
+    /// Last tick's position, guarded step and turn tried, for a step the mover cut at an edge.
     last: Option<(Vec3, [i64; 2], usize)>,
     /// Its personal radius, µm (#4215).
     pub room: i64,
@@ -501,12 +501,12 @@ impl Skill for Route {
             &pushers,
             2 * self.room + SLACK,
         );
-        // A step cut to nothing last tick is tried turned this tick.
+        // A step the mover cut to nothing last tick is tried turned this tick. The step kept is the guarded one: a
+        // wait for another body's space is no edge, and is not turned (#4215).
         let turn = match self.last {
             Some((q, w, t)) if q == p && w != [0, 0] && v != [0, 0] => (t + 1) % TURNS.len(),
             _ => 0,
         };
-        self.last = Some((p, v, turn));
         // The hard rule under the push: no step into another body's space (#4215).
         let room = 2 * self.room + SLACK;
         let mut want = turned(v, TURNS[turn]);
@@ -542,6 +542,7 @@ impl Skill for Route {
             }
             (self.held, self.window) = (0, None);
         }
+        self.last = Some((p, step, turn));
         walk(host, step);
         Progress::Going
     }
