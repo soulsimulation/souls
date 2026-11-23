@@ -419,7 +419,10 @@ impl Fixed {
             .solids
             .iter()
             .filter(|s| {
-                let c = s.ring.iter().fold([0, 0], |a, p| [a[0] + p[0] / 4, a[1] + p[1] / 4]);
+                let c = s
+                    .ring
+                    .iter()
+                    .fold([0, 0], |a, p| [a[0] + p[0] / 4, a[1] + p[1] / 4]);
                 spans(s.y0, s.y1, Terrain::ground(t, c[0], c[1], s.y0))
             })
             .map(|s| s.ring)
