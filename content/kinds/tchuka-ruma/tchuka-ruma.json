@@ -2499,7 +2499,7 @@
       {
         "part": "relay_pointer",
         "field": "relay",
-        "do": "slide_x",
+        "do": "slide",
         "at": {
           "0": 0,
           "1": 170,
@@ -2507,12 +2507,13 @@
           "3": 650,
           "4": 890,
           "5": 1420
-        }
+        },
+        "axis": "x"
       },
       {
         "part": "relay_pointer",
         "field": "relay",
-        "do": "slide_z",
+        "do": "slide",
         "at": {
           "0": 0,
           "1": -780,
@@ -2520,7 +2521,8 @@
           "3": -780,
           "4": -780,
           "5": 0
-        }
+        },
+        "axis": "z"
       }
     ],
     "shape": {
