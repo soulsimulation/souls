@@ -678,8 +678,7 @@ impl Pairing {
             text.push_str(&format!("{g} {h}\n"));
         }
         let tmp = file.with_extension("tmp");
-        std::fs::write(&tmp, text)?;
-        std::fs::rename(tmp, file)
+        crate::durable::replace(file, &tmp, text.as_bytes())
     }
 
     /// The Souls `account` holds, each with the device it is connected to (`None`: unconnected), in grant order.
