@@ -1182,25 +1182,61 @@ impl Engine {
                             (None, "souls:holder-left")
                         }
                         Err(_) => {
-                            let held = self.held_load(&tree, part);
-                            if let Some(l) = held {
-                                carry.load = l;
-                            }
+                            // Where it stands: laid flat there as its entry lays it when that is clear, else left
+                            // standing as it is, on the ground with no offset.
+                            let entry = tree
+                                .handle(part)
+                                .and_then(|h| tree.node(h))
+                                .and_then(|n| self.loads.get(plain(n.kind().as_str())).copied())
+                                .unwrap_or_else(Load::board);
                             let stand = tree
                                 .handle(part)
                                 .zip(tree.handle(ground))
                                 .and_then(|(p, g)| sim::ground::scene::xform_to(&tree, p, g).ok());
-                            let here = stand.map(|s| {
-                                (
-                                    Vec3::new(
-                                        s.pos.x,
-                                        s.pos.y + sim::activity::carry::HEIGHT,
-                                        s.pos.z,
-                                    ),
-                                    s.rot,
-                                )
-                            });
-                            (here, "souls:holder-left-in-place")
+                            match stand {
+                                Some(st) => {
+                                    let ax = st
+                                        .rot
+                                        .rotate(Vec3::new(1_000_000, 0, 0))
+                                        .map_or([1_000_000, 0], |v| [v.x, v.z]);
+                                    let yaw = sim::activity::carry::yaw_toward(ax)
+                                        .unwrap_or(replica::pose::Quat::IDENTITY);
+                                    let a = [
+                                        (i128::from(ax[0]) * i128::from(entry.half_length)
+                                            / 1_000_000)
+                                            as i64,
+                                        (i128::from(ax[1]) * i128::from(entry.half_length)
+                                            / 1_000_000)
+                                            as i64,
+                                    ];
+                                    let flat = sim::activity::carry::outline(
+                                        [st.pos.x + a[0], st.pos.z + a[1]],
+                                        [st.pos.x - a[0], st.pos.z - a[1]],
+                                        &entry,
+                                    );
+                                    let over =
+                                        Vec3::new(st.pos.x, sim::activity::carry::HEIGHT, st.pos.z);
+                                    if self.room_at(&tree, c, ground, part, &flat, body) {
+                                        carry.load = entry;
+                                        carry.track.push((now, over, yaw));
+                                        (None, "souls:holder-left-flat")
+                                    } else {
+                                        carry.load = Load {
+                                            turn: st.rot,
+                                            middle: Vec3::ZERO,
+                                            rest: 0,
+                                            ..entry
+                                        };
+                                        carry.track.push((
+                                            now,
+                                            over,
+                                            replica::pose::Quat::IDENTITY,
+                                        ));
+                                        (None, "souls:holder-left-standing")
+                                    }
+                                }
+                                None => (None, "souls:holder-left-in-place"),
+                            }
                         }
                     };
                     match break_off(
@@ -1437,6 +1473,93 @@ impl Engine {
             sim::activity::carry::yaw_toward(along)?,
             load,
         ))
+    }
+
+    /// Whether `quad` (a resting outline on `ground`, µm) is clear of fixed geometry (`part`'s own outlines aside), of
+    /// every other part B18 reads, at any height, and of every body but `skip`'s.
+    fn room_at(
+        &self,
+        tree: &Tree,
+        c: &Controller,
+        ground: Id,
+        part: Id,
+        quad: &sim::activity::carry::Quad,
+        skip: Id,
+    ) -> bool {
+        use sim::activity::carry::{Fixed, overlap};
+        let (Some(gh), Some(ph)) = (tree.handle(ground), tree.handle(part)) else {
+            return false;
+        };
+        let Ok(fixed) = Fixed::of(tree, ground) else {
+            return false;
+        };
+        let Ok(x) = sim::ground::scene::xform_to(tree, ph, gh) else {
+            return false;
+        };
+        let hw = tree
+            .node(ph)
+            .and_then(|n| self.loads.get(plain(n.kind().as_str())))
+            .map_or(0, |l| l.half_width)
+            + 10_000;
+        let mine = |q: &sim::activity::carry::Quad| {
+            q.iter()
+                .all(|p| (p[0] - x.pos.x).abs() <= hw && (p[1] - x.pos.z).abs() <= hw)
+        };
+        let b = [
+            quad.iter().map(|p| p[0]).min().unwrap_or(0),
+            quad.iter().map(|p| p[1]).min().unwrap_or(0),
+            quad.iter().map(|p| p[0]).max().unwrap_or(0),
+            quad.iter().map(|p| p[1]).max().unwrap_or(0),
+        ];
+        if fixed
+            .within(b)
+            .into_iter()
+            .any(|q| !mine(q) && overlap(quad, q))
+        {
+            return false;
+        }
+        let is_part = |k: &str| self.asm.as_ref().is_some_and(|s| s.is_part(k));
+        let mut stack = vec![tree.root()];
+        while let Some(h) = stack.pop() {
+            stack.extend(tree.children(h).unwrap_or(&[]).iter().copied());
+            let Some(n) = tree.node(h) else { continue };
+            if n.id() == part || !is_part(n.kind().as_str()) {
+                continue;
+            }
+            let Ok(o) = sim::ground::scene::xform_to(tree, h, gh) else {
+                continue;
+            };
+            let r = self
+                .loads
+                .get(plain(n.kind().as_str()))
+                .map_or(1_000_000, |l| l.half_length);
+            let sq = [
+                [o.pos.x - r, o.pos.z - r],
+                [o.pos.x + r, o.pos.z - r],
+                [o.pos.x + r, o.pos.z + r],
+                [o.pos.x - r, o.pos.z + r],
+            ];
+            if overlap(quad, &sq) {
+                return false;
+            }
+        }
+        let radius = sim::ground::HUMAN_RADIUS * 1000;
+        !c.ids()
+            .filter(|id| *id != skip)
+            .filter_map(|id| c.body(id))
+            .any(|m| {
+                let (on, p) = sim::index::place_of(m);
+                on == ground
+                    && overlap(
+                        quad,
+                        &[
+                            [p[0] - radius, p[1] - radius],
+                            [p[0] + radius, p[1] - radius],
+                            [p[0] + radius, p[1] + radius],
+                            [p[0] - radius, p[1] + radius],
+                        ],
+                    )
+            })
     }
 
     /// A lone holder `holder` of crew `activity` lays its seated `part` down beside its bay ([`Engine::lay_place`]), at

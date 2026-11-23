@@ -2863,23 +2863,59 @@ fn a2_souls_take_put_and_unseat_rack_parts_by_intents() {
     );
     // Soul 4, frame B's last holder, leaves the world: frame B is set down as its retire's first step (laid beside
     // the bay, or where it stands when there is no room), never left hanging; a crew puts it back.
+    // It stands 2 m off, out of reach for a lay-down beside the bay: frame B is laid flat where it stands.
     one(
         &mut hands,
         3,
-        v3(ub.x + 1_000_000, 0, ub.z),
-        "Soul 4 beside frame B",
+        v3(ub.x + 2_000_000, 0, ub.z),
+        "Soul 4 2 m from frame B",
     );
     hands[3].send_to(answers::LEAVE, None, BTreeMap::new());
     let got = socket_end(&mut hands[3].s);
     println!("Soul 4, frame B's last holder, leaves the world: {got:?}");
     assert_eq!(got.kind, 1, "Soul 4 leaves the world");
     let (parent, _, down) = where_is(&w, fb);
+    let why = logged(&w)
+        .iter()
+        .flat_map(|p| p.effects.iter())
+        .filter(|e| got.entries.contains(&e.envelope.sequence))
+        .flat_map(|e| e.events.iter().flatten())
+        .filter(|ev| ev.name.as_str() == "souls:carry-set-down")
+        .find_map(|ev| match ev.fields.get(&3) {
+            Some(Value::Text(t)) => Some(t.as_str().to_owned()),
+            _ => None,
+        });
+    let (up, middle) = {
+        let (copy, _) = served_copy(&w);
+        let t = copy.tree();
+        let x =
+            sim::ground::scene::xform_to(t, t.handle(fb).unwrap(), t.handle(g).unwrap()).unwrap();
+        let up = x.rot.rotate(Vec3::new(0, 1_000_000, 0)).unwrap();
+        let mid = x.rot.rotate(Vec3::new(0, 1_219_000, 0)).unwrap();
+        (up, x.pos.y + mid.y)
+    };
     println!(
-        "frame B set down at ({}, {}) mm",
+        "frame B set down ({why:?}) at ({}, {}) mm, its middle {} mm up, its length {}",
         down.x / 1000,
-        down.z / 1000
+        down.z / 1000,
+        middle / 1000,
+        if up.y.abs() < 100_000 {
+            "lying"
+        } else {
+            "standing"
+        }
     );
     assert_eq!(parent, Some(g), "frame B set down, not left hanging");
+    assert_eq!(
+        why.as_deref(),
+        Some("souls:holder-left-flat"),
+        "laid flat where it stood"
+    );
+    assert!(up.y.abs() < 100_000, "lying flat");
+    assert!(
+        (0..=120_000).contains(&middle),
+        "on the ground, not in it: its middle {middle} µm up"
+    );
     let (p, q) = ends(down, 0);
     both(&mut hands, (2, 3), p, q, "Souls 3 and 4 to frame B");
     let crew_b = crew(&mut hands, (2, 3), g);
