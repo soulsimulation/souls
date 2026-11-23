@@ -9,7 +9,8 @@
 //! - **Phases** are its `phases`, in order, each named for its key without `_us` (`start_up_us` is `souls:start-up`):
 //!   contact is the end of the first.
 //! - **Effector.** A `hand` reaches with the hand it holds; a `held_point` with the hand too: the held thing's tip
-//!   lengthens it (B4), and the step's `at` names the point it reaches.
+//!   lengthens it (B4), and the step's `at` names the point it reaches. An `aim` touches nothing: its reach is sight,
+//!   up to 20 m (0.134 B1).
 //! - **Contact** is the step's `at` (the runner sets it); a move read here names `souls:surface` until then.
 
 use replica::bodies::{Class, Want};
@@ -183,6 +184,7 @@ pub fn from_content(text: &str) -> R<Move> {
     }
     let effector = match m.get("effector").and_then(Json::str) {
         Some("hand" | "held_point") => Effector::Held,
+        Some("aim") => Effector::Aim,
         _ => return refuse(format!("{mv}: effector")),
     };
     let reach = match m.get("reach_mm") {
@@ -196,7 +198,7 @@ pub fn from_content(text: &str) -> R<Move> {
             detail: format!("{mv}: start-up, then at least one more, each above zero"),
         });
     }
-    if !(1..=replica::moves::REACH_MOST).contains(&reach) {
+    if !(1..=effector.reach_most()).contains(&reach) {
         return Err(Refusal {
             name: "move-reach-out-of-range",
             detail: format!("{mv}: {reach} µm"),

@@ -17,9 +17,11 @@ import {parseEntry, canonical} from './format.mjs';
 export const MOVE_FORMAT = 'souls-move/1';
 export const RESOURCE_CLASSES = Object.freeze(['locomotion', 'manipulator', 'gaze', 'voice']);
 export const CANCELS_ON = Object.freeze(['claim_taken', 'out_of_reach']);
-export const EFFECTORS = Object.freeze(['hand', 'held_point']);
+export const EFFECTORS = Object.freeze(['hand', 'held_point', 'aim']);
 export const PHASES = Object.freeze(['start_up_us', 'slide_us', 'pour_us', 'consume_us', 'strike_us', 'pump_us', 'recovery_us']);
 export const REACH_MAX_MM = 700;
+/** An aimed move (`effector: aim`: a point, a wave, a look) touches nothing; its reach is sight, up to 20 m (0.134 B1). */
+export const AIM_MAX_MM = 20000;
 const KEYS = ['format', 'move', 'claims', 'blocks', 'cancels_on', 'effector', 'reach_mm', 'phases'];
 const IDENT = /^[a-z][a-z0-9_]*$/;
 const TICK = /(?:^|[_\W])[Tt]icks?(?:$|[_\W])|[a-z]Ticks?\b/;
@@ -50,7 +52,8 @@ export function validateMove(m) {
   if (!Array.isArray(m.cancels_on)) err('cancels_on', 'a list');
   else m.cancels_on.forEach((c, i) => { if (!CANCELS_ON.includes(c)) err(`cancels_on.${i}`, `one of ${CANCELS_ON.join(', ')}`); });
   if (!EFFECTORS.includes(m.effector)) err('effector', `one of ${EFFECTORS.join(', ')}`);
-  if (!(Number.isSafeInteger(m.reach_mm) && m.reach_mm > 0 && m.reach_mm <= REACH_MAX_MM)) err('reach_mm', `whole millimetres, 1 to ${REACH_MAX_MM} (under a full arm)`);
+  const most = m.effector === 'aim' ? AIM_MAX_MM : REACH_MAX_MM;
+  if (!(Number.isSafeInteger(m.reach_mm) && m.reach_mm > 0 && m.reach_mm <= most)) err('reach_mm', m.effector === 'aim' ? `whole millimetres, 1 to ${AIM_MAX_MM} (sight)` : `whole millimetres, 1 to ${REACH_MAX_MM} (under a full arm)`);
   if (!isObj(m.phases)) err('phases', 'a table of phase lengths in microseconds');
   else {
     for (const k of Object.keys(m.phases)) if (!PHASES.includes(k)) err(`phases.${k}`, `unknown phase; durations are named ${PHASES.join(', ')} (microseconds, never ticks)`);
