@@ -316,7 +316,7 @@ impl World {
             .leave(
                 &mut self.tree,
                 &mut self.c,
-                &self.moves,
+                &mut self.moves,
                 &mut self.due,
                 &mut self.mint,
                 ask,
@@ -723,6 +723,56 @@ fn a4_after_a_restart_mid_activity_both_still_belong_and_either_can_leave() {
     assert_eq!(w.leave(0, act, at + 1), at + 1);
     assert!(w.free(b0) && w.tree.handle(act).is_none());
     println!("a4: restored mid-move; 2 members, every claim the activity's; both left at once");
+}
+
+/// 0.135 G3: members take their places only when all stand on one node, each place in that node's axes. One seated
+/// (on its seat's node) or on another floor leaves every member where it stands, placed; so does a member farther
+/// from the middle than its role's `within`.
+#[test]
+fn g3_places_on_one_node_only_and_never_from_far_away() {
+    let fresh = |within: Option<i64>| {
+        let mut k = pair();
+        k.roles[0].stands = vec![(Vec3::new(-250_000, 0, 0), 0)];
+        k.roles[1].stands = vec![(Vec3::new(250_000, 0, 0), 0)];
+        for r in &mut k.roles {
+            r.within = within;
+        }
+        let mut w = world(2, 9);
+        let next = w.tree.to_state().next;
+        w.acts = Activities::new(header(w.root), rules(&w.souls), next, vec![k]);
+        let act = w.pair(0, 1, 0);
+        (w, act)
+    };
+    // On one node: both have a place there, 0.5 m apart about where they stood (1 m apart).
+    let (mut w, act) = fresh(None);
+    let root = w.root;
+    let todo = w
+        .acts
+        .pending_places(|b| w.c.body(b).map(|m| (root, m.pose.position)));
+    assert_eq!(todo.len(), 2, "{todo:?}");
+    assert!(todo.iter().all(|t| t.0 == act && t.3 == root));
+    let apart = (todo[0].4.x - todo[1].4.x).abs() + (todo[0].4.z - todo[1].4.z).abs();
+    assert!((apart - 500_000).abs() < 2_000, "{apart} µm apart");
+    // One seated: its node is its seat's. Nobody walks, and both are placed.
+    let (mut w, _) = fresh(None);
+    let (root, b1, chair_node) = (w.root, w.bodies[1], w.mint.mint().expect("an id"));
+    let todo = w.acts.pending_places(|b| {
+        w.c.body(b)
+            .map(|m| (if b == b1 { chair_node } else { root }, m.pose.position))
+    });
+    assert!(todo.is_empty(), "{todo:?}");
+    let again = w
+        .acts
+        .pending_places(|b| w.c.body(b).map(|m| (root, m.pose.position)));
+    assert!(again.is_empty(), "placed where they stand: {again:?}");
+    // Each 0.5 m from the middle, farther than its role's 0.1 m: placed where it stands.
+    let (mut w, _) = fresh(Some(100_000));
+    let root = w.root;
+    let todo = w
+        .acts
+        .pending_places(|b| w.c.body(b).map(|m| (root, m.pose.position)));
+    assert!(todo.is_empty(), "never walked from far away: {todo:?}");
+    println!("g3: one node, two places 0.5 m apart; seated or far away, placed where they stand");
 }
 
 /// E8 (#2779): offers, accepted, declined and lapsed, on this file's world.

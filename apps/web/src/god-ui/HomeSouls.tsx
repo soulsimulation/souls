@@ -7,7 +7,7 @@ import { BASE } from '../base-path.ts';
 import { useSession, userAuthHeaders } from '../auth-session.ts';
 import './home-souls.css';
 
-export type HomeSoul = { id: string; name: string; description: string; bornAt: number; photoUrl: string | null;
+export type HomeSoul = { id: string; name: string; description: string; bornAt: number | null; photoUrl: string | null;
   body: { family: 'humanoid'; model: string; params: Record<string, unknown> } | null; worlds: { slug: string; name: string; url: string }[] };
 const loadCards = () => import('./HomeSoulCards.tsx');
 const Cards = lazy(loadCards);

@@ -2,9 +2,9 @@
 // (v2/web/src/source/worker.ts: the stream's pointer and parts, played on the replica's WASM in a worker), keeps the
 // public nodes and body samples it hands on, and keeps the page's `takes` and Souls list as the old socket would: the
 // last chunks of every Soul's body (takes.ts) and one PublicSoul a body. Nothing here draws or decides; LiveWorld does.
-import { chunkEnd, chunkOf, TICK_US, type Body, type Frame, type RecordedChunk, type WorldSample } from './takes.ts';
+import { chunkEnd, chunkOf, positionAt, TICK_US, type Body, type Frame, type RecordedChunk, type WorldSample } from './takes.ts';
 import { defaultLookOf, entityWithLook, legacyBodyOf, lookBodyOf, propOf, seatOf, type CatalogueBody, type Held, type Seat } from './take-bodies.ts';
-import { isPublic, saidKey, speechOf, talkOf, type Said, type Talk } from './take-speech.ts';
+import { earshotOf, hearersOf, isPublic, saidKey, speechOf, talkOf, type Said, type Talk } from './take-speech.ts';
 import { cut as cutGestures, endGesture, gestureFrom, type Gesture } from './take-gestures.ts';
 import { privateTurnOf, tickerOf, turnKey } from './take-talk.ts';
 import type { Heard } from './member-turns.ts';
@@ -76,12 +76,16 @@ export function doingOf(n: NodeRec | null, samples: readonly { at: number }[], t
 const Q = 2 ** 30;
 /** How far behind the newest part a chunk is made (B3-4): past a walker's next sample, which comes every 0.2 s (p99
  *  0.25 s at 100 Souls), so a walking body is never held at its last one; was the v2 page's 2 s, which with LiveWorld's
- *  1.5 s and one-second chunks showed an act about 3.5 s after the world's answer. */
+ *  1.5 s and one-second chunks showed an act about 3.5 s after the world's answer. A part ends on the half-second grid
+ *  the chunks are on, so from 0.25 s to one chunk it makes the same chunk (PL, measured with 16 and 20 Souls walking);
+ *  0.1 s adds holds (a pointer's quiet time is not on the grid), and none at all draws a walker held short of where it
+ *  is in 10 % of its frames. */
 export const BEHIND_US = 300_000;
 /** Ticks a chunk (B3-4): half a second, one stream part, so a new chunk is in as often as a part comes. */
 export const CHUNK = 10;
 /** Ticks the page plays behind the newest chunk's end (LiveWorld's live delay for this source, B3-4): one chunk and 0.1 s
- *  for a part that comes late, where the old socket's one-second chunks need 30. */
+ *  for a part that comes late, where the old socket's one-second chunks need 30. The least that holds no more frames
+ *  (PL, measured: parts come 0.49 to 0.51 s apart nine times in ten; 11 ticks doubles the 0.1 s and longer holds). */
 export const PLAY_DELAY = 12;
 type Mat = { p: [number, number, number]; q: [number, number, number, number] };
 const rotate = (q: Mat['q'], v: [number, number, number]): [number, number, number] => {
@@ -204,8 +208,10 @@ export class V2Bridge {
   private nodesChanged(nodes: NodeRec[], removed: string[], at: number, defer = false): NodeRec[] {
     const moved: NodeRec[] = [];
     for (const id of removed) { this.nodes.delete(id); const t = this.tracks.get(id); if (t) t.gone ??= at; this.letGo(id, at); }
+    // V5 (0.133): every record first, so a body listed before the seat or room it is in is placed in it (a history
+    // bundle's state lists a seated body before its bench: it was drawn nowhere for the whole bundle)
+    for (const n of nodes) this.nodes.set(n.id, n);
     for (const n of nodes) {
-      this.nodes.set(n.id, n);
       if (n.parent === null) this.view.world = n.id;
       if (!isBody(n)) {
         // A thing whose frame is a body is in its hand (souls:hold); put down, it is not.
@@ -408,7 +414,10 @@ export class V2Bridge {
       if (!t || !n) continue;
       const tick = Math.floor(s.at / TICK_US), line = talkOf(s, this.talkId++, soulIdOf(n.soul ?? s.speaker), nameOf(s.speaker, n), TICK_US, now + (tick - end) * TICK_US / 1000);
       t.said.push(line);
-      this.view.speech = [...this.view.speech, speechOf(line, s.reach ?? 0)].slice(-300);
+      const others = [...this.tracks].filter(([id, o]) => id !== s.speaker && (o.gone === null || o.gone > s.at))
+        .flatMap(([id, o]) => { const m = this.nodes.get(id) ?? o.node; return m && isBody(m) ? [{ soul: soulIdOf(m.soul ?? id), p: positionAt(o.samples, s.at) }] : []; });
+      const heardBy = hearersOf(positionAt(t.samples, s.at), earshotOf(s.reach ?? 0) * 1000, others).filter((h) => h !== line.from);
+      this.view.speech = [...this.view.speech, speechOf(line, s.reach ?? 0, heardBy)].slice(-300);
     }
   }
 

@@ -2,12 +2,27 @@
   "format": "souls-entry/1",
   "kind": "eden:hearth",
   "owner": "thing",
+  "points": {
+    "stand": { "role": "stand", "at_mm": [0, 0, 1100], "yaw_mdeg": 180000 }
+  },
   "geometry": {
     "bounds_mm": [
       1270,
       1410,
       795
     ]
+  },
+  "forms": {
+    "warm": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [],
+      "steps": [
+        { "step": "walk_to", "point": "stand" },
+        { "step": "wait", "us": 20000000 }
+      ],
+      "effects": []
+    }
   },
   "motion": {
     "how": "fixed"
@@ -16,7 +31,7 @@
     "ever": true
   },
   "text": {
-    "card": "A stone hearth with a log fire and a cooking hook; it glows at night.",
+    "card": "A stone hearth with a log fire and a cooking hook: warm up by it.",
     "camp": "camp",
     "fireplace": "fireplace",
     "fire": "fire"
