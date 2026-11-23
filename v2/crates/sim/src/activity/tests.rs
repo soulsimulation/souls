@@ -316,7 +316,7 @@ impl World {
             .leave(
                 &mut self.tree,
                 &mut self.c,
-                &self.moves,
+                &mut self.moves,
                 &mut self.due,
                 &mut self.mint,
                 ask,
@@ -729,3 +729,4 @@ fn a4_after_a_restart_mid_activity_both_still_belong_and_either_can_leave() {
 mod call;
 mod give;
 mod offers;
+mod together;

@@ -31,6 +31,12 @@
 //!   geometry on the straight way there `carry-board-clips` ([`sweep_load`]); nothing is written. A load whose kind
 //!   has no entry is B9's 2 m board, as before.
 //!
+//! - **A carry that breaks off sets its load down where it is (0.135 C3).** A partner's leave, carriers drifted more
+//!   than [`STRETCH`] from their span at the lift (one stopped, or its connection is gone, while the other walked
+//!   on), and a restart (a carry is not stored, so the load found riding is set down at the first tick) each set
+//!   the load down at its last sample, at rest on the ground ([`Carry::set_down_here`]); the world says why
+//!   (`souls:carry-set-down`, worldd's engine).
+//!
 //! Not here, proposed as tasks: a search over turning poses and corners (B14); stairs; three carriers; a blocked
 //! set-down; walking on after a restart; the gathering walk to the ends (the carriers start at their places); moving
 //! the group's node to the floor's frame as one transfer when it crosses the door (E23 rule 9: it stays a child of the
@@ -562,7 +568,13 @@ pub struct Carry {
     /// Every sample written of the activity's node: the board's track (at, its centre in the open ground's frame,
     /// µm, and its turn).
     pub track: Vec<(Micros, Vec3, Quat)>,
+    /// How far apart its carriers stood at the lift, µm on the plan (0.135 C3).
+    pub span: i64,
 }
+
+/// How far the carriers may drift from their span at the lift before the carry breaks off, µm (0.135 C3): a partner
+/// who stops (or whose connection is gone) while the other walks on.
+pub const STRETCH: i64 = 1_000_000;
 
 fn sample(node: Id, at: Micros, frame: Id, position: Vec3, orientation: Quat) -> Change {
     Change::Motion(HandOff {
@@ -603,7 +615,32 @@ impl Carry {
             audience,
             log: Log::new(header, rules, 0),
             track: Vec::new(),
+            span: 0,
         }
+    }
+
+    /// Whether carriers at `front` and `back` have drifted more than [`STRETCH`] from their span at the lift: the
+    /// carry has broken off (0.135 C3).
+    pub fn stretched(&self, front: Vec3, back: Vec3) -> bool {
+        let d = len([front.x - back.x, front.z - back.z]);
+        (d - self.span).abs() > STRETCH
+    }
+
+    /// Sets the board down where the carry last had it (its last sample, or `at` the frame's pose `here` when it has
+    /// none: a carry found riding after a restart), at rest on `node` (0.135 C3: a carry that breaks off).
+    pub fn set_down_here(
+        &mut self,
+        tree: &mut Tree,
+        at: Micros,
+        node: Id,
+        here: Option<(Vec3, Quat)>,
+        transfer: Id,
+    ) -> R<()> {
+        let Some((mut c, q)) = self.track.last().map(|t| (t.1, t.2)).or(here) else {
+            return refuse("carry-set-down-nowhere", "no sample of the carry");
+        };
+        c.y -= HEIGHT;
+        self.put(tree, at, node, c, q, transfer)
     }
 
     fn write(&mut self, tree: &mut Tree, at: Micros, entries: Vec<Entry>) -> R<()> {
@@ -668,6 +705,7 @@ impl Carry {
         ];
         self.write(tree, at, entries)?;
         self.track.push((at, c, q));
+        self.span = len([front.x - back.x, front.z - back.z]);
         Ok(())
     }
 
@@ -700,6 +738,19 @@ impl Carry {
     ) -> R<()> {
         let (mut c, q) = Carry::pose(front, back)?;
         c.y -= HEIGHT;
+        self.put(tree, at, node, c, q, transfer)
+    }
+
+    /// The board, at rest at `c` turned `q`, on `node`: its leave and its arrival under `transfer`.
+    fn put(
+        &mut self,
+        tree: &mut Tree,
+        at: Micros,
+        node: Id,
+        c: Vec3,
+        q: Quat,
+        transfer: Id,
+    ) -> R<()> {
         let leave = TransferRec::Leave {
             transfer,
             node: self.board,

@@ -4,7 +4,7 @@
 # (`tools/origin/origin.mjs`) and the page (`v2/web`, built from this checkout), behind the front door's own routing
 # (`tools/ops/proxy/soul-game.caddy`, its addresses replaced), all on loopback. No model runs: the engine has no mind.
 #
-#   v2/tools/dev/run.sh [--port <n>] [--dir <folder>] [--host <name>]
+#   v2/tools/dev/run.sh [--port <n>] [--dir <folder>] [--host <name>] [--facts <file>]
 #
 # It prints `ready <url>` and runs until it is stopped (Ctrl-C or SIGTERM), which stops everything it started.
 #
@@ -13,6 +13,8 @@
 #           (`logs/`). A folder that already holds a world serves it again; a new folder seeds a new world.
 #   --host  the page's host (default 127.0.0.1). The dev sign-in is for loopback only: with any other host the
 #           directory refuses to start and so does this command, before anything listens.
+#   --facts a world's facts (`v2/tools/import-eden/export/export.ts --template <file>`) to seed instead of N2's test
+#           world, with every entry in content/kinds. Read only when the folder holds no world yet.
 #
 # The world is at <url>/w/dev/ and, signed in as the test person Ada, its creator, at <url>/w/dev/?as=Ada (any other
 # name is a test person who owns nothing). No Soul stands in it until one joins: a client pairs against the directory
@@ -25,13 +27,14 @@
 # Local only: loopback ports, its own folder, never a production world or its data.
 set -euo pipefail
 V2=$(cd "$(dirname "$0")/../.." && pwd)
-PORT=7400 HOST=127.0.0.1 DIR=$V2/../.local/v2-dev
+PORT=7400 HOST=127.0.0.1 DIR=$V2/../.local/v2-dev FACTS=
 while [ $# -gt 0 ]; do
   case "$1" in
     --port) PORT=$2; shift 2 ;;
     --dir) DIR=$2; shift 2 ;;
     --host) HOST=$2; shift 2 ;;
-    *) sed -n '2,25p' "$0" >&2; exit 2 ;;
+    --facts) FACTS=$(cd "$(dirname "$2")" && pwd)/$(basename "$2"); shift 2 ;;
+    *) sed -n '2,27p' "$0" >&2; exit 2 ;;
   esac
 done
 die() { echo "run.sh: $*" >&2; exit 1; }
@@ -113,9 +116,13 @@ if [ ! -f world/world.json ]; then
   kill "${PIDS[0]}" && wait "${PIDS[0]}" 2> /dev/null || true
   PIDS=() NAMES=()
   grep -Eq '^[0-9a-f]{32}-[0-9]+$' creator || die "the directory gave Ada no principal: $(tail -n 3 logs/directoryd.log)"
-  "$BIN/testworld" --seed 1 --things 0 --out seed > logs/seed.log
-  cp "$V2/../content/kinds/body/humanoid.json" seed/entries/
-  "$BIN/worldd" seed --facts seed/testworld-s1-t0.facts.json --dir world --souls 0 --at 0,0 --entries seed/entries \
+  if [ -n "$FACTS" ]; then
+    cp -R "$V2/../content/kinds/." seed/entries/ && cp "$FACTS" seed/world.facts.json
+  else
+    "$BIN/testworld" --seed 1 --things 0 --out seed > logs/seed.log && mv seed/testworld-s1-t0.facts.json seed/world.facts.json
+    cp "$V2/../content/kinds/body/humanoid.json" seed/entries/
+  fi
+  "$BIN/worldd" seed --facts seed/world.facts.json --dir world --souls 0 --at 0,0 --entries seed/entries \
     --creator "$(cat creator)" >> logs/seed.log 2>&1 || die "worldd seed failed: $(tail -n 3 logs/seed.log)"
 fi
 [ -f creator ] || die "$DIR holds a world seeded before its creator was Ada's principal: use a new --dir"

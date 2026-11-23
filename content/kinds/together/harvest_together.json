@@ -1,0 +1,58 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:harvest_together",
+  "owner": "thing",
+  "state": {
+    "picked": { "n": 28, "type": "int", "unit": "count", "default": 0, "min": 0, "max": 12, "audience": { "rule": "everyone" } }
+  },
+  "links": {
+    "one": { "n": 1, "from": "body", "most": 1, "audience": { "rule": "everyone" } },
+    "other": { "n": 2, "from": "body", "most": 1, "audience": { "rule": "everyone" } }
+  },
+  "points": {
+    "by_one": { "role": "stand", "at_mm": [-300, 0, 0], "yaw_mdeg": 90000 },
+    "by_other": { "role": "stand", "at_mm": [300, 0, 0], "yaw_mdeg": -90000 },
+    "basket": { "role": "contact", "at_mm": [0, 700, 0] }
+  },
+  "slots": {
+    "one": { "admits": "body", "most": 1, "at_mm": [-300, 0, 0], "stand": "by_one" },
+    "other": { "admits": "body", "most": 1, "at_mm": [300, 0, 0], "stand": "by_other" }
+  },
+  "geometry": { "bounds_mm": [1000, 800, 600] },
+  "forms": {
+    "pick": {
+      "who": { "link": "one" },
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "picked", "at_most": 11, "says": "basket_full" },
+        { "need": "hand", "free": true }
+      ],
+      "steps": [{ "step": "move", "move": "press", "at": "basket" }],
+      "effects": [{ "change": "set", "field": "picked", "by": 1, "event": "picked_into_basket" }]
+    },
+    "pick_too": {
+      "who": { "link": "other" },
+      "starts": "act",
+      "needs": [
+        { "need": "state", "field": "picked", "at_most": 11, "says": "basket_full" },
+        { "need": "hand", "free": true }
+      ],
+      "steps": [{ "step": "move", "move": "press", "at": "basket" }],
+      "effects": [{ "change": "set", "field": "picked", "by": 1, "event": "picked_into_basket" }]
+    }
+  },
+  "roles": {
+    "one": { "need": "required", "places": { "in": "this", "slots": ["one"] } },
+    "other": { "need": "required", "places": { "in": "this", "slots": ["other"] } }
+  },
+  "motion": { "how": "fixed" },
+  "loose": { "ever": true },
+  "text": {
+    "card": "A harvest for two into one basket of twelve: offer it, then both pick.",
+    "basket_full": "The basket is full: twelve picked.",
+    "garden": "garden",
+    "harvest": "harvest",
+    "pick_together": "pick together"
+  },
+  "card": { "text": "card", "category": "garden", "synonyms": ["harvest", "pick_together"] }
+}
