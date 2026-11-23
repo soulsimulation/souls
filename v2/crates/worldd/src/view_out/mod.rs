@@ -1682,7 +1682,14 @@ impl<S: ObjectStore> PublicWriter<S> {
     }
     /// The words file of a cut (#3799): the references of the state after it and of its records, as
     /// [`PublicWriter::words`] finds them in the two whole, each node row's kept from the last cut that set it.
-    fn words_after(&mut self, after: Option<&Value>, delta: Option<&Value>) -> R<Vec<u8>> {
+    /// `whole_delta`, with a whole `after`: the rows of `after` that differ from the published state (the context's
+    /// delta), so the index of the published state is brought up to date from them rather than rebuilt (#4192).
+    fn words_after(
+        &mut self,
+        after: Option<&Value>,
+        delta: Option<&Value>,
+        whole_delta: Option<&Value>,
+    ) -> R<Vec<u8>> {
         if self.text.is_none() {
             // No text store: no reference words to keep, but a part's own place names are still published (#3574).
             return self.words_of(
@@ -1709,7 +1716,41 @@ impl<S: ObjectStore> PublicWriter<S> {
             .refs
             .as_ref()
             .is_none_or(|r| r.0 != self.player.version());
-        if after.is_some() || stale {
+        if let (Some(after), Some(Value::Map(d)), false) = (after, whole_delta, stale) {
+            // The node rows from the delta (a removed node is a row of its id alone), the rest of the state's
+            // references read field by field, never copying the node rows.
+            let Value::Map(a) = after else {
+                return Err(fault("stream-words", "a state is a map"));
+            };
+            let changed: &[Value] = match d.get(&2) {
+                Some(Value::Array(c)) => c,
+                _ => &[],
+            };
+            let Some((at, rows, rest)) = &mut self.refs else {
+                unreachable!("not stale")
+            };
+            for row in changed {
+                let Value::Array(p) = row else {
+                    return Err(fault("stream-words", "a row is a pair"));
+                };
+                let id = replica::effects::read_id(&p[0])?;
+                let r = match p.get(1) {
+                    Some(v) => replica::audience::references(v),
+                    None => Default::default(),
+                };
+                if r.is_empty() {
+                    rows.remove(&id);
+                } else {
+                    rows.insert(id, r);
+                }
+            }
+            *rest = a
+                .iter()
+                .filter(|(k, _)| **k != 2)
+                .flat_map(|(_, v)| replica::audience::references(v))
+                .collect();
+            *at = version(after);
+        } else if after.is_some() || stale {
             let whole = after.unwrap_or(self.player.state());
             let at = version(whole);
             let Value::Map(mut m) = whole.clone() else {
@@ -2961,14 +3002,23 @@ impl<S: ObjectStore> PublicWriter<S> {
             .iter()
             .map(|(i, v)| (*i, *v))
             .collect::<Vec<_>>();
+        // A whole cut's rows that differ from the published state: its context's delta, and what the words index
+        // is brought up to date from (#4192).
+        let whole_delta = match &after {
+            Some(after) => Some(replica::stream::public::context_delta(
+                self.player.state(),
+                after,
+            )?),
+            None => None,
+        };
         let context = match (&after, &delta) {
             // The digests are already worked out: the player's state's, and the cut's above (#4192). Hashing either
             // state again was a sixth of the writer's core at 500 agents.
-            (Some(after), _) => replica::stream::public::context_with(
+            (Some(_), _) => replica::stream::public::context_with(
                 &self.baseline,
                 self.player.digest(),
                 &after_digest,
-                replica::stream::public::context_delta(self.player.state(), after)?,
+                whole_delta.clone().expect("a whole cut has its delta"),
                 self.cursor,
                 &self.duplicates,
                 &changed,
@@ -3006,7 +3056,7 @@ impl<S: ObjectStore> PublicWriter<S> {
         let chunk_hash = self.put(&chunk)?;
         let part_hash = self.put(&bytes)?;
         lap.mark(4);
-        let text = self.words_after(after.as_ref(), delta.as_ref())?;
+        let text = self.words_after(after.as_ref(), delta.as_ref(), whole_delta.as_ref())?;
         lap.mark(5);
         let text_hash = self.put(&text)?;
         lap.mark(4);
