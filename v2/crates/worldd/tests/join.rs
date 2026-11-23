@@ -1111,9 +1111,14 @@ fn motion_history_is_bit_identical_to_its_pinned_hash() {
 /// [`motion_history_is_bit_identical_to_its_pinned_hash`]'s effect hash. Re-pinned by W11 (#4087): a walk's
 /// `souls:act-deadline` now counts from the tick its route is planned, not from the move's start. Same 810 records and
 /// 1,543 motion samples; with only that rule put back the run writes the previous pin (b18f5b81...), so the deadline
-/// values are the whole difference.
+/// values are the whole difference. Re-pinned by #4216: a birth skips an entry spot a body holds, so the Souls start
+/// on other spots and walk other paths (812 records, 1,580 motion samples); with only main's birth rule put back the
+/// run writes the previous pin (6a52c87d...), so the birth places are the whole difference. Re-pinned by #4215: a
+/// walker no longer steps into another body's space (the walk skill's guard), so the walks' velocities change tick by
+/// tick (865 records, 2,573 motion samples); with main's walk skill put back the run writes the previous pin
+/// (3d64aca7...), so the walk skill is the whole difference.
 const PINNED_MOTION_HISTORY: &str =
-    "6a52c87d4b5129e91fe73a81329b978b0aea1242369b08a4117b81bad3c8655d";
+    "ac11626b59f898cf2d57dd8b9fb8a933e964e39a754d37637a1e007b38e4ed83";
 
 /// R21: private membership is checked against the joined actor's authoritative body, not its principal id.
 #[test]
@@ -1174,6 +1179,68 @@ fn r21_joined_principal_private_turn_uses_body_and_rejects_nonmember() {
             "no private words in the log"
         );
     }
+    run.stop();
+}
+
+/// G2 (0.133, from #3998): a Soul's own `life:look` puts a humanoid look (its params, one JSON object of at most 2 KiB)
+/// on its default body: one write of field 33 by the body, answered with a receipt. The same look again is refused
+/// `look.worn`; anything but one JSON object, or one over 2 KiB, `look.malformed`; nothing more is written. (A body
+/// that wears a preset by hash is refused `look.wears-body`: `skills::wear`'s own test.)
+#[test]
+fn g2_a_souls_own_look_writes_field_33_once_and_is_refused_by_name_otherwise() {
+    let (run, mut a, _) = serve("g2look");
+    a.act(JOIN, None, p(&[(1, words("Ada"))]))
+        .expect("Ada joins");
+    let body = run.body_of(ada()).expect("born");
+    let look = |b: &[u8]| p(&[(1, Value::Bytes(b.to_vec()))]);
+    let params = br##"{"frame":"fem","hair":"bob","skin":"#a0785a"}"##;
+    let entries = a
+        .act(skills::wear::LOOK_VERB, None, look(params))
+        .expect("the look is written");
+    assert_eq!(entries.len(), 1, "one entry: the look");
+    let field = |run: &Run| {
+        let r = run.replay();
+        let t = r.tree();
+        let n = t.node(t.handle(body).expect("the body")).expect("the body");
+        (
+            n.fields().get(&skills::wear::LOOK).cloned(),
+            n.fields().get(&skills::wear::BODY).cloned(),
+        )
+    };
+    assert_eq!(field(&run), (Some(Value::Bytes(params.to_vec())), None));
+    assert_eq!(
+        a.act(skills::wear::LOOK_VERB, None, look(params)),
+        Err("look.worn".to_owned())
+    );
+    for bad in [&b"[1]"[..], b"not json", &[b'{', 0xff, b'}']] {
+        assert_eq!(
+            a.act(skills::wear::LOOK_VERB, None, look(bad)),
+            Err("look.malformed".to_owned()),
+            "{bad:?}"
+        );
+    }
+    let big = format!(r#"{{"hair":"{}"}}"#, "x".repeat(skills::wear::LOOK_MOST));
+    assert_eq!(
+        a.act(skills::wear::LOOK_VERB, None, look(big.as_bytes())),
+        Err("look.malformed".to_owned()),
+        "over 2 KiB"
+    );
+    assert_eq!(
+        a.act(skills::wear::LOOK_VERB, None, BTreeMap::new()),
+        Err("look.malformed".to_owned()),
+        "no params"
+    );
+    assert_eq!(
+        field(&run).0,
+        Some(Value::Bytes(params.to_vec())),
+        "nothing more written"
+    );
+    // As a client sends words (T8's `{23: bytes}`, a wear's shape): another look, written.
+    let other = br#"{"frame":"masc","preset":"punk"}"#;
+    let as_words = Value::Map(BTreeMap::from([(23, Value::Bytes(other.to_vec()))]));
+    a.act(skills::wear::LOOK_VERB, None, p(&[(1, as_words)]))
+        .expect("a look sent as words is written");
+    assert_eq!(field(&run).0, Some(Value::Bytes(other.to_vec())));
     run.stop();
 }
 

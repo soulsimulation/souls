@@ -359,6 +359,7 @@ dependencies = [
 name = "gatewayd"
 version = "0.0.0"
 dependencies = [
+ "assets",
  "axum",
  "futures-util",
  "getrandom 0.3.4",
@@ -1509,6 +1510,7 @@ dependencies = [
  "futures-util",
  "gatewayd",
  "import-eden",
+ "libc",
  "replica",
  "rustix",
  "sim",

@@ -21,12 +21,14 @@
   {
    "def": "core-mars-boat-1@2",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:parked_vehicle",
+   "forms": "base"
   },
   {
    "def": "core-mars-boat-2@2",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:parked_vehicle",
+   "forms": "base"
   },
   {
    "def": "core-mars-bus-seat-2@3",
@@ -61,7 +63,8 @@
   {
    "def": "core-mars-chest-freezer@2",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:kitchen_gear",
+   "forms": "base"
   },
   {
    "def": "core-mars-classroom-folding-table@2",
@@ -108,12 +111,14 @@
   {
    "def": "core-mars-colab-hut-1@2",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:campus_building",
+   "forms": "base"
   },
   {
    "def": "core-mars-colab-hut-2@2",
    "placed": 4,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:campus_building",
+   "forms": "base"
   },
   {
    "def": "core-mars-colab-taupe-sofa@2",
@@ -148,12 +153,14 @@
   {
    "def": "core-mars-dojo@2",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:campus_building",
+   "forms": "base"
   },
   {
    "def": "core-mars-dry-goods-long-shelf@2",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:kitchen_gear",
+   "forms": "base"
   },
   {
    "def": "core-mars-exterior-serving-shelf@2",
@@ -224,12 +231,14 @@
   {
    "def": "core-mars-forklift-1@2",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:parked_vehicle",
+   "forms": "base"
   },
   {
    "def": "core-mars-forklift-2@2",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:parked_vehicle",
+   "forms": "base"
   },
   {
    "def": "core-mars-freeside-hydro-cart-chrome@2",
@@ -275,7 +284,8 @@
   {
    "def": "core-mars-griddle-cart@2",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:kitchen_gear",
+   "forms": "base"
   },
   {
    "def": "core-mars-honey-sofa@2",
@@ -310,12 +320,14 @@
   {
    "def": "core-mars-og-clubhouse-1@2",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:campus_building",
+   "forms": "base"
   },
   {
    "def": "core-mars-og-clubhouse-2@2",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:campus_building",
+   "forms": "base"
   },
   {
    "def": "core-mars-og-east-folding-chair-2@2",
@@ -338,27 +350,32 @@
   {
    "def": "core-mars-og-east-life-1@2",
    "placed": 9,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:campus_building",
+   "forms": "base"
   },
   {
    "def": "core-mars-og-ground-1@2",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:campus_building",
+   "forms": "base"
   },
   {
    "def": "core-mars-og-kitchen-1@2",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:campus_building",
+   "forms": "base"
   },
   {
    "def": "core-mars-og-kitchen-2@2",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:campus_building",
+   "forms": "base"
   },
   {
    "def": "core-mars-og-kitchen-3@2",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:campus_building",
+   "forms": "base"
   },
   {
    "def": "core-mars-og-worktop@2",
@@ -381,12 +398,14 @@
   {
    "def": "core-mars-prep-mixing-bowl-2@2",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:kitchen_gear",
+   "forms": "base"
   },
   {
    "def": "core-mars-prep-mixing-bowl@2",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:kitchen_gear",
+   "forms": "base"
   },
   {
    "def": "core-mars-prep-table@2",
@@ -421,42 +440,50 @@
   {
    "def": "core-mars-rice-cooker@1",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:kitchen_gear",
+   "forms": "base"
   },
   {
    "def": "core-mars-shelter-1@1",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:campus_building",
+   "forms": "base"
   },
   {
    "def": "core-mars-shelter-2@1",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:campus_building",
+   "forms": "base"
   },
   {
    "def": "core-mars-shelter-3@1",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:campus_building",
+   "forms": "base"
   },
   {
    "def": "core-mars-shelter-4@1",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:campus_building",
+   "forms": "base"
   },
   {
    "def": "core-mars-shelter-5@1",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:campus_building",
+   "forms": "base"
   },
   {
    "def": "core-mars-shelter-6@2",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:campus_building",
+   "forms": "base"
   },
   {
    "def": "core-mars-shelter-7@1",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:campus_building",
+   "forms": "base"
   },
   {
    "def": "core-mars-sink-counter-lip-2@2",
@@ -467,22 +494,26 @@
   {
    "def": "core-mars-sink-counter-lip@2",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:kitchen_gear",
+   "forms": "base"
   },
   {
    "def": "core-mars-site-object-1@1",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:campus_building",
+   "forms": "base"
   },
   {
    "def": "core-mars-site-object-2@1",
    "placed": 4,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:campus_building",
+   "forms": "base"
   },
   {
    "def": "core-mars-stored-stock-pot@2",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:kitchen_gear",
+   "forms": "base"
   },
   {
    "def": "core-mars-study-chair-2@2",
@@ -577,7 +608,8 @@
   {
    "def": "core-mars-tool-camp@2",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:campus_building",
+   "forms": "base"
   },
   {
    "def": "core-mars-tool-ground-bench-lower@2",
@@ -618,7 +650,8 @@
   {
    "def": "core-mars-tool-library-stair@1",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:stair_flight",
+   "forms": "own"
   },
   {
    "def": "core-mars-tool-workshop-folding-table@2",
@@ -629,67 +662,80 @@
   {
    "def": "core-mars-vehicle-10@2",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:parked_vehicle",
+   "forms": "base"
   },
   {
    "def": "core-mars-vehicle-11@1",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:parked_vehicle",
+   "forms": "base"
   },
   {
    "def": "core-mars-vehicle-1@1",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:parked_vehicle",
+   "forms": "base"
   },
   {
    "def": "core-mars-vehicle-2@1",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:parked_vehicle",
+   "forms": "base"
   },
   {
    "def": "core-mars-vehicle-3@1",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:parked_vehicle",
+   "forms": "base"
   },
   {
    "def": "core-mars-vehicle-4@1",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:parked_vehicle",
+   "forms": "base"
   },
   {
    "def": "core-mars-vehicle-5@1",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:parked_vehicle",
+   "forms": "base"
   },
   {
    "def": "core-mars-vehicle-6@1",
    "placed": 5,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:parked_vehicle",
+   "forms": "base"
   },
   {
    "def": "core-mars-vehicle-7@1",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:parked_vehicle",
+   "forms": "base"
   },
   {
    "def": "core-mars-vehicle-8@1",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:parked_vehicle",
+   "forms": "base"
   },
   {
    "def": "core-mars-vehicle-9@1",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:parked_vehicle",
+   "forms": "base"
   },
   {
    "def": "core-mars-water-urn@1",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:kitchen_gear",
+   "forms": "base"
   },
   {
    "def": "core-mars-west-racks@1",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:campus_building",
+   "forms": "base"
   },
   {
    "def": "core-mars-white-fridge@2",
@@ -700,7 +746,9 @@
   {
    "def": "core-panorama@1",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:mountain",
+   "forms": "base",
+   "note": "far ranges round the horizon"
   },
   {
    "def": "core-tire-ring@1",
@@ -721,27 +769,32 @@
   {
    "def": "mars-fidelity-chiba@1",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:campus_building",
+   "forms": "base"
   },
   {
    "def": "mars-fidelity-freeside@1",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:campus_building",
+   "forms": "base"
   },
   {
    "def": "mars-fidelity-kitchen@1",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:campus_building",
+   "forms": "base"
   },
   {
    "def": "mars-fidelity-mimos@1",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:campus_building",
+   "forms": "base"
   },
   {
    "def": "mars-fidelity-showers@1",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:campus_building",
+   "forms": "base"
   },
   {
    "def": "mars-fidelity-toilet-1@1",
@@ -763,12 +816,16 @@
   {
    "def": "mars-gallery-monitors@1",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:screen",
+   "forms": "own",
+   "note": "switch on and off as today; today's programme choice (show the flower, show the card) has no form yet"
   },
   {
    "def": "mars-hall-projection@1",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:screen",
+   "forms": "own",
+   "note": "switch on and off as today; today's programme choice (show the flower, show the card) has no form yet"
   },
   {
    "def": "mars-planter@1",
@@ -779,7 +836,8 @@
   {
    "def": "mars-tea-room-mat@1",
    "placed": 1,
-   "waiting": "none: scenery, a building or a vehicle, or no entry fits yet"
+   "entry": "eden:rug",
+   "forms": "own"
   },
   {
    "def": "mars-water-tank@1",
@@ -791,6 +849,14 @@
    "placed": 1,
    "entry": "eden:watering_can",
    "forms": "own"
+  },
+  {
+   "def": "core-pond@1",
+   "placed": 1,
+   "live": "placed on the live world (in its 3 Nov backup), not in the template",
+   "entry": "eden:pond",
+   "forms": "own",
+   "note": "placed as an area"
   }
  ]
 }

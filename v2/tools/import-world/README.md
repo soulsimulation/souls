@@ -26,9 +26,34 @@ node v2/tools/import-world/import-world.ts <backup.db>… [--world <id>] [--map 
   The differences are against the backup itself: a thing row with no node, a count unlike today's bake, a loader note,
   or an upload no thing names (kept by hash). A backup that does not export is a row that is not clean, with the reason.
 
+A world whose own backup is not at hand (W2, 0.133): `node v2/tools/import-world/template-world.ts <dir> <slug> <template>`
+builds it from its repository template with today's server code and backs it up with today's tool, and prints the
+backup's path. It carries none of the creator's edits, so its row is the template's, not the world's.
+
 Steps, if run apart: `node v2/tools/import-eden/export/export.ts --backup <file> --out <facts.json> [--map …]`, then
 `cargo run -p import-world --release -- <facts.json>… [--json]` from `v2/`.
 
-Test (makes its own fixture: a template world built and edited by today's server code, backed up with today's backup
+## Kept outputs: importing without v1 (0.133 R9a)
+
+The exporters (`v2/tools/import-eden/export/export.ts`, `bake/bake.ts`, `export/backup.ts` and `template-world.ts`
+here) read worlds through v1's packages: the world compiler, its core library, the mesh generators and the old server.
+0.134 deletes them. The Rust importers (`cargo run -p import-world` and `-p import-eden`) need only replica, so each
+world is exported once while v1 still exists, and only the exporters' outputs are kept.
+
+- **Template worlds** are built from repository content, so their outputs are public media on the asset CDN, listed in
+  `tools/assets/manifest.json` under the set `import`, which is pulled only when named:
+  `pnpm assets:pull --set import`. That gives `v2/tools/import-world/kept/<world>/facts.json`, `models.json` and
+  `models/<hash>.glb` for `eden` (`worlds/templates/eden-2026.json`), `godmode-lab` (`hello-hamlet`) and
+  `little-martians-arium` (`littlemartians-two`). Import them with no v1 in the path, from `v2/`:
+  `cargo run --release -p import-world -- tools/import-world/kept/*/facts.json`. The rows match today's importer:
+  godmode-lab `7a13102a2bfb…` clean with 0 differences, Little Martians `6a8cb4c5e1c3…` clean with 5 differences, all
+  explained, and Eden `bf878f5b0e7b…` clean with 0 differences. Eden's facts are byte for byte the ones it was
+  imported from in 0.131.
+- **Live worlds** (Mars College, and any world holding people's things or edits) are not published. Their facts and
+  models are exported at the production switch (0.133 W4), from fresh backups, while v1 still exists, and the release
+  owner keeps the outputs privately, beside the backups they came from. After 0.134 a live world is imported only from
+  those kept files.
+
+ a template world built and edited by today's server code, backed up with today's backup
 tool, under `.local/import-world/test`; needs `pnpm install` and cargo):
 `node --test v2/tools/import-world/test/import-world.test.ts`.
