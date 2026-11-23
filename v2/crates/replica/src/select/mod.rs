@@ -499,6 +499,19 @@ fn um(v: &Value) -> R<i64> {
         .ok_or_else(|| pose_err("a whole number"))
 }
 
+/// The points of a node's outline (11) and line (16) in its own frame, µm, read as a shape is read here; empty for a
+/// node with neither, `None` when one does not read (the claim check, #3962).
+pub(crate) fn shape_points(fields: &std::collections::BTreeMap<u64, Value>) -> Option<Vec<Vec3>> {
+    let mut out = Vec::new();
+    for v in [F_OUTLINE, F_LINE].iter().filter_map(|f| fields.get(f)) {
+        for p in row(v) {
+            let [a, b, ..] = row(p) else { return None };
+            out.push(Vec3::new(um(a).ok()?, 0, um(b).ok()?));
+        }
+    }
+    Some(out)
+}
+
 /// A point in `id`'s frame (µm) in the root's, or `None` when its path cannot be read (the claim check, #3701).
 pub(crate) fn to_root_point(tree: &Tree, id: Id, p: Vec3) -> Option<Vec3> {
     View { tree }.to_root(id).ok()?.point(p).ok()

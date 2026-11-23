@@ -5,6 +5,7 @@
 
 use std::time::Duration;
 
+use replica::effects::Refusal;
 use replica::encode::to_hex;
 use ring::{digest, hmac};
 
@@ -88,11 +89,17 @@ impl S3 {
     /// (the region defaults to `auto`, R2's, and the prefix to none); `None` when neither `DIRECTORY_STORE_URL` nor
     /// `DIRECTORY_STORE_ENDPOINT` is set.
     pub fn from_env() -> Option<R<S3>> {
-        let var = |k: &str| std::env::var(k).unwrap_or_default();
-        if let Some(url) = std::env::var(URL_ENV).ok().filter(|u| !u.trim().is_empty()) {
+        S3::from_vars(|k| std::env::var(k).ok())
+    }
+
+    /// [`S3::from_env`] over settings read through `get` (`register-world`'s settings files, #1960 B3), so an operator
+    /// command picks the store the directory's own environment picks.
+    pub fn from_vars(get: impl Fn(&str) -> Option<String>) -> Option<R<S3>> {
+        let var = |k: &str| get(k).unwrap_or_default();
+        if let Some(url) = get(URL_ENV).filter(|u| !u.trim().is_empty()) {
             return Some(S3::from_url(url.trim(), var));
         }
-        let endpoint = std::env::var(ENV[0]).ok()?;
+        let endpoint = get(ENV[0])?;
         let region = Some(var(ENV[2])).filter(|r| !r.is_empty());
         Some(S3::new(
             &endpoint,
@@ -192,6 +199,23 @@ impl S3 {
                 ),
             ),
         ]
+    }
+
+    /// After a 5xx or a lost answer to a create-only write, reads `key` back (#4014): the same bytes there count as
+    /// applied (their ETag), other bytes as the key existing (`precondition-failed`, what a 412 says), and nothing
+    /// there or no answer to the read leave the write `lost`, `store-unreachable`, so nothing is decided on it.
+    fn read_back(&self, key: &str, bytes: &[u8], lost: Refusal) -> R<String> {
+        match self.get(key) {
+            Ok(Some(o)) if o.bytes == bytes => Ok(o.etag),
+            Ok(Some(_)) => refuse(
+                "precondition-failed",
+                format!(
+                    "{key}: exists, other bytes, read back after {}",
+                    lost.detail
+                ),
+            ),
+            Ok(None) | Err(_) => Err(lost),
+        }
     }
 }
 
@@ -315,11 +339,22 @@ impl Store for S3 {
         }
         req = match when {
             When::Absent => req.header("if-none-match", "*"),
-            When::Is(e) => req.header("if-match", format!("\"{e}\"")),
+            // The ETag bare, without quotes: R2 refuses a quoted `If-Match` on PutObject (412 even when it is the
+            // object's ETag) and takes the bare one (#1960).
+            When::Is(e) => req.header("if-match", e),
         };
-        let res = req.send(bytes).or_else(|e| unreachable(key, e))?;
-        status(res.status().as_u16(), key)?;
-        etag(&res, key)
+        let answered = req
+            .send(bytes)
+            .or_else(|e| unreachable(key, e))
+            .and_then(|res| status(res.status().as_u16(), key).map(|()| res));
+        match answered {
+            Ok(res) => etag(&res, key),
+            // A create-only write the store may have applied, though its answer was a 5xx or never came (#4014).
+            Err(e) if e.name == "store-unreachable" && when == When::Absent => {
+                self.read_back(key, bytes, e)
+            }
+            Err(e) => Err(e),
+        }
     }
 
     /// DeleteObject; a key that is not there is no refusal.

@@ -1,11 +1,12 @@
 #!/usr/bin/env node
 // W17: existing finite placement lifecycle only. Root authenticates the operator; the Souls child owns Store/data.
+import { isMain } from '../../../tools/lib/is-main.mjs';
 import { lstat, mkdir, unlink, readdir, chown } from 'node:fs/promises';
-import { join, resolve, dirname } from 'node:path';
+import { join, dirname } from 'node:path';
 import { createHash } from 'node:crypto';
 import { spawn, execFileSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
-import { record, beneath, data, atomic, command, checkedConfig, ready } from './place-created-world.mjs';
+import { record, beneath, data, atomic, command, checkedConfig, ready, directoryStore, readStoreSettings, STORE_KEYS } from './place-created-world.mjs';
 import { readWorldRoutes } from '../origin/world-routes.mjs';
 import { updateWorldRoute } from './proxy/route-config.mjs';
 
@@ -35,9 +36,11 @@ async function capture(program,args,env) {
   child.stdout.on('data',chunk=>{output+=chunk;if(output.length>1<<20){overflow=true;child.kill('SIGTERM');}});
   await boundedExit(child,15_000);if(overflow)fail('archive-command-output-invalid');return JSON.parse(output);
 }
-export const state=(config,args)=>capture(process.execPath,[fileURLToPath(import.meta.url),'--as-souls',...args],{PATH:'/usr/bin:/bin',BRAIN_MODE:'fake'});
+// The Souls child's supervisor reads the directory's store with the directory's settings (#1960 B7), as directoryd and
+// worldd@ (both the souls user) already hold them.
+export const state=async(config,args)=>capture(process.execPath,[fileURLToPath(import.meta.url),'--as-souls',...args],{PATH:'/usr/bin:/bin',BRAIN_MODE:'fake',...await readStoreSettings()});
 
-async function identity(config,phase) {
+async function identity(config,phase,store) {
   checkedConfig(config);
   if (!phase || !SLUG.test(phase.world) || !REQUEST.test(phase.request) || !INSTANCE.test(instance(phase)) || !['archive','restore'].includes(phase.action)
       || !Number.isSafeInteger(phase.generation) || phase.generation<1) fail('archive-state-invalid');
@@ -56,7 +59,8 @@ async function identity(config,phase) {
   const authority=registry.worlds?.[phase.world];
   if(registry.format!=='souls/world-authority/1'||registry.worldsRoot!==config.worldsRoot||authority?.instance!==id
       ||authority.lineage!==phase.lineage||authority.zone!==phase.zone)fail('archive-authority-mismatch');
-  const named=record(await data(await beneath(config.worldsRoot,join(config.worldsRoot,'directory/world-name',phase.world))));
+  store??=directoryStore(config,await readStoreSettings());
+  const named=record(await store.get(`world-name/${phase.world}`));
   if(!(named instanceof Map)||named.get(1)?.toString('utf8')!==phase.world||named.get(2)?.toString('hex')!==phase.lineage
       ||`${named.get(3)?.[0]?.toString('hex')}:${named.get(3)?.[1]}`!==phase.zone
       ||`${named.get(4)?.[0]?.toString('hex')}:${named.get(4)?.[1]}`!==authority.creator)fail('archive-authority-mismatch');
@@ -106,8 +110,8 @@ async function routes(config,saved,archived) {
   const current=await addresses(config,saved);
   for(const [slug,expected]of Object.entries(saved))await updateWorldRoute(config.worldRoutes,slug,{archived},{expected:{...expected,archived:current[slug].archived}});
 }
-async function checkSaved(config,phase,saved) {
-  const actual=await identity(config,phase);
+async function checkSaved(config,phase,saved,store) {
+  const actual=await identity(config,phase,store);
   if(saved.metadataHash!==actual.metadataHash||saved.factsHash!==actual.factsHash||saved.build!==actual.build)fail('archive-data-mismatch');
   if(saved.format!=='souls/world-archive/1'||saved.instance!==instance(phase)||saved.world!==phase.world
       ||saved.creator!==phase.creator||saved.creator_generation!==phase.creator_generation
@@ -116,11 +120,11 @@ async function checkSaved(config,phase,saved) {
   for(const [slug,row]of Object.entries(saved.routes))if(!SLUG.test(slug)||!row.stream.startsWith(expectedPrefix))fail('archive-address-mismatch');
 }
 
-async function retainedReceipt(config,phase) {
+async function retainedReceipt(config,phase,store) {
   const id=instance(phase);
   try{return await receipt(config,id);}catch(error){if(error.code!=='ENOENT')throw error;}
   const saved=JSON.parse(await data(await beneath(config.backup,join(config.backup,'archives',id))));
-  await checkSaved(config,phase,saved);
+  await checkSaved(config,phase,saved,store);
   const current=readWorldRoutes(config.worldRoutes);
   for(const [name,row]of Object.entries(saved.routes)) {
     if(!current[name]||['gateway','stream','history','canonical'].some(key=>current[name][key]!==row[key]))fail('archive-address-occupied');
@@ -129,14 +133,14 @@ async function retainedReceipt(config,phase) {
 }
 
 /** Same oneshot as creation, invoked only after its inbox item has been retained. */
-export async function archiveRequest(config,request,{getState=state,run=system,probe=ready,mirror=mirrorReceipt}={}) {
+export async function archiveRequest(config,request,{getState=state,run=system,probe=ready,mirror=mirrorReceipt,store}={}) {
   const phase=await getState(config,['request',request]);
   if(!phase)return false;
   if(!same(phase,await getState(config,['get',phase.world])))fail('archive-stale');
   if(phase.state==='active')return true;
   const id=instance(phase);if(!INSTANCE.test(id)||!REQUEST.test(phase.request))fail('archive-state-invalid');
   if(phase.action==='archive') {
-    const {metadataHash,factsHash,build}=await identity(config,phase);
+    const {metadataHash,factsHash,build}=await identity(config,phase,store);
     let saved;try{saved=await receipt(config,id);}catch(e){if(e.code!=='ENOENT')throw e;}
     await fence(config,phase);
     await inactive(run,id);
@@ -149,7 +153,7 @@ export async function archiveRequest(config,request,{getState=state,run=system,p
         generation:phase.generation,metadataHash,factsHash,build,routes:entries};
       await protectedAtomic(join(config.placement,'archives',id),saved);
     }
-    await checkSaved(config,phase,saved);
+    await checkSaved(config,phase,saved,store);
     await routes(config,saved.routes,true);
     await run('/usr/bin/systemctl',['start','souls-routes.service']);
     if(!same(phase,await getState(config,['get',phase.world])))fail('archive-stale');
@@ -158,8 +162,8 @@ export async function archiveRequest(config,request,{getState=state,run=system,p
   }
   let saved;
   try {
-    const {world}=await identity(config,phase);
-    saved=await retainedReceipt(config,phase);await checkSaved(config,phase,saved);
+    const {world}=await identity(config,phase,store);
+    saved=await retainedReceipt(config,phase,store);await checkSaved(config,phase,saved,store);
     // No world output is overwritten on restore; all data/address validation precedes the first start.
     await routes(config,saved.routes,true);
     if(!same(phase,await getState(config,['get',phase.world])))fail('archive-stale');
@@ -185,7 +189,7 @@ export async function archiveRequest(config,request,{getState=state,run=system,p
 async function mirrorReceipt(config,id) {
   await capture(process.execPath,[fileURLToPath(import.meta.url),'--as-souls','mirror',id],{PATH:'/usr/bin:/bin',BRAIN_MODE:'fake'});
 }
-export async function operator(config,args,{getState=state,run=system,uid=process.getuid?.()}={}) {
+export async function operator(config,args,{getState=state,run=system,uid=process.getuid?.(),store}={}) {
   if(uid!==0)fail('archive-root-only');
   if(args.length===1&&args[0]==='list')return getState(config,['list']);
   if(args.length!==2||args[0]!=='restore'||!SLUG.test(args[1]))fail('archive-arguments-invalid');
@@ -197,9 +201,9 @@ export async function operator(config,args,{getState=state,run=system,uid=proces
     if(kept.format!=='souls/archive-fence/1'||kept.instance!==instance(phase)||kept.request!==phase.request||kept.generation!==phase.generation)fail('archive-fence-invalid');
     phase=await getState(config,['recover',phase.world,phase.request]);
   }
-  await identity(config,phase);
+  await identity(config,phase,store);
   // The saved archive generation is still current until the restore CAS below.
-  const prior=await retainedReceipt(config,phase);await checkSaved(config,phase,prior);await addresses(config,prior.routes);
+  const prior=await retainedReceipt(config,phase,store);await checkSaved(config,phase,prior,store);await addresses(config,prior.routes);
   phase=await getState(config,['restore',phase.world]);
   await mkdir(join(config.placement,'requests'),{recursive:false}).catch(error=>{if(error.code!=='EEXIST')throw error;});
   const {open}=await import('node:fs/promises');
@@ -217,7 +221,7 @@ export async function operator(config,args,{getState=state,run=system,uid=proces
   fail('archive-restore-pending');
 }
 
-if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
+if(isMain(import.meta.url)) {
   try {
     if(process.getuid?.()!==0)fail('archive-root-only');
     const stat=await lstat(CONFIG);if(!stat.isFile()||stat.isSymbolicLink()||stat.uid!==0||(stat.mode&0o022))fail('archive-config-untrusted');
@@ -233,7 +237,7 @@ if(process.argv[1]&&resolve(process.argv[1])===fileURLToPath(import.meta.url)) {
         await atomic(join(config.backup,'archives',args[1]),kept);console.log('{}');
       } else {
         if(!['list','request','get','restore','finish','recover'].includes(args[0])||args.length>3)fail('archive-arguments-invalid');
-        const child=spawn(join(config.library,'supervisor'),['archive-state',...args],{env:{PATH:'/usr/bin:/bin',WORLDS_ROOT:config.worldsRoot},stdio:'inherit'});
+        const child=spawn(join(config.library,'supervisor'),['archive-state',...args],{env:{PATH:'/usr/bin:/bin',WORLDS_ROOT:config.worldsRoot,...Object.fromEntries(STORE_KEYS.filter(k=>k in process.env).map(k=>[k,process.env[k]]))},stdio:'inherit'});
         await boundedExit(child,10_000);
       }
     } else console.log(JSON.stringify(await operator(config,process.argv.slice(2))));

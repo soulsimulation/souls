@@ -139,6 +139,7 @@ fn same_ground_form_walk_keeps_the_planned_doorway_links() {
             at: goal,
             reach: 0,
             door: None,
+            ring: None,
         },
     };
     let line = FormQuestion {
@@ -177,6 +178,7 @@ fn same_ground_form_walk_keeps_the_planned_doorway_links() {
         approaches: Default::default(),
         sit_walks: BTreeMap::new(),
         goals: BTreeSet::new(),
+        walk_moves: BTreeMap::new(),
         planning: &planning,
         map: Arc::clone(&map),
     };
@@ -263,6 +265,7 @@ fn form_answers_reject_old_generation_map_and_cancelled_order() {
         at,
         reach: 0,
         door: None,
+        ring: None,
     };
     planning.ask(key, body, question(Vec3::ZERO), &map);
     let old = FormAnswer {
@@ -369,6 +372,7 @@ fn c34_a_named_area_resolves_onto_its_rooms_floor_not_by_nearness() {
         approaches: Default::default(),
         sit_walks: BTreeMap::new(),
         goals: BTreeSet::new(),
+        walk_moves: BTreeMap::new(),
         planning: &planning,
         map: Arc::new(Versions::default()),
     };
@@ -379,30 +383,82 @@ fn c34_a_named_area_resolves_onto_its_rooms_floor_not_by_nearness() {
         .plus(place.orientation.rotate(local).unwrap())
         .unwrap();
     let (floor, on) = sight("r1a")
-        .area_floor(id, 2, ground, at)
-        .expect("an area of a building")
-        .expect("its room's floor");
+        .area_floor(id, 2, ground, at, skills::form_runner::REACH)
+        .expect("a room of a building, on its room's floor");
     assert_eq!(floor, floor1, "the upstairs room's floor");
     assert_eq!(on.y, room_y, "at the room's height, not the point's");
     assert!(
         (on.x - local.x).abs() <= 2 && on.z.abs() <= 2,
         "the point in the building's frame: {on:?}"
     );
+    // C22 sweep (#1960): an area that is no room, and that no floor stands a body near (none here: no walk map), is
+    // planned as any other point, on the ground under it, as today's game walks to an area.
     assert_eq!(
-        sight("attic").area_floor(id, 2, ground, at),
-        Some(None),
-        "no room or only floor: no way"
+        sight("attic").area_floor(id, 2, ground, at, skills::form_runner::REACH),
+        None,
+        "no room, no floor standing a body near it: as any other point"
     );
     assert_eq!(
-        sight("door").area_floor(id, 2, ground, at),
+        sight("door").area_floor(id, 2, ground, at, skills::form_runner::REACH),
         None,
         "not an area: as before"
     );
     assert_eq!(
-        sight("r1a").area_floor(id, 3, ground, at),
+        sight("r1a").area_floor(id, 3, ground, at, skills::form_runner::REACH),
         None,
         "another step: as before"
     );
+}
+
+/// #1960: a point of a thing with floors is carried onto the floor nearest its height. Every floor node stands at the
+/// thing's origin, so the height is read from its rooms and surfaces: a point at the upstairs room's height is on the
+/// upper floor (an upper landing's door), one at the ground's on the ground floor.
+#[test]
+fn a_point_upstairs_is_on_the_upper_floor() {
+    let generated = testworld::generate(1, 0).expect("the synthetic world");
+    let imported = import_eden::load(&generated.text).expect("the imported world");
+    let building = imported.nodes["building"];
+    let (floor0, floor1) = (
+        imported.nodes["building/floor-0"],
+        imported.nodes["building/floor-1"],
+    );
+    let tree = &imported.tree;
+    let room_y = tree
+        .node(tree.handle(imported.nodes["building/r1a"]).unwrap())
+        .unwrap()
+        .place()
+        .unwrap()
+        .position
+        .y;
+    assert!(room_y > 1_000_000, "the upstairs room is up: {room_y}");
+    let kinds = Json::Obj(Vec::new());
+    let toward = BTreeMap::new();
+    let planning = RefCell::new(Planning::default());
+    let sight = Sight {
+        bodies: BTreeMap::new(),
+        carrying: BTreeSet::new(),
+        tree,
+        split: None,
+        builds: BTreeMap::new(),
+        kind: Name::new("souls:body").unwrap(),
+        kinds: &kinds,
+        toward: &toward,
+        asked: RefCell::new(BTreeMap::new()),
+        context: BTreeMap::new(),
+        walks: BTreeMap::new(),
+        approaches: Default::default(),
+        goals: BTreeSet::new(),
+        walk_moves: BTreeMap::new(),
+        sit_walks: BTreeMap::new(),
+        planning: &planning,
+        map: Arc::new(Versions::default()),
+    };
+    let up = Vec3::new(1_000_000, room_y + 1_000_000, 0);
+    let (floor, on) = sight.floor_of(building, up).expect("a thing with floors");
+    assert_eq!(floor, floor1, "a handle 1 m above the upstairs floor");
+    assert_eq!((on.x, on.z), (up.x, up.z), "{on:?}");
+    let down = Vec3::new(1_000_000, 1_000_000, 0);
+    assert_eq!(sight.floor_of(building, down).map(|f| f.0), Some(floor0));
 }
 
 /// A skill that holds its body and does nothing: what a gateway walk's runner reads as running.
@@ -463,7 +519,7 @@ fn a_gateway_walk_is_watched_against_its_legs_end_not_its_granted_place() {
         .granted
         .insert(id, Vec3::new(-40_000_000, 0, 50_000_000));
     let leg_end = Vec3::new(20_000_000, 0, 50_000_000);
-    let mut walk = Walk::new(id, Id::new(Scope([0xc9; 16]), 2).unwrap(), 0);
+    let mut walk = Walk::new(id, Id::new(Scope([0xc9; 16]), 2).unwrap());
     let mut corners = BTreeSet::new();
     for t in 0..2_000i64 {
         let me = *b.runner.controller.body(id).unwrap();
@@ -583,6 +639,7 @@ fn a_walk_to_a_world_drawn_things_point_is_laid_on_its_outline() {
         sit_walks: BTreeMap::new(),
         approaches: Default::default(),
         goals: BTreeSet::new(),
+        walk_moves: BTreeMap::new(),
         planning: &planning,
         map: Arc::new(Versions::default()),
     };
@@ -704,4 +761,151 @@ fn a_thing_selector_binds_the_nearest_of_its_set() {
         Err(()),
         "not a thing selector"
     );
+}
+
+/// A move's reach counts height: a thing's point straight above a body, on the floor over the one it stands on, is out
+/// of reach however near across x and z (a flush through the ceiling), and so is one a storey below a body on the floor
+/// above; each from its own floor is in reach. On the open ground, a point 4 m straight overhead is out of reach and
+/// one 1 m up is in it.
+#[test]
+fn a_thing_directly_above_or_below_is_out_of_reach() {
+    let generated = testworld::generate(1, 0).expect("the synthetic world");
+    let imported = import_eden::load(&generated.text).expect("the imported world");
+    let ground = imported.nodes["ground"];
+    let (floor0, floor1) = (
+        imported.nodes["building/floor-0"],
+        imported.nodes["building/floor-1"],
+    );
+    let building = imported.nodes["building"];
+    let (r0, r1) = (
+        imported.nodes["building/r0a"],
+        imported.nodes["building/r1a"],
+    );
+    let header = import_eden::header(imported.nodes["world"], &imported.rules).unwrap();
+    let mut town =
+        Town::new(imported.tree, ground, Doors::new(header, imported.rules, 0)).expect("the town");
+    let node = |id: Id| town.tree.node(town.tree.handle(id).unwrap()).unwrap();
+    let kind = plain(node(r1).kind()).to_owned();
+    assert_eq!(kind, plain(node(r0).kind()), "both rooms one kind");
+    let point = |x: i128, y: i128, z: i128| {
+        Json::Obj(vec![(
+            "at_mm".into(),
+            Json::Arr(vec![Json::Int(x), Json::Int(y), Json::Int(z)]),
+        )])
+    };
+    // Each room's point: 3 m along z from its origin (clear of the stairwell), on its own floor. The building's two
+    // points: 1.5 m out beyond its east wall, one 4 m up (above a hand on the ground), one 1 m up.
+    let out = i128::from(testworld::BUILDING_LENGTH / 2 + 1_500);
+    let kinds = Json::Obj(vec![
+        (
+            kind,
+            Json::Obj(vec![(
+                "points".into(),
+                Json::Obj(vec![("p".into(), point(0, 0, 3_000))]),
+            )]),
+        ),
+        (
+            plain(node(building).kind()).to_owned(),
+            Json::Obj(vec![(
+                "points".into(),
+                Json::Obj(vec![
+                    ("high".into(), point(out, 4_000, 0)),
+                    ("low".into(), point(out, 1_000, 0)),
+                ]),
+            )]),
+        ),
+    ]);
+    let at = |room: Id| node(room).place().unwrap().position;
+    let (p0, p1) = (at(r0), at(r1));
+    assert_eq!([p0.x, p0.z], [p1.x, p1.z], "the rooms stack");
+    assert!(p1.y - p0.y >= 2_500_000, "a storey apart: {p0:?} {p1:?}");
+    let soul = |n: u64, floor: Id, y: i64| {
+        let id = Id::new(Scope([0xca; 16]), n).unwrap();
+        let frame = Frame {
+            node: floor,
+            slot: None,
+        };
+        let b = town.surfaces[&floor]
+            .place(
+                id,
+                frame,
+                Vec3::new(p0.x, y, p0.z + 3_000_000),
+                Quat::IDENTITY,
+            )
+            .unwrap();
+        (id, b)
+    };
+    let (below, on) = (soul(1, floor0, p0.y), soul(2, floor1, p1.y));
+    // On the open ground beside the building, under its two points.
+    let place = node(building).place().unwrap();
+    let under = place
+        .position
+        .plus(
+            place
+                .orientation
+                .rotate(Vec3::new(i64::try_from(out).unwrap() * 1000, 0, 0))
+                .unwrap(),
+        )
+        .unwrap();
+    let outside = {
+        let id = Id::new(Scope([0xca; 16]), 3).unwrap();
+        let frame = Frame {
+            node: ground,
+            slot: None,
+        };
+        let b = town.surfaces[&ground]
+            .place(id, frame, under, Quat::IDENTITY)
+            .unwrap();
+        (id, b)
+    };
+    let split = town.split(1);
+    let toward = BTreeMap::new();
+    let planning = RefCell::new(Planning::default());
+    let sight = Sight {
+        bodies: BTreeMap::from([below, on, outside]),
+        carrying: BTreeSet::new(),
+        tree: split.shared.tree,
+        split: Some(RefCell::new(split)),
+        builds: [below.0, on.0, outside.0]
+            .into_iter()
+            .map(|b| (b, Build::STANDARD))
+            .collect(),
+        kind: Name::new("souls:body").unwrap(),
+        kinds: &kinds,
+        toward: &toward,
+        asked: RefCell::new(BTreeMap::new()),
+        context: BTreeMap::new(),
+        walks: BTreeMap::new(),
+        sit_walks: BTreeMap::new(),
+        approaches: Default::default(),
+        goals: BTreeSet::new(),
+        walk_moves: BTreeMap::new(),
+        planning: &planning,
+        map: Arc::new(Versions::default()),
+    };
+    let at_point = |body: Id, thing: Id, p: &str| {
+        sight
+            .distance(body, &Effector::Held, None, thing, &Name::new(p).unwrap())
+            .expect("measured")
+    };
+    let d = |body: Id, thing: Id| at_point(body, thing, "p");
+    let reach = 600_000;
+    assert!(
+        d(below.0, r1) > reach,
+        "above, through the ceiling: {}",
+        d(below.0, r1)
+    );
+    assert!(
+        d(on.0, r0) > reach,
+        "below, through the floor: {}",
+        d(on.0, r0)
+    );
+    assert_eq!(d(on.0, r1), 0, "on its own floor");
+    assert_eq!(d(below.0, r0), 0, "on its own floor");
+    let (high, low) = (
+        at_point(outside.0, building, "high"),
+        at_point(outside.0, building, "low"),
+    );
+    assert!(high > reach, "4 m straight overhead: {high}");
+    assert_eq!(low, 0, "1 m up, straight overhead");
 }

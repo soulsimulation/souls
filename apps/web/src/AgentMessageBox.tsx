@@ -4,6 +4,7 @@ import type {Api} from './useSouls.ts';
 import {windowCode} from './god-ui/join-api.ts';
 import {reportAgentPresence,withLink} from './agent-presence.ts';
 import {pollInbox} from './inbox-poll.ts';
+import {v2OwnerMailbox} from './v2-engine/owner-mailbox.ts';
 import './AgentMessageBox.css';
 
 export type AgentInbox = {
@@ -156,6 +157,9 @@ export function useWindowCode() {
 /** The owner card's inbox: read every 2 s while the page is shown (this also feeds the page's presence and link record), and send one message. */
 export function useSoulInbox(api: Api, soulId: string) {
   const request = useCallback<Transport>(async text => {
+    // #4178: on a world the new engine runs, the gateway mailbox (no presence claim: the mailbox gives none)
+    const v2 = v2OwnerMailbox(soulId);
+    if (v2) return text === undefined ? v2.read() : v2.send(text);
     let r;
     try {r = await api(`/v1/edge/owner/${encodeURIComponent(soulId)}/inbox`, text === undefined ? undefined : {text});}
     catch (e) {if (text === undefined) reportAgentPresence(soulId, null); throw e;}

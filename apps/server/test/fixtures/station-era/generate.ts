@@ -1,9 +1,9 @@
 // Actual isolated SQLite/native station carry fixture; no transport or audio.
+import { isMain } from '../../../../../tools/lib/is-main.mjs';
 import assert from 'node:assert/strict';
 import { mkdtempSync,rmSync,readFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { tmpdir } from 'node:os';
-import { fileURLToPath } from 'node:url';
 import { createHash } from 'node:crypto';
 import { setImmediate } from 'node:timers/promises';
 import { marsFactory,marsCommonsTransitionFactory,GREEN_FIELD_WORLD } from '@souls/engine-mars';
@@ -101,4 +101,4 @@ export async function generateStationEraFixture(){
   return {contract:'core-native-station-era-fixture/1',producer,
     scope:'actual isolated SQLite/native sequencer, same-dt physical/header/era, real Date.now anchors; no transport/audio/listener/device/consumer/default proof',journeys};
 }
-if(process.argv[1]===fileURLToPath(import.meta.url))process.stdout.write(JSON.stringify(await generateStationEraFixture(),null,2)+'\n');
+if(isMain(import.meta.url))process.stdout.write(JSON.stringify(await generateStationEraFixture(),null,2)+'\n');

@@ -1,5 +1,6 @@
 //! The directory (Engine v2 W8, #2729): its records (A1), two claims of one world (A2), a paused writer (A3), the
-//! store out of reach (A4) and the truth in the store alone (A5). `cargo test -p directoryd --test directory`.
+//! store out of reach (A4) and the truth in the store alone (A5); a create-only write the store applied though its
+//! answer failed (X6, #4014). `cargo test -p directoryd --test directory`.
 //!
 //! A2 and A3 also run against a real S3-compatible store, the one the environment names (`DIRECTORY_STORE_*`, see
 //! `directoryd::directory::s3::ENV`): `cargo test -p directoryd --test directory -- --ignored --nocapture`.
@@ -8,6 +9,7 @@ use std::sync::Barrier;
 use std::sync::atomic::{AtomicBool, Ordering};
 
 use directoryd::directory::s3::S3;
+use directoryd::directory::stand_in::{Fail, KEY_ID, StandIn};
 use directoryd::directory::store::{Memory, Object, R, Store, When};
 use directoryd::directory::{Claim, Directory};
 use replica::directory::{Place, SoulRecord, Token, WorldRecord};
@@ -363,4 +365,74 @@ fn against_the_store_in_use() {
         two_claims_one_refused(&store);
     }
     a_paused_writer_is_refused(&store);
+}
+
+/// A store over the S3 stand-in, signed with its key id.
+fn stand_in_store(stand_in: &StandIn) -> S3 {
+    S3::from_url(&stand_in.url("souls"), |k| match k {
+        "AWS_ACCESS_KEY_ID" => KEY_ID.to_owned(),
+        _ => String::new(),
+    })
+    .expect("store settings")
+}
+
+/// X6 A1 and A2 (#4014): the stand-in does a create-only write and then fails its answer, a 503 or none at all. The
+/// client reads the key back: its own bytes there count as applied, with their ETag; other bytes as the key existing,
+/// `precondition-failed`, as a 412 says. A world's first pin over such a write is done, not `store-unreachable`.
+#[test]
+fn x6_a_create_only_write_the_store_applied_is_applied() {
+    let stand_in = StandIn::start(100).expect("a stand-in");
+    let store = stand_in_store(&stand_in);
+    for (i, how) in [Fail::Status(503), Fail::Lost].into_iter().enumerate() {
+        let key = format!("x6/{i}");
+        stand_in.fail_writes(1, how);
+        let etag = store
+            .put(&key, b"one", When::Absent)
+            .unwrap_or_else(|e| panic!("{how:?}: applied, though its answer failed: {e:?}"));
+        let held = store.get(&key).expect("read").expect("there");
+        assert_eq!(held.etag, etag, "{how:?}: the ETag of the bytes written");
+        assert_eq!(held.bytes, b"one");
+        stand_in.fail_writes(1, how);
+        assert_eq!(
+            refusal(store.put(&key, b"two", When::Absent)),
+            "precondition-failed",
+            "{how:?}: other bytes there are the key existing"
+        );
+        assert_eq!(store.get(&key).expect("read").expect("there").bytes, b"one");
+    }
+    let lineage = lineage();
+    stand_in.fail_writes(1, Fail::Lost);
+    world(&store, &lineage);
+    let rec = dir(&store, "souls:reader")
+        .world(&lineage, zone())
+        .expect("the pin's record");
+    assert_eq!(rec.build, build_hash(b"souls:build-1"));
+}
+
+/// X6 A3 (#4014): with the store truly out of reach, a create-only write and its read back both go unanswered. It is
+/// still `store-unreachable`, and nothing is decided: a world's first pin is refused.
+#[test]
+fn x6_a_store_truly_out_of_reach_is_still_unreachable() {
+    let port = {
+        let l = std::net::TcpListener::bind("127.0.0.1:0").expect("a port");
+        l.local_addr().expect("its address").port()
+    };
+    let store = S3::new(
+        &format!("http://127.0.0.1:{port}"),
+        "souls",
+        "auto",
+        KEY_ID,
+        "",
+        "",
+    )
+    .expect("store settings");
+    assert_eq!(
+        refusal(store.put("x6/gone", b"one", When::Absent)),
+        "store-unreachable"
+    );
+    let mut d = dir(&store, "souls:pinner");
+    assert_eq!(
+        refusal(d.set_build(&lineage(), zone(), &build_hash(b"souls:build-1"))),
+        "store-unreachable"
+    );
 }

@@ -86,12 +86,15 @@ bundle() {
   install -m 755 "$bins/worldd" "$out/artifacts/worldd"
   install -m 755 "$bins/gatewayd" "$out/artifacts/gatewayd"
   COPYFILE_DISABLE=1 tar -C "$page" -cf "$out/artifacts/page.tar" .
-  # The served client (R17): its files by name, version, length and hash, as soul-client.json gives them.
-  node "$client/served/build.mjs" --out "$out/served" --version "$version" --pkg "$pkg" > /dev/null
+  # The served client (R17): its files by name, version, length and hash, as soul-client.json gives them. Its version
+  # is x.y.z (build.mjs), so a minor release's (0.132) is stamped 0.132.0; a patch's (0.131.1) is its own.
+  local stamp=$version
+  if [[ $version =~ ^[0-9]+\.[0-9]+$ ]]; then stamp=$version.0; fi
+  node "$client/served/build.mjs" --out "$out/served" --version "$stamp" --pkg "$pkg" > /dev/null
   COPYFILE_DISABLE=1 tar -C "$out/served" -cf "$out/artifacts/client.tar" .
   for t in "$out"/served/*; do
     [ "${t##*/}" = soul-client.json ] && continue
-    served+=("$(printf '{"served":"%s","version":"%s","hash":"%s","bytes":%s}' "${t##*/}" "$version" "$(hash "$t")" "$(wc -c < "$t" | tr -d ' ')")")
+    served+=("$(printf '{"served":"%s","version":"%s","hash":"%s","bytes":%s}' "${t##*/}" "$stamp" "$(hash "$t")" "$(wc -c < "$t" | tr -d ' ')")")
   done
   rm -rf "$out/served"
   for t in "${TOOLS[@]}"; do install -m 755 "$bins/$t" "$out/bin/$t"; done
@@ -155,7 +158,21 @@ stage() {
 }
 
 worlds() { find "$WORLDS_ROOT/worlds" -mindepth 1 -maxdepth 1 -type d 2> /dev/null | sed 's|.*/||' | sort; }
+# The directory's store for deploy's pins: the one worldd@'s launcher reads (#1960 B6). The install's drop-in gives
+# worldd@ the secrets file, so its store settings (only those) come from there; a directory.env still wins after it.
 directory_env() {
+  local k v
+  if [ -r "$ETC/secrets.env" ]; then
+    while IFS='=' read -r k v; do
+      k=${k#export }
+      case $k in
+        DIRECTORY_STORE_* | AWS_ACCESS_KEY_ID | AWS_SECRET_ACCESS_KEY | AWS_DEFAULT_REGION)
+          v=${v%\"} v=${v#\"} v=${v%\'} v=${v#\'}
+          export "$k=$v"
+          ;;
+      esac
+    done < "$ETC/secrets.env"
+  fi
   if [ -f "$ETC/directory.env" ]; then
     set -a
     # shellcheck disable=SC1091

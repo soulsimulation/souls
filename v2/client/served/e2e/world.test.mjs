@@ -13,21 +13,24 @@
 // with the WASM replica), from the world's `views/world.json` as the page resolves a placed world.
 //
 //   (a) the public stream carries both bodies, the said sentence and not the whisper's words (in no part and in no
-//       public file), a private conversation's turn as who spoke, when and among whom, never its words (#3775), a `souls:form-move` for the wave, and body motion: changing positions on the walk and a slot
+//       public file), a private conversation's turn as who spoke, when and among whom, never its words (#3775), the seated wave's run on A's body (#4143), and body motion: changing positions on the walk and a slot
 //       hand-off on the sit;
-//   (b) A's copy holds the world's kind entries after pairing, and `can wave:<A's body>` answers yes;
+//   (b) A's copy holds the world's kind entries after pairing, `can wave:<A's body>` answers yes, and `inspect <A's body>`
+//       offers the family's gestures; A's point (toward the bench, before sitting) and clap end with their receipts;
 //   (c) the malformed word is refused by name, and the world then restarts cleanly on the same folder;
 //   (d) after the restart a new viewer's stream holds the bodies where they were, and the stream goes on (a new say);
 //   (e) hide-and-seek (#3915): A takes an apple from an Eden swap shelf and hides it in an Eden hollow stump, whose entry is
 //       `closed`, with B standing by; B's copy, `find`, `look`, the stump's count of what it holds and the entries B's
 //       daemon is handed no longer name the apple, A's still do. An apple in an Eden fridge (closed to all but its
 //       opener) is in neither copy until B opens the fridge, then in B's alone, and out of B's again once B closes it.
+//       The public stream (#3948): the live viewer loses the hidden apple, a viewer that joins then never has it, and
+//       it is back once B takes it out; the fridge's apple is in no viewer's stream at all, opened or not.
 //
 // PENDING markers. An assertion that waits on an open fix runs inside `pending(<issue>, ...)`. While the fix is open it
 // fails, and the run prints `PENDING #<issue>: <what> (expected failure: <why>)` and goes on: never a silent skip. When
 // it passes, the test FAILS with `PENDING #<issue> now passes: remove its marker`, so the fix's PR removes the marker
 // in the same change and the assertion is required from then on.
-//   #3772 (a Soul's body runs its family's forms, E21 #2791): the wave's `souls:form-move` in (a) and `can wave` in (b).
+//   None open: #3772 was fixed by #4075, and #4143 (a wave on a seated body first walked to its own point) by its PR.
 //
 // Fake minds, isolated folders under the OS temp dir, no fixed sleeps (each wait is on an event, bounded as a failure
 // backstop). Run from v2/ after
@@ -63,9 +66,7 @@ const replicaUrl = pathToFileURL(join(PKG, 'replica.js')).href;
 registerHooks({ resolve: (s, c, next) => (s === 'replica' ? { url: replicaUrl, shortCircuit: true } : next(s, c)) });
 
 // ---- Pending markers ---------------------------------------------------------------------------------------------
-const PENDING = {
-  3772: "a Soul's body has no forms: its family's wave is refused and writes no souls:form-move",
-};
+const PENDING = {};
 const pendingReport = [];
 /** Runs `check`; while `issue` is open a failure is expected and printed, a pass fails the run (remove the marker). */
 async function pending(issue, what, check) {
@@ -250,11 +251,12 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
     return { label, home, soul: said.soul, rt, cli: (...a) => souls(home, ...a, '--soul', said.soul) };
   }
   // An act's answer from the world: the daemon's `read` events, by the act's sequence.
-  async function answered(s, sequence, ms = 30_000) {
+  /** The world's first answer to intent `sequence`; with `final`, its last, past an answer in progress (3). */
+  async function answered(s, sequence, ms = 30_000, final = false) {
     s.seen ??= [];
     return waitFor(`${s.label}'s answer to intent ${sequence}`, async () => {
       s.seen.push(...(await request(s.rt.socket, { op: 'read' })).events.filter((e) => e.kind === 'answer'));
-      return s.seen.find((e) => e.sequence === sequence);
+      return s.seen.find((e) => e.sequence === sequence && !(final && e.answer === 3));
     }, ms);
   }
   /** The first event of `s`'s daemon that `pred` holds of; answers read on the way are kept for `answered`. */
@@ -279,6 +281,12 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   }
   // C4's answer kinds: 1 receipt, 2 refused, 3 accepted, 4 resolved, 5 unread.
   const accepted = (a) => a.answer === 1 || a.answer === 3;
+  // An act that starts a walk is answered accepted (3) as its route is planned (W11, #4087), not when it ends; the
+  // next act of the same body waits for its receipt (a body runs one form at a time, v2/docs/intents.md rules 7, 8).
+  async function ended(s, a, what) {
+    if (a.answer.answer === 3) assert.equal((await answered(s, a.sent.sequence, 30_000, true)).answer, 1, `${what} ends with its receipt`);
+    return a;
+  }
   const bodiesSeen = async (s) => (await s.cli('find', 'body', '--limit', '50')).found?.filter((r) => r.kind?.startsWith('souls:body')) ?? [];
 
   const A = await pairOne('alder');
@@ -308,7 +316,10 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
 
   // (b) can wave on my own body, from the copy alone.
   const can = await A.cli('can', `wave:${meA}`);
-  await pending(3772, '(b) `can wave:<me>` answers yes from the copy', () => assert.equal(can.can ?? can.answer ?? can.verdict, 'yes', JSON.stringify(can)));
+  assert.equal(can.can ?? can.answer ?? can.verdict, 'yes', `(b) \`can wave:<me>\` answers yes from the copy (#3772, fixed by #4075): ${JSON.stringify(can)}`);
+  // (b) inspect on my own body lists the family's gestures as its offers (E21, #2791), as `can` reads them.
+  const offered = ((await A.cli('inspect', meA)).offers ?? []).map((o) => o.name);
+  for (const g of ['wave', 'clap', 'point']) assert.ok(offered.includes(g), `(b) \`inspect <me>\` offers ${g}: ${offered.join(', ')}`);
 
   // #3775: a private conversation. A offers B one where they stand (a seat admits no conversation), B accepts and
   // takes a private turn.
@@ -323,6 +334,8 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   // (e) Hide-and-seek (#3915): before the hide both copies hold the apple; after it only the hider's does.
   const apples = async (s) => ((await s.cli('find', 'apple', '--limit', '50')).found ?? []).filter((r) => r.kind?.startsWith('eden:apple'));
   const apple = (await waitFor("the apple on the shelf in B's copy", async () => (await apples(B)).at(0))).id;
+  await waitFor('the shelf apple in the public stream', () => v1.nodes.has(pageKey(apple)) || v1.errors.length, 20_000);
+  assert.deepEqual(v1.errors, [], 'the worker plays the stream');
   const shelf = (await A.cli('find', 'shelf')).found.find((r) => r.kind?.startsWith('eden:swap_shelf'));
   assert.ok(shelf, 'the shelf is found by its words');
   // #3914: the take names no thing; the shelf's selector (things in this shelf, nearest me) binds the apple.
@@ -333,6 +346,7 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   // B stands by the stump while A hides the apple, so A's entries are in B's interest.
   const toStump = await act(B, stump.id);
   assert.ok(accepted(toStump.answer), `B walks to the stump: ${JSON.stringify(toStump.answer)}`);
+  await ended(B, toStump, "B's walk to the stump");
   // #3914: a search of the empty stump, within reach of it, is refused by name, not `arg-missing`.
   const emptySearch = await act(B, `search:${stump.id}`);
   assert.equal(emptySearch.answer.reason, 'thing.none-selected', `B's search of the empty stump: ${JSON.stringify(emptySearch.answer)}`);
@@ -353,22 +367,40 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   assert.equal((await stumpIn(B))?.holds, undefined, "(e) B's copy does not count what the stump holds");
   assert.equal((await stumpIn(A))?.holds, 1, "(e) A's copy counts the apple in the stump");
   stage('hidden apple withheld from the seeker');
+  // #3948: out of the public stream too, for the live viewer and for one that joins now.
+  await waitFor('the hidden apple out of the live public stream', () => !v1.nodes.has(pageKey(apple)) || v1.errors.length, 20_000);
+  assert.deepEqual(v1.errors, [], 'the worker plays the stream past the hide');
+  const late = await viewer('hidden');
+  await waitFor('a late viewer has both bodies', () => late.bodies().length >= 2 || late.errors.length, 20_000);
+  assert.deepEqual(late.errors, [], 'the late viewer plays the stream');
+  assert.ok(!late.nodes.has(pageKey(apple)), '(e) a viewer that joins after the hide does not hold the hidden apple');
+  stage('hidden apple out of the public stream');
   // #3914 A2: B searches the stump with no argument and finds what is hidden: the apple is in B's hand, in B's copy.
   const found = await act(B, `search:${stump.id}`);
   assert.ok(accepted(found.answer), `B's search finds the apple: ${JSON.stringify(found.answer)}`);
+  await ended(B, found, "B's search");
   await waitFor("the found apple in B's copy", async () => (await apples(B)).find((r) => r.id === apple), 20_000);
+  await waitFor('the found apple back in the public stream', () => v1.nodes.has(pageKey(apple)) || v1.errors.length, 20_000);
+  assert.deepEqual(v1.errors, [], 'the worker plays the stream past the search');
   stage('the seeker searched and found the apple');
   // (e) The fridge's apple: in no copy, until B opens the fridge; then in B's, and still not in A's.
   const fridge = (await B.cli('find', 'fridge')).found.find((r) => r.kind?.startsWith('eden:fridge'));
   assert.ok(fridge, 'the fridge is found by its words');
   const cold = async (s) => (await apples(s)).filter((r) => r.in?.startsWith(fridge.name));
   assert.deepEqual(await cold(B), [], "(e) B's copy holds nothing in the closed fridge");
-  assert.ok(accepted((await act(B, fridge.id)).answer), 'B walks to the fridge');
+  const toFridge = await act(B, fridge.id);
+  assert.ok(accepted(toFridge.answer), 'B walks to the fridge');
+  await ended(B, toFridge, "B's walk to the fridge");
   const opened = await act(B, `open:${fridge.id}`);
   assert.ok(accepted(opened.answer), `B opens the fridge: ${JSON.stringify(opened.answer)}`);
+  await ended(B, opened, "B's open");
   await waitFor("the fridge's apple in B's copy once B opened it", async () => (await cold(B)).length === 1, 20_000);
   assert.deepEqual(await cold(A), [], "(e) A, who did not open it, still holds nothing in the fridge");
   stage('the opener sees into the fridge');
+  // #3948: the fridge's apple, in it since the world was built, was never in the public stream and is not now.
+  const coldApple = pageKey((await cold(B))[0].id);
+  const ever = (v) => v.nodes.has(coldApple) || [...v.parts, ...v.snapshots].some((p) => p.nodes.some((n) => n.id === coldApple));
+  assert.ok(!ever(v1) && !ever(late), "(e) the fridge's apple is in no viewer's stream");
   // Leaving the audience: B closes the fridge (its opener link ends) and the apple leaves B's copy.
   const shut = await act(B, `close:${fridge.id}`);
   assert.ok(accepted(shut.answer), `B closes the fridge: ${JSON.stringify(shut.answer)}`);
@@ -381,8 +413,20 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
   const fromPart = v1.parts.length;
   const walk = await act(A, bench.id);
   assert.ok(accepted(walk.answer), `A's walk to the bench: ${JSON.stringify(walk.answer)}`);
+  await ended(A, walk, "A's walk to the bench");
+  // A family gesture on A's own body, to its receipt (0.132 B1-3): a point toward the bench, from its stand point (the
+  // point move reaches 600 mm, so it is made before the sit).
+  async function gesture(...words) {
+    const g = await act(A, ...words);
+    assert.ok(accepted(g.answer), `(a) ${words[0]}: ${JSON.stringify(g.answer)}`);
+    if (g.answer.answer === 3) assert.equal((await answered(A, g.sent.sequence, 30_000, true)).answer, 1, `(a) ${words[0]} ends with its receipt`);
+  }
+  await gesture(`point:${meA}`, `toward=${bench.id}`);
   const sit = await act(A, `sit:${bench.id}`);
   assert.ok(accepted(sit.answer), `A's sit on the bench: ${JSON.stringify(sit.answer)}`);
+  // A body runs one form at a time and the world queues nothing (v2/docs/intents.md rules 7, 8): a sit answered in
+  // progress (3) is followed by its receipt, and only then is the body free for the wave.
+  if (sit.answer.answer === 3) assert.equal((await answered(A, sit.sent.sequence, 30_000, true)).answer, 1, "A's sit ends with its receipt");
   const wave = await act(A, `wave:${meA}`);
   const words = 'the bread is still warm on the square';
   const secret = 'the key is under the third stone';
@@ -428,11 +472,17 @@ test('served world end to end: two paired Souls act; viewers and clients get wha
     assert.ok(!bytes.includes(Buffer.from('second bell')), `#3775: the private words are in no public file: ${f.slice(world.length)}`);
   }
 
-  // (a) The wave's move record, from the body's family.
-  await pending(3772, "(a) the wave is accepted and its souls:form-move reaches the public stream", async () => {
-    assert.ok(accepted(wave.answer), `the wave: ${JSON.stringify(wave.answer)}`);
-    await waitFor('souls:form-move', () => v1.parts.some((p) => (p.happened ?? []).some((h) => h.name === 'souls:form-move' && h.node === pageKey(meA))), 10_000);
-  });
+  // (a) The wave, from the body's family (#4075), made seated where the body is (#4143): it ends with its receipt, and
+  // its run is in the public stream as the entries of a form on A's body itself, started and then ended (the sit's
+  // are the bench's). The move itself is in its `souls:form-move` entry, which the page draws gestures from (#3756).
+  assert.ok(accepted(wave.answer), `(a) the wave on the seated body: ${JSON.stringify(wave.answer)}`);
+  assert.equal((await answered(A, wave.sent.sequence, 30_000, true)).answer, 1, "(a) the wave ends with its receipt");
+  // A clap from the same family, to its receipt (0.132 B1-3).
+  await gesture(`clap:${meA}`);
+  const onA = (name) => v1.parts.slice(fromPart).flatMap((p) => p.happened ?? []).find((h) => h.name === name && h.node === pageKey(meA));
+  const waved = await waitFor("the wave's run in the public stream", () => (onA('souls:form-started') && onA('souls:form-ended')) || v1.errors.length, 10_000);
+  assert.deepEqual(v1.errors, []);
+  assert.ok(waved && onA('souls:form-ended').at > onA('souls:form-started').at, `(a) the wave's run on A's body starts, then ends: ${JSON.stringify([onA('souls:form-started'), onA('souls:form-ended')])}`);
 
   // (a) Body motion: positions change on the walk, and the sit hands the body off to the bench's slot.
   const a = pageKey(meA), benchKey = pageKey(bench.id);

@@ -5,11 +5,21 @@
 //! - **Its copy is kept the way K8's frozen copies are** (`sim::frozen`): a whole copy of the zone taken at start,
 //!   before the clock runs, then each tick's parts handed over (a send, nothing copied) and applied on this thread.
 //!   K8's published copies are shared and never sealed, so they cannot answer by hash; this copy is sealed here, on a
-//!   hash request after a change (only what changed is hashed), and every record a seal gave is kept.
+//!   hash request after a change (only what changed is hashed), and each node's record as last sealed is kept, with
+//!   the records lately replaced, for a descent still under way (#1960; `replica::sync::Records`).
+//! - **It seals at most once every [`SEAL_EVERY`]** (#1960): a tick's parts that arrive sooner after the last seal
+//!   wait, unapplied, and a hashes request then answers from the last seal, at its version. It once sealed at every
+//!   tick a follower asked after (up to 20 a second in a busy world), which shrank the window a replaced big record
+//!   (Eden's ground, megabytes) is kept to under a second, shorter than a far client's descent: refused
+//!   `sync-unknown-hash` at every follow. At most four seals a second, the big window lasts at least four seconds.
 //! - **It holds only what is on the disk:** the answers thread hands over a tick's parts once the tick's records are
 //!   durable, so an answer never shows a change before it is on the disk and goes to the asker at once.
-//! - **It is never behind an answer the asker holds:** the parts are handed over before the tick's answers are sent,
-//!   so a sync asked after a receipt sees the receipt's change.
+//! - **A receipt's change is at most [`SEAL_EVERY`] away:** the parts are handed over before the tick's answers are
+//!   sent, so a hashes request asked after a receipt either sees the receipt's change or answers at an older
+//!   version, the last seal's, which the answer carries. Parts held then are applied at the first message this
+//!   thread takes [`SEAL_EVERY`] after that seal, and the next hashes request seals them. A client whose copy ends
+//!   behind the version its receipt (or an entry) named follows again ([`SEAL_EVERY`] later: the daemon's
+//!   `FOLLOW_AGAIN_MS`, `v2/client/src/daemon/daemon.mjs`), and that follow sees the change.
 //!
 //! Requests reach it from the [`crate::answers::Door`] directly, so they never wait in the clock thread's queue.
 
@@ -17,6 +27,7 @@ use crate::answers::Reply;
 #[cfg(test)]
 use crate::closed::MADE_MOST;
 use crate::closed::{Closed, Redaction, Withhold, actor_of_key};
+use crate::measures;
 use crate::views::names::{self, PublicNames};
 use replica::apply::Replica;
 use replica::effects::Part;
@@ -25,10 +36,17 @@ use replica::encode::{Value, decode, encode};
 use replica::ids::{Hash, Id, Scope, Version};
 use replica::sync::{self, Records, Served, Source, wire};
 use replica::tree::Tree;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, VecDeque};
 use std::sync::Arc;
 use std::sync::mpsc::{Sender, channel};
 use std::thread;
+use std::time::{Duration, Instant};
+
+/// The least time between two seals of the sync copy (#1960). Parts that arrive sooner wait; a hashes request answers
+/// from the last seal. The client's `FOLLOW_AGAIN_MS` (`v2/client/src/daemon/daemon.mjs`) is the same.
+pub const SEAL_EVERY: Duration = Duration::from_millis(250);
+/// How many seal times are kept: enough to age the small window ([`sync::SMALL_SEALS`]).
+const SEAL_TIMES: usize = sync::SMALL_SEALS as usize + 1;
 
 /// What the sync thread is handed.
 pub(crate) enum ToSync {
@@ -60,19 +78,32 @@ pub(crate) fn start(
     thread::Builder::new().name("sync".into()).spawn(move || {
         let mut unsealed = false;
         let mut withhold = Withhold::new(closed);
+        // Parts not yet applied (#1960), and when the copy was last sealed (none: not since start).
+        let mut held: Vec<Arc<Part>> = Vec::new();
+        let mut sealed_at: Option<Instant> = None;
+        // When each recent seal was made: the age of the records' windows, for health.json.
+        let mut seal_times: VecDeque<Instant> = VecDeque::new();
         for r in rx {
-            match r {
-                ToSync::Parts(parts) => {
-                    for p in parts {
-                        match copy.apply(&p) {
-                            Ok(()) => {
-                                unsealed = true;
-                                withhold.applied(copy.tree(), &p);
-                            }
-                            Err(e) => eprintln!("worldd: the sync copy refused a part: {e}"),
+            // The seals' pace is this thread's, off the clock: no world state reads it (the wall-clock rule, K7, binds
+            // the engine; v2/clippy.toml).
+            #[allow(clippy::disallowed_methods)]
+            let now = Instant::now();
+            if let ToSync::Parts(parts) = &r {
+                held.extend(parts.iter().cloned());
+            }
+            if !held.is_empty() && sealed_at.is_none_or(|t| now.duration_since(t) >= SEAL_EVERY) {
+                for p in held.drain(..) {
+                    match copy.apply(&p) {
+                        Ok(()) => {
+                            unsealed = true;
+                            withhold.applied(copy.tree(), &p);
                         }
+                        Err(e) => eprintln!("worldd: the sync copy refused a part: {e}"),
                     }
                 }
+            }
+            match r {
+                ToSync::Parts(_) => {}
                 ToSync::Ask(mut ask, reply) => {
                     // Never the clock thread: a debug build panics there, a release build counts it.
                     sim::commit::off_clock();
@@ -80,11 +111,26 @@ pub(crate) fn start(
                         continue;
                     };
                     let asker = ask.remove(&wire::ACTOR).and_then(|k| actor_of_key(&k));
+                    // Parts are applied only SEAL_EVERY after the last seal, so this seals at most that often.
                     if unsealed && ask.contains_key(&wire::IDS) {
                         match copy.seal() {
                             Ok(sealed) => {
                                 kept.keep(&sealed);
                                 unsealed = false;
+                                sealed_at = Some(now);
+                                seal_times.push_back(now);
+                                if seal_times.len() > SEAL_TIMES {
+                                    seal_times.pop_front();
+                                }
+                                let w = kept.windows();
+                                let age = |seals: u64| {
+                                    usize::try_from(seals)
+                                        .ok()
+                                        .and_then(|k| seal_times.len().checked_sub(k + 1))
+                                        .and_then(|k| seal_times.get(k))
+                                        .map_or(0, |t| now.duration_since(*t).as_millis())
+                                };
+                                measures::SYNCS.sealed(w.small, age(w.small), w.big, age(w.big));
                             }
                             Err(e) => eprintln!("worldd: the sync copy was not sealed: {e}"),
                         }
@@ -124,6 +170,10 @@ pub(crate) fn start(
                         asker,
                     };
                     let mut a = sync::answer(&mut src, &[place], &ask, now);
+                    if matches!(a.get(&wire::REFUSED), Some(Value::Text(t)) if t.as_str() == "sync-unknown-hash")
+                    {
+                        measures::SYNCS.unknown_hash();
+                    }
                     a.insert(wire::ASK, n);
                     names::attach(&mut a, &public_names);
                     // #3703: the public words of the text references these records hold.

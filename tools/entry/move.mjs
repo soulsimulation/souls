@@ -8,10 +8,10 @@
 // instant at the end of start-up; a pour has a contact window (`pour_us`) after it. The effector `held_point` is a named
 // point of the thing in the hand (a spout): reach is measured from it, not from the hand. Nothing is counted in ticks and no number is floating-point. Where the hand is at a
 // time is `pose.mjs`. This file reads `format.mjs` and changes nothing in it.
+import { isMain } from '../lib/is-main.mjs';
 import {createHash} from 'node:crypto';
 import {readdirSync, readFileSync} from 'node:fs';
 import {join} from 'node:path';
-import {fileURLToPath} from 'node:url';
 import {parseEntry, canonical} from './format.mjs';
 
 export const MOVE_FORMAT = 'souls-move/1';
@@ -20,7 +20,7 @@ export const CANCELS_ON = Object.freeze(['claim_taken', 'out_of_reach']);
 export const EFFECTORS = Object.freeze(['hand', 'held_point']);
 export const PHASES = Object.freeze(['start_up_us', 'slide_us', 'pour_us', 'consume_us', 'strike_us', 'pump_us', 'recovery_us']);
 export const REACH_MAX_MM = 700;
-const KEYS = ['format', 'move', 'claims', 'blocks', 'cancels_on', 'effector', 'reach_mm', 'phases'];
+const KEYS = ['format', 'move', 'claims', 'blocks', 'cancels_on', 'effector', 'reach_mm', 'contact', 'phases'];
 const IDENT = /^[a-z][a-z0-9_]*$/;
 const TICK = /(?:^|[_\W])[Tt]icks?(?:$|[_\W])|[a-z]Ticks?\b/;
 const isObj = v => v !== null && typeof v === 'object' && !Array.isArray(v);
@@ -50,6 +50,9 @@ export function validateMove(m) {
   if (!Array.isArray(m.cancels_on)) err('cancels_on', 'a list');
   else m.cancels_on.forEach((c, i) => { if (!CANCELS_ON.includes(c)) err(`cancels_on.${i}`, `one of ${CANCELS_ON.join(', ')}`); });
   if (!EFFECTORS.includes(m.effector)) err('effector', `one of ${EFFECTORS.join(', ')}`);
+  // `contact` (optional): the named point of the thing or body it reaches, fixed by the move (a handshake reaches the
+  // other's right hand); with none, the form's step names it (`at`).
+  if (m.contact !== undefined && (typeof m.contact !== 'string' || !IDENT.test(m.contact))) err('contact', 'a lower_snake_case point name');
   if (!(Number.isSafeInteger(m.reach_mm) && m.reach_mm > 0 && m.reach_mm <= REACH_MAX_MM)) err('reach_mm', `whole millimetres, 1 to ${REACH_MAX_MM} (under a full arm)`);
   if (!isObj(m.phases)) err('phases', 'a table of phase lengths in microseconds');
   else {
@@ -83,7 +86,7 @@ export function loadMoves(dir) {
   return out;
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const dir = process.argv[2] ?? 'content/moves';
   let bad = 0;
   for (const r of loadMoves(dir)) { console.log(JSON.stringify({file: r.file, ref: r.ref, errors: r.errors})); bad += r.errors.length; }

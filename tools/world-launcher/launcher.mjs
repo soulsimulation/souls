@@ -95,6 +95,7 @@
 // and takes them over one at a time (handover below), so the port never closes and no world has two writers.
 //
 // Local only: binds 127.0.0.1, edge minds (owners' agents think; the world pays for none), no credentials, no tunnels.
+import { isMain } from '../lib/is-main.mjs';
 import { authorizedPartiesOverride, publicAuthEnvironment } from './clerk-public-env.mjs';
 import { satelliteSettings, primarySignInPage } from './clerk-satellite.mjs';
 import { execFileSync } from 'node:child_process';
@@ -116,12 +117,12 @@ import { createReadStream, existsSync, mkdirSync, readFileSync, renameSync, rmSy
 import { monitorEventLoopDelay } from 'node:perf_hooks';
 import { brotliCompressSync, brotliDecompressSync, gunzipSync, gzipSync, constants as zlibConstants } from 'node:zlib';
 import { dirname, extname, join, normalize, resolve, sep } from 'node:path';
-import { fileURLToPath, pathToFileURL } from 'node:url';
+import { fileURLToPath } from 'node:url';
 import { DatabaseSync } from 'node:sqlite';
 import { FORK_SLUGS, RESERVED, Registry, SLUG_RE, cachedTemplates, isTimeZone, readWorkersOf, slugFor, worldHeapMb, worldIdOf } from './registry.mjs';
 import { ChildPool, PSS_EVERY_MS, UNLOADED, compileCacheDir, defaultCommand, forkCommand, worldState } from './children.mjs';
 import { canonicalRequest } from './world-urls.mjs';
-import { cutoverFence } from './cutover.mjs';
+import { cutoverFence, withV2Stream } from './cutover.mjs';
 import { legacyWorldFor, redirectSwitch } from './redirects.mjs';
 import { verifiedCreator } from './creator-auth.mjs';
 import { creationPolicy, checkAccountCreation } from './creation-policy.mjs';
@@ -323,7 +324,7 @@ export async function openLauncher(cfg = {}) {
   if (oldRoot && !authEnvFile) throw new Error('launcher: --old-worlds-root needs --auth-env (the original worlds sign in with Clerk)');
   const redirects = oldRoot ? redirectSwitch(join(dataDir, 'redirects.json'), log) : null;
   const registry = new Registry(dataDir);
-  const cutover = cutoverFence({ binding: cfg.cutoverBinding, ...(cfg.cutoverBindingFile ? { file: cfg.cutoverBindingFile } : {}) });
+  const cutover = cutoverFence({ binding: cfg.cutoverBinding, log, ...(cfg.cutoverBindingFile ? { file: cfg.cutoverBindingFile } : {}) });
   const accountPolicy = creationPolicy(cfg);
   /** Handover state (keeper.mjs): 'active' → 'preparing' → 'retired' (or back to 'active' when the next one fails). */
   let phase = 'active', retiredTo = null, gate = null, retiredPidFile = null, handBack = null;
@@ -1015,7 +1016,7 @@ export async function openLauncher(cfg = {}) {
   function siteIndex() { let idx; try { idx = readFileSync(join(webDir, 'llms.txt'), 'utf8'); } catch { return null; }
     return siteLlmsTxt(idx, { origin: publicOrigin, base: B, worlds: publicWorlds(registry.worlds.filter((w) => !closing.has(w.slug))) }); }
   function robotsOf(slug, headers) { const w = slug ? registry.get(slug) : null; return w && isUnlisted(w) ? { ...headers, 'x-robots-tag': NOINDEX } : headers; }
-  function proxyHttp(req, res, targetPort, { tee, path, retry, soul, maxBody = 0, slug = null, noindex = false, onData, keep } = {}) {
+  function proxyHttp(req, res, targetPort, { tee, path, retry, soul, maxBody = 0, slug = null, noindex = false, onData, keep, pageStream = null, pageBodies = null } = {}) {
     if (clientGone(req, res)) return;
     const sent = performance.now();
     // Behind Caddy (a public origin other than our own) keep the visitor's x-forwarded-for, so per-person limits in
@@ -1032,10 +1033,17 @@ export async function openLauncher(cfg = {}) {
       headers['server-timing'] = headers['server-timing'] ? `${headers['server-timing']}, ${mine}` : mine;
       if (soul && account) ceilings.learn(soul, account);   // lane L1: the account a Soul token belongs to (never shown to the client)
       if (slug) sawLoad(slug, r.headers['x-sim-load']);
+      if (keep) keep(r);   // #2515: the world page, kept for the next arrivals
+      if (pageStream && r.statusCode === 200 && /^text\/html\b/.test(headers['content-type'] ?? '') && !headers['content-encoding']) {
+        const chunks = []; r.on('data', (c) => chunks.push(c)); r.on('error', () => res.destroy());
+        // B3-1: the whole page is sent with its length, so a chunked answer's transfer-encoding goes (both is an invalid response)
+        const { 'transfer-encoding': _te, ...whole } = headers;
+        r.on('end', () => { const body = Buffer.from(withV2Stream(Buffer.concat(chunks).toString('utf8'), pageStream, pageBodies)); res.writeHead(200, robotsOf(slug, { ...whole, 'content-length': String(body.length) })).end(body); });
+        return;
+      }
       res.writeHead(r.statusCode ?? 502, noindex ? { ...headers, 'x-robots-tag': NOINDEX } : robotsOf(slug, headers));
       if (tee && (r.statusCode ?? 0) < 300) { const chunks = []; r.on('data', (c) => { if (chunks.length < 64) chunks.push(c); }); r.on('end', () => { try { tee(JSON.parse(Buffer.concat(chunks).toString('utf8'))); } catch { /* not json */ } }); }
       if (onData) r.on('data', onData);
-      if (keep) keep(r);   // #2515: the world page, kept for the next arrivals
       r.pipe(res);
     });
     // A world that was just handed over (or restarted) refused the connection before answering: a GET/HEAD is asked again
@@ -1197,15 +1205,20 @@ export async function openLauncher(cfg = {}) {
     // reached it, is kept; arrivals while it is asked wait for it (a wave costs one build). The world's other routes are
     // proxied as before. Its robots tag is the world's own rule, set for each request. Only a GET that asks for HTML (a
     // browser's arrival) is a page: any other GET, such as a long-poll, never waits behind another caller's flight.
-    let keep;
+    // #4177: the page of a world routed to v2 names its stream in its inline config (written as it leaves, never kept)
+    let keep, pageStream = null, pageBodies = null;
     if (req.method === 'GET' && /\btext\/html\b/.test(String(req.headers.accept ?? '')) && !/^\/(?:v1|mcp|__)(?:\/|$)/.test(edgeRest) && !extname(edgeRest)) {
       const st = pool.status(slug), pageKey = `page ${slug} ${edgeRest} ${st.pid ?? ''}:${st.upSince ?? ''} ${req.headers['x-forwarded-host'] ?? ''} ${req.headers['x-forwarded-proto'] ?? ''} ${req.headers.host ?? ''}`;
+      pageStream = cutover?.v2Stream(w) ?? null; pageBodies = pageStream ? cutover.v2Fields(w) : null;   // B3-2b: v2Bodies, v2Gateway, v2Directory
+      // #4177: at route time the old world's static views are published beside the stream (once; cutover.mjs publish)
+      if (pageStream && p) void cutover.publish(w, async (path) => { const r = await fetch(`http://127.0.0.1:${p}${path}`, { signal: AbortSignal.timeout(10_000) }); return { status: r.status, body: Buffer.from(await r.arrayBuffer()) }; }).catch((e) => log(`cutover: ${slug}'s static views not published (${e?.message ?? e})`));
       let kept = c3.peek(pageKey, PAGE_TTL_MS), tag = 'hit';
       if (!kept && !retried && pageFlights.has(pageKey)) { kept = await pageFlights.get(pageKey); tag = 'shared'; if (clientGone(req, res)) return; }
       if (kept) {
         const { 'server-timing': _t, 'x-robots-tag': _r, ...headers } = kept.headers;
         if (headers['x-sim-page'] !== 'index' || req.url.includes('?')) headers['x-robots-tag'] = NOINDEX;   // as apps/server/src/http.ts (INDEXABLE)
-        res.writeHead(200, robotsOf(slug, { ...headers, 'server-timing': launcherTiming(res, 'cache'), 'x-sim-cache': tag })).end(kept.body);
+        const body = pageStream ? Buffer.from(withV2Stream(kept.body.toString('utf8'), pageStream, pageBodies)) : kept.body;
+        res.writeHead(200, robotsOf(slug, { ...headers, 'content-length': String(body.length), 'server-timing': launcherTiming(res, 'cache'), 'x-sim-cache': tag })).end(body);
         return;
       }
       // the first arrival asks the world; the flight ends with the kept page, or with nothing (not the page, an error, gone)
@@ -1226,7 +1239,7 @@ export async function openLauncher(cfg = {}) {
     }
     // #2299: the last event id a resident's stream was sent (the cursor it holds if its world unloads under it)
     const onData = unloadStill && ask?.kind === 'events' ? (c) => { const m = String(c).match(/(?:^|\n)id: ?([^\r\n]*)/g); if (m) res.simLastId = m.at(-1).replace(/^\n?id: ?/, ''); } : undefined;
-    const opts = { tee, path, retry: again, soul: gated?.soul, slug, onData, keep, maxBody: rest.startsWith('/v1/edge/') && !rest.startsWith('/v1/edge/body/uploads') ? lim.maxBodyKb * 1024 : 0 };
+    const opts = { tee, path, retry: again, soul: gated?.soul, slug, onData, keep, pageStream, pageBodies, maxBody: rest.startsWith('/v1/edge/') && !rest.startsWith('/v1/edge/body/uploads') ? lim.maxBodyKb * 1024 : 0 };
     // Boot, throttling and pool waits may have crossed the switch. Admission is checked again before forwarding.
     if (cutover?.handle(req, res, w, url)) return;
     // Stage B (lane B-port): a C2 read the world's read workers answer goes to their port (only with read workers on)
@@ -1384,6 +1397,17 @@ export async function openLauncher(cfg = {}) {
     }
     dash.noteWatch(req);   // lane DASH: sim-watch's last check (and what it saw down)
     try {
+      // B3-2c: the site's public sign-in fields, in the shape the new system's pages read them (v2/web/src/source/signin.ts
+      // SignInConfig, as v2/tools/origin/site.mjs answers): the pairing card (`/pair`, the directory's) then signs in with
+      // this site's own provider session, the one the old page holds, and approves with it as a bearer. No secret here.
+      if (path === '/v1/auth/config' && (req.method === 'GET' || req.method === 'HEAD')) {
+        const p = auth?.public, host = String(req.headers.host ?? '');
+        const loopback = /^(?:localhost|127\.(?:\d{1,3}\.){2}\d{1,3})(?::\d+)?$/.test(host) || host.startsWith('[::1]');
+        if (!p || (p.clerkPublishableKey.startsWith('pk_test_') && !loopback)) json(res, 503, { code: 'auth-unconfigured', message: 'Sign-in is not configured. Ask the operator to configure the public provider.' });
+        else json(res, 200, { authProvider: 'clerk', clerkPublishableKey: p.clerkPublishableKey, clerkIssuer: p.clerkIssuer,
+          ...(p.clerkSatellite ? { clerkSatellite: { domain: p.clerkSatellite.domain, signInUrl: p.clerkSatellite.signInUrl } } : {}) }, { 'x-content-type-options': 'nosniff' });
+        return;
+      }
       if (path === '/__sim/op/cutover' && req.method === 'GET') {
         if (!direct(req)) { json(res, 403, { ok: false, code: 'operator-only' }); return; }
         try { json(res, 200, { ok: true, ...(cutover?.inspect(registry) ?? { configured: false }) }); }
@@ -1965,7 +1989,7 @@ function serveKeeper(l, stop) {
   process.send({ t: 'ready', build: l.build, pid: process.pid });
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (isMain(import.meta.url)) {
   const argv = process.argv.slice(2);
   const flag = (k) => { const i = argv.indexOf(`--${k}`); return i >= 0 ? argv[i + 1] : undefined; };
   const range = flag('range')?.split('-').map(Number);

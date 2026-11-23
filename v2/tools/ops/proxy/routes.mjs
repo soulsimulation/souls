@@ -6,9 +6,9 @@
 //     --origin https://soul.game --out /var/lib/souls-routes
 // When the directory or the launcher does not answer, nothing is changed (the last map keeps routing) and it exits 1.
 // New slugs are added before stale ones are removed. Prints one line: `routes: <n> slugs (+a -r), sitemap <m> urls`.
+import { isMain } from '../../../../tools/lib/is-main.mjs';
 import { mkdirSync, readdirSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { readWorldRoutes, WORLD_ROUTES } from '../../origin/world-routes.mjs';
 
 const SLUG = /^[a-z0-9][a-z0-9-]{0,62}$/;
@@ -53,7 +53,7 @@ export async function makeRoutes({ directory, launcher, origin, out, worldRoutes
   return { slugs, added, removed, urls: (sitemap.match(/<loc>/g) ?? []).length };
 }
 
-if (process.argv[1] && fileURLToPath(import.meta.url) === process.argv[1]) {
+if (isMain(import.meta.url)) {
   const a = process.argv.slice(2), opt = (k, d) => { const i = a.indexOf(k); return i >= 0 ? a[i + 1] : d; };
   try {
     const r = await makeRoutes({ directory: opt('--directory', 'http://localhost:7310'), launcher: opt('--launcher'), origin: opt('--origin', 'https://soul.game'), out: opt('--out', '/var/lib/souls-routes') });

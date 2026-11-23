@@ -161,6 +161,11 @@ fn stands(c: &Controller, body: Id) -> R<(Id, Vec3)> {
 }
 
 impl Engine {
+    /// The earliest due time of the activities and the boats on their loops (O2: when a sleeping world must be up).
+    pub fn next_due(&self) -> Option<Micros> {
+        self.due.next_due()
+    }
+
     /// The systems for a zone under `header`, checked by `rules`, with activities of `kinds`, minting ids of `scope`.
     pub fn new(header: Header, rules: Rules, kinds: Vec<ActivityKind>, scope: Scope) -> Engine {
         Engine {

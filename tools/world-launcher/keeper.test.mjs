@@ -22,6 +22,8 @@ function release(name, { brokenLauncher = false, brokenWorlds = false, loadMs = 
   mkdirSync(join(r, 'apps/server/src'), { recursive: true }); mkdirSync(join(r, 'worlds/templates'), { recursive: true });
   mkdirSync(join(r, 'apps/web/dist'), { recursive: true }); writeFileSync(join(r, 'apps/web/dist/index.html'), `<!doctype html><title>${name}</title>`);
   cpSync(here, join(r, 'tools/world-launcher'), { recursive: true, filter: (f) => !f.includes('/deploy/') && !f.endsWith('.test.mjs') });
+  // the launcher's own helpers (`../lib/is-main.mjs`)
+  cpSync(join(here, '../lib'), join(r, 'tools/lib'), { recursive: true, filter: (f) => !f.endsWith('.test.mjs') });
   // the launcher's upload gate for world thumbnails (#887) is the server's own moderation module
   cpSync(join(here, '../../apps/server/src/moderation'), join(r, 'apps/server/src/moderation'), { recursive: true, filter: (f) => !f.endsWith('.test.ts') });
   // and a world's page for a world that is not loaded carries the world's own title (#2304)

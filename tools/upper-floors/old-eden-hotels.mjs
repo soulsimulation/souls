@@ -7,6 +7,7 @@
 // the guest rooms' beds and desks, and rooms as places. Hotel 4 keeps its drawn shell: the carousel stands across its door.
 // Pure and deterministic: node tools/upper-floors/old-eden-hotels.mjs <out-dir> writes hotels.fact.json (an array of three
 // facts, installed in order) + hotels.spots.json.
+import { isMain } from '../lib/is-main.mjs';
 import { writeFileSync, mkdirSync } from 'node:fs';
 import { join } from 'node:path';
 import { SEAFRONT_HOTELS, HOTEL_Z, HOTEL_DEPTH, hotelColumns, hotelCoreLayout, hotelFlight, hotelFloorYs } from '../../mars/viewer/app/engine-view/content/assets/eden-regions/hotel-core.ts';
@@ -105,7 +106,7 @@ export function hotelsSpots() {
   return spots;
 }
 
-if (import.meta.url === `file://${process.argv[1]}`) {
+if (isMain(import.meta.url)) {
   const out = process.argv[2]; if (!out) { console.error('usage: old-eden-hotels.mjs <out-dir>'); process.exit(2); }
   mkdirSync(out, { recursive: true });
   writeFileSync(join(out, 'hotels.fact.json'), JSON.stringify(hotelsFacts(), null, 1) + '\n');

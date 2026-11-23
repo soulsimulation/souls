@@ -172,6 +172,38 @@ fn plan_with(
     guard: impl FnOnce(&Part) -> Result<(Guard, Option<PlannedMap>), String>,
 ) -> Result<Planned, Refused> {
     off_clock();
+    // A doorway's row is read at its first end, in field 22, with at least five values after its link (`ground::scene`,
+    // a door's removal): a doorway link, or a link with a door, owned by its second end, or a doorway link whose row
+    // is elsewhere or short, would leave its floor unreadable and its door unremovable (#3934 review).
+    for (i, op) in checked.edit.ops.iter().enumerate() {
+        use crate::ground::scene::{DOORWAY, F_DOORWAYS};
+        let Op::Link {
+            ty,
+            owner,
+            field,
+            row,
+            door,
+            ..
+        } = op
+        else {
+            continue;
+        };
+        let doorway = ty.as_str() == DOORWAY;
+        let why = if *owner == replica::world_model::End::Second
+            && (door.is_some() || *field == F_DOORWAYS || doorway)
+        {
+            "a doorway link is owned by its first end, where its row is read"
+        } else if doorway && (*field != F_DOORWAYS || row.len() < 5) {
+            "a doorway link writes a row of at least 5 values to field 22"
+        } else {
+            continue;
+        };
+        return Err(Refused {
+            op: Some(i),
+            name: "edit.link",
+            detail: why.to_owned(),
+        });
+    }
     let names = names(&checked, &mut minter)?;
     let effects = effects(copy.tree(), copy.version(), &checked, &names, 0);
     let bytes = encode(&Value::Map(BTreeMap::from([
@@ -674,6 +706,9 @@ fn field(tree: &Tree, staged: &BTreeMap<(Id, u64), Value>, node: Id, key: u64) -
 fn int(n: i64) -> Value {
     u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint)
 }
+
+#[cfg(test)]
+mod defined_tests;
 
 #[cfg(test)]
 mod doorway_lowering_tests {

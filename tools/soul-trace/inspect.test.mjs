@@ -120,7 +120,7 @@ test('re-reads only on change, reports missing and oversized traces', async t =>
 test('the inspector never opens a network connection or writes', async t => {
   const src = readFileSync(fileURLToPath(new URL('./inspect.mjs', import.meta.url)), 'utf8');
   const imports = [...src.matchAll(/^import (.+) from '([^']+)';$/gm)].map(m => m[2] + ' ' + m[1]);
-  assert.deepEqual(imports, ["node:http {createServer}", "node:crypto {randomBytes, timingSafeEqual}",
-    "node:fs {openSync, fstatSync, readSync, closeSync}", "node:path {basename, resolve}", "node:url {pathToFileURL}", "./readout.mjs {reconstruct}"]);
+  assert.deepEqual(imports, ["../lib/is-main.mjs { isMain }", "node:http {createServer}", "node:crypto {randomBytes, timingSafeEqual}",
+    "node:fs {openSync, fstatSync, readSync, closeSync}", "node:path {basename, resolve}", "./readout.mjs {reconstruct}"]);
   assert.doesNotMatch(src, /\bfetch\(['"`]http|\brequest\(|child_process|process\.kill/);
 });

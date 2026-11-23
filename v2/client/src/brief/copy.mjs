@@ -147,20 +147,44 @@ export const sequenceOf = (versionHex) => (versionHex ? Number(decode(Buffer.fro
 /** Plain JSON for comparing records: bytes as hex, maps as sorted pairs. */
 const plain = (v) => v instanceof Uint8Array ? hex(v) : Array.isArray(v) ? v.map(plain) : v instanceof Map ? [...v].map(([k, x]) => [k, plain(x)]) : typeof v === 'bigint' ? String(v) : v;
 
-const DECODED = new Map(); // hash → { record, own }; a hash names the same record for ever
-const KEEP_DECODED = 50_000;
-function read(copy, hash) {
-  let d = DECODED.get(hash);
-  if (!d) {
-    const bytes = copy.record(hash);
-    if (!bytes) return null;
-    const m = decode(bytes), rest = new Map(m);
-    rest.delete(10);
-    d = { m, own: JSON.stringify(plain(rest)) };
-    if (DECODED.size >= KEEP_DECODED) DECODED.clear();
-    DECODED.set(hash, d);
+// A copy's records decoded, by hash (a hash names the same record for ever): only those its last walk from the roots
+// reached. A moving body re-hashes itself and every node above it at each follow; keeping every version decoded grew
+// the daemon by megabytes a second while a Soul walked (a room's record holds each child's hash), until Node's heap ran out.
+const DECODED = new WeakMap();
+/** A walk from the copy's roots: `read` decodes a record once, `done` keeps only what the walk reached. */
+function walkOf(copy) {
+  const was = DECODED.get(copy), kept = new Map();
+  return {
+    read(hash) {
+      let d = kept.get(hash) ?? was?.get(hash);
+      if (!d) {
+        const bytes = copy.record(hash);
+        if (!bytes) return null;
+        const m = decode(bytes), rest = new Map(m);
+        rest.delete(10);
+        d = { m, own: JSON.stringify(plain(rest)) };
+      }
+      kept.set(hash, d);
+      return d;
+    },
+    done() { DECODED.set(copy, kept); },
+  };
+}
+
+/** The full names of the creator's own kinds (#3697) the copy holds: field 1 of each `souls:kind` node at a root. */
+export function definedNames(copy) {
+  const out = new Set();
+  for (const h of Object.values(JSON.parse(copy.roots()))) {
+    const root = copy.record(h);
+    if (!root) continue;
+    for (const c of decode(root).get(10) ?? []) {
+      const bytes = copy.record(hex(c));
+      if (!bytes) continue;
+      const m = decode(bytes), f = m.get(6) instanceof Map ? m.get(6) : new Map(), full = f.get(1) ?? f.get(1n);
+      if (plainKind(m.get(2)) === 'souls:kind' && typeof full === 'string') out.add(full);
+    }
   }
-  return d;
+  return out;
 }
 
 /**
@@ -170,16 +194,18 @@ function read(copy, hash) {
  * fields is the world's or a Soul's words and is carried as `text`, to be quoted, never followed.
  */
 export function rowsOf(copy) {
-  const rows = new Map();
+  const rows = new Map(), own = definedNames(copy);
+  const walk = walkOf(copy);
   const todo = Object.values(JSON.parse(copy.roots())).map((h) => [h, []]);
   while (todo.length) {
     const [hash, path] = todo.pop();
-    const d = read(copy, hash);
+    const d = walk.read(hash);
     if (!d) continue;
     const { m } = d, id = idText(m.get(1)), kind = plainKind(m.get(2));
     const fields = m.get(6) instanceof Map ? m.get(6) : new Map();
     const text = [...fields].filter(([n, v]) => typeof v === 'string' && Number(n) !== F_ENTRY).map(([, v]) => v);
-    const entry = entryKind(m);
+    // A thing of a creator's kind (#3697) goes by that kind's full name, so its own revision's record is read.
+    const full = String(m.get(2)), entry = own.has(full) ? full : entryKind(m);
     const name = namesOf(copy).get(publicRef(m)) ?? wordsAt(copy, fields, F_TITLE) ?? `${kind.replace(/^.*:/, '')} ${m.get(1)[1]}`;
     const aliases = wordsAt(copy, fields, F_ALIASES)?.split('\n').map((a) => a.trim()).filter(Boolean) ?? [];
     const children = (m.get(10) ?? []).map(hex);
@@ -194,6 +220,7 @@ export function rowsOf(copy) {
     rows.set(id, { id, name, kind, ...(entry !== kind ? { entry } : {}), parent: m.has(3) ? idText(m.get(3)) : null, path, children: children.length, ...at, ...(text.length ? { text } : {}), ...(of ? { soul: idText(of.get(2)[1]) } : {}), ...(moving ? { moving: true } : {}), ...(hours ? { hours } : {}), ...(aliases.length ? { aliases } : {}), own: d.own });
     for (const c of children) todo.push([c, [...path, name]]);
   }
+  walk.done();
   return rows;
 }
 
@@ -204,9 +231,10 @@ export function rowsOf(copy) {
  */
 export function posesOf(copy) {
   const out = new Map();
+  const walk = walkOf(copy);
   const todo = Object.values(JSON.parse(copy.roots()));
   while (todo.length) {
-    const d = read(copy, todo.pop());
+    const d = walk.read(todo.pop());
     if (!d) continue;
     const { m } = d, pose = m.get(7), p = pose instanceof Map ? pose.get(2) : null;
     out.set(idText(m.get(1)), {
@@ -215,6 +243,7 @@ export function posesOf(copy) {
     });
     todo.push(...(m.get(10) ?? []).map(hex));
   }
+  walk.done();
   return out;
 }
 

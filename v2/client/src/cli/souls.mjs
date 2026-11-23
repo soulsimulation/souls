@@ -4,13 +4,20 @@
 // command starts the daemon. Every answer but status's and quit's ends with `at` and `changed`.
 //
 //   souls.mjs status                          the daemon: connected, cursor, intents sent and answered
-//   souls.mjs look                            the brief: my room, cards outward, what changed, the age
+//   souls.mjs look | here                     the brief: my room, cards outward, what changed, the age
+//   souls.mjs look set <preset | params file> puts a humanoid look on your default body (`life:look`, G3): a preset
+//                                             (casual, punk, woman) or a core/humanoid@2 params JSON file; prints
+//                                             the receipt
+//   souls.mjs listen [--follow]               the owner's messages: those open now, else the next to arrive; with
+//                                             --follow, one line for each as it arrives, until stopped
 //   souls.mjs find <words...> [--limit n]     one search over the copy
 //   souls.mjs pair <world url>                asks the world's directory for a Soul: prints a link and a code for the
 //                                             owner, and returns; the pairing finishes in the background (W2)
 //   souls.mjs act <act> [<act>...]            a ranked list: the first is the act, the rest its fallbacks. An act is
 //                                             <verb>:<id> (sit:<seat id>), an id alone (walk there), or a verb; ids
 //                                             or <name>=<id> after an act are its thing arguments (C10)
+//   souls.mjs act <act> ... --wait            the same, then returns its receipt's final phase (done, refused with the
+//                                             reason, resolved) or, after 60 s, a still-running line saying how to check
 //   souls.mjs inspect <id>                    the thing as the copy holds it and its own offers, each with its parameters
 //                                             and the act that sends it; asks the world nothing (#3686)
 //   souls.mjs object <id> [<offer> [<name>=<value>... | '<params json>']]   no offer: inspect's offers; an offer:
@@ -105,6 +112,7 @@
 //
 // The home is SOULS_HOME, else the nearest .souls; the daemon's library is SOULS_REPLICA_PKG.
 
+import { isMain } from '../../../../tools/lib/is-main.mjs';
 import { spawn } from 'node:child_process';
 import { existsSync, mkdirSync, openSync, readdirSync, readFileSync, statSync, writeFileSync } from 'node:fs';
 import { homedir } from 'node:os';
@@ -136,7 +144,9 @@ export const OPS = [
   'find',
   'history',
   'inspect',
+  'here',
   'lie',
+  'listen',
   'look',
   'now',
   'object',
@@ -154,12 +164,13 @@ export const OPS = [
   'status',
   'stop',
   'wait',
+  'wake',
   'wear',
   'whatson',
   'whisper',
 ];
 /** #3705: today's names, kept: `stop` ends your act (the daemon's op `halt`), `quit` ends the daemon (its op `stop`). */
-const RENAMED = { stop: 'halt', quit: 'stop', conversations: 'converse' };
+const RENAMED = { stop: 'halt', quit: 'stop', conversations: 'converse', here: 'look' };
 const CALENDAR_USAGE = 'calendar | calendar add "<title>" --place <placeId> --in <minutes> --for <minutes> ["description"] | calendar interest|not-coming <id>';
 /** Commands that read the Soul's own memory in the home and never reach the daemon or a world. */
 export const LOCAL = [
@@ -225,6 +236,9 @@ export function requestOf(argv) {
     if (name === '--missed' && opts.missed === 'late') { opts.missed = `late ${args[k]}`; args.splice(k, 1); }
   }
   if (asking) [opts.of, opts.soul] = [opts.soul, opts.as];
+  // D1: `act ... --wait` sends the act, then waits for its receipt's final phase (actEnd).
+  const waits = args[0] === 'act' && args.includes('--wait');
+  if (waits) args.splice(args.indexOf('--wait'), 1);
   const [op = 'status', ...rest] = args;
   if (op === 'schedule') {
     const [sub = 'list', ...more] = rest;
@@ -302,6 +316,18 @@ export function requestOf(argv) {
   if (op === 'whisper') Object.assign(req, { to: rest[0], words: rest.slice(1).join(' ') });
   if (op === 'lie') req.this = rest[0];
   if (op === 'wear') req.body = rest[0];
+  // R5: the owner's wake rules, by name (act-ended, soul-arrives, idle) or as a rule's JSON; listen and wait hand them.
+  if (op === 'wake') {
+    const w = wakeOf(rest);
+    if (w.refused) return w;
+    return { req: w, soul: opts.soul };
+  }
+  // G3: `look set <preset | params file>` is the Soul's own `life:look`, waited for like `act --wait`.
+  if (op === 'look' && rest[0] === 'set') {
+    const look = lookParams(rest[1]);
+    if (look.refused) return look;
+    return { req: { op: 'look-set', params: look.params }, soul: opts.soul, wait: true };
+  }
   if (op === 'converse') {
     const words = rest.filter((w) => w !== '--private');
     const [does = 'list', who, ...said] = words;
@@ -311,12 +337,149 @@ export function requestOf(argv) {
     if (said.length) req.words = said.join(' ');
   }
   if (op === 'wait' && rest[0] !== undefined) req.seconds = Number(rest[0]);
+  if (op === 'listen' && rest.includes('--follow')) req.follow = true;
   if (op === 'history') {
     for (const [k, v] of [['at', opts.at], ['thing', opts.thing], ['soul', opts.of], ['since', opts.since], ['until', opts.until]]) if (v !== undefined) req[k] = v;
   }
   // #3706: a write sent again with the same --key is one write; the daemon answers the repeat with the first answer.
   if (opts.key !== undefined) req.key = opts.key;
-  return { req, soul: opts.soul, ...(opts.now !== undefined && !LOCAL.includes(op) && op !== 'pending' ? { now: opts.now } : {}) };
+  return { req, soul: opts.soul, ...(waits ? { wait: true } : {}), ...(opts.now !== undefined && !LOCAL.includes(op) && op !== 'pending' ? { now: opts.now } : {}) };
+}
+
+/** R5: `wake` named rules: what each matches. `soul-arrives` is another Soul's move ending near this one (the world's
+ *  `souls:move-ended`, which reaches this Soul only from bodies in its view), from anyone or the Soul named. */
+export const WAKES = {
+  'act-ended': () => ({ when: { event: 'client:act-ended' }, why: 'an act of yours ended' }),
+  'soul-arrives': (who) => ({ when: { event: 'souls:move-ended', ...(who ? { from: [who] } : {}) }, why: who ? `${who} arrived near you` : 'a Soul arrived near you' }),
+  // The daemon's `client:idle` carries the quiet in seconds (field 1).
+  idle: (minutes) => ({ when: { event: 'client:idle', fields: { 1: Number(minutes) * 60 } }, why: `no command for ${minutes} minutes` }),
+};
+const WAKE_USAGE = "wake | wake add act-ended | wake add soul-arrives [<soul id>] | wake add idle <minutes> | wake add '<rule json>' | wake remove <id> | wake budget <quiet|normal|lively|unlimited|n> [--day <n>]";
+
+/** R5: the daemon request for `wake` words, or a refusal by name. */
+export function wakeOf([what, arg, ...more]) {
+  const usage = { refused: 'wake-usage', detail: WAKE_USAGE };
+  if (what === undefined || what === 'list') return arg === undefined ? { op: 'wake', do: 'list' } : usage;
+  if (what === 'remove') return arg && !more.length ? { op: 'wake', do: 'remove', id: arg } : usage;
+  if (what === 'add') {
+    if (arg === 'act-ended' && !more.length) return { op: 'wake', do: 'add', rule: WAKES['act-ended']() };
+    if (arg === 'soul-arrives' && more.length <= 1) {
+      if (more[0] !== undefined && !/^s_[A-Za-z0-9_-]+$/.test(more[0])) return { refused: 'wake-soul', detail: 'soul-arrives [<soul id, s_...>]' };
+      return { op: 'wake', do: 'add', rule: WAKES['soul-arrives'](more[0]) };
+    }
+    if (arg === 'idle' && more.length === 1) {
+      if (!/^\d{1,4}$/.test(more[0]) || Number(more[0]) < 1) return { refused: 'wake-idle-minutes', detail: 'idle <whole minutes, at least 1>' };
+      return { op: 'wake', do: 'add', rule: WAKES.idle(more[0]) };
+    }
+    if (arg?.trim().startsWith('{') && !more.length) {
+      try { return { op: 'wake', do: 'add', rule: JSON.parse(arg) }; } catch { return { refused: 'wake-rule-json', detail: 'a rule is one JSON object' }; }
+    }
+    return usage;
+  }
+  if (what === 'budget') {
+    const req = { op: 'wake', do: 'budget' }, words = [arg, ...more].filter((w) => w !== undefined);
+    for (let k = 0; k < words.length; k++) {
+      if (words[k] === '--day') { req.day = /^\d+$/.test(words[k + 1] ?? '') ? Number(words[++k]) : NaN; continue; }
+      if ('hour' in req) return usage;
+      req.hour = /^\d+$/.test(words[k]) ? Number(words[k]) : words[k];
+    }
+    return 'hour' in req || 'day' in req ? req : usage;
+  }
+  return usage;
+}
+
+/** G3: the humanoid look presets a page composes (`apps/web/src/humanoid/look.ts` PRESETS), by name. */
+export const LOOK_PRESETS = ['casual', 'punk', 'woman'];
+/** G3: the most bytes a look's params take (`skills::wear::LOOK_MOST`). */
+const LOOK_MOST = 2048;
+
+/**
+ * G3: a look's params for `look set`: a preset's name gives `{"preset":"<name>"}`; anything else is a file holding one
+ * JSON object of core/humanoid@2 params, at most 2 KiB. A refusal by name otherwise, before anything is sent.
+ */
+export function lookParams(arg, read = (f) => readFileSync(f, 'utf8')) {
+  const usage = { refused: 'look-set-usage', detail: `look set <${LOOK_PRESETS.join('|')} | a params .json file>` };
+  if (!arg) return usage;
+  if (LOOK_PRESETS.includes(arg)) return { params: JSON.stringify({ preset: arg }) };
+  let text;
+  try { text = read(arg); } catch { return usage; }
+  let o;
+  try { o = JSON.parse(text); } catch { return { refused: 'look-params', detail: 'the file holds one JSON object of look params' }; }
+  if (!o || typeof o !== 'object' || Array.isArray(o)) return { refused: 'look-params', detail: 'the file holds one JSON object of look params' };
+  const params = JSON.stringify(o);
+  if (Buffer.byteLength(params) > LOOK_MOST) return { refused: 'look-params', detail: `at most ${LOOK_MOST} bytes of params` };
+  return { params };
+}
+
+/** D1: how long `act --wait` waits for a receipt's final phase before it says the act is still running. */
+export const ACT_WAIT_MS = 60_000;
+/** An answer that ends an intent: anything but `accepted` (in progress, intents.md rule 8). */
+const ENDED = (a) => a !== undefined && a.answer !== 'accepted';
+
+/**
+ * D1: the act's answer, once its receipt has its final phase: `done` (a receipt), `refused` with the reason, or a
+ * joint move's `resolved` with its outcome. Still going after `ms`, the answer says so and how to check. An act not
+ * sent (refused here) is returned as it is. `ask` is the daemon's; the receipt op reads the answers it already holds.
+ */
+export async function actEnd(ask, sent, { ms = ACT_WAIT_MS, every = 200, now = Date.now, sleep = (t) => new Promise((ok) => setTimeout(ok, t)) } = {}) {
+  if (!sent || sent.ok !== true || sent.sequence === undefined) return sent;
+  const until = now() + ms;
+  for (;;) {
+    const polled = await ask({ op: 'receipt', sequence: sent.sequence, quiet: true }, 5000);
+    const last = polled?.ok ? polled.receipt.answers.at(-1) : undefined;
+    const over = now() >= until;
+    if (ENDED(last) || over) {
+      // The last read closes the answer as any command does: the copy's version and what changed since the act.
+      const r = await ask({ op: 'receipt', sequence: sent.sequence }, 5000);
+      const end = r?.ok ? r.receipt.answers.at(-1) : last;
+      if (ENDED(end)) {
+        const phase = end.answer === 'receipt' ? 'done' : end.answer;
+        return { ...sent, ...r, ok: phase !== 'refused' && phase !== 'unread', phase, ...(end.reason ? { reason: end.reason } : {}),
+          ...(phase === 'refused' || phase === 'unread' ? { code: end.reason ?? phase } : {}),
+          // D7: which of the ranked targets holds the body now (a seat a fallback took), when one does.
+          ...(r?.receipt?.held ? { held: r.receipt.held } : {}),
+          // R1b: refused, one offer of the same thing that would work instead.
+          ...(phase === 'refused' && r?.receipt?.try ? { try: r.receipt.try } : {}) };
+      }
+      return { ...sent, ...(r?.ok ? r : {}), phase: end ? 'running' : 'sent', stillRunning: true,
+        detail: `still running after ${Math.round(ms / 1000)} s: check with \`receipt ${sent.sequence}\`, or \`stop ${sent.sequence}\` to end it` };
+    }
+    await sleep(every);
+  }
+}
+
+/** What an agent does with an owner's message (the skill's "serve each open message in one call"). */
+const SERVE = (id) => `act <act> --for ${id}, or ack ${id} "<reply>" --close done|failed`;
+
+/**
+ * D2: the owner's messages, one line each: those open now, else the next to arrive; with `follow`, each as it
+ * arrives until stopped. A message is printed once. A daemon that ended (quit, a crash) is started again by the next
+ * ask, and its open messages are read again from the start, so none is missed.
+ */
+export async function listen(ask, print, { follow = false, seconds = 60, pause = (ms) => new Promise((ok) => setTimeout(ok, ms)) } = {}) {
+  const printed = new Set();
+  let since, daemon;
+  for (;;) {
+    let got;
+    try { got = await ask({ op: 'listen', seconds, ...(since !== undefined ? { since } : {}) }, seconds * 1000 + 5000); } catch (e) { got = { ok: false, code: e.code ?? 'failed', detail: String(e.message ?? e).slice(0, 200) }; }
+    if (got?.ok !== true) {
+      if (!follow) return print(got);
+      [since, daemon] = [undefined, undefined];
+      await pause(1000);
+      continue;
+    }
+    // Another daemon than the last (it was restarted): its cursor means nothing here, so read its open messages.
+    const same = daemon === undefined || got.daemon === daemon;
+    [since, daemon] = [same ? got.cursor : undefined, got.daemon];
+    for (const m of got.mail) {
+      if (printed.has(m.id)) continue;
+      printed.add(m.id);
+      print({ ok: true, kind: 'mail', id: m.id, text: m.text, at: m.at, serve: SERVE(m.id) });
+    }
+    // R5: a wake the owner's rules fired, one line each (its rule, why, how many times since the last).
+    for (const w of got.wakes ?? []) print({ ok: true, kind: 'wake', rule: w.rule, why: w.why, count: w.count, ...(w.untrusted ? { untrusted: true } : {}) });
+    if (!follow && (printed.size || got.wakes?.length || got.timedOut)) return printed.size || got.wakes?.length ? undefined : print({ ok: true, mail: [], timedOut: true });
+  }
 }
 
 /** A local command: the Soul named, else the home's only Soul with a memory folder. */
@@ -409,7 +572,7 @@ async function schedule(home, named, { sub, args, until, missed }) {
   return { ok: true, soul, file: 'memory/schedule.md', ...listed(readSchedule(file), marks, Date.now()) };
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   let newsHome = null;
   // #3708: a command's answer mentions news not mentioned before, once; `news` and `dashboard` say it themselves.
   const out = (v) => {
@@ -450,7 +613,8 @@ if (process.argv[1] === fileURLToPath(import.meta.url)) {
       const ms = req.op === 'wait' ? (req.seconds ?? 30) * 1000 + 5000 : req.op === 'now' || req.op === 'calendar' ? 12_000 : 5000;
       const ask = (r, within) => (resident ? request(runtimeOf(home, soul).socket, r, within)
         : call(home, soul, r, { pkg: process.env.SOULS_REPLICA_PKG ?? DEFAULT_PKG, ms: within }));
-      const answer = await ask(req, ms);
+      if (req.op === 'listen') { await listen(ask, out, { follow: req.follow === true }); process.exit(0); }
+      const answer = asked.wait ? await actEnd(ask, await ask(req, ms)) : await ask(req, ms);
       // C14: a --now line is set once the command has answered, and its outcome added to the answer.
       if (asked.now !== undefined && answer && typeof answer === 'object') answer.now = await ask({ op: 'now', text: asked.now }, 12_000);
       // R20: pending --check prints nothing: exit 0 when a turn has something to serve, 1 when not, 2 on a failure.

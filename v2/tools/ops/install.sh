@@ -12,10 +12,12 @@
 #                                               runs it on another machine through `$INSTALL_SSH <target> <command>`
 #
 # What it makes: the unprivileged user souls; the programs in /usr/local/lib/souls (supervisor, worldd, gatewayd,
-# directoryd, deploy, gateway-upgrade, import-accounts, import-world, publish-template, the origin and the page's files); data in
-# /var/lib/souls; settings in /etc/souls, the secrets file root-owned; the units souls.slice, worldd@ (with its drop-in), souls-gateway@,
-# souls-directory and souls-origin.
-# Carried over from today's installer: idempotent, and it starts, enables and restarts nothing. It never reads or
+# directoryd, register-world, deploy, gateway-upgrade, import-accounts, import-world, publish-template, the origin and the page's files); data in
+# /var/lib/souls; settings in /etc/souls (751), the secrets file root-owned; the units souls.slice, worldd@ (with its drop-in), souls-gateway@,
+# souls-directory, souls-origin, souls-agents and souls-alarms (with its drop-in).
+# Carried over from today's installer: idempotent, and it starts, enables and restarts nothing but the alarm daemon
+# (souls-alarms, O2 #2731), which it enables and starts: it wakes only worlds that went to sleep, and with none it
+# waits. Uninstall stops and disables it. It never reads or
 # writes today's units, users, data, proxy, DNS or firewall: it refuses, changing nothing, when anything it would
 # make is already there and not its own (install.state records what it made).
 set -euo pipefail
@@ -28,14 +30,16 @@ DATA=/var/lib/souls
 ETC=/etc/souls
 UNITS=/etc/systemd/system
 STATE=$ETC/install.state
-PROGRAMS=(supervisor worldd gatewayd directoryd deploy gateway-upgrade import-accounts import-world publish-template)
+PROGRAMS=(supervisor worldd gatewayd directoryd register-world deploy gateway-upgrade import-accounts import-world publish-template)
 # A program's cargo binary: the `templates` crate's is installed as publish-template, since $LIB/templates is the
 # catalogue it writes (W3b's placement.json `templates`).
 built() { if [ "$1" = publish-template ]; then echo templates; else echo "$1"; fi; }
-UNIT_FILES=(souls.slice worldd@.service souls-gateway@.service souls-directory.service souls-origin.service souls-place.path souls-place.service)
+UNIT_FILES=(souls.slice worldd@.service souls-gateway@.service souls-directory.service souls-origin.service souls-agents.service souls-place.path souls-place.service souls-alarms.service)
 DROPIN=$UNITS/worldd@.service.d
+ALARMS_DROPIN=$UNITS/souls-alarms.service.d
+ALARMS=souls-alarms.service
 # Everything it may make, and so everything it may remove: the user, three folders it owns whole, its units.
-OWNED=("user $ACCOUNT" "tree $LIB" "tree $DATA" "tree $ETC" "tree $DROPIN")
+OWNED=("user $ACCOUNT" "tree $LIB" "tree $DATA" "tree $ETC" "tree $DROPIN" "tree $ALARMS_DROPIN")
 for u in "${UNIT_FILES[@]}"; do OWNED+=("file $UNITS/$u"); done
 
 die() {
@@ -133,7 +137,7 @@ ensure_tree() {
   done < <(cd "$R$dst" && find . -mindepth 1 | sed 's|^\./||' | sort -r)
 }
 
-DIRECTORY_PORT=7310 # on loopback; the origin's, 7320, is in souls-origin.service
+DIRECTORY_PORT=7310 # on loopback; the origin's, 7320, and the agents' relay's, 7330, are in their units
 # The directory's arguments, written once. It listens on this machine's IPv4 loopback address, as localhost resolves
 # (directoryd takes an address, not a name).
 directory_args() {
@@ -159,15 +163,18 @@ install_all() {
   from=$(cd "$from" && pwd)
   # The record's folder first, then the user recorded before it is made, so a run that stops anywhere leaves nothing
   # unrecorded. The folder's group is the user's, so it is root's until the user exists.
+  # 751: today's launcher (simworlds, no Souls group) reads its cut-over fence's binding,
+  # /etc/souls/cutover-binding.json (v2/docs/cutover.md), through this folder; it can list nothing here. Every
+  # file keeps its own mode, and every folder below stays 750 or tighter.
   local group=root
   if has_user; then group=$ACCOUNT; fi
-  ensure_dir "$ETC" 750 root "$group" "tree $ETC"
+  ensure_dir "$ETC" 751 root "$group" "tree $ETC"
   record "user $ACCOUNT"
   ensure_user
   if [ "$MODE" = apply ] || [ -d "$R$ETC" ]; then
-    ensure_dir "$ETC" 750 root "$ACCOUNT"
+    ensure_dir "$ETC" 751 root "$ACCOUNT"
   else
-    act "perms $ETC 750 root:$ACCOUNT" true
+    act "perms $ETC 751 root:$ACCOUNT" true
   fi
   ensure_dir "$LIB" 755 root root "tree $LIB"
   for p in "${PROGRAMS[@]}"; do ensure_file "$from/bin/$p" "$LIB/$p" 755 root root; done
@@ -212,6 +219,7 @@ install_all() {
 # Optional CLERK_SATELLITE_DOMAIN and CLERK_SIGN_IN_URL. Never put secrets or tokens here.
 # Private ops settings: SIM_SITE_OWNERS, SOULS_OPS_PUBLIC_ORIGIN, CLERK_AUTHORIZED_PARTIES.
 # Match the provider and application origin configured for souls-directory.
+# Serving processes on the origin's port: ORIGIN_PROCESSES (default: the cores less ORIGIN_RESERVE_CORES, 2).
 SOULS_OPS_DIRECTORY=http://127.0.0.1:$DIRECTORY_PORT"
   ensure_once "$ETC/secrets.env" 600 root root "$SECRETS"
   for u in "${UNIT_FILES[@]}"; do
@@ -220,7 +228,29 @@ SOULS_OPS_DIRECTORY=http://127.0.0.1:$DIRECTORY_PORT"
   done
   ensure_dir "$DROPIN" 755 root root "tree $DROPIN"
   ensure_file "$from/units/worldd-install.conf" "$DROPIN/10-install.conf" 644 root root
+  # The alarm daemon runs as root (it starts worlds) in the group souls, its socket group-writable, so a world and its
+  # gateway, both the user souls, can reach it.
+  ensure_dir "$ALARMS_DROPIN" 755 root root "tree $ALARMS_DROPIN"
+  ensure_file "$from/units/alarms-install.conf" "$ALARMS_DROPIN/10-install.conf" 644 root root
+  # Per-world limits: each world units/world-limits.json lists and this machine has placed gets
+  # worldd@<world>.service.d/limits.conf (world-limits.mjs; a world not listed keeps the unit's own).
+  local l limits
+  limits=$(node "$from/ops/world-limits.mjs" plan --config "$from/units/world-limits.json" --root "$R")
+  if [ -n "$limits" ]; then
+    [ "$MODE" = plan ] || node "$from/ops/world-limits.mjs" apply --config "$from/units/world-limits.json" > /dev/null
+    while IFS= read -r l; do act "$l" true; done <<< "$limits"
+    UNITS_CHANGED=1
+  fi
   if [ "$UNITS_CHANGED" = 1 ]; then act "systemctl daemon-reload" systemctl daemon-reload; fi
+  # The one unit it starts (see the top): enabled at boot, started now, restarted when its unit or drop-in changed.
+  if [ -n "$R" ] || ! systemctl is-enabled --quiet "$ALARMS" 2> /dev/null; then
+    act "enable $ALARMS" systemctl enable --quiet "$ALARMS"
+  fi
+  if [ -n "$R" ] || ! systemctl is-active --quiet "$ALARMS"; then
+    act "start $ALARMS" systemctl start "$ALARMS"
+  elif [ "$UNITS_CHANGED" = 1 ]; then
+    act "restart $ALARMS" systemctl restart "$ALARMS"
+  fi
 }
 
 # The machine: Linux with systemd 254 or later (worldd@ uses RestartSteps) and cgroup v2; node for the origin.
@@ -231,6 +261,9 @@ machine() {
   [ "${v:-0}" -ge 254 ] 2> /dev/null || die "needs systemd 254 or later, found ${v:-none}"
   [ "$(stat -fc %T /sys/fs/cgroup)" = cgroup2fs ] || die "needs cgroup v2"
   command -v node > /dev/null || echo "install: warning: no node on PATH; souls-origin needs it" >&2
+  # Below 22.12 the origin runs one process: its port cannot be shared (listen reusePort).
+  node -e 'const [a,b]=process.versions.node.split(".").map(Number);process.exit(a>22||(a===22&&b>=12)?0:1)' 2> /dev/null \
+    || echo "install: warning: node older than 22.12; souls-origin will run one process" >&2
 }
 
 # Refuses unless every unit of the install is inactive or failed (not running, starting, stopping or reloading) and
@@ -255,6 +288,11 @@ units_quiet() {
 # apply takes them back as its own. Removing the data is a production delete, the owner's to do by hand.
 uninstall() {
   local item keep=0
+  # The alarm daemon is the install's own to stop (it started it); every other unit is the operator's.
+  if recorded "file $UNITS/$ALARMS"; then
+    if systemctl is-active --quiet "$ALARMS"; then act "stop $ALARMS" systemctl stop "$ALARMS"; fi
+    if systemctl is-enabled --quiet "$ALARMS" 2> /dev/null; then act "disable $ALARMS" systemctl disable --quiet "$ALARMS"; fi
+  fi
   units_quiet
   [ -f "$STATE" ] || {
     echo "nothing installed (no $STATE)"
@@ -304,6 +342,22 @@ check() {
   printf '%s\n' "${OWNED[@]}" > "$tmp/placed$STATE"
   INSTALL_ROOT=$tmp/placed bash "$0" plan --from "$tmp/b" > "$tmp/plan2" || die "check: the plan over a placed client refused"
   ! grep -q "^would client" "$tmp/plan2" || die "check: an install would replace a placed client"
+  grep -qxF "would dir $ETC 751 root:root" "$tmp/plan" && grep -qxF "would perms $ETC 751 root:$ACCOUNT" "$tmp/plan" ||
+    die "check: a fresh install does not make $ETC 751"
+  (
+    # A re-install over a 750 $ETC, with the user and root ownership simulated: it puts back 751, then changes nothing.
+    R=$tmp/etc
+    mkdir -p "$R$ETC" && chmod 750 "$R$ETC"
+    printf '%s\n' "${OWNED[@]}" > "$R$STATE"
+    has_user() { true; }
+    perms() { echo "$(stat -c %a "$1" 2> /dev/null || stat -f %Lp "$1") root $ACCOUNT"; }
+    install_all "$tmp/b" > "$tmp/etc.plan"
+    grep -qxF "would perms $ETC 751 root:$ACCOUNT" "$tmp/etc.plan" || die "check: a re-install leaves $ETC at 750"
+    chmod 751 "$R$ETC"
+    install_all "$tmp/b" > "$tmp/etc.plan2"
+    ! grep -qE "^would (dir|perms) $ETC " "$tmp/etc.plan2" || die "check: a re-install changes a 751 $ETC"
+  )
+  echo "check: $ETC is 751 after a fresh install and after a re-install over 750"
   for p in import-accounts import-world publish-template; do
     cmp -s "$tmp/bins/$(built "$p")" "$tmp/b/bin/$p" || die "check: $p missing or changed in bundle"
     [ -n "$(find "$tmp/b/bin/$p" -prune -perm 755)" ] || die "check: $p bundle mode is not 755"
@@ -378,11 +432,11 @@ bundle() {
   for p in "${PROGRAMS[@]}"; do install -m 755 "$bins/$(built "$p")" "$out/bin/$p"; done
   rm -rf "$out/origin" "$out/web"
   mkdir -p "$out/origin"
-  cp "$HERE/../origin/origin.mjs" "$HERE/../origin/cache.mjs" "$HERE/../origin/site.mjs" "$HERE/../origin/ops.mjs" "$HERE/../origin/owner-auth.mjs" "$HERE/../origin/world-routes.mjs" "$HERE/../../client/served/serve.mjs" "$out/origin/"
+  cp "$HERE/../origin/origin.mjs" "$HERE/../origin/cache.mjs" "$HERE/../origin/site.mjs" "$HERE/../origin/ops.mjs" "$HERE/../origin/owner-auth.mjs" "$HERE/../origin/world-routes.mjs" "$HERE/../origin/upgrade-refusal.mjs" "$HERE/../origin/agents.mjs" "$HERE/../../client/served/serve.mjs" "$out/origin/"
   cp "$HERE/../../../tools/world-launcher/owner-overview-data.mjs" "$out/origin/"
   cp -R "$page" "$out/web"
   mkdir -p "$out/ops/proxy"
-  cp "$HERE/place-created-world.mjs" "$HERE/archive-world.mjs" "$HERE/place-world.sh" "$out/ops/"
+  cp "$HERE/place-created-world.mjs" "$HERE/archive-world.mjs" "$HERE/place-world.sh" "$HERE/world-limits.mjs" "$out/ops/"
   cp "$HERE/proxy/route-config.mjs" "$HERE/proxy/routes.mjs" "$out/ops/proxy/"
   if [ -n "${4:-}" ]; then cp -R "$4" "$out/templates"; fi
   rm -rf "$out/client"
@@ -433,7 +487,7 @@ main() {
       machine
       preflight
       install_all "${from:?apply --from <bundle>}"
-      echo "applied: $CHANGES changes (nothing started)"
+      echo "applied: $CHANGES changes (nothing started but $ALARMS)"
       ;;
     uninstall)
       [ -z "$R" ] || die "INSTALL_ROOT is for plans only"

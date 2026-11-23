@@ -2,12 +2,20 @@
 //!
 //! ```text
 //! supervisor launch <world>     the unit's ExecStart: record the start, read the pin, run builds/<hash>/worldd serve
+//!                               (with --sleep $WORLDS_ROOT/alarms.sock when SOULS_SLEEP=1: a quiet world sleeps, O2)
 //! supervisor ready <world>      the unit's ExecStartPost (after worldd said READY=1): record that it serves
 //! supervisor exited <world>     the unit's ExecStopPost: record how it ended, from $SERVICE_RESULT and $EXIT_*
 //! supervisor health [<world>]   print the health record (every world's, without a name)
 //! supervisor pin <world> <hash> pin a build in the directory (W8's set_build)
 //! supervisor hash <file>        a build's hash
+//! supervisor directory-get <key> print the directory store's object at <key> (exit 3 when there is none)
+//! supervisor alarms             the machine's alarm daemon (O2, #2731): wakes sleeping worlds, on $WORLDS_ROOT/alarms.sock
+//! supervisor wake <world>       asks the alarm daemon to wake a world now
 //! ```
+//!
+//! The alarm daemon wakes a world with `systemctl start --no-block worldd@<world>.service`, or, with
+//! `$SUPERVISOR_WAKE` set, by running that program with the world's name. Its record is `alarms/$SOULS_MACHINE`
+//! (default `local`) in the directory.
 //!
 //! The machine's folder is `$WORLDS_ROOT`: `builds/<hash>/worldd`, `worlds/<world>/` (each world's state), `cache/`
 //! (the cached copy of each world's record) and `health/`. The directory is the object store `DIRECTORY_STORE_*`
@@ -22,10 +30,12 @@ use directoryd::directory::store::Store;
 use replica::encode::{from_hex, to_hex};
 use supervisor::folder::Folder;
 use supervisor::health::{self, Event};
+use supervisor::wake::{Daemon, Program, Systemd, Waker};
 use supervisor::{
     EXIT_BUILD_MISMATCH, EXIT_BUILD_MISSING, EXIT_PIN_MISSING, World, build_hash, build_path, pin,
     set_pin,
 };
+use supervisor::{alarm, sleep};
 
 // The supervisor is operations, not the engine: its records carry the wall clock's time (the wall-clock rule, K7).
 #[allow(clippy::disallowed_methods)]
@@ -33,6 +43,14 @@ fn now_ms() -> i64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
         .map_or(0, |d| d.as_millis() as i64)
+}
+
+// The alarm daemon's clock: alarms are wall-clock times (the wall-clock rule, K7).
+#[allow(clippy::disallowed_methods)]
+fn now_us() -> i64 {
+    std::time::SystemTime::now()
+        .duration_since(std::time::UNIX_EPOCH)
+        .map_or(0, |d| d.as_micros() as i64)
 }
 
 fn root() -> PathBuf {
@@ -93,12 +111,15 @@ fn launch(root: &Path, world: &World) -> i32 {
     }
     println!("launch: world {name} build {hex} (pin from the {from:?})");
     let state = root.join("worlds").join(&name);
-    let err = Command::new(&path)
-        .arg("serve")
-        .arg("--dir")
-        .arg(&state)
-        .env("WORLDD_BUILD", &hex)
-        .exec();
+    let mut serve = Command::new(&path);
+    serve.arg("serve").arg("--dir").arg(&state);
+    // O2 (0.133 S3b): with SOULS_SLEEP=1 in the unit's environment, the world sleeps through the machine's alarm
+    // daemon when still and nothing is due. Off unless set: until the old page plays a sleeping world as still (S4p)
+    // and a large world starts fast (S5), a sleeping world would stall its viewers and answer late.
+    if std::env::var("SOULS_SLEEP").is_ok_and(|v| v == "1") {
+        serve.arg("--sleep").arg(root.join("alarms.sock"));
+    }
+    let err = serve.env("WORLDD_BUILD", &hex).exec();
     eprintln!("launch: build.missing: {hex}: {err}");
     EXIT_BUILD_MISSING
 }
@@ -214,14 +235,61 @@ fn run(args: &[String]) -> Result<i32, String> {
             with_store(&root, |s| set_pin(s, &world, &build))??;
             Ok(0)
         }
+        Some("alarms") => {
+            let socket = root.join("alarms.sock");
+            let machine = std::env::var("SOULS_MACHINE").unwrap_or_else(|_| "local".into());
+            let mut waker: Box<dyn Waker> = match std::env::var("SUPERVISOR_WAKE") {
+                Ok(p) => Box::new(Program(p)),
+                Err(_) => Box::new(Systemd),
+            };
+            let (tx, rx) = std::sync::mpsc::channel();
+            supervisor::wake::listen(&socket, tx).map_err(|e| format!("alarms: {e}"))?;
+            with_store(&root, |s| {
+                let record = alarm::Record::load(s, &machine)?;
+                let armed = record.alarms.values().filter(|d| d.is_some()).count();
+                println!("alarms: {armed} armed of {}", record.alarms.len());
+                Daemon::new(record).run(&rx, waker.as_mut(), now_us);
+                Ok::<_, String>(())
+            })??;
+            Ok(0)
+        }
+        Some("wake") => {
+            sleep::wake(&root.join("alarms.sock"), &world_arg(args)?.name())?;
+            Ok(0)
+        }
         Some("hash") => {
             let bytes =
                 std::fs::read(args.get(2).ok_or("no file named")?).map_err(|e| e.to_string())?;
             println!("{}", to_hex(&build_hash(&bytes)));
             Ok(0)
         }
+        // W3b's placement and archive tools (root) read the directory's create intent, name records and list through
+        // this, so they read the store the directory and the worlds use (#1960 B7), never a second rule.
+        Some("directory-get") => {
+            let key = args.get(2).filter(|_| args.len() == 3).ok_or("directory-get <key>")?;
+            let safe = |p: &str| {
+                !p.is_empty()
+                    && p.bytes()
+                        .all(|b| b.is_ascii_lowercase() || b.is_ascii_digit() || b == b'-')
+            };
+            if !key.split('/').all(safe) {
+                return Err("directory-get: a key is lowercase words joined by /".into());
+            }
+            let got = with_store(&root, |s| s.get(key))?
+                .map_err(|e| format!("{}: {}", e.name, e.detail))?;
+            match got {
+                Some(o) => {
+                    use std::io::Write;
+                    std::io::stdout()
+                        .write_all(&o.bytes)
+                        .map_err(|e| e.to_string())?;
+                    Ok(0)
+                }
+                None => Ok(3),
+            }
+        }
         _ => Err(
-            "usage: supervisor launch|ready|exited|health|pin|hash ... (see the crate's docs)"
+            "usage: supervisor launch|ready|exited|health|pin|hash|directory-get|alarms|wake ... (see the crate's docs)"
                 .into(),
         ),
     }

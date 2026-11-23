@@ -46,6 +46,7 @@ const RESERVED: &[Reserved] = &[
     r(30, "worldd::words::NAME", On::Body),
     r(31, "worldd::words::DESCRIPTION", On::Body),
     r(32, "skills::wear::BODY", On::Body),
+    r(33, "skills::wear::LOOK", On::Body),
     r(crate::host::F_CROSSING, "host::F_CROSSING", On::Body),
     r(crate::host::F_WAITING, "host::F_WAITING", On::Body),
     r(crate::host::F_TURNS, "host::F_TURNS", On::Link),
@@ -69,6 +70,7 @@ const RESERVED: &[Reserved] = &[
     r(crate::sky::F_SKY_DATE, "sky::F_SKY_DATE", On::World),
     r(crate::sky::F_PALETTE, "sky::F_PALETTE", On::World),
     r(crate::sky::F_MIST, "sky::F_MIST", On::World),
+    r(crate::sky::F_SKY_HOUR, "sky::F_SKY_HOUR", On::World),
     r(crate::sky::F_STRIKE, "sky::F_STRIKE", On::World),
     r(crate::time::F_CLOCK_WORLD, "time::F_CLOCK_WORLD", On::World),
     r(crate::time::F_CLOCK_REAL, "time::F_CLOCK_REAL", On::World),
@@ -98,7 +100,6 @@ const RESERVED: &[Reserved] = &[
     r(crate::edit::DOOR_GEOMETRY, "edit::DOOR_GEOMETRY", On::Thing),
     // Kept for fields in review (21 Nov): a place's aliases (#3904), district plans, build claims and land-use zones
     // on the zone's root (#3879, #3913), and the owner and access marks any node may carry (#3913).
-    r(91, "sky::F_SKY_HOUR (#3957)", On::World),
     r(101, "F_ALIASES (#3904)", On::Place),
     r(140, "edit::claims F_DISTRICTS (#3879)", On::Place),
     r(141, "edit::claims F_CLAIMS (#3879)", On::Place),

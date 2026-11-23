@@ -12,7 +12,7 @@
 //     {"op":"act","verb":"...","target":"<scope hex>-<counter>"}  builds the next intent (the target optional) and
 //                                sends it once (now, or at the next sign-in)
 //     {"op":"read"}              gives and clears what happened since the last read (it never wakes the model)
-//     {"op":"stop"}              ends the process (the thin command's `quit`)
+//     {"op":"stop"}              ends the process (the thin command's `quit`); answered once nothing more is written
 //     {"op":"query","questions":[..],"budget":n}   #3704: several reads of the copy, each answered in turn (reads.mjs)
 //     {"op":"catalog"} | {"op":"context","words":"..","cursor":n}   #3704: the kinds in the copy; its named targets
 //     {"op":"batch","reads":[{"op":..},..]}       #3704: several read ops in one call, each answered as alone
@@ -136,17 +136,18 @@ import { createServer } from 'node:net';
 import { join } from 'node:path';
 import { pathToFileURL } from 'node:url';
 import { atSocket, readSeat, runtimeOf } from '../home/home.mjs';
-import { QUOTED_NOTE, brief, changedBlock } from '../brief/brief.mjs';
+import { QUOTED_NOTE, brief, changedBlock, heldBy } from '../brief/brief.mjs';
 import { changedBetween, decode, posesOf, publicNames as toldNames, rememberPublicNames, rememberPublicWords, rowsOf, sequenceOf } from '../brief/copy.mjs';
 import { find } from '../find/find.mjs';
 import { publicNameHydration } from '../find/public-names.mjs';
 import { achievedOf, causeOf, openTrace } from '../stats/trace.mjs';
 import { stats, transcriptOf } from '../stats/stats.mjs';
-import { ageOf } from './age.mjs';
+import { FOLLOW_AGAIN_MS, ageOf, followsAgain } from './age.mjs';
 import { moveForm, moveVerdict, seatedAfter } from './moves.mjs';
 import { BATCH_MOST, BATCH_READS, catalog, context, query } from './reads.mjs';
 import { CURRENT_MS, candidateOf, canOf, isCurrent, judge, sift } from '../check/check.mjs';
-import { kindsIn, stateOf } from '../check/state.mjs';
+import { risesFromSeat } from '../check/stand.mjs';
+import { kindsHeld, kindsIn, stateOf } from '../check/state.mjs';
 import { actWords, nearestIds, nearestOffers, offerNamed, offersOf } from '../check/offers.mjs';
 import { Table } from '../reflex/reflex.mjs';
 import { Wakes } from '../wake/wake.mjs';
@@ -156,6 +157,7 @@ import { clockOf, worldNow } from '../clock/clock.mjs';
 import { worldOps } from '../creator/world.mjs';
 import { exportOf, importOf } from '../creator/genesis.mjs';
 import { cloneFile, moveByOps, removeOps, selectOf } from '../creator/things.mjs';
+import { TRACE_MOST, openCreatorTrace, rowOf } from '../creator/trace.mjs';
 import { feederFor } from '../memory/feeder.mjs';
 import { KIND_PLAIN, OFFER_EVENTS, converseIntents, offerNote } from '../converse/converse.mjs';
 import { due, onEvent as dueOnEvent, readSchedule, shown as shownEntry } from '../schedule/schedule.mjs';
@@ -176,7 +178,10 @@ if (!home || !soul || !pkg) {
 }
 
 const rt = runtimeOf(home, soul);
-const log = (line) => appendFileSync(rt.log, `${new Date().toISOString()} ${line}\n`, { mode: 0o600 });
+// Set by `stop` once its last write is done: nothing writes into the Soul's home after it, so `stop`'s answer means
+// the home can be removed at once (`souls retire`, a test's teardown). Every writer below checks it.
+let ended = false;
+const log = (line) => ended || appendFileSync(rt.log, `${new Date().toISOString()} ${line}\n`, { mode: 0o600 });
 
 // --- One per Soul ---------------------------------------------------------------------------------------------
 function alive(pid) { try { process.kill(pid, 0); return true; } catch (e) { return e.code === 'EPERM'; } }
@@ -224,7 +229,7 @@ const scope = unhex(seat.grant.scope);
 
 // --- State on disk: the cursor and the sequences ------------------------------------------------------------------
 const state = { cursor: null, sequence: 0, unanswered: [], ...(existsSync(rt.state) ? JSON.parse(readFileSync(rt.state, 'utf8')) : {}) };
-const save = () => { writeFileSync(`${rt.state}.tmp`, JSON.stringify(state) + '\n', { mode: 0o600 }); renameSync(`${rt.state}.tmp`, rt.state); };
+const save = () => { if (ended) return; writeFileSync(`${rt.state}.tmp`, JSON.stringify(state) + '\n', { mode: 0o600 }); renameSync(`${rt.state}.tmp`, rt.state); };
 const queued = []; // intents made while no socket was signed in, not yet sent
 const events = []; // what happened since the last read
 const heardSince = []; // what this Soul heard since its last turn (a look or a wait), for the brief (C6)
@@ -276,6 +281,12 @@ function receiptAnswered(e) {
   const r = receipts.get(e.sequence);
   if (r) r.answers.push({ answer: ANSWER_NAMES[e.answer] ?? String(e.answer), ...(e.reason ? { reason: e.reason } : {}), ...(e.version ? { version: e.version } : {}), at: new Date().toISOString() });
   const order = r && ORDERS.has(r.verbs[0]) && e.answer === 1;
+  // R5: an act of this Soul's that ends (not words, not a progress answer) is the client's `client:act-ended`, which a
+  // wake rule (`wake add act-ended`) or a reflex can match: field 1 its sequence, 2 how it ended, 3 the reason.
+  if (e.answer !== 3 && !order && going.includes(e.sequence)) {
+    // The client's own word, so no actor: a rule never matches what its own Soul caused (`match.mjs`).
+    fire({ name: ACT_ENDED, fields: { 1: e.sequence, 2: ANSWER_NAMES[e.answer] ?? String(e.answer), ...(e.reason ? { 3: e.reason } : {}) }, actor: null, toMe: true, sequence: `act-${e.sequence}` });
+  }
   if (e.answer !== 3 && !order) { const k = going.indexOf(e.sequence); if (k >= 0) going.splice(k, 1); }
   // A cancel's receipt: what it named has ended.
   if (r?.replaces !== undefined && e.answer === 1) { const k = going.indexOf(r.replaces); if (k >= 0) going.splice(k, 1); }
@@ -287,7 +298,11 @@ let stopped = 0; // acts stopped locally, for the trace
 // (and why) it has not been known current; null while it is.
 const startedAt = performance.now();
 let confirmedAt = null, changedAt = null, cutAt = startedAt, cutWhy = 'not-connected';
-const trace = openTrace(rt.dir);
+const traceFile = openTrace(rt.dir);
+const trace = { ...traceFile, write: (record) => ended || traceFile.write(record) };
+// A creator's recent commands, refused or not (`souls-god trace`): kept on disk beside the state, so a restart keeps them.
+const creatorTrace = seat.grant.actor === 'creator' ? openCreatorTrace(rt.dir) : null;
+const UNTRACED = new Set(['trace', 'stats', 'pending', 'status', 'stop']);
 const rankedOf = new Map(); // sequence → how many verbs it ranked, until answered
 const editsWaiting = new Map(); // G7: an edit's sequence → what its answer is handed to
 const movesOf = new Map(); // sequence → its move's form (C14), until answered: a receipt says whether the body sits
@@ -311,6 +326,29 @@ const INTENT_MOST = 4096;
 
 /** A creator's bulk edit (#3695) by the gateway's `POST /v2/creator-edit`: null when it was taken (its answer comes on
  *  the socket), else the refusal's name. Its bytes are never logged. */
+/** #3697: a creator's upload, by the gateway's `POST /v2/creator-upload`: G6's check in a child process, metadata
+ *  stripped, the hold point. The answer `{hash, state: allowed|held}` or the refusal; the token never leaves here. */
+async function upload(req) {
+  if (seat.grant.actor !== 'creator') return { ok: false, code: 'upload.not-the-creator', detail: 'this home holds a Soul\'s token, not a creator\'s' };
+  let body;
+  try { body = readFileSync(String(req.path ?? '')); } catch (e) { return { ok: false, code: 'file-unreadable', detail: `${req.path}: ${e.code ?? e.message}` }; }
+  const u = new URL(seat.gateway);
+  u.protocol = u.protocol === 'wss:' ? 'https:' : u.protocol === 'ws:' ? 'http:' : u.protocol;
+  const base = u.pathname.replace(/\/v2\/ws$/, '');
+  u.pathname = `${base}/v2/creator-upload`;
+  u.search = ''; u.hash = '';
+  try {
+    const r = await fetch(u, { method: 'POST', headers: { authorization: `Bearer ${seat.token}`, 'content-type': 'application/octet-stream' }, body, signal: AbortSignal.timeout(30_000) });
+    let a = {};
+    try { a = await r.json(); } catch { /* not JSON */ }
+    if (r.status !== 200) return { ok: false, code: a.refused ?? `upload.http-${r.status}`, ...(a.detail ? { detail: a.detail } : {}) };
+    u.pathname = `${base}/v2/uploads/${a.hash}`;
+    return { ok: true, ...a, ...(a.state === 'allowed' ? { url: u.href } : {}) };
+  } catch {
+    return { ok: false, code: 'upload.unreachable', detail: 'the gateway did not answer' };
+  }
+}
+
 async function sendBulk(bytes, sequence) {
   state.unanswered.push(sequence);
   save();
@@ -373,8 +411,15 @@ function granted() {
 /**
  * R9b: the copy brought current by hash once an entry changed the world near it, or after a drop (the items missed
  * while away are not replayed). One at a time: entries that arrive during a sync ask for one more after it.
+ * #1960: `owed` is the newest version a receipt of this Soul's or an entry named since sign-in; a follow that ends
+ * behind it (the world answered from a seal before that tick) follows again FOLLOW_AGAIN_MS later (`followsAgain`).
  */
 let followWanted = false;
+let owed = 0, again = 0, againTimer = null;
+// A refresh's waiters (an answer bringing the copy current) when it ended behind `owed`: handed to the follow again,
+// so an answer after this Soul's own write or edit shows it, not the seal before it.
+let carried = [];
+const owe = (sequence) => { if (sequence > owed) { owed = sequence; again = 0; } };
 function follow() {
   if (!followWanted || syncing || !ws || !signedIn || ws.granting) return;
   followWanted = false;
@@ -465,7 +510,7 @@ function closeMail(id, state, outcome) {
 
 /** Compare and descend through the gateway (R5b): the scope's hashes, then the records not held, level by level. */
 function startSync(sock, kind) {
-  syncing = { n: ++asked, step: 'hashes', kind, t0: performance.now(), version: null, waiters: [] };
+  syncing = { n: ++asked, step: 'hashes', kind, t0: performance.now(), version: null, waiters: carried.splice(0) };
   if (cutAt !== null) cutWhy = 'syncing';
   awaitAnswer(sock);
   sock.send(wire.wireSyncScope(BigInt(syncing.n)));
@@ -496,10 +541,21 @@ function syncAnswer(sock, n, refused, bytes) {
   const { waiters } = syncing;
   syncing = null;
   hearing();
-  for (const w of waiters) w(true);
+  const behind = (done.kind === 'refresh' || done.kind === 'follow') && followsAgain({ at: sequenceOf(copyVersion), owed, again });
+  if (behind) carried.push(...waiters);
+  else for (const w of waiters) w(true);
   // A refresh (R7) brings the copy current for an answer, and a follow for an entry (R9b); the stream's cursor stays
   // the last frame it was given.
-  if (done.kind === 'refresh' || done.kind === 'follow') { scheduleWorld(); follow(); return; }
+  if (done.kind === 'refresh' || done.kind === 'follow') {
+    scheduleWorld();
+    if (behind) {
+      again++;
+      followWanted = true;
+      clearTimeout(againTimer);
+      againTimer = setTimeout(() => { againTimer = null; follow(); }, FOLLOW_AGAIN_MS);
+    } else follow();
+    return;
+  }
   state.cursor = copyVersion; // the stream carries on from the version the hashes are at
   state.seen = null; // no frame of it applied: the gateway's default
   save();
@@ -546,6 +602,8 @@ function connect() {
         if (a === 'stream.resumed') counts.resumed++;
         if (a === 'stream.cannot-resume') counts.cannotResume++;
         log(`signed in: ${a}`);
+        owed = 0; // versions named on an earlier socket may be another epoch's
+        again = 0;
         refreshKinds();
         step = 'stream';
         clearTimeout(deadline);
@@ -575,7 +633,7 @@ function connect() {
           // read the authoritative body link and renew hearing through the usual sync completion path.
           if (Number(c) === 1) changed = true;
         }
-        if (changed) { followWanted = true; follow(); }
+        if (changed) { if (b !== '-') owe(sequenceOf(b)); followWanted = true; follow(); }
         if (movesOf.has(s) && Number(c) !== 3) { state.seated = seatedAfter(movesOf.get(s), Number(c), state.seated ?? null); movesOf.delete(s); }
         if (serving.has(s) && Number(c) !== 3) {
           closeMail(serving.get(s), achievedOf(Number(c), d) ? 'done' : 'failed', d !== '-' ? d : ['', 'receipt', 'refused', '', 'resolved', 'unread'][Number(c)] || 'answered');
@@ -607,6 +665,7 @@ function connect() {
       cutAt ??= performance.now();
       cutWhy = 'not-connected';
       if (syncing) { clearTimeout(syncing.timer); for (const w of syncing.waiters) w(false); syncing = null; }
+      for (const w of carried.splice(0)) w(false);
     }
     if (stopping) return;
     counts.drops++;
@@ -652,6 +711,8 @@ function onItem(bytes) {
 
 // --- What happens near this Soul (R9b, #3201) ----------------------------------------------------------------------
 const SAID = 'souls:said';
+/** R5: the client's own events, for wake rules and reflexes: an act of this Soul's ended, and no command for a while. */
+const ACT_ENDED = 'client:act-ended', IDLE = 'client:idle';
 const FIRED_KEYS_KEPT = 4096;
 const firedKeys = new Set(); // `<sequence>/<name>` of the events handed to the reflexes, the oldest let go first
 
@@ -661,6 +722,8 @@ function fire(event) {
   if (firedKeys.has(key)) return;
   firedKeys.add(key);
   if (firedKeys.size > FIRED_KEYS_KEPT) firedKeys.delete(firedKeys.values().next().value);
+  // R5: the owner's wake rules match the same events; a wake that fires is handed to the reader waiting (`listen`, `wait`).
+  if (wakes.onEvent(event, Date.now())) for (const w of wakers.splice(0)) w();
   for (const { intent } of reflexes.onEvent(event, Date.now())) {
     // Marked as a reflex (#3764): sent on the Soul's standing consent, it is not its agent acting.
     sendIntent([intent.verb], { target: ID.test(String(intent.target ?? '')) ? intent.target : undefined, basis: shownVersion ?? state.cursor, reflex: true });
@@ -671,6 +734,7 @@ function fire(event) {
 let feeder = null;
 const heardWords = new Map(); // a heard utterance's words, by the reference the feeder is given
 function remember(entries) {
+  if (ended) return;
   try {
     feeder ??= feederFor(home, soul, { world: seat.world, textOf: (ref) => heardWords.get(ref) ?? null });
     feeder.feed(entries);
@@ -686,7 +750,8 @@ function remember(entries) {
  */
 function onEntry(e) {
   counts.entries++;
-  if (e.changes > 0) { followWanted = true; follow(); }
+  // The version after an entry is its sequence and one (`replica::apply`).
+  if (e.changes > 0) { owe(e.sequence + 1); followWanted = true; follow(); }
   const actor = e.actor === ME ? soul : e.actor;
   const events = e.events.filter((ev) => ev.name !== SAID);
   for (const ev of events) fire({ name: ev.name, fields: ev.fields, actor, toMe: Object.values(ev.fields).includes(ME), sequence: e.sequence });
@@ -733,9 +798,16 @@ async function ageAfter({ now = false } = {}) {
   return !current && !age.gap ? { ...age, stale: true, gap: { ms: 0, why: signedIn ? 'syncing' : 'not-connected' } } : age;
 }
 
+/** The kind entries held in `<home>/kinds/` and the creator's own from the copy (#3697), the Soul's own body kind given
+ *  its family's forms (E21, #2791). */
+function heldKinds() {
+  const me = [...rowsOf(copy).values()].find((r) => r.id === ME || r.soul === ME);
+  return kindsHeld(join(home, 'kinds'), copy, me?.kind);
+}
+
 /** R2's verdict on each candidate, on the copy as it is now (R8). */
 function verdicts(candidates) {
-  const kinds = kindsIn(join(home, 'kinds')), state = stateOf(copy, kinds, ME);
+  const kinds = heldKinds(), state = stateOf(copy, kinds, ME);
   return candidates.map((c) => judge(wire.rules_decide, c, { kinds, state, asker: { sees: [] } }));
 }
 
@@ -768,7 +840,9 @@ const OPS = new Set([
   'import',
   'inspect',
   'lie',
+  'listen',
   'look',
+  'look-set',
   'now',
   'object',
   'pending',
@@ -783,7 +857,9 @@ const OPS = new Set([
   'stats',
   'status',
   'stop',
+  'trace',
   'undo',
+  'upload',
   'wait',
   'wake',
   'wear',
@@ -802,10 +878,25 @@ const EDIT_BULK_WITHIN = 120_000; // a bulk edit's (#3695)
 /** The world's kinds text, which the creator's pairing or setup keeps in the home; empty when there is none. */
 const kindsText = () => { try { return readFileSync(join(home, 'kinds', `${seat.world}.kinds`), 'utf8'); } catch { return ''; } };
 /** The pinned kinds by full name, with what each admits; {} without a kinds text. */
-const pinned = () => { const t = kindsText(); return t.trim() ? JSON.parse(wire.editKinds(t)) : {}; };
+const pinned = () => {
+  const t = kindsText();
+  const boot = t.trim() ? JSON.parse(wire.editKinds(t)) : {};
+  // #3697: and the creator's own kinds, each a `souls:kind` node of the copy.
+  let own = {};
+  try { if (copy) own = JSON.parse(wire.definedKinds(copy)); } catch { /* no copy yet */ }
+  return { ...boot, ...own };
+};
+/** #3697: a `define` operation as the world reads it: a `souls:kind` node at the root holding the record's bytes. */
+function definition(o) {
+  const text = typeof o.entry === 'string' ? o.entry : JSON.stringify(o.entry ?? null);
+  const root = [...rowsOf(copy).values()].find((r) => r.parent === null)?.id;
+  if (!root) throw Object.assign(new Error('no copy of the world yet'), { code: 'edit.no-copy' });
+  return { op: 'place', name: o.name ?? 1, kind: wire.definitionKind(), in: root, at: [0, 0, 0], fields: { 2: { hex: Buffer.from(text, 'utf8').toString('hex') } } };
+}
 /** A kind's full name from what a creator writes: the full name, `namespace:name`, or the bare name. */
 function fullKind(kinds, k) {
   const s = String(k ?? '');
+  if (s.includes('@')) return s; // a full name is the world's to judge
   const hit = Object.keys(kinds).filter((n) => n === s || n.split('@')[0] === s || n.split('@')[0].split(':')[1] === s);
   if (hit.length === 1) return hit[0];
   throw Object.assign(new Error(`${s}: ${hit.length ? 'ambiguous; copy a full pinned name from describe' : `not pinned; describe lists ${Object.keys(kinds).join(', ')}`}`), { code: 'edit.kind-unknown' });
@@ -820,6 +911,37 @@ function marksOf(row) {
   return { marks: { ...(owner !== undefined ? { owner: who } : {}), ...(access !== undefined ? { access: Number(access) } : {}) } };
 }
 
+/** K3 (0.133): the uploaded models the batch's definitions name (`looks.model: "upload:<hash>"`), or a refusal when
+ *  one is written wrong. A model is the hash `upload` answered: `1220` and the SHA-256 in hex. */
+const UPLOAD_MODEL = /^upload:(1220[0-9a-f]{64})$/;
+function modelsOf(ops) {
+  const hashes = [];
+  for (const o of ops ?? []) {
+    if (o?.op !== 'define') continue;
+    let r;
+    try { r = typeof o.entry === 'string' ? JSON.parse(o.entry) : o.entry; } catch { continue; } // the copy's check names it
+    const m = r?.looks?.model;
+    if (typeof m !== 'string' || !m.startsWith('upload:')) continue;
+    const hit = UPLOAD_MODEL.exec(m);
+    if (!hit) return { code: 'kind.model', detail: `looks.model ${JSON.stringify(m).slice(0, 80)}: upload:1220 and 64 hex` };
+    hashes.push(hit[1]);
+  }
+  return { hashes };
+}
+/** Whether the gateway serves the upload (an allowed one; a held or unknown one is not served), or the refusal. */
+async function modelAllowed(hash) {
+  const u = new URL(seat.gateway);
+  u.protocol = u.protocol === 'wss:' ? 'https:' : u.protocol === 'ws:' ? 'http:' : u.protocol;
+  u.pathname = `${u.pathname.replace(/\/v2\/ws$/, '')}/v2/uploads/${hash}`;
+  u.search = ''; u.hash = '';
+  try {
+    const r = await fetch(u, { method: 'HEAD', signal: AbortSignal.timeout(10_000) });
+    return r.status === 200 ? null : { code: 'kind.model-unknown', detail: `${hash} is not an allowed upload of this world` };
+  } catch {
+    return { code: 'upload.unreachable', detail: 'the gateway did not answer' };
+  }
+}
+
 /** The batch as replica's `ops_of` reads it: kinds by full name, positions in µm (a creator writes mm). */
 async function editOnce(req) {
   if (seat.grant.actor !== 'creator') return { ok: false, code: 'edit.not-the-creator', detail: 'this home holds a Soul\'s token, not a creator\'s' };
@@ -831,10 +953,18 @@ async function editOnce(req) {
   const w = undo ? { ops: [] } : await worldBatch(req);
   if (w.ok === false) return closing({ ...w, sent: false, local: true }, null, { age });
   if (w.list) return closing({ ok: true, sent: false, selected: w.list.length, things: w.list }, null, { age });
+  // K3: a definition whose look is an uploaded model names an allowed upload of this world, else nothing is sent
+  if (!undo) {
+    const m = modelsOf(w.ops);
+    if (m.code) return closing({ ok: false, ...m, sent: false, local: true }, null, { age });
+    for (const h of m.hashes) { const no = await modelAllowed(h); if (no) return closing({ ok: false, ...no, sent: false, local: true }, null, { age }); }
+  }
   const batch = undo ? null : batchOf(w.ops, req.claim);
+  let defines;
   if (!undo) {
     const v = JSON.parse(wire.editCheck(copy, batch, kindsText()));
     if (!v.ok) return closing({ ...v, sent: false, local: true }, null, { age });
+    defines = v.defines;
   }
   if (!copyVersion) return closing({ ok: false, code: 'edit.no-copy', sent: false, detail: 'no copy of the world yet' }, null, { age });
   state.sequence++;
@@ -875,7 +1005,7 @@ async function editOnce(req) {
     save();
   }
   const out = a.answer === 1
-    ? { ok: true, sequence, ...(undo ? { [req.op === 'undo' ? 'undone' : 'redone']: true } : { names: a.names ?? {} }), ...(step ?? {}), ...(w.says ? { did: w.says } : {}) }
+    ? { ok: true, sequence, ...(undo ? { [req.op === 'undo' ? 'undone' : 'redone']: true } : { names: a.names ?? {} }), ...(defines?.length ? { defines } : {}), ...(step ?? {}), ...(w.says ? { did: w.says } : {}) }
     : { ok: false, sequence, code: a.reason ?? 'edit.refused', ...(a.op !== undefined ? { op: a.op } : {}) };
   // The world node is written by the world's own sky timers too: a world verb planned just before one is stale, and
   // is made again from the copy brought current, once.
@@ -888,7 +1018,7 @@ function batchOf(ops, claim) {
   const kinds = pinned();
   const um = (at) => (Array.isArray(at) ? at.map((n) => Math.round(Number(n) * 1000)) : undefined);
   // #3695: a move that must land to the micrometre (a thing lifted with the ground) gives its position as `atUm`.
-  const list = ops.map(({ atUm, ...o }) => ({ ...o, ...(o.kind !== undefined ? { kind: Object.keys(kinds).length ? fullKind(kinds, o.kind) : o.kind } : {}), ...(o.at ? { at: um(o.at) } : {}), ...(atUm ? { at: atUm.map(Number) } : {}) }));
+  const list = ops.map(({ atUm, ...o }) => (o?.op === 'define' ? definition(o) : { ...o, ...(o.kind !== undefined ? { kind: Object.keys(kinds).length ? fullKind(kinds, o.kind) : o.kind } : {}), ...(o.at ? { at: um(o.at) } : {}), ...(atUm ? { at: atUm.map(Number) } : {}) }));
   return JSON.stringify(claim === undefined ? list : { claim: String(claim), ops: list });
 }
 
@@ -926,10 +1056,11 @@ function towardOf(req) {
   const found = exact.length ? exact : souls.filter((r) => r.name.toLowerCase() === lower);
   if (found.length === 0) return { code: 'say-to-unknown', detail: `no Soul called ${want} in the copy: find "${want}" or look` };
   if (found.length > 1) return { code: 'say-to-ambiguous', detail: `${found.length} Souls are called ${want}: use the id (${found.map((r) => r.id).join(', ')})` };
-  const them = found[0], forms = kindsIn(join(home, 'kinds'))[me?.kind]?.forms ?? {};
+  const them = found[0], forms = heldKinds()[me?.kind]?.forms ?? {};
   const takes = (f) => Object.keys(forms[f]?.takes ?? {});
   const gestures = Object.entries(forms).filter(([, f]) => f.steps?.length && f.steps.every((x) => x.step === 'move') && Object.keys(f.takes ?? {}).every((k) => k === 'toward'));
-  const g = req.gesture === undefined ? null : String(req.gesture);
+  // Today's verbs are hyphenated (`shake-head`); a kind's form names are snake_case (`shake_head_at`).
+  const g = req.gesture === undefined ? null : String(req.gesture).replace(/-/g, '_');
   let form = g === null ? (forms.look_at && takes('look_at').includes('target') ? 'look_at' : null) : null, arg = 'target';
   if (g !== null) {
     form = [`${g}_at`, `${g}_to`, g].find((f) => gestures.some(([n]) => n === f) && takes(f).includes('toward')) ?? (gestures.some(([n]) => n === g) ? g : null);
@@ -964,13 +1095,13 @@ function actsOf(words) {
       // µs, 16 digits: #3703); #3712: a form's
       // `text` argument is words, sent as T8's `{23: words}` for the world's text store, never logged as they are.
       if (arg) {
-        kinds ??= kindsIn(join(home, 'kinds'));
+        kinds ??= heldKinds();
         rows ??= rowsOf(copy);
-        const take = kinds[rows.get(c.this)?.kind]?.forms?.[c.form]?.takes?.[arg[1]];
+        const take = kinds[rows.get(c.this)?.entry ?? rows.get(c.this)?.kind]?.forms?.[c.form]?.takes?.[arg[1]];
         args[arg[1]] = take?.type === 'text' ? { 23: arg[2] } : /^-?\d{1,16}$/.test(arg[2]) && Number.isSafeInteger(Number(arg[2])) ? Number(arg[2]) : arg[2];
         continue;
       }
-      kinds ??= kindsIn(join(home, 'kinds'));
+      kinds ??= heldKinds();
       rows ??= rowsOf(copy);
       const takes = Object.entries(kinds[rows.get(c.this)?.entry ?? rows.get(c.this)?.kind]?.forms?.[c.form]?.takes ?? {});
       const name = takes.map(([n, t]) => t?.type === 'thing' && n).find((n) => n && !(n in args));
@@ -985,6 +1116,9 @@ function actsOf(words) {
   }
   return out;
 }
+
+/** D8 (`check/stand.mjs`): a stand on this Soul's own seated or lying body goes as its seat's rise. */
+const standsFromSeat = (candidates) => risesFromSeat(candidates, { rows: rowsOf(copy), kinds: heldKinds(), me: ME, ns: NS });
 
 /**
  * Builds the next intent, `ranked` verbs on `target` with `words`, and sends it once (now, or at the next sign-in).
@@ -1055,12 +1189,12 @@ function keyAnswered(a) {
 const worldNowOrReal = () => worldNow(clockOf(copy)) ?? Date.now() * 1000;
 
 /** #3728: an import plan's edits, one at a time, each answered before the next is planned. The first refusal stops
- *  it, and says how far it got. */
-async function runPlan(plan) {
+ *  it, and says how far it got. Each edit goes under the build claim named, if any, as any edit does (#3701). */
+async function runPlan(plan, claim) {
   const started = performance.now();
   let edits = 0;
   for (let ops; (ops = plan.next());) {
-    const a = await answer({ op: 'edit', ops });
+    const a = await answer({ op: 'edit', ops, ...(claim !== undefined ? { claim } : {}) });
     if (!a.ok) return { ok: false, code: a.code, op: a.op, detail: `edit ${edits + 1} was refused (${ops.length} operations, the first ${ops[0].op} ${ops[0].kind ?? ops[0].node}); ${edits} edits were made`, ...summary(plan, edits, started) };
     plan.took(a.names);
     edits++;
@@ -1147,14 +1281,14 @@ async function worldBatch(req) {
   return worldOps(copy, req.world, worldNowOrReal());
 }
 
-async function answer(req) {
+async function answer(req, conn = null) {
   if (req.key !== undefined) {
     if (!KEYED.has(req.op)) return { ok: false, code: 'key-not-a-write', detail: `--key goes on a write: ${[...KEYED].join(', ')}` };
     if (!keyOk(req.key)) return { ok: false, code: 'key-form', detail: '--key takes 1 to 100 printable characters, no spaces' };
     return keyed(req);
   }
   // R13: a command from the model's turn shows that what a reader was handed was taken.
-  if (!['wait', 'status', 'pending'].includes(req.op)) wakes.confirm();
+  if (!['wait', 'status', 'pending', 'listen'].includes(req.op)) { wakes.confirm(); lastCommand = Date.now(); }
   switch (req.op) {
     case 'pending': {
       // R20 (#3328): whether a turn has anything to serve: an open message, or wakes the budget lets through now. It
@@ -1215,6 +1349,8 @@ async function answer(req) {
         sequence: state.sequence, unanswered: state.unanswered, queued: queued.length, ...counts,
         syncing: syncing !== null, syncs, roots: JSON.parse(copy.roots()),
         hearing: ws?.hearing ?? null, viewGrants, viewKinds: [...viewKinds],
+        // The Soul's own body in the copy, once born (a joined body is minted, not the Soul's id): `act wave:<body>`.
+        body: [...rowsOf(copy).values()].find((r) => r.soul === ME)?.id ?? null,
         rssBytes: rss, heapBytes: heapUsed, upMs: Date.now() - since, now: state.now ?? null,
       };
     }
@@ -1233,13 +1369,16 @@ async function answer(req) {
     case 'wait': {
       const ms = Math.min(Math.max(Number(req.seconds ?? 30), 0), WAIT_MOST_S) * 1000, until = Date.now() + ms;
       // R13: the queued wakes are handed as one delivery when the budget allows; over it, they wait for it to.
-      let handed = wakes.deliver(Date.now());
-      while (handed.length === 0 && nothingYet() && Date.now() < until) {
+      // A reader whose socket closed takes nothing: what came stays for the next reader (an owner's message, a wake).
+      const gone = () => conn?.destroyed === true;
+      let handed = gone() ? [] : wakes.deliver(Date.now());
+      while (handed.length === 0 && nothingYet() && !gone() && Date.now() < until) {
         const free = wakes.nextFree(Date.now());
         const left = Math.min(until, free ?? until) - Date.now();
         await new Promise((ok) => { const t = setTimeout(ok, Math.max(left, 0)); wakers.push(() => { clearTimeout(t); ok(); }); });
-        handed = wakes.deliver(Date.now());
+        handed = gone() ? [] : wakes.deliver(Date.now());
       }
+      if (gone()) return { ok: false, code: 'reader-gone' };
       if (handed.length) saveWakes();
       const got = events.splice(0);
       const timedOut = handed.length === 0 && !got.some((e) => e.kind !== 'synced');
@@ -1248,12 +1387,32 @@ async function answer(req) {
       return closing({ ok: true, events: got, ...said, ...(handed.length ? { wakes: handed } : {}), ...(timedOut ? { timedOut: true } : {}) },
         (rows) => ({ events: got.map((e) => (e.kind === 'heard' ? named(rows, [e])[0] : e)) }));
     }
+    case 'listen': {
+      // D2: the owner's messages as they arrive, read from the numbered events, so nothing is taken from `wait`. No
+      // `since`: the messages open now, else the next to arrive. Returns at the first, or empty at the timeout.
+      const ms = Math.min(Math.max(Number(req.seconds ?? 30), 0), WAIT_MOST_S) * 1000, until = Date.now() + ms;
+      const fresh = (since) => logged.filter((e) => e.kind === 'mail' && e.n > since).map(({ n, ...m }) => m);
+      // A cursor past this daemon's newest is a former daemon's (a restart): read from the open messages again.
+      const from = req.since === undefined || Number(req.since) > eventN ? undefined : Math.max(Number(req.since) || 0, 0);
+      const since = from ?? eventN;
+      let got = from === undefined ? [...mail.values()].map((m) => ({ kind: 'mail', id: m.id, text: String(m.text), at: m.at })) : fresh(since);
+      // R5: the wakes the owner's rules queued are handed here too, as `wait` hands them, within the budget.
+      const gone = () => conn?.destroyed === true;
+      let handed = gone() ? [] : wakes.deliver(Date.now());
+      while (got.length === 0 && handed.length === 0 && !gone() && Date.now() < until) {
+        await new Promise((ok) => { const t = setTimeout(ok, Math.max(until - Date.now(), 0)); wakers.push(() => { clearTimeout(t); ok(); }); });
+        got = fresh(since);
+        handed = gone() ? [] : wakes.deliver(Date.now());
+      }
+      if (handed.length) saveWakes();
+      return { ok: true, cursor: eventN, daemon: process.pid, mail: got, ...(handed.length ? { wakes: handed } : {}), ...(got.length || handed.length ? {} : { timedOut: true }) };
+    }
     case 'can': {
       const intent = Array.isArray(req.acts) ? actsOf(req.acts)[0] : req.intent;
       if (moveForm(intent?.verb)) {
         // C14: a move is checked as the world checks it, on the copy and the body's last known posture.
         const age = await ageAfter();
-        const nodes = stateOf(copy, kindsIn(join(home, 'kinds')), ME).nodes;
+        const nodes = stateOf(copy, heldKinds(), ME).nodes;
         const v = moveVerdict(wire.move_check, intent, { nodes, seated: state.seated ?? null });
         return closing({ ok: true, ...canOf(v, isCurrent(age, CURRENT_MS)) }, null, { age });
       }
@@ -1264,7 +1423,7 @@ async function answer(req) {
     }
     case 'act': {
       if (req.for !== undefined && !mail.has(req.for)) return { ok: false, code: 'mail-not-found', detail: 'for names an open message this daemon was given' };
-      const candidates = Array.isArray(req.acts) ? actsOf(req.acts) : (Array.isArray(req.verbs) ? req.verbs : [req.verb]).map(candidateOf);
+      const candidates = standsFromSeat(Array.isArray(req.acts) ? actsOf(req.acts) : (Array.isArray(req.verbs) ? req.verbs : [req.verb]).map(candidateOf));
       if (candidates.length === 0 || candidates.length > ACT_MOST || candidates.some((c) => !c.verb || /\s/.test(c.verb))) {
         return { ok: false, code: 'act-ranked-list', detail: `one to ${ACT_MOST} verbs, best first` };
       }
@@ -1325,10 +1484,11 @@ async function answer(req) {
       return closing({ ok: true, sequence, sent, verb: f.verb, basis: sequenceOf(basis), ...(toward ? { to: toward } : {}) }, null, { now: true });
     }
     case 'inspect': return inspect(req);
+    case 'upload': return upload(req);
     case 'whatson': case 'calendar': return calendar(req);
     // #3704 (today's `query`, `catalog`, `context` and `batch`): reads from the copy, asking the world nothing.
     case 'query': { const rows = rowsOf(copy), me = [...rows.values()].find((r) => r.id === ME || r.soul === ME)?.id ?? null; const q = query(rows, req.questions, { budget: req.budget, me }); return q.ok ? closing(q, null, { now: true }) : { ...q, ...ageNow() }; }
-    case 'catalog': return closing(catalog(rowsOf(copy), kindsIn(join(home, 'kinds'))), null, { now: true });
+    case 'catalog': return closing(catalog(rowsOf(copy), kindsHeld(join(home, 'kinds'), copy)), null, { now: true });
     case 'context': return closing(context(rowsOf(copy), req.words ?? '', { cursor: req.cursor }), null, { now: true });
     case 'batch': {
       // Several reads in one call, each answered as it would be alone, in order; a write in it is refused, not sent.
@@ -1354,6 +1514,12 @@ async function answer(req) {
         return closing({ ok: false, code: 'object.unknown-offer', detail: `${req.this} offers no ${req.action}`, did_you_mean: nearestOffers(seen.offers, req.action), offers: seen.offers.map((o) => o.name) }, null, { now: true });
       }
       return answer({ op: 'act', acts: actWords(offer, req.args ?? []), ...(req.for !== undefined ? { for: req.for } : {}) });
+    }
+    case 'trace': {
+      if (!creatorTrace) return { ok: false, code: 'trace.not-a-creator', detail: 'trace lists a creator\'s commands' };
+      const n = Math.max(1, Math.min(TRACE_MOST, Number(req.n ?? 20) || 20));
+      const rows = creatorTrace.last(n);
+      return { ok: true, kept: creatorTrace.size, most: TRACE_MOST, refused: rows.filter((r) => !r.ok).length, rows };
     }
     case 'describe': return closing({ ok: true }, (rows) => {
       // Where each stands in its parent, mm, for placing by relation (#3694).
@@ -1392,7 +1558,7 @@ async function answer(req) {
         const c = await clonePlan(req.world);
         if (c.ok === false) return closing({ ...c, local: true }, null, { now: true });
         const ops = c.plan.next();
-        const v = JSON.parse(wire.editCheck(copy, batchOf(ops), kindsText()));
+        const v = JSON.parse(wire.editCheck(copy, batchOf(ops, req.claim), kindsText()));
         return closing({ ...v, local: true, would: c.says, ops }, null, { now: true });
       }
       const w = await worldBatch(req);
@@ -1418,7 +1584,7 @@ async function answer(req) {
         const age = await ageAfter();
         const c = await clonePlan(req.world);
         if (c.ok === false) return closing({ ...c, sent: false, local: true }, null, { age });
-        const out = await runPlan(c.plan);
+        const out = await runPlan(c.plan, req.claim);
         return out.ok ? { ...out, did: c.says, copies: c.copies.map((id) => c.plan.ids.get(id) ?? null) } : out;
       }
       return editOnce(req);
@@ -1474,6 +1640,14 @@ async function answer(req) {
 
     }
     case 'converse': return converse(req);
+    case 'look-set': {
+      // G3: the Soul's own look on its default body (`life:look`, G2): its params' bytes as T8's words shape.
+      const params = String(req.params ?? '');
+      if (!params.startsWith('{') || Buffer.byteLength(params) > 2048) return { ok: false, code: 'look-params', detail: 'one JSON object of at most 2048 bytes' };
+      const basis = shownVersion ?? state.cursor;
+      const { sequence, sent } = sendIntent(['life:look'], { words: params, basis });
+      return closing({ ok: true, sequence, sent, verb: 'life:look', basis: sequenceOf(basis) }, null, { now: true });
+    }
     case 'wear': {
       const body = String(req.body ?? '');
       if (!/^[A-Za-z0-9_.:@-]{1,80}$/.test(body)) return { ok: false, code: 'wear-names-a-body', detail: 'wear <preset>' };
@@ -1494,7 +1668,7 @@ async function answer(req) {
       const scheduled = scheduleEvent(e);
       return { ok: true, fired, ...(scheduled.length ? { scheduled } : {}) };
     }
-    case 'stop': setImmediate(stop); return { ok: true };
+    case 'stop': return { ok: true }; // answered by stop() itself, once its last write is done
     case 'halt': {
       // #3705 (today's `stop`): ends this Soul's own act where it stands: a walk stops now, a sit, a lie or a rise
       // finishes, a standing order ends. A `souls:cancel` naming it; the world answers both.
@@ -1510,7 +1684,16 @@ async function answer(req) {
       const which = req.sequence !== undefined ? Number(req.sequence) : [...receipts.keys()].at(-1);
       const r = receipts.get(which);
       if (!r) return { ok: false, code: 'receipt-not-found', detail: which === undefined ? 'no intent sent since the daemon started' : `no intent ${which} among the last ${RECEIPTS_KEPT} this daemon sent`, ...ageNow() };
-      return closing({ ok: true, receipt: { ...r, going: going.includes(r.sequence) } }, null, { now: true });
+      // D1: `act --wait` asks `quiet` while it waits, so what changed is kept for its last answer, not spent on a poll.
+      const got = { ok: true, receipt: { ...r, going: going.includes(r.sequence) } };
+      if (req.quiet) return { ...got, ...ageNow() };
+      // D7: an act that ended with its receipt names which of its ranked targets now holds this Soul's body (a seat a
+      // fallback took), read from the copy brought current.
+      const done = r.answers.at(-1)?.answer === 'receipt';
+      // R1b: an act the world refused names one offer of the same thing that would work, from this client's own offers.
+      const instead = r.answers.at(-1)?.answer === 'refused' ? suggestionFor(r) : null;
+      if (instead) got.receipt.try = instead;
+      return closing(got, done ? (rows) => { const h = heldBy(rows, ME, r); return h ? { receipt: { ...got.receipt, held: h } } : {}; } : null, { now: !done });
     }
     case 'events': {
       // #3705: the events after cursor `since` (0: every one kept), without taking them: `wait` still hands them.
@@ -1524,6 +1707,33 @@ async function answer(req) {
 }
 
 /**
+ * R1b: for an act the world refused, one other offer of the thing or place it named first (`thingOf`'s offers, from
+ * this machine's kind entries) that would work: the first the form rules pass on the copy (`yes`), else the first they
+ * cannot judge here (`unknown`, a move such as a sit); never one they refuse, one needing arguments it has no default
+ * or choice for, nor the verb that was refused. Walking there comes last. Null when there is none.
+ */
+function suggestionFor(r) {
+  const target = String(r.target ?? '').split(' ')[0];
+  if (!ID.test(target)) return null;
+  const t = thingOf(target);
+  if (!t.ok) return null;
+  const refused = new Set(r.verbs.map((v) => String(v).replace(/^.*:/, '')));
+  const free = (o) => !Object.values(o.params ?? {}).some((p) => !p.optional && p.default === undefined);
+  const offers = t.offers.filter((o) => !refused.has(o.name) && !o.act.startsWith('carrier:') && free(o));
+  offers.sort((a, b) => (a.name === 'walk') - (b.name === 'walk'));
+  let unknown = null;
+  for (const o of offers) {
+    let c;
+    try { [c] = actsOf([o.act]); } catch { continue; }
+    if (!c) continue;
+    const v = c.form ? verdicts([c])[0] : { verdict: 'unknown' };
+    if (v.verdict === 'yes') return { act: o.act, name: o.name, checked: 'yes' };
+    if (v.verdict !== 'no' && !unknown) unknown = { act: o.act, name: o.name, checked: 'unknown' };
+  }
+  return unknown;
+}
+
+/**
  * #3686: thing `id` as this Soul's copy holds it, with its offers from its kind's entry in `<home>/kinds/`, or a
  * refusal naming the ids nearest it. It reads the copy as it is: no sync, nothing asked of the world.
  */
@@ -1532,7 +1742,8 @@ function thingOf(id) {
   if (!row) {
     return { ok: false, code: 'inspect.unknown-id', detail: `${id ?? '(none)'} is not an id this Soul's copy holds; ids come from look and find`, did_you_mean: nearestIds(rows.values(), id) };
   }
-  const kinds = kindsIn(join(home, 'kinds')), entry = kinds[row.entry ?? row.kind];
+  // A Soul's body has the family's forms (E21, #2791), as `can` and `act` read them.
+  const kinds = heldKinds(), entry = kinds[row.entry ?? row.kind];
   return { ok: true, row, entry, offers: offersOf(row.id, entry, { moving: Boolean(row.moving) }), fields: stateOf(copy, kinds, ME).nodes[row.id]?.fields };
 }
 
@@ -1563,7 +1774,7 @@ function inspect(req) {
  * and `add` are the items' own forms (`show_interest`, `drop_interest`, `post`), sent through `act`.
  */
 async function calendar(req) {
-  const kinds = kindsIn(join(home, 'kinds')), clock = clockOf(copy), cal = calendarOf(copy), nowMs = Date.now();
+  const kinds = kindsHeld(join(home, 'kinds'), copy), clock = clockOf(copy), cal = calendarOf(copy), nowMs = Date.now();
   const view = (rows) => ({ rows, me: ME, clock, cal, nowMs });
   if (req.op === 'whatson') {
     const hours = Number(req.hours ?? 3);
@@ -1704,11 +1915,12 @@ const server = createServer((c) => {
     for (let k; (k = buf.indexOf('\n')) >= 0;) {
       const line = buf.slice(0, k);
       buf = buf.slice(k + 1);
-      let op = 'unread';
+      let op = 'unread', asked = null;
       Promise.resolve().then(() => {
         const req = JSON.parse(line);
+        asked = req;
         op = !OPS.has(req.op) ? 'unknown' : req.op === 'pending' && req.list ? 'pending-list' : req.op; // a listing is the agent's
-        return answer(req);
+        return answer(req, c);
       })
         .catch((e) => ({ ok: false, code: e.code ?? 'refused', detail: String(e.message ?? e).slice(0, 200) }))
         .then((out) => {
@@ -1725,11 +1937,15 @@ const server = createServer((c) => {
           // Every answer carries its age (R10); each but stats's is traced with the bytes it prints.
           const said = JSON.stringify('age' in out ? out : { ...out, ...ageNow() }) + '\n';
           if (op !== 'stats' && !check) trace.write({ k: 'cmd', op, bytes: Buffer.byteLength(said) });
-          if (!c.destroyed) c.write(said);
+          if (creatorTrace && asked && !UNTRACED.has(asked.op)) creatorTrace.add(rowOf(asked, out));
+          if (op === 'stop') stop(c, said);
+          else if (!c.destroyed) c.write(said);
         });
     }
   });
   c.on('error', () => {});
+  // R5: a reader that went away (its `wait` or `listen` stopped) is let go now, so it takes nothing it cannot print.
+  c.on('close', () => { for (const w of wakers.splice(0)) w(); });
 });
 
 // --- The Soul's own schedule (R15, #2757) ------------------------------------------------------------------------
@@ -1812,8 +2028,24 @@ async function fireEntry(e, now, late, moment = false) {
 }
 
 /** Each second: the beat (a gap is the daemon off or the machine asleep), then the real times that have come. */
+/** R5: when this Soul's agent last sent a command (any but a reader's), and each idle rule's last firing. */
+let lastCommand = Date.now();
+const idleFired = new Map();
+/** R5: an idle rule (`wake add idle <minutes>`: `client:idle` with field 1 the quiet in seconds) fires once per quiet
+ *  spell, checked each beat. */
+function idleCheck(now) {
+  for (const r of wakes.rules) {
+    if (!r.when.event.includes(IDLE)) continue;
+    const seconds = Number(r.when.fields?.[1] ?? r.when.fields?.['1']);
+    if (!(seconds > 0) || now - lastCommand < seconds * 1000 || idleFired.get(r.id) === lastCommand) continue;
+    idleFired.set(r.id, lastCommand);
+    fire({ name: IDLE, fields: { 1: seconds }, actor: null, toMe: true, sequence: `idle-${r.id}-${lastCommand}` });
+  }
+}
+
 function beat() {
   const now = Date.now(), s = state.schedule;
+  idleCheck(now);
   const off = s.beat !== null && now - s.beat > GAP_MS ? [s.beat, now] : null;
   if (off) log(`schedule: no beat for ${Math.round((now - s.beat) / 1000)} s`);
   s.beat = now;
@@ -1890,16 +2122,26 @@ function scheduleEvent(event) {
   return hit.map((e) => e.id);
 }
 
-function stop() {
-  stopping = true;
-  log('stopping');
-  ws?.close();
-  server.close();
-  releaseLock();
-  process.exit(0);
+/**
+ * Ends the daemon. Its last writes (the log line, the lock and socket released) come first; then nothing writes into
+ * the home again, and only then does a `stop` command (`c`) get its answer `said`; the process ends once it is sent.
+ */
+function stop(c, said) {
+  if (!ended) {
+    stopping = true;
+    log('stopping');
+    clearInterval(beating);
+    ws?.close();
+    server.close();
+    releaseLock();
+    ended = true;
+  }
+  if (!c || c.destroyed) process.exit(0);
+  setTimeout(() => process.exit(0), 1000).unref(); // a caller gone before its answer is not waited for
+  c.end(said, () => process.exit(0));
 }
-process.on('SIGTERM', stop);
-process.on('SIGINT', stop);
+process.on('SIGTERM', () => stop());
+process.on('SIGINT', () => stop());
 process.on('SIGHUP', () => {}); // the terminal that started it closing is not a reason to stop
 
 server.on('error', (e) => {
@@ -1909,6 +2151,6 @@ server.on('error', (e) => {
 });
 rmSync(rt.socket, { force: true });
 beat(); // before the first answer, so it lists what was missed while off
-setInterval(beat, BEAT_MS);
+const beating = setInterval(beat, BEAT_MS);
 atSocket(rt.socket, (path) => server.listen(path, () => log(`listening for ${soul}, pid ${process.pid}`)));
 connect();
