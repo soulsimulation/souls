@@ -121,10 +121,7 @@ pub fn pin<S: Store>(store: S, root: &Path, world: &World) -> Result<(Vec<u8>, F
             // A cache that cannot be written loses nothing but the next start's way round an unreachable store.
             if let Ok(bytes) = record.to_bytes() {
                 let _ = std::fs::create_dir_all(root.join("cache"));
-                let tmp = path.with_extension("new");
-                if std::fs::write(&tmp, bytes).is_ok() {
-                    let _ = std::fs::rename(&tmp, &path);
-                }
+                let _ = health::write_synced(&path, &bytes);
             }
             Ok((record.build, From::Store))
         }
