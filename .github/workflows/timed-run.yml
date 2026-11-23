@@ -283,6 +283,9 @@ jobs:
             echo "XDG_DATA_HOME=$d/data"
           } >> "$GITHUB_ENV"
           { echo "$d/bin"; echo "$d/cargo/bin"; } >> "$GITHUB_PATH"
+          # ci.yml's group check keeps its cargo cache in the shared home (~/.cache/souls-group-check) from other runners at
+          # the same time: not this job's (its cargo is in the per-run directory)
+          echo "STRAY_EXCLUDE=$STRAY_EXCLUDE,$HOME/.cache/souls-group-check" >> "$GITHUB_ENV"
       - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           path: ctl
