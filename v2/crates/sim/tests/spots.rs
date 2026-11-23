@@ -772,3 +772,112 @@ fn a_door_is_reached_from_a_room_on_either_side() {
         );
     }
 }
+
+/// One walker sent from `(sx, 0)` to the point `(0, 0)` on the open ground, bodies standing still (no order) at `by`,
+/// run until its walk ends: the runner and the town after.
+fn sent_past(sx: i64, by: &[(i64, i64)]) -> (Runner, Town) {
+    let (mut t, _) = town();
+    let g = t.ground;
+    let mut c = Runner::new(TICK);
+    let w = stand(&t, id(1), g, Vec3::new(sx, 0, 0));
+    send(
+        &mut c,
+        w,
+        SPEED,
+        Target::new(g, Vec3::new(0, 0, 0)),
+        id(1000),
+    )
+    .unwrap();
+    for (k, &(x, z)) in by.iter().enumerate() {
+        let b = stand(&t, id(10 + k as u64), g, Vec3::new(x, 0, z));
+        c.add_body(common::humanoid(), b).unwrap();
+    }
+    for _ in 0..600 {
+        if c.runs.is_empty() {
+            break;
+        }
+        c.tick(&mut t).unwrap();
+    }
+    (c, t)
+}
+
+/// Whether the walk ended short of its goal, as near as the crowd allows (`F_SHORT` on its body, 0.133 A2-4).
+fn short(c: &Runner) -> bool {
+    c.fields
+        .get(&id(1))
+        .is_some_and(|f| f.contains_key(&replica::host::F_SHORT))
+}
+
+/// 0.133 A2-4 (review of #4364): a walk to its own granted spot, free and reachable, is never ended short by bodies
+/// at rest near its line. One bystander in line, a pair with a gap a body passes through, and a row of three before
+/// the spot: each walk ends a plain `done` on its spot, which it holds, settled.
+#[test]
+fn a2_4_a_walk_to_a_free_spot_arrives_past_bodies_near_its_line() {
+    type Case = (&'static str, &'static [(i64, i64)]);
+    let cases: [Case; 4] = [
+        ("one bystander 2 m short, in line", &[(-2_000_000, 0)]),
+        ("one bystander 0.5 m short, in line", &[(-500_000, 0)]),
+        (
+            "a pair 0.5 m apart across the line, 1.5 m short",
+            &[(-1_500_000, -250_000), (-1_500_000, 250_000)],
+        ),
+        (
+            "a row of three 0.4 m apart across the line, 1.5 m short",
+            &[
+                (-1_500_000, -400_000),
+                (-1_500_000, 0),
+                (-1_500_000, 400_000),
+            ],
+        ),
+    ];
+    for (label, by) in cases {
+        let (c, _) = sent_past(-6_000_000, by);
+        let p = c.controller.body(id(1)).unwrap().pose.position;
+        let spot = c.granted.get(&id(1)).copied();
+        let off = spot.map(|s| flat(p, s));
+        println!(
+            "A2-4 {label}: ended {:?}; at ({}, {}) mm; short {}; spot {spot:?}, {off:?} µm off",
+            c.ended.get(&id(1)),
+            p.x / 1000,
+            p.z / 1000,
+            short(&c)
+        );
+        assert!(
+            matches!(c.ended.get(&id(1)), Some((_, Progress::Done))),
+            "{label}: done"
+        );
+        assert!(!short(&c), "{label}: a plain done, not short");
+        assert!(
+            off.is_some_and(|o| o <= skills::route::AT_SPOT),
+            "{label}: on its spot: {off:?}"
+        );
+        assert!(c.settled(id(1)), "{label}: settled on its spot");
+    }
+}
+
+/// 0.133 A2-4 (review of #4364): a walk whose granted spot a body at rest stands on ends short of it, as near as the
+/// crowd allows, and gives the spot back: it is not settled, and the spot is released at the next tick.
+#[test]
+fn a2_4_a_walk_ended_short_of_its_spot_releases_it() {
+    let (mut c, mut t) = sent_past(-6_000_000, &[(0, 0)]);
+    let p = c.controller.body(id(1)).unwrap().pose.position;
+    println!(
+        "A2-4 spot taken: ended {:?}; {} mm from the point; spot {:?}; short {}",
+        c.ended.get(&id(1)),
+        flat(p, Vec3::new(0, 0, 0)) / 1000,
+        c.granted.get(&id(1)),
+        short(&c)
+    );
+    assert!(matches!(c.ended.get(&id(1)), Some((_, Progress::Done))));
+    assert!(short(&c), "ended short of its spot");
+    assert!(!c.settled(id(1)), "not settled on a spot it never reached");
+    assert!(!c.granted.contains_key(&id(1)), "its grant is given back");
+    c.tick(&mut t).unwrap();
+    assert!(
+        t.spots
+            .record
+            .iter()
+            .any(|e| matches!(e, Entry::Release { who, .. } if *who == id(1))),
+        "the spot is released"
+    );
+}

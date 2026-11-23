@@ -7,12 +7,18 @@
 //!   the marks of the last tick (T1, `v2/docs/TRUNK.md`), as [`Facts`], and writes its grants.
 //! - **A grant.** One walker at a time, the waiting one nearest the end the link lets in, and only when the far end
 //!   has room to step out into, every body inside going the same way is at least [`SPACING`] along, and no grant is
-//!   outstanding.
+//!   outstanding. Grants are fair (0.133 A2-4): a waiter passed over [`PASSED`] times at a crowded wide link, or
+//!   [`PASSED_NARROW`] times at a narrow one, by ones that came to wait after it goes first, the longest waiting of
+//!   those first, so no waiter is out-gapped for ever. A narrow link's waiters stand in a queue, and a grant to one
+//!   behind it waits on the queue stepping aside: it comes later there.
 //! - **A turn.** The direction changes when the link is empty and the other side waits, or, while the other side
 //!   waits, after [`RUN`] walkers or [`RUN_TIME`] in one direction (then no more are let in, and it changes once the
 //!   link is empty).
 //! - **Still bodies.** A body staying in the link by its own order is no walker in its facts: it is never inside, and
 //!   walkers pass it as they pass any still body (N7: other bodies are a preference, not a wall).
+//! - **Crowded wide links** (0.133 A2-4). A wide link is taken in turns too while crowded ([`Turns::crowded`]): from
+//!   the tick a walker marks itself waiting for it (the walk does so when bodies crowd its mouth) to the tick none
+//!   waits for it and none is inside on its turn; then its state is dropped. Its grants wait for [`WIDE_SPACING`].
 //!
 //! Integers only: µm and µs. Not here: crowds in the open, rides (N12), the order to stay (E3), a walker that waits
 //! too long (N10).
@@ -22,18 +28,36 @@ use replica::effects::Refusal;
 use replica::ids::Id;
 use replica::time::Micros;
 use replica::world_model::show;
-use std::collections::BTreeMap;
+use std::collections::{BTreeMap, BTreeSet};
 
 /// A link under this width (µm) is taken in turns.
 pub const NARROW: i64 = 1_200_000;
 /// A grant waits until every body inside going the same way is this far along, µm.
 pub const SPACING: i64 = 900_000;
+/// A grant to a wide link taken in turns waits until every body inside going the same way is this far along, µm.
+pub const WIDE_SPACING: i64 = 350_000;
 /// The far end has room when no body that is not waiting for the link stands within this of its middle, µm.
 pub const ROOM: i64 = 600_000;
 /// Walkers let in one direction before the other side, waiting, gets its turn.
 pub const RUN: u32 = 8;
+/// At a crowded wide link, a waiter passed over this many times by walkers that came to wait after it is let in next
+/// (A2-4).
+pub const PASSED: u32 = 2;
+/// At a narrow link, a waiter passed over this many times by walkers that came to wait after it is let in next (A2-4).
+pub const PASSED_NARROW: u32 = 6;
 /// Time one direction may run before the other side, waiting, gets its turn, µs.
 pub const RUN_TIME: Micros = 10_000_000;
+
+/// The waiter at one end let in next: one passed over [`PASSED`] times ([`PASSED_NARROW`] at a narrow link), the
+/// longest waiting of those (then nearest, then id); else the nearest (then id).
+fn next(s: &State, end: &[(i64, Id)], narrow: bool) -> Option<Id> {
+    let since = |w: Id| s.waits.get(&w).copied().unwrap_or_default();
+    end.iter()
+        .filter(|&&(_, w)| since(w).1 >= if narrow { PASSED_NARROW } else { PASSED })
+        .min_by_key(|&&(g, w)| (since(w).0, g, w))
+        .or_else(|| end.iter().min())
+        .map(|&(_, w)| w)
+}
 
 /// Whether a link is taken in turns.
 pub fn narrow(l: &Link) -> bool {
@@ -75,12 +99,17 @@ pub struct State {
     pub granted: Option<Id>,
     /// Every change and grant, in order.
     pub timeline: Vec<Turn>,
+    /// Each walker waiting: since when, µs, and how many times one that came to wait after it was let in first.
+    pub waits: BTreeMap<Id, (Micros, u32)>,
 }
 
 /// The turn states of the narrow links, by owning node and link.
 #[derive(Default)]
 pub struct Turns {
     pub owners: BTreeMap<Id, BTreeMap<Id, State>>,
+    /// The wide links taken in turns while crowded (0.133 A2-4): from the tick a walker marks itself waiting for one
+    /// (it does so when bodies crowd its mouth) to the tick none waits for it and none is inside.
+    pub crowded: BTreeSet<Id>,
 }
 
 impl Turns {
@@ -91,6 +120,13 @@ impl Turns {
     /// The state of link `link`, if its owner has written one.
     pub fn state(&self, link: &Link) -> Option<&State> {
         self.owners.get(&link.owner)?.get(&link.id)
+    }
+
+    /// Drops link `link`'s state: a wide link no longer crowded is free again (A2-4).
+    pub fn forget(&mut self, link: &Link) {
+        if let Some(m) = self.owners.get_mut(&link.owner) {
+            m.remove(&link.id);
+        }
     }
 
     /// Whether `who` may enter `link` now: granted by its owner.
@@ -118,6 +154,12 @@ impl Turns {
             && (f.inside.iter().any(|i| i.2 == g) || !f.waiting.iter().flatten().any(|w| w.1 == g))
         {
             s.granted = None;
+        }
+        // Who waits, and since when: one no longer waiting is dropped.
+        s.waits
+            .retain(|w, _| f.waiting.iter().flatten().any(|x| x.1 == *w));
+        for &(_, w) in f.waiting.iter().flatten() {
+            s.waits.entry(w).or_insert((at, 0));
         }
         let waits = [!f.waiting[0].is_empty(), !f.waiting[1].is_empty()];
         let empty = f.inside.is_empty() && s.granted.is_none();
@@ -148,19 +190,30 @@ impl Turns {
             }
         }
         let Some(d) = s.dir else { return Ok(()) };
+        // A wide link taken in turns while crowded (A2-4) lets the next one in sooner: two pass abreast in it.
+        let spacing = if narrow(link) { SPACING } else { WIDE_SPACING };
         let clear = f
             .inside
             .iter()
-            .all(|&(from, along, _)| from == d && along >= SPACING);
+            .all(|&(from, along, _)| from == d && along >= spacing);
         if s.granted.is_none()
             && !spent(s, d)
             && clear
             && f.room[usize::from(1 - d)]
-            && let Some(&(_, who)) = f.waiting[usize::from(d)].iter().min()
+            && let Some(who) = next(s, &f.waiting[usize::from(d)], narrow(link))
         {
             s.granted = Some(who);
             s.entered += 1;
             s.timeline.push(Turn::Grant { at, who, end: d });
+            // Each waiting longer at that end is passed over once more.
+            let since = s.waits.get(&who).map_or(at, |w| w.0);
+            for &(_, w) in &f.waiting[usize::from(d)] {
+                if let Some(x) = s.waits.get_mut(&w)
+                    && x.0 < since
+                {
+                    x.1 += 1;
+                }
+            }
         }
         Ok(())
     }
