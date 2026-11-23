@@ -782,7 +782,7 @@ impl Sight<'_> {
         if named {
             return None;
         }
-        let (corners, _) = sim::spots::footprint(entry)?;
+        let (corners, _) = sim::spots::footprint(&entry)?;
         let on = self.goals.contains(&body) && sim::spots::walkable(entry);
         let reach = match self.walk_moves.get(&body) {
             Some(&r) => {
@@ -1239,7 +1239,7 @@ impl Sight<'_> {
                 .and_then(|p| p.get("at_mm")))
             .and_then(on)
             .map(|p| gap(flat(q, [p.x, p.z]), p.y, p.y));
-            let surface = sim::spots::footprint(entry).and_then(|(corners, height)| {
+            let surface = sim::spots::footprint(&entry).and_then(|(corners, height)| {
                 let [a, b, c, d] = corners;
                 let corners = [on(a)?, on(b)?, on(c)?, on(d)?];
                 let ring = corners.map(|p| [p.x, p.z]);
