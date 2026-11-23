@@ -526,14 +526,12 @@ impl Engine {
             Verb::Start => e.start(&mut tree, c, ask, target("start-needs-an-activity")?)?,
             Verb::Leave => {
                 let activity = target("leave-needs-an-activity")?;
-                // A crew holding a part in its slot is not left: it puts the part down first (0.135 A2). Its activity
-                // would otherwise end with the part inside it.
-                if self
-                    .asm
-                    .as_ref()
-                    .is_some_and(|s| s.held.contains_key(&activity))
+                // 0.135 A2: while a crew's part is on its way in or back, or its take or seating waits for its commit,
+                // the crew is not left; at any other time a leave breaks its carry off, as any carry's.
+                if self.taking.contains_key(&activity)
+                    || self.asm.as_ref().is_some_and(|s| s.busy(activity))
                 {
-                    return Err(refusal("crew.holds-a-part", show(activity)));
+                    return Err(refusal("crew.setting-in", show(activity)));
                 }
                 // 0.135 C3: a carrier's leave breaks the carry off; its load is set down where it is.
                 if let Some(mut carry) = self.carries.remove(&activity) {
@@ -547,6 +545,9 @@ impl Engine {
                         "souls:partner-left",
                         Some((a.id, a.soul)),
                     )?;
+                    if let Some(s) = self.asm.as_mut() {
+                        s.ended(activity);
+                    }
                 }
                 e.next = tree.next();
                 e.leave(
@@ -919,7 +920,9 @@ impl Engine {
                         continue;
                     }
                 };
+                // A carrier with no body (retired, or gone from the world) has left (0.135 A2's review).
                 let (Ok((_, f)), Ok((_, k))) = (stands(c, f), stands(c, k)) else {
+                    gone.push(*activity);
                     continue;
                 };
                 // 0.135 C3: one stopped (or its connection is gone) while the other walked on.
@@ -981,24 +984,27 @@ impl Engine {
     /// track to its mover where the track ended, and its carry started again from there, the part still in its slot.
     fn stop_refused(&mut self, tree: &mut Tree, now: Micros) {
         let Some(asm) = self.asm.as_mut() else { return };
+        let mut written = Vec::new();
         for (activity, s) in std::mem::take(&mut asm.stopped) {
-            let audience = tree
+            let by = s.by;
+            match asm.stop(tree, now, activity, s) {
+                Ok(effects) => written.push((by, effects)),
+                Err(r) => eprintln!(
+                    "worldd: a refused seating was not stopped: {}: {r}",
+                    show(activity)
+                ),
+            }
+        }
+        let back = asm.returned(tree, now);
+        for (activity, s, effects) in back {
+            written.push((s.by, effects));
+            let Some(audience) = tree
                 .handle(activity)
                 .and_then(|h| tree.node(h))
-                .map(|n| n.audience());
-            let (Some(audience), Ok(effects)) = (audience, asm.stop(tree, now, activity, &s))
+                .map(|n| n.audience())
             else {
-                eprintln!(
-                    "worldd: a refused seating was not stopped: {}",
-                    show(activity)
-                );
                 continue;
             };
-            for mut e in effects {
-                e.envelope.cause = Cause::Intent(s.by.0);
-                e.envelope.actor = Actor::Soul(s.by.1);
-                self.out.push(e);
-            }
             let mut carry = Carry::new(
                 activity,
                 s.part,
@@ -1007,10 +1013,31 @@ impl Engine {
                 self.header.clone(),
                 self.rules.clone(),
             );
-            carry.track.push((now, s.end.0, s.end.1));
+            carry.track.push((now, s.start.0, s.start.1));
             carry.span = s.span;
+            if let Some(l) = self.held_load(tree, s.part) {
+                carry.load = l;
+            }
             self.carries.insert(activity, carry);
         }
+        for ((intent, soul), effects) in written {
+            for mut e in effects {
+                e.envelope.cause = Cause::Intent(intent);
+                e.envelope.actor = Actor::Soul(soul);
+                self.out.push(e);
+            }
+        }
+    }
+
+    /// The load `part` is as its kind's entry states it, turned as it is held in its crew's slot (0.135 C4's
+    /// `Load`), so a carry that breaks off sets it down the way it is held.
+    fn held_load(&self, tree: &Tree, part: Id) -> Option<Load> {
+        let n = tree.handle(part).and_then(|h| tree.node(h))?;
+        let l = self.loads.get(plain(n.kind().as_str()))?;
+        Some(Load {
+            turn: n.place()?.orientation,
+            ..*l
+        })
     }
 
     /// The takes and seatings to commit through the walkers' maps (0.135 A2, `crate::answers`), and the seatings
@@ -1062,6 +1089,9 @@ impl Engine {
                 carry.track.push((now, at, turn));
                 // Its carriers' span at the take: a carry they let drift apart breaks off (0.135 C3).
                 carry.span = span;
+                if let Some(l) = self.held_load(live, part) {
+                    carry.load = l;
+                }
                 self.carries.insert(r.activity, carry);
             }
             _ => asm.written(r.activity, r.step, false),

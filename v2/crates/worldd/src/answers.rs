@@ -2344,13 +2344,21 @@ impl Clock {
                     Ok(()) => self.outstanding += 1,
                     Err(e) => {
                         if let CheckJob::Part(j) = e.0 {
-                            self.seated.push((j.0, Ok(None)));
+                            let refused = Refusal {
+                                name: "edit.map-unchecked",
+                                detail: "no checker for the walkers' maps".into(),
+                            };
+                            self.seated.push((j.0, Err(refused)));
                         }
                     }
                 },
                 None => {
                     if let CheckJob::Part(j) = job {
-                        self.seated.push((j.0, Ok(None)));
+                        let refused = Refusal {
+                            name: "edit.map-unchecked",
+                            detail: "no checker for the walkers' maps".into(),
+                        };
+                        self.seated.push((j.0, Err(refused)));
                     }
                 }
             }
@@ -5927,7 +5935,11 @@ fn edit_checker(
                                     Ok(Some(PartMaps { maps, guard, souls }))
                                 })
                             }
-                            None => Ok(None),
+                            // A seating changes what walkers go round: never written without their maps, as a set-down's.
+                            None => Err(Refusal {
+                                name: "edit.map-unchecked",
+                                detail: "no walkers' map was prepared for the seating".into(),
+                            }),
                         };
                         if events.send(Event::Part(Box::new((r, checked)))).is_err() {
                             break;
