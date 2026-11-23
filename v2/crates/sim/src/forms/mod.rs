@@ -693,6 +693,16 @@ impl Forms {
         self.runs.get(run)?.runner.at()
     }
 
+    /// Whether `body`'s run is in a hand step (a `move`, `take`, `put` or `hand` step): one a walk of its own Soul does
+    /// not end by its claim on the legs, so the world leaves it (intents rule 10, 0.134 I4).
+    pub fn in_hand_move(&self, body: Id) -> bool {
+        self.by_body
+            .get(&body)
+            .and_then(|run| self.runs.get(run))
+            .and_then(|fr| fr.runner.step())
+            .is_some_and(|s| matches!(s, Step::Move { .. } | Step::Hand))
+    }
+
     /// The Soul on `body` leaves its run: taken at once (`form-not-running` when there is none), and the run ends
     /// `left` at the next stable moment (the runner's rule). When `intent` names the act waiting on that run (#4187),
     /// only the waiting act is left: it ends `left` now and never starts, and the run goes on.

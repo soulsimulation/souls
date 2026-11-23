@@ -114,14 +114,16 @@ export function chunkOf(bodies: readonly Body[], fromTick: number, frame: Frame,
       heading = m.heading;
       const walking = m.speed >= WALKING;
       // 0.134 B4: a gesture aimed at another body faces it and names it the partner (the old paired poses meet it); a
-      // held hand is the old renderer's hand hold with it. The drawing turns; the body in the world does not.
-      const g = walking ? null : gestureNow(b.gestures, t), other = g?.target ? byNode.get(g.target) : undefined;
+      // held hand is the old renderer's hand hold with it. An aimed gesture at a thing (B1) turns the standing body
+      // toward where its target stood. The drawing turns; the body in the world does not.
+      const g = walking ? null : gestureNow(b.gestures, t), other = g?.target && g.target !== b.node ? byNode.get(g.target) : undefined;
       const op = other ? positionAt(other.samples, t) : null;
-      if (op && Math.hypot(op[0] - p[0], op[2] - p[2]) > 1) heading = Math.atan2(op[2] - p[2], op[0] - p[0]);
+      const aim: [number, number] | null = op ? [op[0], op[2]] : g?.toward && !seatAt(b.samples, t) ? g.toward : null;
+      const drawn = aim && Math.hypot(aim[0] - p[0], aim[1] - p[2]) > 1 ? Math.atan2(aim[1] - p[2], aim[0] - p[0]) : heading;
       const nextPartner = g && !g.hold && other ? other.entity : null, nextHold = g?.hold && other ? other.entity : null;
       if (k < ticks && nextPartner !== (partner ?? null)) { changes.push([k, b.entity, 'partner', nextPartner]); partner = nextPartner; }
       if (k < ticks && nextHold !== (hold ?? null)) { changes.push([k, b.entity, 'handHold', nextHold ? { with: nextHold, hand: 'right' } : null]); hold = nextHold; }
-      track.push([k, Math.round(p[0]), Math.round(p[1]), Math.round(p[2]), Math.round(heading * ANG_Q)]);
+      track.push([k, Math.round(p[0]), Math.round(p[1]), Math.round(p[2]), Math.round(drawn * ANG_Q)]);
       if (k === 0) { changes.push([0, b.entity, 'present', true], [0, b.entity, 'level', 0]); if (b.look) changes.push([0, b.entity, 'body', b.look]); }
       const seat = walking ? null : seatAt(b.samples, t), nextSeat = seat ? seat.height / POS_Q : null, nextProp = heldAt(b.held, t);
       if (k < ticks && nextSeat !== (seatH ?? null)) { changes.push([k, b.entity, 'seatHeight', nextSeat]); seatH = nextSeat; }

@@ -17,8 +17,9 @@ const GESTURES: Readonly<Record<string, string>> = {
 const HOLDS: ReadonlySet<string> = new Set(['hold_hand']);
 
 /** A gesture as the take draws it: world time µs, its end (planned or cut, `Infinity`-like for a held move), the old
- *  activity id (null for a hold); the body it is aimed at, if any; whether it holds that body's hand. */
-export type Gesture = { start: number; end: number; activity: string | null; target?: string | null; hold?: boolean };
+ *  activity id (null for a hold); the body it is aimed at, if any, and (0.134 B1's aimed moves) where its target stood
+ *  when it began, world x and z in mm; whether it holds that body's hand. */
+export type Gesture = { start: number; end: number; activity: string | null; target?: string | null; toward?: [number, number]; hold?: boolean };
 
 /** The old activity a move plays, or null: `souls:wave`, `wave@2` and `wave` alike. */
 export function gestureOf(move: string): string | null {
@@ -27,11 +28,11 @@ export function gestureOf(move: string): string | null {
 }
 
 /** A move record (start and phase ends, µs) as a gesture, or null when its move is not one. */
-export function gestureFrom(move: { name: string; start: number; ends: readonly number[]; target?: string | null }): Gesture | null {
+export function gestureFrom(move: { name: string; start: number; ends: readonly number[]; target?: string | null }, toward?: [number, number] | null): Gesture | null {
   const activity = gestureOf(move.name), end = move.ends[move.ends.length - 1];
   const hold = HOLDS.has(move.name.slice(move.name.indexOf(':') + 1).split('@')[0]);
   if (!(activity || hold) || !(end > move.start)) return null;
-  return { start: move.start, end, activity: hold ? null : activity, ...(move.target ? { target: move.target } : {}), ...(hold ? { hold } : {}) };
+  return { start: move.start, end, activity: hold ? null : activity, ...(move.target ? { target: move.target } : {}), ...(toward ? { toward } : {}), ...(hold ? { hold } : {}) };
 }
 
 /** Ends a body's gesture running at `at` (its run ended early); one that has not begun or is over stays as it is. */
@@ -44,6 +45,11 @@ export function gestureNow(gestures: readonly Gesture[] | undefined, t: number):
   let out: Gesture | null = null;
   for (const g of gestures ?? []) if (g.start <= t && t < g.end) out = g;
   return out;
+}
+
+/** Where the gesture playing at world time t is aimed (its target's world x and z, mm), or null. */
+export function towardAt(gestures: readonly Gesture[] | undefined, t: number): [number, number] | null {
+  return gestureNow(gestures, t)?.toward ?? null;
 }
 
 /** The activity of the gesture playing at world time t, or null (none, or a hand hold). */

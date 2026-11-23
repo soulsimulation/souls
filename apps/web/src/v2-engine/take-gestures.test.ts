@@ -66,3 +66,27 @@ test('0.134 B4: a handshake aimed at another body faces it and names it the part
   assert.deepEqual(at(0.5).v2_b.state.handHold, { with: 'v2_a', hand: 'right' }, 'B holds A\'s hand');
   assert.ok(Math.abs(Math.abs(at(0.5).v2_b.yaw) - Math.PI / 2) < 0.01, 'B faces A');
 });
+
+test('0.134 B4: a gesture at the body itself (a wave where it stands) names no partner', () => {
+  const g = gestureFrom({ name: 'eden:wave', start: t0, ends: [t0 + 800_000], target: 'n-c' })!;
+  const C: Body = { entity: 'v2_c', node: 'n-c', soul: 's-c', name: 'Cy', heading: 0, samples: [{ at: t0 - 1_000_000, p: [0, 0, 0] }], gestures: [g] };
+  const e = sampleTake(chunkOf([C], FROM, frame).take as unknown as Take, 0.5).entities.v2_c;
+  assert.equal(e.activity, 'wave');
+  assert.equal(e.state.partner ?? null, null, 'not its own partner');
+  assert.ok(Math.abs(e.yaw) < 0.01, 'it does not turn');
+});
+
+test('an aimed gesture (0.134 B1) turns the standing body toward its target while it plays, then back', () => {
+  // a lamp 6 m off along +z; the body last walked along +x, so it faces +x (yaw 0)
+  const g = gestureFrom({ name: 'eden:point', start: t0 + 200_000, ends: [t0 + 700_000] }, [0, 6000])!;
+  const body: Body = { entity: 'v2_a_3', soul: 'soul-a-3', name: 'Cy', heading: 0, gestures: [g],
+    samples: [{ at: t0 - 2_000_000, p: [-1000, 0, 0] }, { at: t0 - 1_000_000, p: [0, 0, 0] }] };
+  const take = chunkOf([body], FROM, frame).take as unknown as Take, at = (s: number) => sampleTake(take, s).entities.v2_a_3;
+  assert.ok(Math.abs(at(0.1).yaw) < 0.01, 'before: as it walked');
+  assert.equal(at(0.4).activity, 'point');
+  assert.ok(Math.abs(at(0.4).yaw - Math.PI / 2) < 0.01, `pointing, it faces the lamp: ${at(0.4).yaw}`);
+  assert.ok(Math.abs(at(0.9).yaw) < 0.01, 'after: back as it stood');
+  const seated: Body = { ...body, entity: 'v2_a_4', samples: [{ at: t0 - 1_000_000, p: [0, 0, 0], seat: { height: 450, lie: false } }] };
+  assert.ok(Math.abs(sampleTake(chunkOf([seated], FROM, frame).take as unknown as Take, 0.4).entities.v2_a_4.yaw) < 0.01, 'seated, it keeps its seat\'s way');
+  assert.equal(gestureFrom({ name: 'eden:clap', start: t0, ends: [t0 + 1] })!.toward, undefined, 'no target: unaimed');
+});
