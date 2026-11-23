@@ -1,0 +1,2630 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:domino_tiling_board",
+  "owner": "thing",
+  "state": {
+    "h_a1": {
+      "n": 28,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "h_a2": {
+      "n": 29,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "h_a3": {
+      "n": 30,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "h_b1": {
+      "n": 31,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "h_b2": {
+      "n": 32,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "h_b3": {
+      "n": 33,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "v_1": {
+      "n": 34,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "v_2": {
+      "n": 35,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "v_3": {
+      "n": 36,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "v_4": {
+      "n": 37,
+      "type": "bool",
+      "default": false,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "stand": {
+      "role": "stand",
+      "at_mm": [
+        0,
+        0,
+        950
+      ],
+      "yaw_mdeg": 180000
+    },
+    "board": {
+      "role": "contact",
+      "at_mm": [
+        0,
+        850,
+        450
+      ]
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      1420,
+      900,
+      1120
+    ]
+  },
+  "forms": {
+    "place_h_a1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "h_a1",
+          "says": "occupied",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "h_a2",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "v_1",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "v_2",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "h_a1",
+          "to": true,
+          "event": "tile_shown"
+        }
+      ]
+    },
+    "remove_h_a1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "h_a1",
+          "says": "already_empty",
+          "is": true
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "h_a1",
+          "to": false,
+          "event": "tile_hidden"
+        }
+      ]
+    },
+    "place_h_a2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "h_a2",
+          "says": "occupied",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "h_a1",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "h_a3",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "v_2",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "v_3",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "h_a2",
+          "to": true,
+          "event": "tile_shown"
+        }
+      ]
+    },
+    "remove_h_a2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "h_a2",
+          "says": "already_empty",
+          "is": true
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "h_a2",
+          "to": false,
+          "event": "tile_hidden"
+        }
+      ]
+    },
+    "place_h_a3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "h_a3",
+          "says": "occupied",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "h_a2",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "v_3",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "v_4",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "h_a3",
+          "to": true,
+          "event": "tile_shown"
+        }
+      ]
+    },
+    "remove_h_a3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "h_a3",
+          "says": "already_empty",
+          "is": true
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "h_a3",
+          "to": false,
+          "event": "tile_hidden"
+        }
+      ]
+    },
+    "place_h_b1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "h_b1",
+          "says": "occupied",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "h_b2",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "v_1",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "v_2",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "h_b1",
+          "to": true,
+          "event": "tile_shown"
+        }
+      ]
+    },
+    "remove_h_b1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "h_b1",
+          "says": "already_empty",
+          "is": true
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "h_b1",
+          "to": false,
+          "event": "tile_hidden"
+        }
+      ]
+    },
+    "place_h_b2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "h_b2",
+          "says": "occupied",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "h_b1",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "h_b3",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "v_2",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "v_3",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "h_b2",
+          "to": true,
+          "event": "tile_shown"
+        }
+      ]
+    },
+    "remove_h_b2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "h_b2",
+          "says": "already_empty",
+          "is": true
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "h_b2",
+          "to": false,
+          "event": "tile_hidden"
+        }
+      ]
+    },
+    "place_h_b3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "h_b3",
+          "says": "occupied",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "h_b2",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "v_3",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "v_4",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "h_b3",
+          "to": true,
+          "event": "tile_shown"
+        }
+      ]
+    },
+    "remove_h_b3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "h_b3",
+          "says": "already_empty",
+          "is": true
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "h_b3",
+          "to": false,
+          "event": "tile_hidden"
+        }
+      ]
+    },
+    "place_v_1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "v_1",
+          "says": "occupied",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "h_a1",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "h_b1",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "v_1",
+          "to": true,
+          "event": "tile_shown"
+        }
+      ]
+    },
+    "remove_v_1": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "v_1",
+          "says": "already_empty",
+          "is": true
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "v_1",
+          "to": false,
+          "event": "tile_hidden"
+        }
+      ]
+    },
+    "place_v_2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "v_2",
+          "says": "occupied",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "h_a1",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "h_a2",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "h_b1",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "h_b2",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "v_2",
+          "to": true,
+          "event": "tile_shown"
+        }
+      ]
+    },
+    "remove_v_2": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "v_2",
+          "says": "already_empty",
+          "is": true
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "v_2",
+          "to": false,
+          "event": "tile_hidden"
+        }
+      ]
+    },
+    "place_v_3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "v_3",
+          "says": "occupied",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "h_a2",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "h_a3",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "h_b2",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "h_b3",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "v_3",
+          "to": true,
+          "event": "tile_shown"
+        }
+      ]
+    },
+    "remove_v_3": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "v_3",
+          "says": "already_empty",
+          "is": true
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "v_3",
+          "to": false,
+          "event": "tile_hidden"
+        }
+      ]
+    },
+    "place_v_4": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "v_4",
+          "says": "occupied",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "h_a3",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "state",
+          "field": "h_b3",
+          "says": "overlap",
+          "is": false
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "v_4",
+          "to": true,
+          "event": "tile_shown"
+        }
+      ]
+    },
+    "remove_v_4": {
+      "who": "anyone",
+      "starts": "act",
+      "needs": [
+        {
+          "need": "state",
+          "field": "v_4",
+          "says": "already_empty",
+          "is": true
+        },
+        {
+          "need": "hand",
+          "empty": true,
+          "says": "hands_empty"
+        },
+        {
+          "need": "within_reach",
+          "point": "board"
+        }
+      ],
+      "steps": [
+        {
+          "step": "walk_to",
+          "point": "stand"
+        },
+        {
+          "step": "move",
+          "move": "press",
+          "at": "board"
+        },
+        {
+          "step": "wait",
+          "us": 2000000
+        }
+      ],
+      "effects": [
+        {
+          "change": "set",
+          "field": "v_4",
+          "to": false,
+          "event": "tile_hidden"
+        }
+      ]
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "looks": {
+    "model": "look:domino_tiling_board",
+    "table": [
+      {
+        "part": "tile_h_a1",
+        "field": "h_a1",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      },
+      {
+        "part": "tile_h_a2",
+        "field": "h_a2",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      },
+      {
+        "part": "tile_h_a3",
+        "field": "h_a3",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      },
+      {
+        "part": "tile_h_b1",
+        "field": "h_b1",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      },
+      {
+        "part": "tile_h_b2",
+        "field": "h_b2",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      },
+      {
+        "part": "tile_h_b3",
+        "field": "h_b3",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      },
+      {
+        "part": "tile_v_1",
+        "field": "v_1",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      },
+      {
+        "part": "tile_v_2",
+        "field": "v_2",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      },
+      {
+        "part": "tile_v_3",
+        "field": "v_3",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      },
+      {
+        "part": "tile_v_4",
+        "field": "v_4",
+        "do": "show",
+        "at": {
+          "false": 0,
+          "true": 1
+        }
+      }
+    ],
+    "shape": {
+      "round": 2,
+      "shapes": [
+        {
+          "kind": "box",
+          "at": [
+            0,
+            790,
+            0
+          ],
+          "size": [
+            1400,
+            40,
+            1100
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -630,
+            385,
+            -480
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -630,
+            385,
+            480
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            630,
+            385,
+            -480
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            630,
+            385,
+            480
+          ],
+          "size": [
+            60,
+            770,
+            60
+          ],
+          "tint": "wood"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            817,
+            0
+          ],
+          "size": [
+            1350,
+            14,
+            1050
+          ],
+          "tint": "paper"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            827,
+            0
+          ],
+          "size": [
+            1000,
+            6,
+            520
+          ],
+          "tint": "plate"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -480,
+            831,
+            0
+          ],
+          "size": [
+            4,
+            2,
+            480
+          ],
+          "tint": "grid"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -240,
+            831,
+            0
+          ],
+          "size": [
+            4,
+            2,
+            480
+          ],
+          "tint": "grid"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            831,
+            0
+          ],
+          "size": [
+            4,
+            2,
+            480
+          ],
+          "tint": "grid"
+        },
+        {
+          "kind": "box",
+          "at": [
+            240,
+            831,
+            0
+          ],
+          "size": [
+            4,
+            2,
+            480
+          ],
+          "tint": "grid"
+        },
+        {
+          "kind": "box",
+          "at": [
+            480,
+            831,
+            0
+          ],
+          "size": [
+            4,
+            2,
+            480
+          ],
+          "tint": "grid"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            831,
+            -240
+          ],
+          "size": [
+            960,
+            2,
+            4
+          ],
+          "tint": "grid"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            831,
+            0
+          ],
+          "size": [
+            960,
+            2,
+            4
+          ],
+          "tint": "grid"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            831,
+            240
+          ],
+          "size": [
+            960,
+            2,
+            4
+          ],
+          "tint": "grid"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            -360,
+            824,
+            -340
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -15,
+              -15
+            ],
+            [
+              -5,
+              -15
+            ],
+            [
+              -5,
+              -25
+            ],
+            [
+              5,
+              -25
+            ],
+            [
+              5,
+              15
+            ],
+            [
+              15,
+              15
+            ],
+            [
+              15,
+              25
+            ],
+            [
+              -15,
+              25
+            ],
+            [
+              -15,
+              15
+            ],
+            [
+              -5,
+              15
+            ],
+            [
+              -5,
+              -5
+            ],
+            [
+              -15,
+              -5
+            ]
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            -120,
+            824,
+            -340
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -15,
+              -25
+            ],
+            [
+              15,
+              -25
+            ],
+            [
+              15,
+              5
+            ],
+            [
+              -5,
+              5
+            ],
+            [
+              -5,
+              15
+            ],
+            [
+              15,
+              15
+            ],
+            [
+              15,
+              25
+            ],
+            [
+              -15,
+              25
+            ],
+            [
+              -15,
+              -5
+            ],
+            [
+              5,
+              -5
+            ],
+            [
+              5,
+              -15
+            ],
+            [
+              -15,
+              -15
+            ]
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            120,
+            824,
+            -340
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -15,
+              -25
+            ],
+            [
+              15,
+              -25
+            ],
+            [
+              15,
+              25
+            ],
+            [
+              -15,
+              25
+            ],
+            [
+              -15,
+              15
+            ],
+            [
+              5,
+              15
+            ],
+            [
+              5,
+              5
+            ],
+            [
+              -15,
+              5
+            ],
+            [
+              -15,
+              -5
+            ],
+            [
+              5,
+              -5
+            ],
+            [
+              5,
+              -15
+            ],
+            [
+              -15,
+              -15
+            ]
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "extrude",
+          "at": [
+            360,
+            824,
+            -340
+          ],
+          "h": 6,
+          "polygon": [
+            [
+              -15,
+              -25
+            ],
+            [
+              -5,
+              -25
+            ],
+            [
+              -5,
+              -5
+            ],
+            [
+              5,
+              -5
+            ],
+            [
+              5,
+              -25
+            ],
+            [
+              15,
+              -25
+            ],
+            [
+              15,
+              25
+            ],
+            [
+              5,
+              25
+            ],
+            [
+              5,
+              5
+            ],
+            [
+              -15,
+              5
+            ]
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -588,
+            827,
+            -120
+          ],
+          "size": [
+            8,
+            6,
+            65
+          ],
+          "tint": "ink",
+          "yaw": 157380
+        },
+        {
+          "kind": "box",
+          "at": [
+            -562,
+            827,
+            -120
+          ],
+          "size": [
+            8,
+            6,
+            65
+          ],
+          "tint": "ink",
+          "yaw": 22620
+        },
+        {
+          "kind": "box",
+          "at": [
+            -575,
+            827,
+            -120
+          ],
+          "size": [
+            8,
+            6,
+            26
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -600,
+            827,
+            120
+          ],
+          "size": [
+            8,
+            6,
+            60
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -585,
+            827,
+            90
+          ],
+          "size": [
+            8,
+            6,
+            30
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -585,
+            827,
+            120
+          ],
+          "size": [
+            8,
+            6,
+            30
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -585,
+            827,
+            150
+          ],
+          "size": [
+            8,
+            6,
+            30
+          ],
+          "tint": "ink",
+          "yaw": 90000
+        },
+        {
+          "kind": "box",
+          "at": [
+            -562,
+            827,
+            95
+          ],
+          "size": [
+            8,
+            6,
+            18
+          ],
+          "tint": "ink",
+          "yaw": 56310
+        },
+        {
+          "kind": "box",
+          "at": [
+            -555,
+            827,
+            105
+          ],
+          "size": [
+            8,
+            6,
+            10
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -562,
+            827,
+            115
+          ],
+          "size": [
+            8,
+            6,
+            18
+          ],
+          "tint": "ink",
+          "yaw": -56310
+        },
+        {
+          "kind": "box",
+          "at": [
+            -562,
+            827,
+            125
+          ],
+          "size": [
+            8,
+            6,
+            18
+          ],
+          "tint": "ink",
+          "yaw": 56310
+        },
+        {
+          "kind": "box",
+          "at": [
+            -555,
+            827,
+            135
+          ],
+          "size": [
+            8,
+            6,
+            10
+          ],
+          "tint": "ink"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -562,
+            827,
+            145
+          ],
+          "size": [
+            8,
+            6,
+            18
+          ],
+          "tint": "ink",
+          "yaw": -56310
+        },
+        {
+          "kind": "box",
+          "at": [
+            -240,
+            834,
+            -120
+          ],
+          "size": [
+            480,
+            8,
+            240
+          ],
+          "tint": "base",
+          "role": "tile_h_a1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -240,
+            842,
+            -120
+          ],
+          "size": [
+            464,
+            8,
+            224
+          ],
+          "tint": "face",
+          "role": "tile_h_a1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -240,
+            848,
+            -120
+          ],
+          "size": [
+            4,
+            4,
+            224
+          ],
+          "tint": "ink",
+          "role": "tile_h_a1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            834,
+            -120
+          ],
+          "size": [
+            480,
+            8,
+            240
+          ],
+          "tint": "base",
+          "role": "tile_h_a2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            842,
+            -120
+          ],
+          "size": [
+            464,
+            8,
+            224
+          ],
+          "tint": "face",
+          "role": "tile_h_a2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            848,
+            -120
+          ],
+          "size": [
+            4,
+            4,
+            224
+          ],
+          "tint": "ink",
+          "role": "tile_h_a2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            240,
+            834,
+            -120
+          ],
+          "size": [
+            480,
+            8,
+            240
+          ],
+          "tint": "base",
+          "role": "tile_h_a3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            240,
+            842,
+            -120
+          ],
+          "size": [
+            464,
+            8,
+            224
+          ],
+          "tint": "face",
+          "role": "tile_h_a3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            240,
+            848,
+            -120
+          ],
+          "size": [
+            4,
+            4,
+            224
+          ],
+          "tint": "ink",
+          "role": "tile_h_a3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -240,
+            834,
+            120
+          ],
+          "size": [
+            480,
+            8,
+            240
+          ],
+          "tint": "base",
+          "role": "tile_h_b1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -240,
+            842,
+            120
+          ],
+          "size": [
+            464,
+            8,
+            224
+          ],
+          "tint": "face",
+          "role": "tile_h_b1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -240,
+            848,
+            120
+          ],
+          "size": [
+            4,
+            4,
+            224
+          ],
+          "tint": "ink",
+          "role": "tile_h_b1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            834,
+            120
+          ],
+          "size": [
+            480,
+            8,
+            240
+          ],
+          "tint": "base",
+          "role": "tile_h_b2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            842,
+            120
+          ],
+          "size": [
+            464,
+            8,
+            224
+          ],
+          "tint": "face",
+          "role": "tile_h_b2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            0,
+            848,
+            120
+          ],
+          "size": [
+            4,
+            4,
+            224
+          ],
+          "tint": "ink",
+          "role": "tile_h_b2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            240,
+            834,
+            120
+          ],
+          "size": [
+            480,
+            8,
+            240
+          ],
+          "tint": "base",
+          "role": "tile_h_b3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            240,
+            842,
+            120
+          ],
+          "size": [
+            464,
+            8,
+            224
+          ],
+          "tint": "face",
+          "role": "tile_h_b3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            240,
+            848,
+            120
+          ],
+          "size": [
+            4,
+            4,
+            224
+          ],
+          "tint": "ink",
+          "role": "tile_h_b3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -360,
+            834,
+            0
+          ],
+          "size": [
+            240,
+            8,
+            480
+          ],
+          "tint": "base",
+          "role": "tile_v_1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -360,
+            842,
+            0
+          ],
+          "size": [
+            224,
+            8,
+            464
+          ],
+          "tint": "face",
+          "role": "tile_v_1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -360,
+            848,
+            0
+          ],
+          "size": [
+            224,
+            4,
+            4
+          ],
+          "tint": "ink",
+          "role": "tile_v_1"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -120,
+            834,
+            0
+          ],
+          "size": [
+            240,
+            8,
+            480
+          ],
+          "tint": "base",
+          "role": "tile_v_2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -120,
+            842,
+            0
+          ],
+          "size": [
+            224,
+            8,
+            464
+          ],
+          "tint": "face",
+          "role": "tile_v_2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            -120,
+            848,
+            0
+          ],
+          "size": [
+            224,
+            4,
+            4
+          ],
+          "tint": "ink",
+          "role": "tile_v_2"
+        },
+        {
+          "kind": "box",
+          "at": [
+            120,
+            834,
+            0
+          ],
+          "size": [
+            240,
+            8,
+            480
+          ],
+          "tint": "base",
+          "role": "tile_v_3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            120,
+            842,
+            0
+          ],
+          "size": [
+            224,
+            8,
+            464
+          ],
+          "tint": "face",
+          "role": "tile_v_3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            120,
+            848,
+            0
+          ],
+          "size": [
+            224,
+            4,
+            4
+          ],
+          "tint": "ink",
+          "role": "tile_v_3"
+        },
+        {
+          "kind": "box",
+          "at": [
+            360,
+            834,
+            0
+          ],
+          "size": [
+            240,
+            8,
+            480
+          ],
+          "tint": "base",
+          "role": "tile_v_4"
+        },
+        {
+          "kind": "box",
+          "at": [
+            360,
+            842,
+            0
+          ],
+          "size": [
+            224,
+            8,
+            464
+          ],
+          "tint": "face",
+          "role": "tile_v_4"
+        },
+        {
+          "kind": "box",
+          "at": [
+            360,
+            848,
+            0
+          ],
+          "size": [
+            224,
+            4,
+            4
+          ],
+          "tint": "ink",
+          "role": "tile_v_4"
+        }
+      ],
+      "palette": {
+        "wood": "#75543b",
+        "paper": "#eee2c3",
+        "plate": "#c7c3b5",
+        "grid": "#526369",
+        "ink": "#142833",
+        "base": "#e4dfc9",
+        "face": "#76a3ce"
+      },
+      "tags": [
+        "puzzle",
+        "domino",
+        "tiling",
+        "object"
+      ]
+    }
+  },
+  "text": {
+    "puzzle": "puzzle",
+    "card": "Cover eight cells with nonoverlapping domino indicators; remove to backtrack.",
+    "domino": "domino tiling board",
+    "rectangle": "two-cell coverage and backtracking",
+    "hands_empty": "Put down what you hold before changing a placement.",
+    "occupied": "That placement is already shown. Remove it individually.",
+    "overlap": "Another shown rectangle covers one of these cells. Remove a conflicting choice or choose a different pair.",
+    "already_empty": "That placement is already hidden. Choose a shown placement to remove.",
+    "coordinates": "The fixed board has two rows A at the far/top edge and B at the near/bottom edge, and columns1 through4 from left to right. Each horizontal h_a1,h_a2,h_a3 or h_b1,h_b2,h_b3 spans the named row and starting column plus the next column. Vertical v_1 through v_4 spans both rows of its named column. Each visible indicator is one whole two-cell rectangle with an attached middle seam.",
+    "rules": "Place any of the ten potential rectangles only when it is hidden and no shown rectangle shares either cell. Boundary contact is allowed; interiors cannot overlap. A complete tiling uses four rectangles to cover all eight cells. Remove any shown choice individually; every partial can return to blank. These are ten fixed potential-placement indicators, not four portable conserved dominoes.",
+    "solutions": "There are five complete tilings: (h_a1,h_a3,h_b1,h_b3); (h_a3,h_b3,v_1,v_2); (h_a2,h_b2,v_1,v_4); (h_a1,h_b1,v_3,v_4); and (v_1,v_2,v_3,v_4). These action sequences are examples, not an automatic solver.",
+    "backtrack": "A genuine dead end shows h_a1,h_a3 and h_b2: the top row is covered, but the two bottom corner cells cannot be paired. Remove only h_b2, then place h_b1 and h_b3 to complete the board. No reset is needed.",
+    "limits": "Each Boolean selects the visibility of one original mounted whole rectangle, inset face and center seam. Full bases cover complete cells; inset faces distinguish neighboring indicators. No loose custody, stock, portable-object conservation, pip game, physical placement trajectory, force, toppling, score, solver or reset is claimed."
+  },
+  "card": {
+    "text": "card",
+    "category": "puzzle",
+    "synonyms": [
+      "domino",
+      "rectangle"
+    ]
+  },
+  "howtos": {
+    "coordinates": {
+      "text": "coordinates",
+      "steps": [
+        {
+          "form": "place_h_a1"
+        },
+        {
+          "form": "remove_h_a1"
+        }
+      ]
+    },
+    "rules": {
+      "text": "rules",
+      "steps": [
+        {
+          "form": "place_v_1"
+        },
+        {
+          "form": "remove_v_1"
+        }
+      ]
+    },
+    "backtracking": {
+      "text": "backtrack",
+      "steps": [
+        {
+          "form": "place_h_a1"
+        },
+        {
+          "form": "place_h_a3"
+        },
+        {
+          "form": "place_h_b2"
+        },
+        {
+          "form": "remove_h_b2"
+        },
+        {
+          "form": "place_h_b1"
+        },
+        {
+          "form": "place_h_b3"
+        },
+        {
+          "form": "remove_h_b3"
+        },
+        {
+          "form": "remove_h_b1"
+        },
+        {
+          "form": "remove_h_a3"
+        },
+        {
+          "form": "remove_h_a1"
+        }
+      ]
+    },
+    "fixed_indicators": {
+      "text": "limits",
+      "steps": [
+        {
+          "form": "place_h_a1"
+        },
+        {
+          "form": "remove_h_a1"
+        }
+      ]
+    },
+    "solution_1": {
+      "text": "solutions",
+      "steps": [
+        {
+          "form": "place_h_a1"
+        },
+        {
+          "form": "place_h_a3"
+        },
+        {
+          "form": "place_h_b1"
+        },
+        {
+          "form": "place_h_b3"
+        },
+        {
+          "form": "remove_h_b3"
+        },
+        {
+          "form": "remove_h_b1"
+        },
+        {
+          "form": "remove_h_a3"
+        },
+        {
+          "form": "remove_h_a1"
+        }
+      ]
+    },
+    "solution_2": {
+      "text": "solutions",
+      "steps": [
+        {
+          "form": "place_h_a3"
+        },
+        {
+          "form": "place_h_b3"
+        },
+        {
+          "form": "place_v_1"
+        },
+        {
+          "form": "place_v_2"
+        },
+        {
+          "form": "remove_v_2"
+        },
+        {
+          "form": "remove_v_1"
+        },
+        {
+          "form": "remove_h_b3"
+        },
+        {
+          "form": "remove_h_a3"
+        }
+      ]
+    },
+    "solution_3": {
+      "text": "solutions",
+      "steps": [
+        {
+          "form": "place_h_a2"
+        },
+        {
+          "form": "place_h_b2"
+        },
+        {
+          "form": "place_v_1"
+        },
+        {
+          "form": "place_v_4"
+        },
+        {
+          "form": "remove_v_4"
+        },
+        {
+          "form": "remove_v_1"
+        },
+        {
+          "form": "remove_h_b2"
+        },
+        {
+          "form": "remove_h_a2"
+        }
+      ]
+    },
+    "solution_4": {
+      "text": "solutions",
+      "steps": [
+        {
+          "form": "place_h_a1"
+        },
+        {
+          "form": "place_h_b1"
+        },
+        {
+          "form": "place_v_3"
+        },
+        {
+          "form": "place_v_4"
+        },
+        {
+          "form": "remove_v_4"
+        },
+        {
+          "form": "remove_v_3"
+        },
+        {
+          "form": "remove_h_b1"
+        },
+        {
+          "form": "remove_h_a1"
+        }
+      ]
+    },
+    "solution_5": {
+      "text": "solutions",
+      "steps": [
+        {
+          "form": "place_v_1"
+        },
+        {
+          "form": "place_v_2"
+        },
+        {
+          "form": "place_v_3"
+        },
+        {
+          "form": "place_v_4"
+        },
+        {
+          "form": "remove_v_4"
+        },
+        {
+          "form": "remove_v_3"
+        },
+        {
+          "form": "remove_v_2"
+        },
+        {
+          "form": "remove_v_1"
+        }
+      ]
+    }
+  }
+}

@@ -1,0 +1,6350 @@
+{
+  "format": "souls-form-cases/1",
+  "about": "All20 forms and every own-value, exact cell-overlap competitor, hand and evaluator reach need.",
+  "cases": [
+    {
+      "name": "place_h_a1_allowed",
+      "act": {
+        "this": "p1",
+        "form": "place_h_a1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "place_h_a1_need_0",
+      "act": {
+        "this": "p1",
+        "form": "place_h_a1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": true,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "place_h_a1_need_1",
+      "act": {
+        "this": "p1",
+        "form": "place_h_a1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": true,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "place_h_a1_need_2",
+      "act": {
+        "this": "p1",
+        "form": "place_h_a1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": true,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2
+      }
+    },
+    {
+      "name": "place_h_a1_need_3",
+      "act": {
+        "this": "p1",
+        "form": "place_h_a1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": true,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 3
+      }
+    },
+    {
+      "name": "place_h_a1_need_4",
+      "act": {
+        "this": "p1",
+        "form": "place_h_a1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 4
+      }
+    },
+    {
+      "name": "place_h_a1_need_5",
+      "act": {
+        "this": "p1",
+        "form": "place_h_a1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 5
+      }
+    },
+    {
+      "name": "remove_h_a1_allowed",
+      "act": {
+        "this": "p1",
+        "form": "remove_h_a1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": true,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_h_a1_need_0",
+      "act": {
+        "this": "p1",
+        "form": "remove_h_a1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "remove_h_a1_need_1",
+      "act": {
+        "this": "p1",
+        "form": "remove_h_a1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": true,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 1
+      }
+    },
+    {
+      "name": "remove_h_a1_need_2",
+      "act": {
+        "this": "p1",
+        "form": "remove_h_a1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": true,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "place_h_a2_allowed",
+      "act": {
+        "this": "p1",
+        "form": "place_h_a2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "place_h_a2_need_0",
+      "act": {
+        "this": "p1",
+        "form": "place_h_a2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": true,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "place_h_a2_need_1",
+      "act": {
+        "this": "p1",
+        "form": "place_h_a2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": true,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "place_h_a2_need_2",
+      "act": {
+        "this": "p1",
+        "form": "place_h_a2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": true,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2
+      }
+    },
+    {
+      "name": "place_h_a2_need_3",
+      "act": {
+        "this": "p1",
+        "form": "place_h_a2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": true,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 3
+      }
+    },
+    {
+      "name": "place_h_a2_need_4",
+      "act": {
+        "this": "p1",
+        "form": "place_h_a2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": true,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 4
+      }
+    },
+    {
+      "name": "place_h_a2_need_5",
+      "act": {
+        "this": "p1",
+        "form": "place_h_a2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 5
+      }
+    },
+    {
+      "name": "place_h_a2_need_6",
+      "act": {
+        "this": "p1",
+        "form": "place_h_a2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 6
+      }
+    },
+    {
+      "name": "remove_h_a2_allowed",
+      "act": {
+        "this": "p1",
+        "form": "remove_h_a2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": true,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_h_a2_need_0",
+      "act": {
+        "this": "p1",
+        "form": "remove_h_a2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "remove_h_a2_need_1",
+      "act": {
+        "this": "p1",
+        "form": "remove_h_a2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": true,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 1
+      }
+    },
+    {
+      "name": "remove_h_a2_need_2",
+      "act": {
+        "this": "p1",
+        "form": "remove_h_a2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": true,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "place_h_a3_allowed",
+      "act": {
+        "this": "p1",
+        "form": "place_h_a3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "place_h_a3_need_0",
+      "act": {
+        "this": "p1",
+        "form": "place_h_a3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": true,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "place_h_a3_need_1",
+      "act": {
+        "this": "p1",
+        "form": "place_h_a3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": true,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "place_h_a3_need_2",
+      "act": {
+        "this": "p1",
+        "form": "place_h_a3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": true,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2
+      }
+    },
+    {
+      "name": "place_h_a3_need_3",
+      "act": {
+        "this": "p1",
+        "form": "place_h_a3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 3
+      }
+    },
+    {
+      "name": "place_h_a3_need_4",
+      "act": {
+        "this": "p1",
+        "form": "place_h_a3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 4
+      }
+    },
+    {
+      "name": "place_h_a3_need_5",
+      "act": {
+        "this": "p1",
+        "form": "place_h_a3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 5
+      }
+    },
+    {
+      "name": "remove_h_a3_allowed",
+      "act": {
+        "this": "p1",
+        "form": "remove_h_a3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": true,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_h_a3_need_0",
+      "act": {
+        "this": "p1",
+        "form": "remove_h_a3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "remove_h_a3_need_1",
+      "act": {
+        "this": "p1",
+        "form": "remove_h_a3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": true,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 1
+      }
+    },
+    {
+      "name": "remove_h_a3_need_2",
+      "act": {
+        "this": "p1",
+        "form": "remove_h_a3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": true,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "place_h_b1_allowed",
+      "act": {
+        "this": "p1",
+        "form": "place_h_b1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "place_h_b1_need_0",
+      "act": {
+        "this": "p1",
+        "form": "place_h_b1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": true,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "place_h_b1_need_1",
+      "act": {
+        "this": "p1",
+        "form": "place_h_b1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": true,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "place_h_b1_need_2",
+      "act": {
+        "this": "p1",
+        "form": "place_h_b1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": true,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2
+      }
+    },
+    {
+      "name": "place_h_b1_need_3",
+      "act": {
+        "this": "p1",
+        "form": "place_h_b1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": true,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 3
+      }
+    },
+    {
+      "name": "place_h_b1_need_4",
+      "act": {
+        "this": "p1",
+        "form": "place_h_b1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 4
+      }
+    },
+    {
+      "name": "place_h_b1_need_5",
+      "act": {
+        "this": "p1",
+        "form": "place_h_b1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 5
+      }
+    },
+    {
+      "name": "remove_h_b1_allowed",
+      "act": {
+        "this": "p1",
+        "form": "remove_h_b1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": true,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_h_b1_need_0",
+      "act": {
+        "this": "p1",
+        "form": "remove_h_b1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "remove_h_b1_need_1",
+      "act": {
+        "this": "p1",
+        "form": "remove_h_b1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": true,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 1
+      }
+    },
+    {
+      "name": "remove_h_b1_need_2",
+      "act": {
+        "this": "p1",
+        "form": "remove_h_b1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": true,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "place_h_b2_allowed",
+      "act": {
+        "this": "p1",
+        "form": "place_h_b2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "place_h_b2_need_0",
+      "act": {
+        "this": "p1",
+        "form": "place_h_b2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": true,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "place_h_b2_need_1",
+      "act": {
+        "this": "p1",
+        "form": "place_h_b2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": true,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "place_h_b2_need_2",
+      "act": {
+        "this": "p1",
+        "form": "place_h_b2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": true,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2
+      }
+    },
+    {
+      "name": "place_h_b2_need_3",
+      "act": {
+        "this": "p1",
+        "form": "place_h_b2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": true,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 3
+      }
+    },
+    {
+      "name": "place_h_b2_need_4",
+      "act": {
+        "this": "p1",
+        "form": "place_h_b2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": true,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 4
+      }
+    },
+    {
+      "name": "place_h_b2_need_5",
+      "act": {
+        "this": "p1",
+        "form": "place_h_b2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 5
+      }
+    },
+    {
+      "name": "place_h_b2_need_6",
+      "act": {
+        "this": "p1",
+        "form": "place_h_b2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 6
+      }
+    },
+    {
+      "name": "remove_h_b2_allowed",
+      "act": {
+        "this": "p1",
+        "form": "remove_h_b2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": true,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_h_b2_need_0",
+      "act": {
+        "this": "p1",
+        "form": "remove_h_b2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "remove_h_b2_need_1",
+      "act": {
+        "this": "p1",
+        "form": "remove_h_b2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": true,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 1
+      }
+    },
+    {
+      "name": "remove_h_b2_need_2",
+      "act": {
+        "this": "p1",
+        "form": "remove_h_b2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": true,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "place_h_b3_allowed",
+      "act": {
+        "this": "p1",
+        "form": "place_h_b3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "place_h_b3_need_0",
+      "act": {
+        "this": "p1",
+        "form": "place_h_b3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": true,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "place_h_b3_need_1",
+      "act": {
+        "this": "p1",
+        "form": "place_h_b3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": true,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "place_h_b3_need_2",
+      "act": {
+        "this": "p1",
+        "form": "place_h_b3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": true,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2
+      }
+    },
+    {
+      "name": "place_h_b3_need_3",
+      "act": {
+        "this": "p1",
+        "form": "place_h_b3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 3
+      }
+    },
+    {
+      "name": "place_h_b3_need_4",
+      "act": {
+        "this": "p1",
+        "form": "place_h_b3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 4
+      }
+    },
+    {
+      "name": "place_h_b3_need_5",
+      "act": {
+        "this": "p1",
+        "form": "place_h_b3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 5
+      }
+    },
+    {
+      "name": "remove_h_b3_allowed",
+      "act": {
+        "this": "p1",
+        "form": "remove_h_b3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": true,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_h_b3_need_0",
+      "act": {
+        "this": "p1",
+        "form": "remove_h_b3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "remove_h_b3_need_1",
+      "act": {
+        "this": "p1",
+        "form": "remove_h_b3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": true,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 1
+      }
+    },
+    {
+      "name": "remove_h_b3_need_2",
+      "act": {
+        "this": "p1",
+        "form": "remove_h_b3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": true,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "place_v_1_allowed",
+      "act": {
+        "this": "p1",
+        "form": "place_v_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "place_v_1_need_0",
+      "act": {
+        "this": "p1",
+        "form": "place_v_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": true,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "place_v_1_need_1",
+      "act": {
+        "this": "p1",
+        "form": "place_v_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": true,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "place_v_1_need_2",
+      "act": {
+        "this": "p1",
+        "form": "place_v_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": true,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2
+      }
+    },
+    {
+      "name": "place_v_1_need_3",
+      "act": {
+        "this": "p1",
+        "form": "place_v_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 3
+      }
+    },
+    {
+      "name": "place_v_1_need_4",
+      "act": {
+        "this": "p1",
+        "form": "place_v_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 4
+      }
+    },
+    {
+      "name": "remove_v_1_allowed",
+      "act": {
+        "this": "p1",
+        "form": "remove_v_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": true,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_v_1_need_0",
+      "act": {
+        "this": "p1",
+        "form": "remove_v_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "remove_v_1_need_1",
+      "act": {
+        "this": "p1",
+        "form": "remove_v_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": true,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 1
+      }
+    },
+    {
+      "name": "remove_v_1_need_2",
+      "act": {
+        "this": "p1",
+        "form": "remove_v_1"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": true,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "place_v_2_allowed",
+      "act": {
+        "this": "p1",
+        "form": "place_v_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "place_v_2_need_0",
+      "act": {
+        "this": "p1",
+        "form": "place_v_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": true,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "place_v_2_need_1",
+      "act": {
+        "this": "p1",
+        "form": "place_v_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": true,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "place_v_2_need_2",
+      "act": {
+        "this": "p1",
+        "form": "place_v_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": true,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2
+      }
+    },
+    {
+      "name": "place_v_2_need_3",
+      "act": {
+        "this": "p1",
+        "form": "place_v_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": true,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 3
+      }
+    },
+    {
+      "name": "place_v_2_need_4",
+      "act": {
+        "this": "p1",
+        "form": "place_v_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": true,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 4
+      }
+    },
+    {
+      "name": "place_v_2_need_5",
+      "act": {
+        "this": "p1",
+        "form": "place_v_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 5
+      }
+    },
+    {
+      "name": "place_v_2_need_6",
+      "act": {
+        "this": "p1",
+        "form": "place_v_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 6
+      }
+    },
+    {
+      "name": "remove_v_2_allowed",
+      "act": {
+        "this": "p1",
+        "form": "remove_v_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": true,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_v_2_need_0",
+      "act": {
+        "this": "p1",
+        "form": "remove_v_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "remove_v_2_need_1",
+      "act": {
+        "this": "p1",
+        "form": "remove_v_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": true,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 1
+      }
+    },
+    {
+      "name": "remove_v_2_need_2",
+      "act": {
+        "this": "p1",
+        "form": "remove_v_2"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": true,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "place_v_3_allowed",
+      "act": {
+        "this": "p1",
+        "form": "place_v_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "place_v_3_need_0",
+      "act": {
+        "this": "p1",
+        "form": "place_v_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": true,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "place_v_3_need_1",
+      "act": {
+        "this": "p1",
+        "form": "place_v_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": true,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "place_v_3_need_2",
+      "act": {
+        "this": "p1",
+        "form": "place_v_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": true,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2
+      }
+    },
+    {
+      "name": "place_v_3_need_3",
+      "act": {
+        "this": "p1",
+        "form": "place_v_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": true,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 3
+      }
+    },
+    {
+      "name": "place_v_3_need_4",
+      "act": {
+        "this": "p1",
+        "form": "place_v_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": true,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 4
+      }
+    },
+    {
+      "name": "place_v_3_need_5",
+      "act": {
+        "this": "p1",
+        "form": "place_v_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 5
+      }
+    },
+    {
+      "name": "place_v_3_need_6",
+      "act": {
+        "this": "p1",
+        "form": "place_v_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 6
+      }
+    },
+    {
+      "name": "remove_v_3_allowed",
+      "act": {
+        "this": "p1",
+        "form": "remove_v_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": true,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_v_3_need_0",
+      "act": {
+        "this": "p1",
+        "form": "remove_v_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "remove_v_3_need_1",
+      "act": {
+        "this": "p1",
+        "form": "remove_v_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": true,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 1
+      }
+    },
+    {
+      "name": "remove_v_3_need_2",
+      "act": {
+        "this": "p1",
+        "form": "remove_v_3"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": true,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    },
+    {
+      "name": "place_v_4_allowed",
+      "act": {
+        "this": "p1",
+        "form": "place_v_4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "place_v_4_need_0",
+      "act": {
+        "this": "p1",
+        "form": "place_v_4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "place_v_4_need_1",
+      "act": {
+        "this": "p1",
+        "form": "place_v_4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": true,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 1
+      }
+    },
+    {
+      "name": "place_v_4_need_2",
+      "act": {
+        "this": "p1",
+        "form": "place_v_4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": true,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 2
+      }
+    },
+    {
+      "name": "place_v_4_need_3",
+      "act": {
+        "this": "p1",
+        "form": "place_v_4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 3
+      }
+    },
+    {
+      "name": "place_v_4_need_4",
+      "act": {
+        "this": "p1",
+        "form": "place_v_4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 4
+      }
+    },
+    {
+      "name": "remove_v_4_allowed",
+      "act": {
+        "this": "p1",
+        "form": "remove_v_4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "yes"
+      }
+    },
+    {
+      "name": "remove_v_4_need_0",
+      "act": {
+        "this": "p1",
+        "form": "remove_v_4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "field_differs",
+        "need": 0
+      }
+    },
+    {
+      "name": "remove_v_4_need_1",
+      "act": {
+        "this": "p1",
+        "form": "remove_v_4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": "held",
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "hand_not_empty",
+        "need": 1
+      }
+    },
+    {
+      "name": "remove_v_4_need_2",
+      "act": {
+        "this": "p1",
+        "form": "remove_v_4"
+      },
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              3000,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "asker": {
+        "sees": "all"
+      },
+      "expect": {
+        "verdict": "no",
+        "reason": "out_of_reach",
+        "need": 2
+      }
+    }
+  ]
+}

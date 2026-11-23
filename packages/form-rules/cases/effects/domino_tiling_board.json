@@ -1,0 +1,3758 @@
+{
+  "format": "souls-effect-cases/1",
+  "about": "All20 one-Boolean literal effects, five complete tilings, genuine dead-end removal/backtracking/reuse; generic successful apply receipts replay. This is not native restart/stop proof.",
+  "cases": [
+    {
+      "name": "place_h_a1_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_h_a1"
+          },
+          "receipt": "place_h_a1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_a1",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:domino_tiling_board",
+          "fields": {
+            "h_a1": 1,
+            "h_a2": false,
+            "h_a3": false,
+            "h_b1": false,
+            "h_b2": false,
+            "h_b3": false,
+            "v_1": false,
+            "v_2": false,
+            "v_3": false,
+            "v_4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_h_a1_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": true,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_h_a1"
+          },
+          "receipt": "remove_h_a1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_a1",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:domino_tiling_board",
+          "fields": {
+            "h_a1": 0,
+            "h_a2": false,
+            "h_a3": false,
+            "h_b1": false,
+            "h_b2": false,
+            "h_b3": false,
+            "v_1": false,
+            "v_2": false,
+            "v_3": false,
+            "v_4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "place_h_a2_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_h_a2"
+          },
+          "receipt": "place_h_a2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_a2",
+                "n": 29,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:domino_tiling_board",
+          "fields": {
+            "h_a1": false,
+            "h_a2": 1,
+            "h_a3": false,
+            "h_b1": false,
+            "h_b2": false,
+            "h_b3": false,
+            "v_1": false,
+            "v_2": false,
+            "v_3": false,
+            "v_4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_h_a2_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": true,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_h_a2"
+          },
+          "receipt": "remove_h_a2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_a2",
+                "n": 29,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:domino_tiling_board",
+          "fields": {
+            "h_a1": false,
+            "h_a2": 0,
+            "h_a3": false,
+            "h_b1": false,
+            "h_b2": false,
+            "h_b3": false,
+            "v_1": false,
+            "v_2": false,
+            "v_3": false,
+            "v_4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "place_h_a3_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_h_a3"
+          },
+          "receipt": "place_h_a3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_a3",
+                "n": 30,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:domino_tiling_board",
+          "fields": {
+            "h_a1": false,
+            "h_a2": false,
+            "h_a3": 1,
+            "h_b1": false,
+            "h_b2": false,
+            "h_b3": false,
+            "v_1": false,
+            "v_2": false,
+            "v_3": false,
+            "v_4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_h_a3_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": true,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_h_a3"
+          },
+          "receipt": "remove_h_a3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_a3",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:domino_tiling_board",
+          "fields": {
+            "h_a1": false,
+            "h_a2": false,
+            "h_a3": 0,
+            "h_b1": false,
+            "h_b2": false,
+            "h_b3": false,
+            "v_1": false,
+            "v_2": false,
+            "v_3": false,
+            "v_4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "place_h_b1_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_h_b1"
+          },
+          "receipt": "place_h_b1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_b1",
+                "n": 31,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:domino_tiling_board",
+          "fields": {
+            "h_a1": false,
+            "h_a2": false,
+            "h_a3": false,
+            "h_b1": 1,
+            "h_b2": false,
+            "h_b3": false,
+            "v_1": false,
+            "v_2": false,
+            "v_3": false,
+            "v_4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_h_b1_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": true,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_h_b1"
+          },
+          "receipt": "remove_h_b1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_b1",
+                "n": 31,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:domino_tiling_board",
+          "fields": {
+            "h_a1": false,
+            "h_a2": false,
+            "h_a3": false,
+            "h_b1": 0,
+            "h_b2": false,
+            "h_b3": false,
+            "v_1": false,
+            "v_2": false,
+            "v_3": false,
+            "v_4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "place_h_b2_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_h_b2"
+          },
+          "receipt": "place_h_b2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_b2",
+                "n": 32,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:domino_tiling_board",
+          "fields": {
+            "h_a1": false,
+            "h_a2": false,
+            "h_a3": false,
+            "h_b1": false,
+            "h_b2": 1,
+            "h_b3": false,
+            "v_1": false,
+            "v_2": false,
+            "v_3": false,
+            "v_4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_h_b2_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": true,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_h_b2"
+          },
+          "receipt": "remove_h_b2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_b2",
+                "n": 32,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:domino_tiling_board",
+          "fields": {
+            "h_a1": false,
+            "h_a2": false,
+            "h_a3": false,
+            "h_b1": false,
+            "h_b2": 0,
+            "h_b3": false,
+            "v_1": false,
+            "v_2": false,
+            "v_3": false,
+            "v_4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "place_h_b3_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_h_b3"
+          },
+          "receipt": "place_h_b3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_b3",
+                "n": 33,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:domino_tiling_board",
+          "fields": {
+            "h_a1": false,
+            "h_a2": false,
+            "h_a3": false,
+            "h_b1": false,
+            "h_b2": false,
+            "h_b3": 1,
+            "v_1": false,
+            "v_2": false,
+            "v_3": false,
+            "v_4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_h_b3_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": true,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_h_b3"
+          },
+          "receipt": "remove_h_b3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_b3",
+                "n": 33,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:domino_tiling_board",
+          "fields": {
+            "h_a1": false,
+            "h_a2": false,
+            "h_a3": false,
+            "h_b1": false,
+            "h_b2": false,
+            "h_b3": 0,
+            "v_1": false,
+            "v_2": false,
+            "v_3": false,
+            "v_4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "place_v_1_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_v_1"
+          },
+          "receipt": "place_v_1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "v_1",
+                "n": 34,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:domino_tiling_board",
+          "fields": {
+            "h_a1": false,
+            "h_a2": false,
+            "h_a3": false,
+            "h_b1": false,
+            "h_b2": false,
+            "h_b3": false,
+            "v_1": 1,
+            "v_2": false,
+            "v_3": false,
+            "v_4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_v_1_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": true,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_v_1"
+          },
+          "receipt": "remove_v_1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "v_1",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:domino_tiling_board",
+          "fields": {
+            "h_a1": false,
+            "h_a2": false,
+            "h_a3": false,
+            "h_b1": false,
+            "h_b2": false,
+            "h_b3": false,
+            "v_1": 0,
+            "v_2": false,
+            "v_3": false,
+            "v_4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "place_v_2_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_v_2"
+          },
+          "receipt": "place_v_2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "v_2",
+                "n": 35,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:domino_tiling_board",
+          "fields": {
+            "h_a1": false,
+            "h_a2": false,
+            "h_a3": false,
+            "h_b1": false,
+            "h_b2": false,
+            "h_b3": false,
+            "v_1": false,
+            "v_2": 1,
+            "v_3": false,
+            "v_4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_v_2_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": true,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_v_2"
+          },
+          "receipt": "remove_v_2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "v_2",
+                "n": 35,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:domino_tiling_board",
+          "fields": {
+            "h_a1": false,
+            "h_a2": false,
+            "h_a3": false,
+            "h_b1": false,
+            "h_b2": false,
+            "h_b3": false,
+            "v_1": false,
+            "v_2": 0,
+            "v_3": false,
+            "v_4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "place_v_3_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_v_3"
+          },
+          "receipt": "place_v_3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "v_3",
+                "n": 36,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:domino_tiling_board",
+          "fields": {
+            "h_a1": false,
+            "h_a2": false,
+            "h_a3": false,
+            "h_b1": false,
+            "h_b2": false,
+            "h_b3": false,
+            "v_1": false,
+            "v_2": false,
+            "v_3": 1,
+            "v_4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_v_3_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": true,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_v_3"
+          },
+          "receipt": "remove_v_3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "v_3",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:domino_tiling_board",
+          "fields": {
+            "h_a1": false,
+            "h_a2": false,
+            "h_a3": false,
+            "h_b1": false,
+            "h_b2": false,
+            "h_b3": false,
+            "v_1": false,
+            "v_2": false,
+            "v_3": 0,
+            "v_4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "place_v_4_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_v_4"
+          },
+          "receipt": "place_v_4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "v_4",
+                "n": 37,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:domino_tiling_board",
+          "fields": {
+            "h_a1": false,
+            "h_a2": false,
+            "h_a3": false,
+            "h_b1": false,
+            "h_b2": false,
+            "h_b3": false,
+            "v_1": false,
+            "v_2": false,
+            "v_3": false,
+            "v_4": 1
+          }
+        }
+      }
+    },
+    {
+      "name": "remove_v_4_single_bool",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": true
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_v_4"
+          },
+          "receipt": "remove_v_4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "v_4",
+                "n": 37,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:domino_tiling_board",
+          "fields": {
+            "h_a1": false,
+            "h_a2": false,
+            "h_a3": false,
+            "h_b1": false,
+            "h_b2": false,
+            "h_b3": false,
+            "v_1": false,
+            "v_2": false,
+            "v_3": false,
+            "v_4": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "solution_1",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_h_a1"
+          },
+          "receipt": "solution_10",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_a1",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_h_a3"
+          },
+          "receipt": "solution_11",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_a3",
+                "n": 30,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_h_b1"
+          },
+          "receipt": "solution_12",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_b1",
+                "n": 31,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_h_b3"
+          },
+          "receipt": "solution_13",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_b3",
+                "n": 33,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_h_b3"
+          },
+          "receipt": "solution_14",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_b3",
+                "n": 33,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_h_b1"
+          },
+          "receipt": "solution_15",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_b1",
+                "n": 31,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_h_a3"
+          },
+          "receipt": "solution_16",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_a3",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_h_a1"
+          },
+          "receipt": "solution_17",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_a1",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:domino_tiling_board",
+          "fields": {
+            "h_a1": 0,
+            "h_a2": false,
+            "h_a3": 0,
+            "h_b1": 0,
+            "h_b2": false,
+            "h_b3": 0,
+            "v_1": false,
+            "v_2": false,
+            "v_3": false,
+            "v_4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "solution_2",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_h_a3"
+          },
+          "receipt": "solution_20",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_a3",
+                "n": 30,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_h_b3"
+          },
+          "receipt": "solution_21",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_b3",
+                "n": 33,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_v_1"
+          },
+          "receipt": "solution_22",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "v_1",
+                "n": 34,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_v_2"
+          },
+          "receipt": "solution_23",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "v_2",
+                "n": 35,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_v_2"
+          },
+          "receipt": "solution_24",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "v_2",
+                "n": 35,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_v_1"
+          },
+          "receipt": "solution_25",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "v_1",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_h_b3"
+          },
+          "receipt": "solution_26",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_b3",
+                "n": 33,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_h_a3"
+          },
+          "receipt": "solution_27",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_a3",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:domino_tiling_board",
+          "fields": {
+            "h_a1": false,
+            "h_a2": false,
+            "h_a3": 0,
+            "h_b1": false,
+            "h_b2": false,
+            "h_b3": 0,
+            "v_1": 0,
+            "v_2": 0,
+            "v_3": false,
+            "v_4": false
+          }
+        }
+      }
+    },
+    {
+      "name": "solution_3",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_h_a2"
+          },
+          "receipt": "solution_30",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_a2",
+                "n": 29,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_h_b2"
+          },
+          "receipt": "solution_31",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_b2",
+                "n": 32,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_v_1"
+          },
+          "receipt": "solution_32",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "v_1",
+                "n": 34,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_v_4"
+          },
+          "receipt": "solution_33",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "v_4",
+                "n": 37,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_v_4"
+          },
+          "receipt": "solution_34",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "v_4",
+                "n": 37,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_v_1"
+          },
+          "receipt": "solution_35",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "v_1",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_h_b2"
+          },
+          "receipt": "solution_36",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_b2",
+                "n": 32,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_h_a2"
+          },
+          "receipt": "solution_37",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_a2",
+                "n": 29,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:domino_tiling_board",
+          "fields": {
+            "h_a1": false,
+            "h_a2": 0,
+            "h_a3": false,
+            "h_b1": false,
+            "h_b2": 0,
+            "h_b3": false,
+            "v_1": 0,
+            "v_2": false,
+            "v_3": false,
+            "v_4": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "solution_4",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_h_a1"
+          },
+          "receipt": "solution_40",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_a1",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_h_b1"
+          },
+          "receipt": "solution_41",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_b1",
+                "n": 31,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_v_3"
+          },
+          "receipt": "solution_42",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "v_3",
+                "n": 36,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_v_4"
+          },
+          "receipt": "solution_43",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "v_4",
+                "n": 37,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_v_4"
+          },
+          "receipt": "solution_44",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "v_4",
+                "n": 37,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_v_3"
+          },
+          "receipt": "solution_45",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "v_3",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_h_b1"
+          },
+          "receipt": "solution_46",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_b1",
+                "n": 31,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_h_a1"
+          },
+          "receipt": "solution_47",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_a1",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:domino_tiling_board",
+          "fields": {
+            "h_a1": 0,
+            "h_a2": false,
+            "h_a3": false,
+            "h_b1": 0,
+            "h_b2": false,
+            "h_b3": false,
+            "v_1": false,
+            "v_2": false,
+            "v_3": 0,
+            "v_4": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "solution_5",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_v_1"
+          },
+          "receipt": "solution_50",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "v_1",
+                "n": 34,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_v_2"
+          },
+          "receipt": "solution_51",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "v_2",
+                "n": 35,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_v_3"
+          },
+          "receipt": "solution_52",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "v_3",
+                "n": 36,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_v_4"
+          },
+          "receipt": "solution_53",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "v_4",
+                "n": 37,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_v_4"
+          },
+          "receipt": "solution_54",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "v_4",
+                "n": 37,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_v_3"
+          },
+          "receipt": "solution_55",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "v_3",
+                "n": 36,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_v_2"
+          },
+          "receipt": "solution_56",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "v_2",
+                "n": 35,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_v_1"
+          },
+          "receipt": "solution_57",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "v_1",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:domino_tiling_board",
+          "fields": {
+            "h_a1": false,
+            "h_a2": false,
+            "h_a3": false,
+            "h_b1": false,
+            "h_b2": false,
+            "h_b3": false,
+            "v_1": 0,
+            "v_2": 0,
+            "v_3": 0,
+            "v_4": 0
+          }
+        }
+      }
+    },
+    {
+      "name": "deadend_backtrack_reuse",
+      "state": {
+        "actor": "b1",
+        "nodes": {
+          "room": {
+            "loose": [
+              "b1",
+              "p1"
+            ]
+          },
+          "p1": {
+            "kind": "eden:domino_tiling_board",
+            "fields": {
+              "h_a1": false,
+              "h_a2": false,
+              "h_a3": false,
+              "h_b1": false,
+              "h_b2": false,
+              "h_b3": false,
+              "v_1": false,
+              "v_2": false,
+              "v_3": false,
+              "v_4": false
+            }
+          },
+          "b1": {
+            "hands": {
+              "left": null,
+              "right": null
+            },
+            "effector_mm": [
+              0,
+              850,
+              450
+            ]
+          }
+        },
+        "moves": {
+          "press": {
+            "reach_mm": 600
+          }
+        }
+      },
+      "do": [
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_h_a1"
+          },
+          "receipt": "deadend_backtrack_reuse0",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_a1",
+                "n": 28,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_h_a3"
+          },
+          "receipt": "deadend_backtrack_reuse1",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_a3",
+                "n": 30,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_h_b2"
+          },
+          "receipt": "deadend_backtrack_reuse2",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_b2",
+                "n": 32,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_h_b2"
+          },
+          "receipt": "deadend_backtrack_reuse3",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_b2",
+                "n": 32,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_h_b1"
+          },
+          "receipt": "deadend_backtrack_reuse4",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_b1",
+                "n": 31,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_h_b3"
+          },
+          "receipt": "deadend_backtrack_reuse5",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_b3",
+                "n": 33,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_h_b3"
+          },
+          "receipt": "deadend_backtrack_reuse6",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_b3",
+                "n": 33,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_h_b1"
+          },
+          "receipt": "deadend_backtrack_reuse7",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_b1",
+                "n": 31,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_h_a3"
+          },
+          "receipt": "deadend_backtrack_reuse8",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_a3",
+                "n": 30,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_h_a1"
+          },
+          "receipt": "deadend_backtrack_reuse9",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "h_a1",
+                "n": 28,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "place_v_1"
+          },
+          "receipt": "deadend_backtrack_reuse10",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "v_1",
+                "n": 34,
+                "to": 1
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_shown",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        },
+        {
+          "act": {
+            "this": "p1",
+            "form": "remove_v_1"
+          },
+          "receipt": "deadend_backtrack_reuse11",
+          "expect": {
+            "verdict": "yes",
+            "changes": [
+              {
+                "change": "set",
+                "node": "p1",
+                "field": "v_1",
+                "n": 34,
+                "to": 0
+              }
+            ],
+            "events": [
+              {
+                "event": "eden:tile_hidden",
+                "node": "p1",
+                "changes": [
+                  0
+                ]
+              }
+            ],
+            "timers": []
+          }
+        }
+      ],
+      "after": {
+        "p1": {
+          "kind": "eden:domino_tiling_board",
+          "fields": {
+            "h_a1": 0,
+            "h_a2": false,
+            "h_a3": 0,
+            "h_b1": 0,
+            "h_b2": 0,
+            "h_b3": 0,
+            "v_1": 0,
+            "v_2": false,
+            "v_3": false,
+            "v_4": false
+          }
+        }
+      }
+    }
+  ]
+}
