@@ -19,8 +19,9 @@
 //!   nothing answers, and the offer lapses. The engine holds no setting that fires when an offer arrives (TRUNK T10).
 //!
 //! - **A give** (0.133 R4, the smallest part of E24 #2793) is an offer that names a thing the asker holds: accepting
-//!   it moves that thing from the asker's hand to a free hand of the one who accepts, in one part with the offer's end
-//!   (both sides or neither), and no activity starts. At the accept the world checks again: the asker still holds it
+//!   it moves that thing from the asker's hand to a free hand of the one who accepts (T1's leave and arrive, one part),
+//!   then ends the offer with [`GIVEN`]. A give makes no activity node: its offer is the `souls:offer` event alone
+//!   (field 6 the thing), so nothing but the event and the thing's move reaches the world's stream. At the accept the world checks again: the asker still holds it
 //!   (`give.not-held`), the two stand on the same floor within [`GIVE_REACH`] (`give.too-far`), and the one who accepts
 //!   has a free hand, two for a two-handed thing (`give.no-free-hand`). A refused accept leaves the offer open: free a
 //!   hand or come closer, and accept again. A decline or a lapse is any offer's.
@@ -195,16 +196,20 @@ impl Activities {
                 intent: ask.intent,
             }],
         };
-        let changes = vec![
-            create(id, kind, place, audience, &node),
-            Change::Link {
-                link,
-                ty: name(MEMBER),
-                ends: [body, id],
-                owner: End::Second,
-                audience,
-            },
-        ];
+        // A give makes no activity node: the offer is its event, and the accept moves the thing (see the notes).
+        let changes = match given {
+            Some(_) => Vec::new(),
+            None => vec![
+                create(id, kind, place, audience, &node),
+                Change::Link {
+                    link,
+                    ty: name(MEMBER),
+                    ends: [body, id],
+                    owner: End::Second,
+                    audience,
+                },
+            ],
+        };
         let mut fields = BTreeMap::from([
             (1, id.to_value()),
             (2, Value::Text(kind.clone())),
@@ -218,16 +223,18 @@ impl Activities {
         let sequence = self.next;
         let by = (ask.at, Actor::Soul(ask.soul), Cause::Intent(ask.intent));
         self.emit(tree, place, audience, by, OFFER, fields, changes)?;
-        self.live.insert(
-            id,
-            Live {
-                kind: kind.clone(),
-                audience,
-                node,
-                drivers: BTreeMap::new(),
-                moves: BTreeMap::new(),
-            },
-        );
+        if given.is_none() {
+            self.live.insert(
+                id,
+                Live {
+                    kind: kind.clone(),
+                    audience,
+                    node,
+                    drivers: BTreeMap::new(),
+                    moves: BTreeMap::new(),
+                },
+            );
+        }
         due.set(Timer {
             node: body,
             id: timer,
@@ -271,7 +278,7 @@ impl Activities {
         if now >= o.expires {
             return refuse("offer-expired", show(offer));
         }
-        if !o.taken && !self.live.contains_key(&offer) {
+        if o.given.is_none() && !o.taken && !self.live.contains_key(&offer) {
             return refuse("offer-withdrawn", show(offer));
         }
         Ok(o.clone())
@@ -421,8 +428,8 @@ impl Activities {
         Ok(pair)
     }
 
-    /// A give's accept (see the module's notes): the thing from the asker's hand to a free hand of `body`, the offer's
-    /// node ended, and [`GIVEN`], in one part. Returns the offer. `give.not-held`, `give.too-far`, `give.no-free-hand`.
+    /// A give's accept (see the module's notes): the thing from the asker's hand to a free hand of `body`, then the
+    /// offer's node ended with [`GIVEN`]. Returns the offer. `give.not-held`, `give.too-far`, `give.no-free-hand`.
     #[allow(clippy::too_many_arguments)]
     fn give(
         &mut self,
@@ -500,16 +507,10 @@ impl Activities {
         } else {
             o.place
         };
-        self.emit_with(
-            tree,
-            node,
-            o.audience,
-            by,
-            GIVEN,
-            fields,
-            changes,
-            moved.to_vec(),
-        )?;
+        // The thing first, as a hand's take is written (its own part: the public stream reads a transfer that way),
+        // then the offer's end with the event, as a decline ends it. Every check is made before either is written.
+        self.emit_part(tree, by, moved.to_vec())?;
+        self.emit(tree, node, o.audience, by, GIVEN, fields, changes)?;
         self.live.remove(&offer);
         self.offers.open.remove(&offer);
         self.offers.timers.remove(&o.timer);

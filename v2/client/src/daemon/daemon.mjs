@@ -1661,9 +1661,12 @@ function converse(req) {
   return closing({ ok: true, sent, basis: sequenceOf(basis) }, null, { now: true });
 }
 
-/** 0.133 R4: a give's intents (`../give/give.mjs`), sent once as `act`'s are; the answers arrive as events. */
+/** 0.133 R4: a give's intents (`../give/give.mjs`), sent once as `act`'s are; the answers arrive as events. The offer's
+ *  node goes on the open ground, which admits activities (a floor or a room does not): where the two stand is the
+ *  world's check at the accept. */
 function give(req) {
-  const place = [...rowsOf(copy).values()].find((r) => r.id === ME || r.soul === ME)?.parent ?? null;
+  const rows = [...rowsOf(copy).values()];
+  const place = rows.find((r) => r.kind?.split('@')[0] === 'eden:ground')?.id ?? rows.find((r) => r.id === ME || r.soul === ME)?.parent ?? null;
   const intents = giveIntents(req, { place });
   if (intents.code) return { ok: false, code: intents.code, detail: intents.detail };
   const basis = shownVersion ?? state.cursor;

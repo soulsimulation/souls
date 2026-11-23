@@ -251,50 +251,19 @@ impl Activities {
         Ok(())
     }
 
-    /// [`Activities::emit`] with `extra` entries after its effect, in the same part: all or none (a give's transfer).
-    #[allow(clippy::too_many_arguments)]
-    fn emit_with(
+    /// `entries` as one part, caused and acted as `by` says, with no event: a give's transfer (T1's leave and arrive).
+    fn emit_part(
         &mut self,
         tree: &mut Tree,
-        node: Id,
-        audience: Audience,
         by: (Micros, Actor, Cause),
-        event: &'static str,
-        fields: BTreeMap<u64, Value>,
-        changes: Vec<Change>,
-        extra: Vec<(Id, Audience, Body)>,
+        entries: Vec<(Id, Audience, Body)>,
     ) -> R<()> {
-        let n = changes.len() as u64;
-        let mut effects = vec![Effect {
-            envelope: Envelope {
-                sequence: self.next,
-                at: by.0,
-                cause: by.2,
-                actor: by.1,
-                audience,
-                node,
-            },
-            body: Body::Changes(
-                changes
-                    .into_iter()
-                    .map(|change| ChangeRec {
-                        change,
-                        rest: Rest::new(),
-                    })
-                    .collect(),
-            ),
-            events: Some(vec![Event {
-                name: name(event),
-                fields,
-                changes: (0..n).collect(),
-                rest: Rest::new(),
-            }]),
-            rest: Rest::new(),
-        }];
-        for (i, (node, audience, body)) in extra.into_iter().enumerate() {
-            effects.push(Effect {
+        let effects: Vec<Effect> = entries
+            .into_iter()
+            .zip(self.next..)
+            .map(|((node, audience, body), sequence)| Effect {
                 envelope: Envelope {
-                    sequence: self.next + 1 + i as u64,
+                    sequence,
                     at: by.0,
                     cause: by.2,
                     actor: by.1,
@@ -304,8 +273,8 @@ impl Activities {
                 body,
                 events: None,
                 rest: Rest::new(),
-            });
-        }
+            })
+            .collect();
         let bytes = encode(&Value::Map(BTreeMap::from([
             (1, Value::Bytes(self.header.hash().to_bytes())),
             (

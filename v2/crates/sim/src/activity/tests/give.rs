@@ -1,5 +1,5 @@
 //! 0.133 R4, the give (the smallest part of E24, #2793): a held book offered to another Soul and accepted ends in a
-//! free hand of the one who accepted, in one part with the offer's end; at the accept the world checks again that the
+//! free hand of the one who accepted, and the offer ends; at the accept the world checks again that the
 //! giver still holds it (`give.not-held`), that the two stand within reach on one floor (`give.too-far`), and that the
 //! taker has a free hand (`give.no-free-hand`), and a refused accept leaves the offer open. `cargo test -p sim give`.
 
@@ -118,17 +118,26 @@ fn a_book_given_and_accepted_ends_in_the_takers_free_hand() {
     let (parent, slot) = w.held_by(book);
     assert_eq!(parent, Some(w.bodies[1]), "in the taker's hand");
     assert_eq!(slot, Some(hands(&family())[0].slot), "its first free hand");
-    // One part: the offer's end and the given event, then the transfer's leave and arrive.
+    // The transfer's leave and arrive (one part, as a hand's take), then the offer's end with the given event.
     let part = &w.acts.stream[before..];
     println!("give: {} effects", part.len());
     assert_eq!(part.len(), 3);
-    let event = part[0]
+    assert!(
+        part[..2]
+            .iter()
+            .all(|e| matches!(e.body, Body::Transfer(_))),
+        "the transfer first"
+    );
+    let event = part[2]
         .events
         .as_ref()
         .and_then(|e| e.first())
         .expect("an event");
     assert_eq!(event.name.as_str(), GIVEN);
-    assert!(w.tree.handle(offer).is_none(), "the offer's node is gone");
+    assert!(
+        w.tree.handle(offer).is_none(),
+        "a give makes no activity node"
+    );
     assert_eq!(
         w.take(1, offer, 3_000).expect_err("answered").name,
         "offer-missing",
