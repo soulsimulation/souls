@@ -404,8 +404,7 @@ impl Pairing {
                 );
                 let file = authority.tokens.with_file_name(name);
                 let temporary = file.with_extension("souls-tmp");
-                std::fs::write(&temporary, text)?;
-                std::fs::rename(temporary, file)?;
+                crate::durable::replace(&file, &temporary, text.as_bytes())?;
             }
             return Ok(());
         }
@@ -448,8 +447,7 @@ impl Pairing {
             }
         }
         let tmp = file.with_extension("souls-tmp");
-        std::fs::write(&tmp, text)?;
-        std::fs::rename(tmp, file)
+        crate::durable::replace(&file, &tmp, text.as_bytes())
     }
 
     /// Whether `account` holds as many unretired Souls as one account may (#3720).
