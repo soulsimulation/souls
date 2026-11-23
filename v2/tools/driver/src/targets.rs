@@ -174,10 +174,10 @@ fn ground(seen: &Seen) -> Option<Id> {
     n.into_iter().max_by_key(|(_, k)| *k).map(|(f, _)| f)
 }
 
-/// #4193: each Soul's [`MINE_EACH`] nearest of `of`, taking a farther one where [`SHARE_MOST`] Souls already have it.
-fn spread(seen: &Seen, of: &[Id]) -> BTreeMap<Id, Vec<Id>> {
+/// #4193: each Soul's [`MINE_EACH`] nearest of `of`, taking a farther one where [`SHARE_MOST`] Souls already have it
+/// (`used` counts across the kinds, so a seat that is also a walk target counts for both).
+fn spread(seen: &Seen, of: &[Id], used: &mut BTreeMap<Id, usize>) -> BTreeMap<Id, Vec<Id>> {
     let at: Vec<(Id, (i64, i64))> = of.iter().filter_map(|t| Some((*t, world_xz(seen, t)?))).collect();
-    let mut used: BTreeMap<Id, usize> = BTreeMap::new();
     let mut out = BTreeMap::new();
     if at.is_empty() {
         return out;
@@ -229,18 +229,18 @@ fn near<'a>(seen: &Seen, things: Vec<(Id, &'a Json)>) -> Vec<(Id, &'a Json)> {
         at.iter().map(|p| p.0).sum::<i64>() / at.len() as i64,
         at.iter().map(|p| p.1).sum::<i64>() / at.len() as i64,
     );
-    let placed: Vec<((Id, &Json), i64)> = things
+    let placed: Vec<((Id, &Json), i128)> = things
         .iter()
         .filter_map(|t| {
             let (x, z) = world_xz(seen, &t.0)?;
-            Some((*t, (x - cx).pow(2) + (z - cz).pow(2)))
+            Some((*t, i128::from(x - cx).pow(2) + i128::from(z - cz).pow(2)))
         })
         .collect();
     let mut r = NEAR_UM;
     while r < 4_000_000_000 {
         let close: Vec<(Id, &Json)> = placed
             .iter()
-            .filter(|(_, d)| *d <= r * r)
+            .filter(|(_, d)| *d <= i128::from(r).pow(2))
             .map(|(t, _)| *t)
             .collect();
         if close.len() >= NEAR_LEAST {
@@ -297,6 +297,10 @@ impl Targets {
             let of: Vec<(Id, &Json)> = things.iter().filter(|(_, e)| f(e)).copied().collect();
             near(seen, of).into_iter().map(|(id, _)| id).collect()
         };
+        // #4193: each Soul's own targets are the nearest its body, from every reachable thing, not only the middle's.
+        let every = |f: &dyn Fn(&Json) -> bool| -> Vec<Id> {
+            things.iter().filter(|(_, e)| f(e)).map(|(id, _)| *id).collect()
+        };
         let mut walk = ids(&|e| has_slot(e, None));
         if walk.is_empty() {
             walk = ids(&|_| true);
@@ -344,8 +348,11 @@ impl Targets {
         let sit = ids(&|e| has_slot(e, Some("sit")));
         let all_things = ids(&|_| true);
         let takeable = ids(&|e| has_form(e, "take"));
-        let (mut w, mut s, mut k, mut a) =
-            (spread(seen, &walk), spread(seen, &sit), spread(seen, &takeable), spread(seen, &all_things));
+        let mut used = BTreeMap::new();
+        let mut w = spread(seen, &every(&|e| has_slot(e, None)), &mut used);
+        let mut s = spread(seen, &every(&|e| has_slot(e, Some("sit"))), &mut used);
+        let mut k = spread(seen, &every(&|e| has_form(e, "take")), &mut used);
+        let mut a = spread(seen, &every(&|_| true), &mut BTreeMap::new());
         let mine = seen
             .bodies
             .keys()

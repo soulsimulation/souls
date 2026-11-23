@@ -78,7 +78,7 @@ export function merge(a, b, name) {
 }
 
 /** The ladder's steps (X7, #4015): agent counts for the measured runs on a served world. */
-export const LADDER = Object.freeze([10, 50, 100, 200, 350, 500]);
+export const LADDER = Object.freeze([10, 20, 50, 100, 200, 350, 500]);
 
 /** A ladder step's two arms, its count fixed by its name (`--agents` is not read): uneven is the shared `event` shape
  *  as it is; even is `uniform` at the pace that intends as many acts as the uneven arm with the same seconds and seed,
