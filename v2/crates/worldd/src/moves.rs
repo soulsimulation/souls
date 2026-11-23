@@ -7,7 +7,7 @@
 //! - **Cancels.** `claim_taken` is cancelled by a new claim on any class it claims; `out_of_reach` is B2's own check at
 //!   contact, for every move.
 //! - **Phases** are its `phases`, in order, each named for its key without `_us` (`start_up_us` is `souls:start-up`):
-//!   contact is the end of the first.
+//!   contact is the end of the first. A last `hold_us` holds: it lasts until the move is released.
 //! - **Effector.** A `hand` reaches with the hand it holds; a `held_point` with the hand too: the held thing's tip
 //!   lengthens it (B4), and the step's `at` names the point it reaches.
 //! - **Contact** is the move's own `contact` when it names one (a handshake reaches the other body's `hand_right`, read
@@ -29,7 +29,7 @@ const OWN: [&str; 3] = [
 ];
 
 /// Every file of `content/moves`, by name. A test holds this list to the folder (`tests/content_moves.rs`).
-pub const CONTENT: [(&str, &str); 41] = [
+pub const CONTENT: [(&str, &str); 42] = [
     ("bow", include_str!("../../../../content/moves/bow.json")),
     (
         "cheer",
@@ -56,6 +56,10 @@ pub const CONTENT: [(&str, &str); 41] = [
     (
         "high_five",
         include_str!("../../../../content/moves/high_five.json"),
+    ),
+    (
+        "hold_hand",
+        include_str!("../../../../content/moves/hold_hand.json"),
     ),
     ("hug", include_str!("../../../../content/moves/hug.json")),
     ("jump", include_str!("../../../../content/moves/jump.json")),
@@ -215,6 +219,14 @@ pub fn from_content(text: &str) -> R<Move> {
         phases.push(Phase {
             name: name(&format!("souls:{}", p.replace('_', "-")))?,
             length: i64::try_from(*us).or_else(|_| refuse(format!("{mv}: phase {k}")))?,
+            // `hold_us`, the last phase only: it lasts until the move is released (holding hands).
+            held: p == "hold",
+        });
+    }
+    if phases.iter().rev().skip(1).any(|p| p.held) {
+        return Err(Refusal {
+            name: "move-held-not-last",
+            detail: format!("{mv}: hold_us is the last phase"),
         });
     }
     let effector = match m.get("effector").and_then(Json::str) {
