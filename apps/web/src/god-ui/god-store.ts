@@ -6,6 +6,7 @@ import { useSyncExternalStore } from 'react';
 import { whenVisible } from '../poll-pace.ts';
 import { apiPath } from '../world-path.ts';
 import { userAuthHeaders } from '../auth-session.ts';
+import { v2Creator } from './god-api.ts';
 
 /** G5: one view ('agent'); 'forsake' is the danger zone that takes the modal over (hand the world on, or archive it). */
 export type Section = 'agent' | 'forsake';
@@ -13,7 +14,7 @@ export type Outcome = 'done' | 'failed' | 'withdrawn';
 export type Presence = 'listening' | 'working' | 'recent' | 'away';
 export type TicketFocus = { x: number; y: number; z: number; span: number; label?: string; count: number };
 export type Ticket = { id: string; text: string; state: 'sent' | 'delivered' | 'acknowledged'; sentAt: number; deliveredAt?: number; acknowledgedAt?: number; reply?: string; outcome?: Outcome; focus?: TicketFocus; touched?: number };
-export type GodInbox = { connected: boolean; presence?: Presence; lastSeenAt: number | null; listenedAt?: number | null; listenerExpiresAt?: number | null; workingUntil?: number | null; latest: Ticket | null; queued?: number; log?: Ticket[] };
+export type GodInbox = { /** G1: the creator's mailbox on a v2 world (no presence is known there). */ v2?: true; connected: boolean; presence?: Presence; lastSeenAt: number | null; listenedAt?: number | null; listenerExpiresAt?: number | null; workingUntil?: number | null; latest: Ticket | null; queued?: number; log?: Ticket[] };
 
 type State = { open: boolean; section: Section; inbox: GodInbox | null; inboxError: boolean };
 let state: State = { open: false, section: 'agent', inbox: null, inboxError: false };
@@ -38,6 +39,7 @@ export const presenceWord = (p: Presence | undefined, connected: boolean) => p =
 
 /** Expire server-issued availability even if an owner poll fails. Pairing/general activity is not a listener. */
 function freshInbox(inbox: GodInbox, now = Date.now()): GodInbox {
+  if (inbox.v2) return inbox;
   const working = (inbox.workingUntil ?? 0) > now;
   const listening = (inbox.listenerExpiresAt ?? 0) > now;
   const presence: Presence = listening && inbox.presence === 'listening' ? 'listening' : working ? 'working' : listening ? 'listening' : 'away';
@@ -45,6 +47,9 @@ function freshInbox(inbox: GodInbox, now = Date.now()): GodInbox {
 }
 
 async function call(path: string, body?: unknown): Promise<GodInbox> {
+  // G1 (0.133): on a v2 world the command box is the creator's mailbox; its agent's `listen` prints each command
+  const c = v2Creator();
+  if (c) { if (path.endsWith('/withdraw')) throw new Error('A command sent to the mailbox cannot be withdrawn.'); return (await c).inbox((body as { text?: string } | undefined)?.text); }
   const r = await fetch(apiPath(path), { method: body === undefined ? 'GET' : 'POST', headers: { ...(await userAuthHeaders()), 'content-type': 'application/json' }, cache: 'no-store', ...(body === undefined ? {} : { body: JSON.stringify(body) }) });
   const d = await r.json().catch(() => ({}));
   if (!r.ok || !d.inbox) throw new Error(d.message ?? d.error?.message ?? (r.status === 429 ? 'Too many commands are waiting. Withdraw some, or let your agent catch up.' : 'That did not reach the world. Try again.'));

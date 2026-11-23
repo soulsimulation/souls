@@ -664,11 +664,16 @@ fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
 fn build_with(cache: Option<&Path>, facts: &str, entries: &[(String, Json)]) -> R<Built> {
     let (prepared, kept) = courses_cached(cache, facts, entries)?;
     stamp("facts: courses");
+    // A kind whose entry joins parts (a rack bay, a beam, a frame stand) takes its slots from its entry (0.135).
+    let texts: Vec<(String, String)> = entries
+        .iter()
+        .map(|(k, e)| (k.clone(), e.to_json()))
+        .collect();
     // A kept text that does not load is never the start's end: it is computed again.
-    let mut im = match import_eden::load(&prepared) {
+    let mut im = match import_eden::load_with(&prepared, &texts) {
         Err(e) if kept => {
             eprintln!("worldd: the kept facts' courses do not load ({e}); computing them again");
-            import_eden::load(&courses(facts, entries)?)?
+            import_eden::load_with(&courses(facts, entries)?, &texts)?
         }
         im => im?,
     };
@@ -2315,6 +2320,15 @@ fn serve(args: &[String]) -> R<()> {
         kinds: Json::Obj(kinds),
         moves,
     };
+    // The joined-part rule the world checks every write on (B18, B20 #3356), read from its entries.
+    let joined = sim::structure::Structure::from_entries(&rules.kinds);
+    let (bays, standing, bearing) = joined.kinds();
+    println!(
+        "joined parts: bays [{}], standing [{}], bearing [{}]",
+        bays.join(", "),
+        standing.join(", "),
+        bearing.join(", ")
+    );
     let bucket = arg(args, "--store")
         .cloned()
         .or_else(|| std::env::var("WORLDD_STORE").ok())
@@ -2801,7 +2815,7 @@ fn replay_stream(tier: &Tier, found: &sim::log::Recovered, base_record: u64) {
 mod tests {
     use super::*;
 
-    /// 0.134 T1: each `content/kinds/together` entry is an activity kind of two roles, each aiming the entry's move at
+    /// 0.134 T1 and T2: each `content/kinds/together` entry is an activity kind of two roles, each aiming the entry's move at
     /// the other, and the client offers each by the name the world pins (`v2/client/src/together/together.mjs`).
     #[test]
     fn t1_together_entries_are_the_activity_kinds_the_client_offers() {
@@ -2823,10 +2837,19 @@ mod tests {
                 "eden:hug".to_owned(),
                 read(include_str!("../../../../content/kinds/together/hug.json")),
             ),
+            (
+                "eden:hold_hands".to_owned(),
+                read(include_str!(
+                    "../../../../content/kinds/together/hold_hands.json"
+                )),
+            ),
         ];
         let client = include_str!("../../../client/src/together/together.mjs");
         let kinds = activity_kinds(&entries).unwrap();
-        for (k, mv) in kinds.iter().zip(["handshake", "high_five", "hug"]) {
+        for (k, mv) in kinds
+            .iter()
+            .zip(["handshake", "high_five", "hold_hand", "hug"])
+        {
             println!("{}", k.name.as_str());
             assert_eq!(k.roles.len(), 2);
             for r in &k.roles {
@@ -3874,8 +3897,8 @@ mod tests {
         let built = build(&facts, &entries).expect("builds");
         assert_eq!(
             built.activities.len(),
-            2,
-            "conversation and entry runtime pins"
+            3,
+            "conversation, give and entry runtime pins"
         );
         let prefix = imported.kind_lines.join("\n") + "\n";
         assert!(

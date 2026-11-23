@@ -78,6 +78,11 @@ impl Closed {
         self.kinds.is_empty()
     }
 
+    /// Whether `entry`'s kind is a closed container, as [`Closed::of`] reads it: what is in it is kept from the public.
+    pub fn closes(entry: &Json) -> bool {
+        !Closed::of(&[(String::from("k:k"), entry.clone())]).is_empty()
+    }
+
     fn rule(&self, tree: &Tree, id: Id) -> Option<&Rule> {
         let n = tree.node(tree.handle(id)?)?;
         self.kinds.get(plain(n.kind().as_str()))

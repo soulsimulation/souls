@@ -14,7 +14,8 @@ import { hourLabel, setVisitorPreviewHour, subscribeVisitorHour, visitorPreviewH
 import { subscribeWorldZone, worldZone } from './world-zone.ts';
 import { arrivalGate } from './gen-mesh/lazy-assets.ts';
 import { TouchHints } from './touch/hints.tsx';
-import { v2History } from './v2-engine/history.ts';
+import { playSpeed, setPlaySpeed, v2History } from './v2-engine/history.ts';
+import { TICK_US } from './v2-engine/takes.ts';
 import { momentLink, momentTick } from './v2-engine/moment-link.ts';
 // X3: read at module load: Shell rewrites the landing fragment to its tab (#watch) before the scene is ready.
 const landingMoment = typeof location === 'undefined' ? null : momentTick(location.hash);
@@ -82,8 +83,6 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
     document.addEventListener('pointerdown', away); document.addEventListener('keydown', esc);
     return () => { document.removeEventListener('pointerdown', away); document.removeEventListener('keydown', esc); };
   }, [hourOpen]);
-  // DLG3 (Gene): the history scrub ("Back 1 min") is hidden for now; `?rewind` keeps it reachable for tests.
-  const [rewind] = useState(() => { try { return new URLSearchParams(location.search).has('rewind'); } catch { return false; } });
   // X3: a moved world's link to a moment. Opened, the page seeks that moment once and plays from there.
   const [copied, setCopied] = useState<string | null>(null), opened = useRef(false);
   useEffect(() => {
@@ -96,6 +95,18 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
     void navigator.clipboard?.writeText(link).catch(() => {});
     setCopied(link); setTimeout(() => setCopied(null), 4000);
   };
+  // K3: a moved world plays from its first moment, at a chosen speed, with a scrub bar over everything since
+  const [firstTick, setFirstTick] = useState<number | null>(null), [speed, setSpeed] = useState(playSpeed), [scrub, setScrub] = useState<number | null>(null);
+  const scrubTo = (v: number) => { setScrub(null); void handle?.seek(v); };
+  const fromStart = async () => {
+    const h = v2History(), now = state?.shownTick;
+    if (!h || now == null) return;
+    const us = firstTick !== null ? firstTick * TICK_US : await h.first(now * TICK_US).catch(() => null);
+    if (us === null) return;
+    setFirstTick(Math.floor(us / TICK_US));
+    void handle?.seek(Math.floor(us / TICK_US));
+  };
+  useEffect(() => { if (state?.presentation === 'history' && firstTick === null && state.shownTick != null) void v2History()?.first(state.shownTick * TICK_US).then((us) => { if (us !== null) setFirstTick(Math.floor(us / TICK_US)); }).catch(() => {}); }, [state?.presentation, firstTick]);
   const help = useRef<HTMLDivElement>(null);
   const unavailable = !!state?.unavailableReason;
   const current = state?.shownTick != null && !state.loading && !unavailable;
@@ -118,7 +129,7 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   const preparing = initialPending(initial);
   // lane PERF: a new world's card also waits for the GLBs nearest the arrival (gen-mesh/lazy-assets.ts, ≤ 30 s), so the
   // first view is the world, not bare ground filling in; old worlds never plan an eager set, so this is false there
-  const assetsNear = useSyncExternalStore(arrivalGate.subscribe, arrivalGate.pending);
+  const assetsNear = useSyncExternalStore(arrivalGate.subscribe, arrivalGate.pending, arrivalGate.pending);
   // P7 lever D: a phone's new world drawn before the live data came: only the nearest assets still hold the card
   const early = useSyncExternalStore(earlyArrival.subscribe, earlyArrival.shown, earlyArrival.shown);
   if (early) drawnOnce.current = true;
@@ -132,7 +143,7 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   const arrivalGone = useCallback(() => { lightGone.current = true; setArrivalShown(false); }, []);
   // The bar counts bytes (asset-bytes.ts: every asset fetch, total known up front), never files; it only moves forward
   // and is full once the world is ready. Without a byte total yet, the older measures stand in.
-  const bytes = useSyncExternalStore(assetBytes.subscribe.bind(assetBytes), () => assetBytes.snapshot());
+  const bytes = useSyncExternalStore(assetBytes.subscribe.bind(assetBytes), () => assetBytes.snapshot(), () => assetBytes.snapshot());
   // new worlds learn their total from the snapshot a moment after the first downloads start: no bar until then
   // #1266: one progress for the bar and the light: bytes, then preparation, and 100% only once the world is drawn
   const measured = !card ? (arrivalShown ? 1 : null) : arrivalFraction({ card, bytes, initial, downloads: state?.assetDownloads, arriving });
@@ -201,12 +212,16 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
         </div>, document.body)}
         {!arriving&&!!state?.assetDownloads?.pending&&<span className="asset-download-note" role="status" title="Actual asset downloads; the world stays usable while art arrives.">Art loading · {state.assetDownloads.loaded}/{state.assetDownloads.total}</span>}
         {settledReason && !lost && <span role="status" className="warn viewer-reason" title={settledReason}>{settledReason}</span>}
-        {rewind && <button disabled={!handle || state?.shownTick == null || state.loading} onClick={() => { if (state?.shownTick != null) void handle?.seek(Math.max(0, state.shownTick - 60 / dt)); }}>Back 1 min</button>}
+        {/* Gene: "Show it to everyone": the history scrub ("Back 1 min") shows to every viewer, no `?rewind` flag */}
+        <button disabled={!handle || state?.shownTick == null || state.loading} onClick={() => { if (state?.shownTick != null) void handle?.seek(Math.max(0, state.shownTick - 60 / dt)); }}>Back 1 min</button>
         {v2History() && state?.shownTick != null && !state.loading && <button type="button" data-moment-link={copied ?? ''} title="Copy a link that opens the world at this moment" onClick={() => copyMoment(state.shownTick!)}>{copied ? 'Link copied' : 'Link to this moment'}</button>}
         {state?.presentation === 'history' && <>
           <button onClick={() => handle?.setPlaying(state.playback !== 'playing')}>{state.playback === 'playing' ? 'Pause recording' : 'Play recording'}</button>
           <button onClick={() => handle?.live()}>Return to live</button>
+          {v2History() && <button type="button" title="Play faster" onClick={() => { const x = speed >= 8 ? 1 : speed * 2; setPlaySpeed(x); setSpeed(x); }}>×{speed}</button>}
+          {v2History() && firstTick !== null && state.shownTick != null && <input type="range" aria-label="Every moment since the world began" min={firstTick} max={Math.max(firstTick + 1, Math.floor(Date.now() * 1000 / TICK_US))} step={1} value={scrub ?? state.shownTick} onChange={(e) => setScrub(Number(e.target.value))} onPointerUp={(e) => scrubTo(Number((e.target as HTMLInputElement).value))} onKeyUp={(e) => { if (e.key.startsWith('Arrow') || e.key === 'Home' || e.key === 'End') scrubTo(Number((e.target as HTMLInputElement).value)); }} />}
         </>}
+        {v2History() && state?.shownTick != null && !state.loading && <button type="button" title="Play this world from the first moment it ran" onClick={() => void fromStart()}>From the start</button>}
       </div>
     </div>;
   // #893: phones get the camera menu as a bottom sheet; Follow appears when a Soul is selected.

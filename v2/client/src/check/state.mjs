@@ -3,11 +3,12 @@
 // no pose, hands or the actor's moves, and links and slots are not read here yet, so only a field's `no` is a local
 // one (`SEEN_FIELDS`). A kind with no entry held gives a node with no fields, and its candidates are `unknown`.
 //
-// Kind entries (`souls-entry/1`) are read from a folder, `<home>/kinds/`, by their `kind` name.
+// Kind entries (`souls-entry/1`) are read from a folder, `<home>/kinds/`, by their `kind` name, and a creator's own
+// kinds (#3697) from the copy: each a `souls:kind` node at the root holding its record (`kindsHeld`).
 
 import { readdirSync, readFileSync } from 'node:fs';
 import { join } from 'node:path';
-import { decode, entryKind, idText } from '../brief/copy.mjs';
+import { decode, entryKind, idText, plainKind } from '../brief/copy.mjs';
 
 /**
  * The `souls-entry/1` entries in `dir`, by kind name; none if the folder is missing. Unreadable files are skipped.
@@ -29,6 +30,43 @@ export function kindsIn(dir, body) {
   return kinds;
 }
 
+/**
+ * The records of a creator's own kinds (#3697) the copy holds, by full name (`namespace:name@hash`, field 1 of each
+ * `souls:kind` node at a root; field 2 the record's bytes, `souls-entry/1`), as the world's loader reads them
+ * (`replica::kinds::defined`). A thing's row names its creator kind by that full name (`rowsOf`'s `entry`), so two
+ * revisions of one kind never lend each other their forms or state. The plain name also finds a record while only one
+ * revision of it is defined.
+ */
+export function definedIn(copy) {
+  const kinds = {}, plains = {};
+  if (!copy) return kinds;
+  for (const h of Object.values(JSON.parse(copy.roots()))) {
+    const root = copy.record(h);
+    if (!root) continue;
+    for (const c of decode(root).get(10) ?? []) {
+      const bytes = copy.record(Buffer.from(c).toString('hex'));
+      if (!bytes) continue;
+      const m = decode(bytes);
+      if (plainKind(m.get(2)) !== 'souls:kind') continue;
+      const f = m.get(6) instanceof Map ? m.get(6) : new Map(), b = f.get(2) ?? f.get(2n), full = f.get(1) ?? f.get(1n);
+      if (!(b instanceof Uint8Array) || typeof full !== 'string') continue;
+      try {
+        const e = JSON.parse(Buffer.from(b).toString('utf8'));
+        if (e?.format !== 'souls-entry/1' || typeof e.kind !== 'string' || plainKind(full) !== e.kind) continue;
+        kinds[full] = e;
+        (plains[e.kind] ??= []).push(e);
+      } catch { /* not a record */ }
+    }
+  }
+  for (const [plain, es] of Object.entries(plains)) if (es.length === 1) kinds[plain] = es[0];
+  return kinds;
+}
+
+/** Every kind entry this Soul holds: the world's, from `dir`, and the creator's own from the copy (`definedIn`). */
+export function kindsHeld(dir, copy, body) {
+  return { ...definedIn(copy), ...kindsIn(dir, body) };
+}
+
 const plain = (v) => (typeof v === 'bigint' ? Number(v) : v instanceof Uint8Array ? Buffer.from(v).toString('hex') : v);
 /** A text field's value as the rules read it: its words' reference (`{21: id}`, K16) as the id's text once written,
  *  null once cleared (`{}`) or never written, so a need on `is: null` tells them apart. */
@@ -42,7 +80,8 @@ export function stateOf(copy, kinds, me) {
     const bytes = copy.record(todo.pop());
     if (!bytes) continue;
     const m = decode(bytes), id = idText(m.get(1)), kind = entryKind(m);
-    const state = kinds[kind]?.state ?? {};
+    // A creator's kind by its full name first (#3697): its own revision's state numbering.
+    const state = (kinds[String(m.get(2))] ?? kinds[kind])?.state ?? {};
     const byN = Object.fromEntries(Object.entries(state).map(([name, def]) => [def.n, name]));
     const fields = {};
     // An enum's value is held as a name (`souls:stand`); the entry lists its values by their local part (`stand`).

@@ -287,6 +287,22 @@ export async function greenCommand({ repo, sha, self, events = [] }, opts = {}) 
   catch (e) { console.error(`::warning::green at head unknown, so this run does its jobs: ${e.message}`); return 'false'; }
 }
 
+/**
+ * B1-8: what a merge group compiles (no tests). Two PRs green at their own heads can still combine into code that does
+ * not build (#4220 + #4291), so a merge group checks that the combined code compiles: `cargo check` of the v2
+ * workspace when a file it builds from changed (v2's crates and tools, and the content and packages they include), and
+ * `tsc -p apps/web` when a file the web app type-checks changed. No diff (null), the workflows or this script: both.
+ */
+export const GROUP_RUST = /^(v2\/(?!web\/|client\/|docs\/)|content\/(moves|kinds)\/|packages\/engine-mars\/|tools\/ops\/)/;
+export const GROUP_WEB = /^(apps\/web\/|packages\/|mars\/|v2\/web\/src\/|tsconfig[^/]*\.json$|package\.json$|pnpm-lock\.yaml$)/;
+const GROUP_BOTH = /^\.github\/(workflows\/ci\.yml|scripts\/ci-scope\.mjs)$/;
+export function groupChecks(files) {
+  if (!files) return { rust: true, web: true };
+  const code = files.filter((f) => !/\.md$/.test(f));
+  const both = code.some((f) => GROUP_BOTH.test(f));
+  return { rust: both || code.some((f) => GROUP_RUST.test(f)), web: both || code.some((f) => GROUP_WEB.test(f)) };
+}
+
 const ZERO = /^0+$/;
 export function changedFiles(base, head = 'HEAD', git = (...a) => execFileSync('git', a, { encoding: 'utf8' })) {
   if (!base || ZERO.test(base)) return null; // a new branch or a missing base: run everything
@@ -296,6 +312,13 @@ export function changedFiles(base, head = 'HEAD', git = (...a) => execFileSync('
 
 async function main(argv) {
   const opt = k => { const i = argv.indexOf(k); return i >= 0 ? argv[i + 1] : undefined; };
+  if (argv[0] === 'group') {
+    const files = opt('--files') !== undefined ? opt('--files').split(',').filter(Boolean) : changedFiles(opt('--base'), opt('--head'));
+    const out = groupChecks(files);
+    console.log(JSON.stringify({ ...out, files: files?.length ?? 'all' }));
+    if (process.env.GITHUB_OUTPUT) appendFileSync(process.env.GITHUB_OUTPUT, `rust=${out.rust}\nweb=${out.web}\n`);
+    return;
+  }
   if (argv[0] === 'green') {
     console.log(await greenCommand({ repo: opt('--repo'), sha: opt('--sha'), self: opt('--self'), events: (opt('--events') ?? '').split(',').filter(Boolean) }));
     return;
