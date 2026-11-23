@@ -80,7 +80,7 @@ the installed client hashes, and checks the same trusted `souls/world-routes/1` 
 The endpoint is unavailable to forwarded requests and discloses no filesystem paths.
 
 **`switch`** runs `check` first and refuses, changing nothing, on any failed precondition (each named): the live release
-carries the front door; the directory lists `eden`; `worldd@<world>` and `souls-gateway@<world>` run; the world's
+carries the front door; the directory lists `eden`; `worldd@<world>`, `souls-gateway@<world>` and `souls-agents` (the agents' relay on 7330, #4152) run; the world's
 placed socket path is under Linux's 108 bytes; the directory's `--gateway-tokens` is the world folder's `tokens` file
 (W11b); the backup and store settings are set; the actual launcher is prepared. Then it:
 
@@ -93,6 +93,11 @@ placed socket path is under Linux's 108 bytes; the directory's `--gateway-tokens
    site files, `caddy validate`, reload and timer. A missing synchronous Eden map is a failed switch;
 5. writes `switched`. A routing failure records `switch-failed` and leaves old writes fenced: resume `switch` or
    run `back`; it never silently permits old writes while new routing may be live.
+
+**Order in production:** `souls-agents` is installed (`install.sh`) and running (`systemctl start souls-agents`)
+before any Caddy reload that carries a `soul-game.caddy` sending `/w/<slug>/v2/ws`, `v2/creator-token` and
+`v2/entries` to 7330. Otherwise every agent gets 502 until it starts (viewers are unaffected). `check` refuses while
+it is not active.
 
 **`back`** keeps old writes fenced while it quiesces the route timer/service, restores and reloads the saved old
 proxy, confirms the restored file and removes Eden's map entry. Only then does it atomically set Eden's canonical
