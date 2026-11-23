@@ -131,7 +131,11 @@ const sw = JSON.parse(execFileSync(process.execPath, [join(repo, 'tools/world-la
 need(sw.page?.v2Stream, `the switch did not take: ${JSON.stringify(sw)}`);
 log(`switched: ${BASE}/w/${SLUG}/ reads ${sw.page.v2Stream}`);
 
-const browser = await chromium.launch({ args: ['--use-gl=angle', '--use-angle=swiftshader', '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
+// The machine's GPU where there is one (B3-5): with software GL the page's place previews read pixels back for about
+// 20 s after it opens (WorldPlacePreviews.ts readRenderTargetPixels), holding its main thread and every stream message
+// behind them, which no viewer with a GPU sees. `--gl soft` keeps SwiftShader.
+const GL = opt('gl', process.platform === 'darwin' ? 'metal' : 'soft');
+const browser = await chromium.launch({ args: [...(GL === 'metal' ? ['--use-angle=metal', '--enable-gpu'] : ['--use-gl=angle', '--use-angle=swiftshader']), '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
 const report = { base: '<local front door>', world: SLUG, agents: AGENTS, seconds: SECONDS, lines: {} };
 const rows = [];
 const row = (line, what, pass, detail) => { rows.push({ line, what, pass, detail }); log(`${pass ? 'PASS' : 'FAIL'} ${line} ${what}: ${detail}`); };
@@ -182,24 +186,51 @@ const probe = (page, soul) => page.evaluate((soul) => {
 if (ONLY.has('2')) {
   // The agent's own home, named with SOULS_HOME: an empty .souls is not a home, and the client would walk up from here
   // to the nearest real one (a person's own Souls, when the checkout sits in their folder).
-  const home = join(OUT, 'agent'); mkdirSync(join(home, '.souls'), { recursive: true });
-  const cli = (...a) => { try { return JSON.parse(execFileSync(process.execPath, [join(repo, 'v2/client/src/cli/souls.mjs'), ...a], { cwd: home, encoding: 'utf8', env: { ...process.env, SOULS_HOME: join(home, '.souls'), SOULS_REPLICA_PKG: PKG }, timeout: 30_000 }).trim().split('\n').at(-1)); } catch (e) { const out = String(e.stdout ?? '').trim().split('\n').at(-1); try { return JSON.parse(out); } catch { return { ok: false, detail: String(out || e.message).slice(0, 300) }; } } };
+  const cliIn = (home) => (...a) => { try { return JSON.parse(execFileSync(process.execPath, [join(repo, 'v2/client/src/cli/souls.mjs'), ...a], { cwd: home, encoding: 'utf8', env: { ...process.env, SOULS_HOME: join(home, '.souls'), SOULS_REPLICA_PKG: PKG }, timeout: 30_000 }).trim().split('\n').at(-1)); } catch (e) { const out = String(e.stdout ?? '').trim().split('\n').at(-1); try { return JSON.parse(out); } catch { return { ok: false, detail: String(out || e.message).slice(0, 300) }; } } };
+  /** A fresh agent in its own home, paired at /pair and approved in the card: its client and its Soul's page id. */
+  const pairAgent = async (name) => {
+    const home = join(OUT, name); mkdirSync(join(home, '.souls'), { recursive: true });
+    const cli = cliIn(home), pair = cli('pair', `${BASE}/${SLUG}?gateway=${BASE.replace(/^http/, 'ws')}/w/${SLUG}/v2/ws`);
+    let st = null;
+    if (pair.link) {
+      const card = await (await browser.newContext()).newPage();
+      await card.goto(pair.link.replace(/^https?:\/\/[^/]+/, BASE));
+      if (await card.locator('#signin').isVisible().catch(() => false)) await card.click('#signin');
+      if (await card.locator('#who').isVisible().catch(() => false)) { await card.fill('#person', 'Ada'); await card.locator('#who button').click(); }
+      await card.check('#match', { timeout: 15_000 }).catch(() => {});
+      await card.click('#approve', { timeout: 15_000 }).catch(() => {});
+      // the pairing finishes in the background (the client's own pair process): until then no Soul lives in the home
+      for (let i = 0; i < 60 && st?.connected !== true; i++) { st = cli('status'); if (st.connected !== true) await sleep(1000); }
+      await card.context().close();
+    }
+    return { cli, pair, soul: st?.connected === true ? st.soul : null };
+  };
+  /** A newly arrived Soul on the page (B3-5): its first act (a walk to a seat on the ground) sent, and how long after the
+   *  world took it the page lists its body; at most 30 s. */
+  const arrival = async (agent, target) => {
+    const t0 = Date.now(), sent = agent.cli('act', target);
+    let shownMs = null;
+    for (; Date.now() - t0 < 30_000 && shownMs === null; await sleep(100)) if (await page.evaluate((id) => !!window.__soulsV2?.souls.has(id), agent.soul)) shownMs = Date.now() - t0;
+    const rc = sent.sequence ? agent.cli('receipt', String(sent.sequence)).receipt : null;
+    const acceptedMs = rc?.answers?.[0]?.at ? Date.parse(rc.answers[0].at) - Date.parse(rc.sentAt) : null;
+    return { sent, acceptedMs, shownMs, afterMs: shownMs !== null && acceptedMs !== null ? shownMs - acceptedMs : null };
+  };
   const { ctx, page } = await worldPage(true);
-  const before = new Set(await page.evaluate(() => [...(window.__soulsV2?.souls.keys() ?? [])]));
-  const pair = cli('pair', `${BASE}/${SLUG}?gateway=${BASE.replace(/^http/, 'ws')}/w/${SLUG}/v2/ws`);
-  let connected = false;
-  if (pair.link) {
-    const card = await (await browser.newContext()).newPage();
-    await card.goto(pair.link.replace(/^https?:\/\/[^/]+/, BASE));
-    if (await card.locator('#signin').isVisible().catch(() => false)) await card.click('#signin');
-    if (await card.locator('#who').isVisible().catch(() => false)) { await card.fill('#person', 'Ada'); await card.locator('#who button').click(); }
-    await card.check('#match', { timeout: 15_000 }).catch(() => {});
-    await card.click('#approve', { timeout: 15_000 }).catch(() => {});
-    // the pairing finishes in the background (the client's own pair process): until then no Soul lives in the home
-    for (let i = 0; i < 60 && !connected; i++) { connected = cli('status').connected === true; if (!connected) await sleep(1000); }
+  const ARRIVALS = Number(opt('arrivals', 5));
+  report.lines[2] = { steps: [], arrivals: [] };
+  // the arrivals before the main agent's: each a fresh Soul whose first act is a walk; the main agent's own first walk
+  // is the last of them
+  const seat = () => (cliIn(join(OUT, 'agent'))('find', 'bench').found ?? []).find((f) => /^ground/.test(f.in ?? ''))?.id;
+  for (let k = 1; k < ARRIVALS; k++) {
+    const a = await pairAgent(`arrival-${k}`), at = a.soul ? seat() ?? (a.cli('find', 'bench').found ?? [])[0]?.id : null;
+    const r = a.soul && at ? await arrival(a, at) : { afterMs: null, acceptedMs: null, shownMs: null };
+    report.lines[2].arrivals.push(r);
+    row(2, `arrival ${k} of ${ARRIVALS}`, r.afterMs !== null && r.afterMs <= 2000, a.soul ? `first act taken at ${r.acceptedMs ?? '?'} ms; its body on the page ${r.shownMs === null ? 'not within 30 s' : `at ${r.shownMs} ms, ${r.afterMs} ms after`}` : `not paired: ${JSON.stringify(a.pair).slice(0, 160)}`);
+    a.cli('quit');
   }
-  row(2, 'pair', connected, connected ? 'paired at /pair, approved in the card by the page\'s local sign-in, the client connected' : `pairing: ${JSON.stringify(pair).slice(0, 200)}`);
-  report.lines[2] = { paired: connected, steps: [] };
+  const agent = await pairAgent('agent'), cli = agent.cli, connected = !!agent.soul;
+  row(2, 'pair', connected, connected ? 'paired at /pair, approved in the card by the page\'s local sign-in, the client connected' : `pairing: ${JSON.stringify(agent.pair).slice(0, 200)}`);
+  report.lines[2].paired = connected;
   /** The first thing `find <word>` gives whose own offers include `<verb>:` (inspect), for each word in turn. */
   const offering = (verb, ...words) => {
     // outdoors first (on the ground: reachable from where a new Soul arrives), then the rest
@@ -209,13 +240,13 @@ if (ONLY.has('2')) {
   /** Waits for act `seq` to end (its receipt, or a refusal), at most `ms`. */
   const ended = async (seq, ms = 120_000) => { for (const t0 = Date.now(); Date.now() - t0 < ms; await sleep(1000)) { const r = cli('receipt', String(seq)).receipt; if (r && r.going === false) return r; } return null; };
   /** One timed step: the act sent, then the page polled until `shown` holds (at most 6 s); passes within 2 s. */
-  let soul = null;
+  let soul = null, arrivalT0 = null;
   const step = async (name, send, shown) => {
     const b = soul ? await probe(page, soul) : null, t0 = Date.now(), sent = send();
     let seenMs = null;
     while (Date.now() - t0 < (soul ? 6000 : 30_000)) { // a Soul not on the page yet: wait longer, to say when it came
       if (!soul) {
-        soul = (await page.evaluate(() => [...(window.__soulsV2?.souls.keys() ?? [])])).find((s) => !before.has(s)) ?? null;
+        soul = (await page.evaluate((id) => (window.__soulsV2?.souls.has(id) ? id : null), agent.soul)) ?? null;
         if (soul) report.lines[2].appearedMs = Date.now() - t0;
         // the clip follows it: its card by the page's own link, then Follow
         if (soul) { await page.evaluate((id) => { location.hash = `soul/${id}`; }, soul); await page.getByRole('button', { name: /^Follow$/ }).first().click({ timeout: 3000 }).catch(() => {}); }
@@ -236,7 +267,7 @@ if (ONLY.has('2')) {
     const afterAnswer = seenMs !== null && shownBy ? seenMs - shownBy.ms : null;
     const pass = sent?.ok !== false && afterAnswer !== null && afterAnswer <= 2000;
     const last = soul ? await probe(page, soul) : null;
-    report.lines[2].steps.push({ name, answer: sent?.ok === false ? sent : { ok: true, sequence: sent?.sequence }, answers, seenMs, afterAnswer, page: last });
+    report.lines[2].steps.push({ name, answer: sent?.ok === false ? sent : { ok: true, sequence: sent?.sequence }, answers, timed, seenMs, afterAnswer, page: last });
     row(2, name, pass, `${sent?.ok === false ? `refused: ${JSON.stringify(sent).slice(0, 160)}` : `world: ${answers || 'no answer yet'}`}; on the page ${seenMs === null ? `not within 6 s (it shows ${last ? `${last.doing ?? '?'}, ${last.activity ?? '?'}${last.prop ? `, holding ${last.prop}` : ''}` : 'no such Soul'})` : `after ${seenMs} ms, ${afterAnswer ?? '?'} ms after the world's ${shownBy?.name ?? 'answer'}`}`);
     return sent;
   };
@@ -246,6 +277,10 @@ if (ONLY.has('2')) {
     report.lines[2].targets = { bench, bed, cup };
     // walk (the first act also brings the new Soul into the world: no join is taught or needed)
     let r = await step('walk', () => bench ? cli('act', bench) : { ok: false, detail: 'no seat found' }, walking);
+    // the main agent's first act is the last arrival: its body on the page after the world took the walk
+    const took = report.lines[2].steps[0]?.timed?.[0]?.ms ?? null, came = report.lines[2].appearedMs ?? null;
+    report.lines[2].arrivals.push({ acceptedMs: took, shownMs: came, afterMs: took !== null && came !== null ? came - took : null });
+    row(2, `arrival ${ARRIVALS} of ${ARRIVALS}`, took !== null && came !== null && came - took <= 2000, `first act taken at ${took ?? '?'} ms; its body on the page ${came === null ? 'not within 30 s' : `at ${came} ms, ${came - took} ms after`}`);
     if (r?.sequence) await ended(r.sequence);
     r = await step('sit', () => bench ? cli('act', `sit:${bench}`) : { ok: false, detail: 'no seat found' }, (s) => s.activity === 'sit');
     if (r?.sequence) await ended(r.sequence, 15_000);
