@@ -820,9 +820,10 @@ function heldKinds() {
     return kindsHeld(dir, copy, me?.kind);
   });
 }
-const kindsKept = keptOne(), stateKept = keptOne();
-/** The rules' state of the copy for this Soul (`stateOf`), kept while the copy's roots and the kinds are the same. */
-const heldState = (kinds) => stateKept.get([copy.roots(), kinds], () => stateOf(copy, kinds, ME));
+const kindsKept = keptOne(), stateKept = keptOne(), stateMemo = {};
+/** The rules' state of the copy for this Soul (`stateOf`), kept while the copy's roots and the kinds are the same; when
+ *  a sync changed the copy, only the records it changed are read again (`stateMemo`). */
+const heldState = (kinds) => stateKept.get([copy.roots(), kinds], () => stateOf(copy, kinds, ME, stateMemo));
 
 let verdictsTook = null; // G-late: the last verdicts' parts, ms, for the act check's log line
 /** R2's verdict on each candidate, on the copy as it is now (R8). */
