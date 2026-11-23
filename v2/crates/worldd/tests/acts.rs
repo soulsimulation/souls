@@ -1019,11 +1019,11 @@ fn point(v: Vec3) -> BTreeMap<u64, Value> {
 }
 
 /// #4187, the trace: a Soul's take is running (its run open, its press under way) when its own controller sends a
-/// walk. The walk is a move, which the bodies take, not the form runner. Today the walk replaces the run: its claim on
-/// the body ends the take's press, the take is refused `claim-taken` with nothing taken, and the walk is done where it
-/// was sent. In lockstep, the walk arriving at a fixed tick: the take starts at tick 1 and is in its approach at ticks 2
-/// and 3, which the walk's claim on the legs ends. From tick 4 the take is in its press, a hand move a walk does not
-/// end: the take is done and the body walks. On a served clock a slow machine let the walk arrive then (#4206's flake).
+/// walk. The walk is a move, which the bodies take, not the form runner. The walk replaces the run: in the take's
+/// approach its claim on the legs ends the run, the take is refused `claim-taken` with nothing taken, and the walk is
+/// done where it was sent. In lockstep, the walk arriving at a fixed tick: the take starts at tick 1 and is in its approach at ticks 2
+/// and 3, which the walk's claim on the legs ends. From tick 4 the take is in its press, a hand move, which the walk
+/// leaves at its next phase end ([`i4_a_walk_leaves_a_run_in_its_hand_move_at_the_next_phase_end`]).
 #[test]
 fn i4187_a_walk_sent_during_an_open_form_run() {
     let run = lockstep();
@@ -1182,4 +1182,81 @@ fn i4187_a_form_act_sent_during_an_open_form_run() {
         "the can in the body's hand"
     );
     run.stop();
+}
+
+/// The take's answer and the walk's (their sequence, and the receipt's entries or the refusal's reason), where the
+/// vessel is and where the walker stands.
+type TakeThenWalk = (
+    (u64, Result<Vec<u64>, String>),
+    (u64, Result<Vec<u64>, String>),
+    (Option<Id>, Option<u64>),
+    Vec3,
+);
+
+/// #4187's take, its Soul's walk arriving at tick `walk_at`, in lockstep.
+fn take_then_walk(walk_at: i64) -> TakeThenWalk {
+    let run = lockstep();
+    let (take, walk) = (std::sync::mpsc::channel(), std::sync::mpsc::channel());
+    let arrive = |tick, sequence, verb: &str, target, parameters, reply| {
+        let bytes = intent_bytes(w1(), sequence, verb, target, parameters);
+        run.world
+            .events
+            .send(answers::Event::ArrivalAt { tick, bytes, reply })
+            .unwrap();
+    };
+    arrive(1, 1, "test:take", Some(vessel()), BTreeMap::new(), take.0);
+    arrive(
+        walk_at,
+        2,
+        "test:walk",
+        Some(ground()),
+        point(south(3_000_000)),
+        walk.0,
+    );
+    let (done, ran) = std::sync::mpsc::channel();
+    run.world
+        .events
+        .send(answers::Event::RunTo { tick: 400, done })
+        .unwrap();
+    ran.recv().unwrap();
+    let final_of = |rx: &std::sync::mpsc::Receiver<Vec<u8>>| {
+        let ends: Vec<_> = rx
+            .try_iter()
+            .filter(|f| answers::progress_of(f).is_none())
+            .collect();
+        assert_eq!(ends.len(), 1, "one final answer");
+        answer_in(&ends[0])
+    };
+    let (first, second) = (final_of(&take.1), final_of(&walk.1));
+    let r = run.replay();
+    let out = (first, second, parent(&r, vessel()), at(&r, w1()));
+    run.world.stop();
+    out
+}
+
+/// 0.134 I4, intents rule 10 in a hand move: the take's press starts at tick 4 and makes contact at about tick 9. The
+/// Soul's walk arriving before the contact leaves the run there (`left`, nothing taken); arriving after it, at the
+/// press's end (`left`, the vessel taken at the contact stays in the hand). Either way the walk goes on and is done,
+/// and no intent waits to its deadline.
+#[test]
+fn i4_a_walk_leaves_a_run_in_its_hand_move_at_the_next_phase_end() {
+    let hand = (Some(w1()), Some(1));
+    for (walk_at, taken) in [(5, false), (12, true)] {
+        let (first, second, vessel_at, walker) = take_then_walk(walk_at);
+        println!(
+            "I4 walk at tick {walk_at}: take {first:?}, walk {second:?}, vessel {vessel_at:?}"
+        );
+        assert_eq!(first, (1, Err("left".to_owned())), "the run is left");
+        assert!(matches!(second, (2, Ok(_))), "the walk is done: {second:?}");
+        assert_eq!(walker, south(3_000_000), "walked to where it was sent");
+        if taken {
+            assert_eq!(vessel_at, hand, "the effect landed at the contact stays");
+        } else {
+            assert_eq!(
+                vessel_at,
+                (Some(ground()), None),
+                "left before the contact: nothing taken"
+            );
+        }
+    }
 }
