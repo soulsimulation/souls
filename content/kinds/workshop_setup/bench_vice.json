@@ -88,7 +88,7 @@
         }
       ]
     },
-    "set_jaw_gap_0": {
+    "set_gap": {
       "who": "anyone",
       "starts": "act",
       "needs": [
@@ -101,7 +101,9 @@
         {
           "need": "state",
           "field": "jaw_gap",
-          "not": 0
+          "not": {
+            "arg": "gap"
+          }
         },
         {
           "need": "hand",
@@ -127,142 +129,23 @@
         {
           "change": "set",
           "field": "jaw_gap",
-          "to": 0,
+          "to": {
+            "arg": "gap"
+          },
           "event": "set_jaw_gap"
         }
-      ]
-    },
-    "set_jaw_gap_40": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "clamped",
-          "is": false,
-          "says": "unlock_first"
-        },
-        {
-          "need": "state",
-          "field": "jaw_gap",
-          "not": 40
-        },
-        {
-          "need": "hand",
-          "free": true
-        },
-        {
-          "need": "within_reach",
-          "point": "control"
-        }
       ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "front"
-        },
-        {
-          "step": "move",
-          "move": "turn",
-          "at": "control"
+      "takes": {
+        "gap": {
+          "type": "value",
+          "of": [
+            0,
+            40,
+            80,
+            120
+          ]
         }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "jaw_gap",
-          "to": 40,
-          "event": "set_jaw_gap"
-        }
-      ]
-    },
-    "set_jaw_gap_80": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "clamped",
-          "is": false,
-          "says": "unlock_first"
-        },
-        {
-          "need": "state",
-          "field": "jaw_gap",
-          "not": 80
-        },
-        {
-          "need": "hand",
-          "free": true
-        },
-        {
-          "need": "within_reach",
-          "point": "control"
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "front"
-        },
-        {
-          "step": "move",
-          "move": "turn",
-          "at": "control"
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "jaw_gap",
-          "to": 80,
-          "event": "set_jaw_gap"
-        }
-      ]
-    },
-    "set_jaw_gap_120": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "clamped",
-          "is": false,
-          "says": "unlock_first"
-        },
-        {
-          "need": "state",
-          "field": "jaw_gap",
-          "not": 120
-        },
-        {
-          "need": "hand",
-          "free": true
-        },
-        {
-          "need": "within_reach",
-          "point": "control"
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "front"
-        },
-        {
-          "step": "move",
-          "move": "turn",
-          "at": "control"
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "jaw_gap",
-          "to": 120,
-          "event": "set_jaw_gap"
-        }
-      ]
+      }
     },
     "clamp_jaws": {
       "who": "anyone",

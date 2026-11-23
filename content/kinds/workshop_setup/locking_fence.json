@@ -88,7 +88,7 @@
         }
       ]
     },
-    "set_fence_offset_100": {
+    "set_offset": {
       "who": "anyone",
       "starts": "act",
       "needs": [
@@ -101,7 +101,9 @@
         {
           "need": "state",
           "field": "offset",
-          "not": 100
+          "not": {
+            "arg": "offset"
+          }
         },
         {
           "need": "hand",
@@ -127,98 +129,22 @@
         {
           "change": "set",
           "field": "offset",
-          "to": 100,
+          "to": {
+            "arg": "offset"
+          },
           "event": "set_fence_offset"
         }
-      ]
-    },
-    "set_fence_offset_200": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "lever_locked",
-          "is": false,
-          "says": "unlock_first"
-        },
-        {
-          "need": "state",
-          "field": "offset",
-          "not": 200
-        },
-        {
-          "need": "hand",
-          "free": true
-        },
-        {
-          "need": "within_reach",
-          "point": "control"
-        }
       ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "front"
-        },
-        {
-          "step": "move",
-          "move": "slide",
-          "at": "control"
+      "takes": {
+        "offset": {
+          "type": "value",
+          "of": [
+            100,
+            200,
+            300
+          ]
         }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "offset",
-          "to": 200,
-          "event": "set_fence_offset"
-        }
-      ]
-    },
-    "set_fence_offset_300": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "lever_locked",
-          "is": false,
-          "says": "unlock_first"
-        },
-        {
-          "need": "state",
-          "field": "offset",
-          "not": 300
-        },
-        {
-          "need": "hand",
-          "free": true
-        },
-        {
-          "need": "within_reach",
-          "point": "control"
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "front"
-        },
-        {
-          "step": "move",
-          "move": "slide",
-          "at": "control"
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "offset",
-          "to": 300,
-          "event": "set_fence_offset"
-        }
-      ]
+      }
     },
     "lock_fence": {
       "who": "anyone",

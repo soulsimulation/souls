@@ -88,7 +88,7 @@
         }
       ]
     },
-    "index_head_0": {
+    "set_index": {
       "who": "anyone",
       "starts": "act",
       "needs": [
@@ -101,7 +101,9 @@
         {
           "need": "state",
           "field": "index",
-          "not": 0
+          "not": {
+            "arg": "angle"
+          }
         },
         {
           "need": "hand",
@@ -127,98 +129,22 @@
         {
           "change": "set",
           "field": "index",
-          "to": 0,
+          "to": {
+            "arg": "angle"
+          },
           "event": "index_head"
         }
-      ]
-    },
-    "index_head_45": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "pin_engaged",
-          "is": false,
-          "says": "unlock_first"
-        },
-        {
-          "need": "state",
-          "field": "index",
-          "not": 1
-        },
-        {
-          "need": "hand",
-          "free": true
-        },
-        {
-          "need": "within_reach",
-          "point": "control"
-        }
       ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "front"
-        },
-        {
-          "step": "move",
-          "move": "turn",
-          "at": "control"
+      "takes": {
+        "angle": {
+          "type": "value",
+          "of": [
+            0,
+            45,
+            90
+          ]
         }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "index",
-          "to": 1,
-          "event": "index_head"
-        }
-      ]
-    },
-    "index_head_90": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "pin_engaged",
-          "is": false,
-          "says": "unlock_first"
-        },
-        {
-          "need": "state",
-          "field": "index",
-          "not": 2
-        },
-        {
-          "need": "hand",
-          "free": true
-        },
-        {
-          "need": "within_reach",
-          "point": "control"
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "front"
-        },
-        {
-          "step": "move",
-          "move": "turn",
-          "at": "control"
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "index",
-          "to": 2,
-          "event": "index_head"
-        }
-      ]
+      }
     },
     "engage_pin": {
       "who": "anyone",

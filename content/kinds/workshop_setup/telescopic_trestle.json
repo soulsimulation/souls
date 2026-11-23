@@ -88,7 +88,7 @@
         }
       ]
     },
-    "set_extension_0": {
+    "set_extension": {
       "who": "anyone",
       "starts": "act",
       "needs": [
@@ -101,7 +101,9 @@
         {
           "need": "state",
           "field": "extension",
-          "not": 0
+          "not": {
+            "arg": "extension"
+          }
         },
         {
           "need": "hand",
@@ -127,98 +129,22 @@
         {
           "change": "set",
           "field": "extension",
-          "to": 0,
+          "to": {
+            "arg": "extension"
+          },
           "event": "set_extension"
         }
-      ]
-    },
-    "set_extension_150": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "collar_locked",
-          "is": false,
-          "says": "unlock_first"
-        },
-        {
-          "need": "state",
-          "field": "extension",
-          "not": 150
-        },
-        {
-          "need": "hand",
-          "free": true
-        },
-        {
-          "need": "within_reach",
-          "point": "control"
-        }
       ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "front"
-        },
-        {
-          "step": "move",
-          "move": "slide",
-          "at": "control"
+      "takes": {
+        "extension": {
+          "type": "value",
+          "of": [
+            0,
+            150,
+            300
+          ]
         }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "extension",
-          "to": 150,
-          "event": "set_extension"
-        }
-      ]
-    },
-    "set_extension_300": {
-      "who": "anyone",
-      "starts": "act",
-      "needs": [
-        {
-          "need": "state",
-          "field": "collar_locked",
-          "is": false,
-          "says": "unlock_first"
-        },
-        {
-          "need": "state",
-          "field": "extension",
-          "not": 300
-        },
-        {
-          "need": "hand",
-          "free": true
-        },
-        {
-          "need": "within_reach",
-          "point": "control"
-        }
-      ],
-      "steps": [
-        {
-          "step": "walk_to",
-          "point": "front"
-        },
-        {
-          "step": "move",
-          "move": "slide",
-          "at": "control"
-        }
-      ],
-      "effects": [
-        {
-          "change": "set",
-          "field": "extension",
-          "to": 300,
-          "event": "set_extension"
-        }
-      ]
+      }
     },
     "lock_collar": {
       "who": "anyone",
