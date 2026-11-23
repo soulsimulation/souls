@@ -1,7 +1,7 @@
 // One cutover writer; durable phases describe partial operations, while canonical is the only admission truth.
+import { isMain } from '../../../../tools/lib/is-main.mjs';
 import { constants, copyFileSync, existsSync, mkdirSync, openSync, closeSync, fsyncSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { spawnSync } from 'node:child_process';
 import { readWorldRoutes } from '../../origin/world-routes.mjs';
 import { updateWorldRoute } from '../proxy/route-config.mjs';
@@ -78,7 +78,7 @@ export async function transition({ command, dir, routesFile, slug, world, valida
   } finally { rmSync(lock, { recursive: true }); }
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const [command, script] = process.argv.slice(2), root = process.env.CUTOVER_ROOT || '';
   const slug = process.env.SLUG, world = process.env.WORLD;
   let binding, routesFile;

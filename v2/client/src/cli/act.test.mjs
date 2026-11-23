@@ -56,13 +56,16 @@ function souls(home, args) {
   return JSON.parse(r.stdout.trim().split('\n').at(-1));
 }
 
-/** The answer event for `sequence`, read from the daemon. */
+/** The answer event that ends `sequence`, read from the daemon: a walk's or a form's accepted (kind 3, sent as its
+ *  run starts, W11 #4087) is read past to its receipt or refusal; an act has at most one. */
 const got = []; // every answer read, kept: one read may take the answers of several intents
 async function answerOf(rt, sequence) {
-  return waitFor(async () => {
+  const end = await waitFor(async () => {
     got.push(...(await request(rt.socket, { op: 'read' })).events.filter((e) => e.kind === 'answer'));
-    return got.find((e) => e.sequence === sequence);
+    return got.find((e) => e.sequence === sequence && e.answer !== 3);
   }, 60_000);
+  assert.ok(got.filter((e) => e.sequence === sequence && e.answer === 3).length <= 1, `one accepted at most: ${sequence}`);
+  return end;
 }
 
 const freePort = () => new Promise((ok) => { const s = netServer().listen(0, '127.0.0.1', () => { const { port } = s.address(); s.close(() => ok(port)); }); });

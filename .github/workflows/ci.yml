@@ -4,23 +4,21 @@
 # The job matrix is the release gate's CPU contract split for GitHub runners; `scope` picks jobs with the same path
 # map as `tools/test-harness/release-gate.mjs --scope auto` (.github/scripts/ci-scope.mjs). Branch protection requires
 # the single `ci-ok` check. The full Modal gate still qualifies releases (release.yml); CI is the per-PR check.
-# CI window (docs/testing.md#ci-window): a pull request run does its heavy jobs (qualify, smoke) only for a ready PR
-# labelled merge:ready or ci:run; otherwise it runs scope and repo, and ci-ok fails as "full CI deferred" when heavy jobs
-# were selected. Adding either label starts a fresh pull_request run with the window open: the merge queue reads required
-# checks from that event, so a green dispatch never clears a deferred ci-ok. Any other label starts the same kind of run
-# (#2018): the queue reads only the newest ci run at a head, so a run without ci-ok would hide the real one. A label run
-# queues behind a run in progress, cancels nothing, and does no heavy work if the head's newest run passed, so its ci-ok
-# repeats that result in about a minute (scope and ci-ok only; repo skips too). `gh workflow run ci.yml --ref <branch> -f pr=<n>` still runs a PR's path-scoped CI by hand, but its
-# checks don't count for the queue.
-# Pull request, merge_group and push runs never run the qualify legs ci-scope.mjs marks `heavy: true` (lightOnly): the
+# CI window (docs/testing.md#ci-window): every push to a ready (non-draft) pull request runs its jobs once, with no label;
+# a draft runs scope and repo, and ci-ok fails as "full CI deferred" when heavy jobs were selected, until it is marked
+# ready. Labels start no run. In the merge queue nothing runs again: a PR enters only with its required checks green at
+# its head, so a merge_group run reports ci-ok at once (scope, repo, qualify and smoke skip); the push to main that
+# lands it runs its paths' light set as the net. `gh workflow run ci.yml --ref <branch> -f pr=<n>` still runs a PR's
+# path-scoped CI by hand, but its checks don't count for the queue.
+# Pull request and push runs never run the qualify legs ci-scope.mjs marks `heavy: true` (lightOnly): the
 # full battery runs once a day on main (schedule, 06:23 UTC), on a manual run, and before a release in the remote gate,
-# not per change (Gene, 18 Nov: startup mode). A push to main runs the light set its paths pick, like a merge group. Push
+# not per change (Gene, 18 Nov: startup mode). A push to main runs the light set its paths pick. Push
 # runs share one concurrency group, `ci-main`, where a newer push cancels an older one still running; the daily run has
 # its own group, `ci-daily`, and is never cancelled (docs/testing.md#ci-window).
 name: ci
 on:
   pull_request:
-    types: [opened, synchronize, reopened, ready_for_review, labeled]
+    types: [opened, synchronize, reopened, ready_for_review]
   merge_group:
   push:
     branches: [main]
@@ -36,13 +34,15 @@ permissions:
   contents: read
 concurrency:
   group: ${{ github.event_name == 'push' && 'ci-main' || github.event_name == 'schedule' && 'ci-daily' || format('ci-{0}', github.event.pull_request.number || inputs.pr || github.ref) }}
-  cancel-in-progress: ${{ github.event_name == 'push' || (github.event_name == 'pull_request' && github.event.action != 'labeled') }}
+  cancel-in-progress: ${{ github.event_name == 'push' || github.event_name == 'pull_request' }}
 # tools/assets pull keeps its content-addressed download cache in its default ~/.cache/sim-assets: on a self-hosted
 # runner that persists on the host's disk across jobs; on a GitHub-hosted one, the media cache steps below carry it.
 jobs:
   # scope, repo and ci-ok (and the required security, fragment and merge_group proof jobs) run on
   # CI_LIGHT_RUNNER when set (a label, or a JSON label list), else GitHub-hosted. Unset it to go back to hosted runners.
   scope:
+    # A merge group runs nothing: ci-ok reports the PR's own result (below).
+    if: github.event_name != 'merge_group'
     runs-on: ${{ vars.CI_LIGHT_RUNNER && (startsWith(vars.CI_LIGHT_RUNNER, '[') && fromJSON(vars.CI_LIGHT_RUNNER) || vars.CI_LIGHT_RUNNER) || 'ubuntu-latest' }}
     timeout-minutes: 5
     permissions:
@@ -66,7 +66,7 @@ jobs:
       # a pull_request run's pass covers no heavy leg (ci-scope.mjs lightOnly).
       - id: green
         name: Already green at this head
-        if: github.event.action == 'labeled' || (github.event_name == 'workflow_dispatch' && inputs.pr != '')
+        if: github.event_name == 'workflow_dispatch' && inputs.pr != ''
         env:
           GH_TOKEN: ${{ github.token }}
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.sha }}
@@ -79,13 +79,12 @@ jobs:
           HEAD_SHA: ${{ github.event.pull_request.head.sha || github.event.merge_group.head_sha || github.sha }}
           EVENT: ${{ inputs.pr && 'request' || github.event_name }}
           DRAFT: ${{ github.event.pull_request.draft || false }}
-          LABELS: ${{ toJSON(github.event.pull_request.labels.*.name) }}
           GREEN: ${{ steps.green.outputs.green || false }}
         # The daily run and a manual run check everything (FULL_EVENTS); the merge train reads those runs.
-        run: node .github/scripts/ci-scope.mjs --base "$BASE" --head "$HEAD_SHA" --event "$EVENT" --draft "$DRAFT" --labels "$LABELS" --green-at-head "$GREEN"
+        run: node .github/scripts/ci-scope.mjs --base "$BASE" --head "$HEAD_SHA" --event "$EVENT" --draft "$DRAFT" --green-at-head "$GREEN"
 
-  # Fast, dependency-free checks of the repo's own tooling. Skipped only when scope found the head already green (a label
-  # run at a head whose newest ci run passed): the tree is the one that passed, so ci-ok repeats that result in seconds.
+  # Fast, dependency-free checks of the repo's own tooling. Skipped when scope found the head already green (a requested
+  # run at a head whose newest requested run passed), and in a merge group, where scope does not run.
   repo:
     needs: scope
     if: needs.scope.outputs.green != 'true'
@@ -309,11 +308,14 @@ jobs:
             soul-tools)
               # #1111: not a gate step; picked by ci-scope.mjs from its own paths
               node --test --test-concurrency=4 tools/soul-runtime/*.test.mjs tools/soul-trace/*.test.mjs
-              # the entry format and its gates (check, look, prove); picked by tools/entry, content and packages/form-rules
+              # the launcher test that reads content/kinds
+              node --test --test-concurrency=4 tools/world-launcher/soul/card-search.test.mjs
+              ;;
+            kinds)
+              # The kinds' case files: the entry format and its gates (check, look, prove), and form-rules' own tests over
+              # packages/form-rules/cases. Picked only by content/kinds, packages/form-rules and tools/entry (ci-scope.mjs).
               node --test --test-concurrency=4 tools/entry/*.test.mjs
-              # form-rules' own tests and the launcher test that reads content/kinds: a change confined to the low-risk
-              # paths (ci-scope.mjs LOW_RISK) runs this job and no packages or launcher job
-              node --test --test-concurrency=4 packages/form-rules/src/*.test.ts tools/world-launcher/soul/card-search.test.mjs
+              node --test --test-concurrency=4 packages/form-rules/src/*.test.ts
               ;;
             v2)
               # Engine v2 (K15, #2637): not a gate step; picked by ci-scope.mjs from its own paths
@@ -437,10 +439,10 @@ jobs:
           if-no-files-found: warn
           retention-days: 14
 
-  # The one required check: passes when every selected job passed (or none was needed). A deferred run (CI window
-  # closed, heavy jobs selected) fails it: skipped heavy jobs never count as passing. On a pull_request, in the merge
-  # queue and on a push the `heavy: true` legs are never selected (the daily run and the release gate run them), so
-  # there it covers the jobs that ran.
+  # The one required check: passes when every selected job passed (or none was needed). A deferred run (a draft with
+  # heavy jobs selected) fails it: skipped heavy jobs never count as passing. On a pull_request and on a push the
+  # `heavy: true` legs are never selected (the daily run and the release gate run them), so there it covers the jobs
+  # that ran. In a merge group it passes at once: the PR entered the queue only with ci-ok green at its own head.
   ci-ok:
     runs-on: ${{ vars.CI_LIGHT_RUNNER && (startsWith(vars.CI_LIGHT_RUNNER, '[') && fromJSON(vars.CI_LIGHT_RUNNER) || vars.CI_LIGHT_RUNNER) || 'ubuntu-latest' }}
     needs: [scope, repo, qualify, smoke]
@@ -452,7 +454,7 @@ jobs:
         env:
           WINDOW: ${{ needs.scope.outputs.window }}
         run: |
-          echo "::error title=Full CI deferred::The CI window is closed for this PR ($WINDOW), so its heavy jobs did not run. Mark it ready and add ci:run (or merge:ready) to run them: docs/testing.md#ci-window"
+          echo "::error title=Full CI deferred::The CI window is closed for this PR ($WINDOW), so its heavy jobs did not run. Mark it ready for review to run them: docs/testing.md#ci-window"
           exit 1
       - env:
           SCOPE: ${{ needs.scope.result }}
@@ -462,8 +464,10 @@ jobs:
           SMOKE: ${{ needs.smoke.result }}
           SMOKE_SELECTED: ${{ needs.scope.outputs.smoke }}
           GREEN: ${{ needs.scope.outputs.green }}
+          EVENT: ${{ github.event_name }}
         run: |
           echo "scope=$SCOPE repo=$REPO qualify=$QUALIFY jobs_selected=$ANY smoke=$SMOKE smoke_selected=$SMOKE_SELECTED green_at_head=$GREEN"
+          if [ "$EVENT" = merge_group ]; then echo "merge group: the PR's own ci-ok passed at its head to enter the queue; nothing runs again"; exit 0; fi
           test "$SCOPE" = success
           if [ "$GREEN" = true ]; then test "$REPO" = skipped; else test "$REPO" = success; fi
           if [ "$ANY" = true ]; then test "$QUALIFY" = success; else test "$QUALIFY" = skipped; fi

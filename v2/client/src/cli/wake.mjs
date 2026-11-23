@@ -9,8 +9,8 @@
 //
 // Prints the daemon's answer as JSON. The home and the library are found as client.mjs finds them.
 
+import { isMain } from '../../../../tools/lib/is-main.mjs';
 import { homedir } from 'node:os';
-import { fileURLToPath } from 'node:url';
 import { DEFAULT_PKG, call } from '../daemon/client.mjs';
 import { findHome, soulsWithTokens } from '../home/home.mjs';
 
@@ -39,7 +39,7 @@ export function wakeRequest(args) {
   throw new Error(usage);
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const args = process.argv.slice(2);
   const k = args.indexOf('--soul');
   const named = k >= 0 ? args.splice(k, 2)[1] : undefined;

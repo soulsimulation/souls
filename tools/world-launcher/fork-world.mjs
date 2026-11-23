@@ -11,6 +11,7 @@
 // PUBLIC_URL, WORLD_PATH, BUILD_ID, EDGE_CLI_FILE, ACCOUNT_REGISTRY_PATH). Relative paths in it resolve against this
 // release. Gates: Clerk + an account registry, accepted history never shrinks, Soul rows unchanged by boot.
 // Minds: none in the world (edge driver, fake brain, no model keys): $0 model spend.
+import { isMain } from '../lib/is-main.mjs';
 import { readFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { dirname, isAbsolute, join, resolve } from 'node:path';
@@ -108,6 +109,6 @@ async function main() {
   } catch (error) { await close(); throw error; }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (isMain(import.meta.url)) {
   main().catch((e) => { console.error('fork refused:', e.message); process.exit(1); });
 }

@@ -13,7 +13,7 @@ The repo's contract is [docs/testing/e2e.md](../../../docs/testing/e2e.md); read
 | `e2e/config.mjs` | Paths (`e2e/scenarios`, `.e2e/runs`), reserved ports, iteration cap |
 | `e2e/scenarios/*.md` | Scenarios: front matter + numbered steps with `expect*` and `screenshot` lines |
 | `e2e/local-smoke.mjs` | The local smoke (`e2e/scenarios/local-smoke.md`): boots its own instance on a free port, world list → one world → a person drawn, then tears down |
-| `tools/god-skill/dev-world.mjs` | Starts one local world with fake minds, dev auth and its own data dir |
+| `v2/tools/dev/run.sh` | Starts one local world of the new engine on loopback (world, gateway, directory with the dev sign-in, origin, page) in its own folder; no model runs |
 | `.e2e/` | Gitignored working state: runs, browsers, scratch drivers |
 
 Scenarios marked with a remote or hardware fixture (for example `client-fixture-arrival`, which needs owned loopback
@@ -33,8 +33,8 @@ rather than approximating them.
 
 1. Read `docs/testing/e2e.md` and `e2e/config.mjs`. Note reserved ports; never use them for your own world.
    A scenario with a `runner` in its front matter (`local-smoke`) is run by that command, not driven by hand.
-2. Built client: `apps/web/dist/index.html` must exist and match your change. If not:
-   `pnpm install --frozen-lockfile && pnpm build`.
+2. The world's programs and page: `v2/tools/dev/run.sh` builds what is missing and builds the page from this
+   checkout at each start (its head lists what it needs, and how to name prebuilt ones).
 3. Browser: Playwright MCP tools (`mcp__playwright__*`) if listed; otherwise a driver script under `.e2e/` that
    loads Playwright the way the harness does (`tools/playtest/lib/platform.mjs` → `resolvePlaywright`, or
    `createRequire('mars/viewer/package.json')('@playwright/test')`, as `e2e/local-smoke.mjs` does). Browsers come from
@@ -48,10 +48,12 @@ rather than approximating them.
 ### 1. Boot an isolated world
 ```bash
 RUN=.e2e/runs/$(date -u +%Y%m%dT%H%M%SZ)-<id>; mkdir -p $RUN/snapshots $RUN/shots
-node tools/god-skill/dev-world.mjs e2e-<short> 4720 --genesis worlds/templates/<fixture>.json --fresh --data $RUN/data
-# → http://127.0.0.1:4720/w/e2e-<short>?dev=1 (pid N, log .lane/e2e-<short>.log)
+v2/tools/dev/run.sh --port 4720 --dir $RUN/data > $RUN/world.log 2>&1 &
+# wait for `ready http://127.0.0.1:4720` in $RUN/world.log
+# → http://127.0.0.1:4720/w/dev/ ; signed in as the test person Ada, the world's creator: …/w/dev/?as=Ada
 ```
-`fixture` in the scenario names the genesis template (`hello-hamlet` if unspecified). Record the URL, pid, port and
+The world is N2's test world (`fixture: testworld`); a scenario naming a genesis template is for the old server and
+is not runnable on it. The dev sign-in works on loopback only. Record the URL, pid, port and
 commit (`git rev-parse HEAD`, dirty or not) in `$RUN/ready.json`. Boot errors (port taken, missing build) are
 relayed verbatim.
 
@@ -127,6 +129,6 @@ Questions for the maintainer: <1–3>
 
 ## Rules
 - Never claim pass without every deterministic check green.
-- Fake minds only (`BRAIN_MODE=fake`, which `dev-world.mjs` sets). Nothing here may spend model credits.
+- No model runs: the engine has no mind, and `run.sh` starts none. Nothing here may spend model credits.
 - Ephemeral data only; never point a run at a real data dir or a production world.
 - Never commit `.e2e/` contents, screenshots or video.

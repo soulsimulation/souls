@@ -1,9 +1,9 @@
 // Install a previously built web artifact only for its exact source and release flags.
 // The build runs on Modal; this verifier keeps release.sh's normal checks in force.
+import { isMain } from '../../lib/is-main.mjs';
 import { createHash } from 'node:crypto';
 import { copyFileSync, existsSync, lstatSync, mkdirSync, readFileSync, readdirSync, writeFileSync } from 'node:fs';
-import { dirname, join, resolve } from 'node:path';
-import { fileURLToPath } from 'node:url';
+import { dirname, join } from 'node:path';
 
 export function inventory(root, relative = '') {
   const rows = [];
@@ -47,7 +47,7 @@ export function install(root, destination, expected) {
   return receipt;
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const [operation, root, destination, sourceSha, buildId, base, cdn, cdnOrigin, edenWorlds, arrivalUI, goatCounter, godUploadsCdn] = process.argv.slice(2);
   const identity = { sourceSha, buildId, base, cdn, cdnOrigin, edenWorlds, arrivalUI, goatCounter, godUploadsCdn };
   if (operation === 'install') install(root, destination, identity);

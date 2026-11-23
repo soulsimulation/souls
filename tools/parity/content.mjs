@@ -36,6 +36,7 @@
  * Terrain is physical support/ground height; decorative hill heights and the
  * complete rendered atmosphere need separate evidence and remain UNKNOWN.
  */
+import { isMain } from '../lib/is-main.mjs';
 import { readFile, readdir, writeFile } from 'node:fs/promises';
 import { dirname, isAbsolute, resolve } from 'node:path';
 import { fileURLToPath, pathToFileURL } from 'node:url';
@@ -387,6 +388,6 @@ async function main(argv) {
   process.exitCode = result.diff.status === 'IDENTICAL' ? 0 : result.diff.status === 'NOT_IDENTICAL' ? 1 : 2;
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) main(process.argv.slice(2)).catch((error) => {
+if (isMain(import.meta.url)) main(process.argv.slice(2)).catch((error) => {
   process.stderr.write(JSON.stringify({ status: 'UNKNOWN', error: error.message }) + '\n'); process.exitCode = 2;
 });

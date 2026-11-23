@@ -6,9 +6,8 @@
 // concatenating the n TAP logs in shard order reproduces the serial run's test order (and its duplicate-title ordinals).
 // Unknown files weigh the median. Every shard computes the same partition from the same inputs.
 // Rebuild the weights from a run:  node v5-shard.mjs --durations <out>/out/groups/v5-*/V5-server-full-files.jsonl > v5-durations.json
+import { isMain } from '../lib/is-main.mjs';
 import { readFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
-import { resolve } from 'node:path';
 
 export function partition(files, seconds, n) {
   if (!Number.isInteger(n) || n < 1) throw Error(`invalid shard count ${n}`);
@@ -45,11 +44,11 @@ export function durationsFrom(jsonlTexts) {
   return Object.fromEntries(Object.entries(files).sort(([a], [b]) => (a < b ? -1 : a > b ? 1 : 0)));
 }
 
-if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url) && process.argv[2] === '--durations') {
+if (isMain(import.meta.url) && process.argv[2] === '--durations') {
   const paths = process.argv.slice(3);
   const files = durationsFrom(paths.map(p => readFileSync(p, 'utf8')));
   process.stdout.write(JSON.stringify({ schemaVersion: 1, source: `${paths.length} shard logs, ${new Date().toISOString().slice(0, 10)}`, files }, null, 2) + '\n');
-} else if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.url)) {
+} else if (isMain(import.meta.url)) {
   const [spec, durations] = process.argv.slice(2);
   const m = /^(\d+)\/(\d+)$/.exec(spec || '');
   if (!m || +m[1] < 1 || +m[1] > +m[2]) { console.error('usage: v5-shard.mjs <i>/<n> <v5-durations.json> < files'); process.exit(2); }
