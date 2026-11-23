@@ -159,8 +159,11 @@ export class V2Bridge {
     if (m.t === 'snapshot') { this.nodesChanged(m.s.nodes, m.s.removed, this.view.newestTo ?? 0); this.publish(); return; }
     const p = m.p;
     this.liveFrom ??= p.from;
-    this.nodesChanged(p.nodes, p.removed, p.from);
+    // K2: a record that changes a body's frame or slot (a sit, a stand, a step inside) lands after the part's own motion
+    // samples of that body (its walk there), so the walk's last sample never draws a seated body standing again
+    const moved = this.nodesChanged(p.nodes, p.removed, p.from, true);
     for (const [id, frame, slot, at, x, y, z] of p.samples) this.sample(id, frame, slot, at, [x, y, z]);
+    for (const n of moved) this.sample(n.id, n.parent!, n.slot, Math.max(n.at ?? p.from, p.from, this.tracks.get(n.id)?.samples.at(-1)?.at ?? -Infinity), n.pos);
     // A gesture move plays on its body (take-gestures.ts); a run that ends early ends its gesture then.
     for (const m of p.moves ?? []) { const g = gestureFrom(m, this.toward(m.target)), t = this.tracks.get(m.body); if (g && t) t.gestures.push(g); }
     for (const e of p.runEnds ?? []) { const t = this.tracks.get(e.body); if (t) cutGestures(t.gestures, e.at); }
@@ -176,7 +179,9 @@ export class V2Bridge {
     this.publish();
   }
 
-  private nodesChanged(nodes: NodeRec[], removed: string[], at: number): void {
+  /** `defer`: a body's record that changes its frame or slot is returned, to be sampled after the part's motion samples. */
+  private nodesChanged(nodes: NodeRec[], removed: string[], at: number, defer = false): NodeRec[] {
+    const moved: NodeRec[] = [];
     for (const id of removed) { this.nodes.delete(id); const t = this.tracks.get(id); if (t) t.gone ??= at; this.letGo(id, at); }
     for (const n of nodes) {
       this.nodes.set(n.id, n);
@@ -193,12 +198,13 @@ export class V2Bridge {
         // it from then on, so a body first seen standing is not held there until its next motion sample (#4217). Never
         // before the part that shows the move: a sit moves the record into the seat's slot without a motion sample, so
         // its `at` (its newest motion sample) is older than the move, and a sample there would be dropped (#4175).
-        if (n.parent && (!t.node || !samePlace(t.node, n))) this.sample(n.id, n.parent, n.slot, Math.max(n.at ?? at, at), n.pos);
+        if (n.parent && (!t.node || !samePlace(t.node, n))) { if (defer && t.node && (t.node.parent !== n.parent || t.node.slot !== n.slot)) moved.push(n); else this.sample(n.id, n.parent, n.slot, Math.max(n.at ?? at, at), n.pos); }
         t.node = n; t.gone = null;
       }
       // A placed body with no motion yet stands where its record has it.
       else if (n.parent) this.sample(n.id, n.parent, n.slot, n.at ?? 0, n.pos);
     }
+    return moved;
   }
 
   /** Thing `id` leaves its holder's hand at world time `at`; the holder still holds whatever else it holds. */

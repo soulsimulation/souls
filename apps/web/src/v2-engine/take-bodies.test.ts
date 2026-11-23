@@ -172,3 +172,18 @@ test('a sit that moves the record into a seat with no motion sample is drawn sea
   assert.equal(b.view.unplaced, 1);
   assert.deepEqual(b.view.unplacedFrames, ['w.99/2 (not in the public copy)']);
 });
+
+test('K2: a walk to a seat and the sit in one part is drawn seated, not standing on the walk\'s last sample', () => {
+  const b = new V2Bridge({ rulesVersion: 'test/1' });
+  b.receive({ t: 'snapshot', s: { nodes: [world, chair, body], removed: [] } as never });
+  b.receive(part(0));
+  b.receive(part(1));
+  // one part: the walk's samples to the chair (1.0 to 1.4 s), and the sit's record in its slot (`at`: its newest sample)
+  const walk = [0, 1, 2, 3, 4].map((k): [string, string, number | null, number, number, number, number] => ['b.7', 'w.0', null, T0 + 1_000_000 + k * 100_000, 500_000 * k, 0, 0]);
+  b.receive(part(2, [{ ...body, parent: 'w.3', slot: 0, pos: [0, 0, 0], at: T0 + 1_400_000 }], walk));
+  for (let n = 3; n < 12; n++) b.receive(part(n));
+  assert.equal(on(b, 1.2).activity, 'walk');
+  assert.equal(on(b, 2).activity, 'sit', 'seated once there');
+  assert.equal(on(b, 2).state.seatHeight, 0.45);
+  assert.equal(on(b, 4).activity, 'sit', 'and while it stays');
+});
