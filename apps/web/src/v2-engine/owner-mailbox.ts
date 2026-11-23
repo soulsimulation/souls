@@ -219,7 +219,7 @@ const PROTOCOL = 2;
 /** A box-only view socket, as v2/web/src/owner/mail-socket.ts `MailSocket` (that file's cborg resolves from v2/web,
  *  which this app does not install): hello, sign in with the view token, then only the box's text frames; the token
  *  is renewed on the open socket before it expires, and the socket comes back after a drop. */
-class BoxSocket implements Sock {
+export class BoxSocket implements Sock {
   onText: ((t: string) => void) | null = null;
   private ws: WebSocket | null = null;
   private open = false;
