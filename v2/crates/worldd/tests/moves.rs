@@ -1493,7 +1493,7 @@ fn a_twenty_metre_gateway_walk_gets_one_progress_answer_and_arrives() {
 }
 
 /// A synthetic mover edge across an otherwise planned route reproduces a walker making no progress. The test
-/// keeps the map unchanged deliberately: it exercises the same C21 watch as a stale route or a blocked walker.
+/// keeps the map unchanged deliberately: it exercises the never-stuck ladder as a stale route or a blocked walker would.
 fn stalled_bodies() -> Result<Bodies, replica::effects::Refusal> {
     let mut b = bodies()?;
     let ground = b.town.ground;
@@ -1530,18 +1530,21 @@ fn stalled_bodies() -> Result<Bodies, replica::effects::Refusal> {
     Ok(b)
 }
 
+/// A stalled gateway walk is the never-stuck ladder's (0.133 N1): routed again at 3 s, a shoulder turn at 9 s, and at
+/// 15 s its order ends by name, `goal-unreachable` (before, C21's watch ended it `walk.blocked` at 3 s); its body is
+/// released in its ending tick.
 #[test]
-fn a_stalled_gateway_walk_ends_walk_blocked_and_releases_its_body() {
+fn a_stalled_gateway_walk_ends_goal_unreachable_and_releases_its_body() {
     let (world, mut c, store, path) = served_with(10_000_000, "blockedwalk", stalled_bodies);
     c.send(1, "eden:walk", Some(thing()));
-    assert_eq!(c.answer(), Err("walk.blocked".into()));
+    assert_eq!(c.answer(), Err("goal-unreachable".into()));
     std::thread::sleep(Duration::from_millis(150));
     world.stop();
     let _ = std::fs::remove_file(&path);
     let bytes = store.0.lock().unwrap().bytes.clone();
     let log = logged(&bytes);
     let (&id, l) = log.iter().next().unwrap();
-    assert_eq!(l.last().unwrap().2.as_deref(), Some("walk.blocked"));
+    assert_eq!(l.last().unwrap().2.as_deref(), Some("goal-unreachable"));
     let ticks = ticks(&bytes);
     let (end, _, _) = tick_of(&ticks, id, MOVE_ENDED);
     assert!(

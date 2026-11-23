@@ -359,6 +359,7 @@ dependencies = [
 name = "gatewayd"
 version = "0.0.0"
 dependencies = [
+ "assets",
  "axum",
  "futures-util",
  "getrandom 0.3.4",
