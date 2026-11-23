@@ -568,22 +568,47 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
     let root = tree.node(tree.root()).map(|n| n.id());
     // The root's own fields first: a plan or claim list that would not read is refused whatever else.
     for (i, op) in edit.ops.iter().enumerate() {
-        if let Op::Set {
-            node: Ref::Node(id),
-            field,
-            to,
-        } = op
-            && Some(*id) == root
-        {
-            let (bad, why) = match *field {
-                F_CLAIMS => ("edit.claim-malformed", read_claims(to).err()),
-                F_DISTRICTS => ("edit.district-malformed", read_districts(to).err()),
-                F_ZONES => ("edit.zone-malformed", read_zones(to).err()),
-                _ => continue,
-            };
-            if let Some(why) = why {
-                return refuse(Some(i), bad, why);
+        // A rows operation (#3728) writes the whole field too: what it would make there is checked the same way.
+        let (id, field) = match op {
+            Op::Set {
+                node: Ref::Node(id),
+                field,
+                ..
             }
+            | Op::Rows {
+                node: Ref::Node(id),
+                field,
+                ..
+            } if Some(*id) == root && [F_CLAIMS, F_DISTRICTS, F_ZONES].contains(field) => {
+                (*id, *field)
+            }
+            _ => continue,
+        };
+        let merged;
+        let to = match op {
+            Op::Set { to, .. } => to,
+            Op::Rows { rows, .. } => {
+                let now = tree
+                    .handle(id)
+                    .and_then(|h| tree.node(h))
+                    .and_then(|n| n.fields().get(&field).cloned());
+                // Not a field of rows: the structure check has refused it already.
+                let Some(m) = super::merged_rows(now.as_ref(), rows) else {
+                    continue;
+                };
+                merged = m;
+                &merged
+            }
+            _ => continue,
+        };
+        let (bad, why) = match field {
+            F_CLAIMS => ("edit.claim-malformed", read_claims(to).err()),
+            F_DISTRICTS => ("edit.district-malformed", read_districts(to).err()),
+            F_ZONES => ("edit.zone-malformed", read_zones(to).err()),
+            _ => continue,
+        };
+        if let Some(why) = why {
+            return refuse(Some(i), bad, why);
         }
     }
     let claims = live(copy);
@@ -629,6 +654,11 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
                 }
             }
         };
+        if let Op::Set { node, field, to } = op
+            && *field == DOOR_LINK
+        {
+            aimed.insert(*node, to.clone());
+        }
         match op {
             Op::Place {
                 name,
@@ -716,9 +746,6 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
                 }
             }
             Op::Set { node, field, to } => {
-                if *field == DOOR_LINK {
-                    aimed.insert(*node, to.clone());
-                }
                 if *node == root.map_or(Ref::New(u64::MAX), Ref::Node) {
                     t.root = true;
                 } else {
@@ -739,6 +766,14 @@ pub(crate) fn judge(edit: &Edit, copy: &Replica) -> Result<(), Refused> {
                             }
                         }
                     }
+                }
+            }
+            // A rows edit (#3956) touches the thing where it is, as a set does.
+            Op::Rows { node, .. } => {
+                if *node == root.map_or(Ref::New(u64::MAX), Ref::Node) {
+                    t.root = true;
+                } else {
+                    add(&mut t, points_of(tree, &placed, *node));
                 }
             }
             Op::Remove { node } => {

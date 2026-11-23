@@ -112,6 +112,12 @@ asked of the geometry first (`out-of-reach` with the distance), the claim is a c
 each resource it holds, and each phase end is one timer in K9's due list. Nothing polls; a later claim that takes the
 move's resources cancels it at its next phase end (`claim-taken`).
 
+**Aimed moves** (0.134 B1). A move that touches nothing says so with the effector `aim` (`{1: 4}`): a point, a wave, a
+nod, a bow and a look aim at their target instead of reaching it. An aimed move has no contact, and its reach is sight:
+the target's distance, as the geometry measures it, up to `AIM_MOST` (20 m). Every other move touches, and its reach
+stays at most `REACH_MOST` (700 mm), so a hand still reaches no farther than an arm. Distance alone is checked; a wall
+between does not block an aim, and the move does not turn the body.
+
 ## Postures and seats (B3)
 
 `v2/crates/sim/src/slots` (B3 #2682) seats bodies. A seat is one slot of a thing, with its kind's data

@@ -1292,6 +1292,26 @@ impl Reach for Sight<'_> {
         };
         Some(with_height(flat([a.x, a.z], [b.x, b.z]), v))
     }
+
+    /// The thing argument this body's run named, for a move at it ([`AT_ARG`]). The record that names it is seen by
+    /// everyone, so a thing in a closed container is not named (#4339): the record keeps the form's own node.
+    fn aimed(&self, body: Id, point: &Name) -> Option<Id> {
+        if point.as_str() != AT_ARG {
+            return None;
+        }
+        let thing = *self.toward.get(&body)?;
+        let mut up = self.tree.node(self.tree.handle(thing)?)?.parent();
+        while let Some(p) = up {
+            let n = self.tree.node(self.tree.handle(p)?)?;
+            if entry_in(self.kinds, self.tree, &n)
+                .is_some_and(|e| crate::closed::Closed::closes(&e))
+            {
+                return None;
+            }
+            up = n.parent();
+        }
+        Some(thing)
+    }
 }
 
 /// The point a move with no `at` and no `toward` reaches (C23, #3494): the body itself, always in reach (a wave, a
@@ -2336,9 +2356,22 @@ impl Acts {
         let timers = self.timers.keys().copied().collect::<BTreeSet<Id>>();
         let mut watch = std::mem::take(&mut self.watch);
         let mut blocked = Vec::new();
+        // Intents rule 10 (0.134 I4): a Soul's own walk replaces its open run. In the run's walk its claim on the legs
+        // ends the run (`claim-taken`); a hand move holds no legs, so the run is left, at the move's next phase end
+        // (its contact or its end: never mid-contact).
+        let walking: Vec<Id> = bodies.as_deref().map_or_else(Vec::new, |b| {
+            b.runner
+                .running_bodies()
+                .into_iter()
+                .filter(|body| self.forms.in_hand_move(*body))
+                .collect()
+        });
         let mut stalled = Vec::new();
         let made_way = self.made_way.clone();
         let fired = self.with(tree, bodies.as_deref_mut(), tick, |forms, w| {
+            for body in walking {
+                let _ = forms.leave(w, body, None, now);
+            }
             forms.tick(w, now);
             let asked = std::mem::take(&mut *w.geometry.asked.borrow_mut());
             watch.keep(&asked.keys().copied().collect());

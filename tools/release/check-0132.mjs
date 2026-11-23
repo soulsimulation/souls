@@ -253,6 +253,10 @@ else if (ONLY.has('2')) {
   };
   /** Waits for act `seq` to end (its receipt, or a refusal), at most `ms`. */
   const ended = async (seq, ms = 120_000) => { for (const t0 = Date.now(); Date.now() - t0 < ms; await sleep(1000)) { const r = cli('receipt', String(seq)).receipt; if (r && r.going === false) return r; } return null; };
+  /** Waits for walk `seq` to end. The world ends a walk: done when it arrives, `walk.blocked` when it stalls (C21), so a
+   *  long walk that keeps closing on its goal is waited for (D11: a 233 s walk to a bed was cut at 120 s here, by the
+   *  next act sent while it still walked). The bound only keeps a check from hanging on a world that never answers. */
+  const walked = (seq) => ended(seq, 20 * 60_000);
   /** One timed step: the act sent, then the page polled until `shown` holds (at most 6 s); passes within 2 s. */
   let soul = null, arrivalT0 = null;
   const step = async (name, send, shown) => {
@@ -295,21 +299,21 @@ else if (ONLY.has('2')) {
     const took = report.lines[2].steps[0]?.timed?.[0]?.ms ?? null, came = report.lines[2].appearedMs ?? null;
     report.lines[2].arrivals.push({ acceptedMs: took, shownMs: came, afterMs: took !== null && came !== null ? came - took : null });
     row(2, `arrival ${ARRIVALS} of ${ARRIVALS}`, took !== null && came !== null && came - took <= 2000, `first act taken at ${took ?? '?'} ms; its body on the page ${came === null ? 'not within 30 s' : `at ${came} ms, ${came - took} ms after`}`);
-    if (r?.sequence) await ended(r.sequence);
-    r = await step('sit', () => bench ? cli('act', `sit:${bench}`) : { ok: false, detail: 'no seat found' }, (s) => s.activity === 'sit');
+    if (r?.sequence) await walked(r.sequence);
+    r = await step('sit', () => bench ? cli('act', `sit:${bench}`) : { ok: false, detail: 'no seat found' }, (s) => s.activity === 'sit' || s.acts.includes('sit') || s.doing === 'seated');
     if (r?.sequence) await ended(r.sequence, 15_000);
     // seated, a Soul stands up before it goes anywhere (the skill: `act <ns>:rise`), in the world's namespace or the seat's
     const rise = () => { const ns = [...new Set([bench, bed].filter(Boolean).map((id) => JSON.stringify(cli('inspect', id)).match(/"([a-z0-9_-]+):rise:/)?.[1]).filter(Boolean))]; const w = cli('act', ...(ns.length ? ns : ['eden', SLUG]).map((n) => `${n}:rise`)); return w.sequence ? ended(w.sequence, 15_000) : null; };
     await rise();
-    if (bed) { const w = cli('act', bed); if (w.sequence) await ended(w.sequence); }
-    r = await step('lie', () => bed ? cli('act', `lie:${bed}`) : { ok: false, detail: 'no bed found' }, (s) => s.activity === 'lie');
+    if (bed) { const w = cli('act', bed); if (w.sequence) await walked(w.sequence); }
+    r = await step('lie', () => bed ? cli('act', `lie:${bed}`) : { ok: false, detail: 'no bed found' }, (s) => s.activity === 'lie' || s.acts.includes('lie'));
     if (r?.sequence) await ended(r.sequence, 15_000);
     await rise();
-    if (cup) { const w = cli('act', cup); if (w.sequence) await ended(w.sequence); }
+    if (cup) { const w = cli('act', cup); if (w.sequence) await walked(w.sequence); }
     r = await step('take', () => cup ? cli('act', `take:${cup}`) : { ok: false, detail: 'no thing to take found' }, (s) => !!s.prop);
     if (r?.sequence) await ended(r.sequence, 15_000);
     r = await step('carry', () => bench ? cli('act', bench) : { ok: false, detail: 'no place to carry it to' }, (s) => !!s.prop && walking(s));
-    if (r?.sequence) await ended(r.sequence);
+    if (r?.sequence) await walked(r.sequence);
     // the client's set-down names the held thing itself (a take from a bookcase holds a new book, not the bookcase): the
     // thing `find` places in the Soul's own body, by the body's name
     const me = cli('status').body, myName = me ? cli('inspect', me).name : null, held = (await probe(page, soul))?.prop;

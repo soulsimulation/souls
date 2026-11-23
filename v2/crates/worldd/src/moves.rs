@@ -193,6 +193,7 @@ pub fn from_content(text: &str) -> R<Move> {
     }
     let effector = match m.get("effector").and_then(Json::str) {
         Some("hand" | "held_point") => Effector::Held,
+        Some("aim") => Effector::Aim,
         _ => return refuse(format!("{mv}: effector")),
     };
     let reach = match m.get("reach_mm") {
@@ -206,7 +207,7 @@ pub fn from_content(text: &str) -> R<Move> {
             detail: format!("{mv}: start-up, then at least one more, each above zero"),
         });
     }
-    if !(1..=replica::moves::REACH_MOST).contains(&reach) {
+    if !(1..=effector.reach_most()).contains(&reach) {
         return Err(Refusal {
             name: "move-reach-out-of-range",
             detail: format!("{mv}: {reach} µm"),
