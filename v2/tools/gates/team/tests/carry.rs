@@ -836,9 +836,19 @@ async fn rungs_0_and_1_two_souls_carry_loads_as_their_entries_state_through_the_
     let logged = Logged::read(&store);
     let (replayed, hash, held) = logged.replay();
     let t = replayed.tree();
+    // Where each load's middle lies (0.135 C4: a laid-flat upright's origin is at its foot, not its middle).
     let lies = |n: Id| {
         let node = t.node(t.handle(n).expect("the load")).unwrap();
-        (node.parent(), node.place().unwrap().position)
+        let p = node.place().unwrap();
+        let middle = match node.kind().as_str() {
+            k if k == full(UPRIGHT) => Load::of(&upright_entry()).unwrap().middle,
+            _ => Vec3::ZERO,
+        };
+        let m = p.orientation.rotate(middle).unwrap();
+        (
+            node.parent(),
+            Vec3::new(p.position.x + m.x, 0, p.position.z + m.z),
+        )
     };
     let near = |p: Vec3, q: Vec3| (p.x - q.x).abs() < 500_000 && (p.z - q.z).abs() < 500_000;
     let (on_b, at_b) = lies(beam());

@@ -1,0 +1,640 @@
+//! 0.135 C4: a world served by `worldd serve` carries both rack parts, a beam and an upright, by two Souls' own intents
+//! through a real gateway, one connection and one token each, as C1's steps: walk, offer and accept, lift, carry 25 m
+//! and set down. The carry is the content entry `content/kinds/construction/carry.json` (its two roles make it an
+//! activity kind, its slot admitting a thing is where the load rides), and each load is carried as its own entry
+//! states. Held and set down, the load's long axis runs between its carriers.
+//!
+//! N2's test world, its yard, and one upright lying loose on the open ground (the yard's frames stand in their
+//! stand's slots, and a lift takes a load from the floor its carriers stand on). The Souls are born at the yard's
+//! north edge.
+
+// A real process and a real gateway on the real clock: the waits are real time.
+#![allow(clippy::disallowed_methods)]
+
+use std::collections::BTreeMap;
+use std::io::{BufRead, BufReader, Read};
+use std::path::{Path, PathBuf};
+use std::process::{Child, Command, Stdio};
+use std::sync::Arc;
+use std::sync::mpsc::{Receiver, channel};
+use std::time::{Duration, Instant};
+
+use futures_util::{SinkExt, StreamExt};
+use gatewayd::receipts::Receipts;
+use gatewayd::token::{Grant, Token, Tokens};
+use gatewayd::{Gateway, Log, resume, socket, world_link};
+use replica::effects::{Actor, Body, Change, Effect, Part, TransferRec};
+use replica::encode::{Name, Value, decode, encode, from_hex};
+use replica::ids::{Id, Scope, Version};
+use replica::intents::{Hello, Intent, PROTOCOL, Target};
+use replica::pose::{Pose, Vec3};
+use replica::rules::json;
+use replica::world_model::plain;
+use sim::activity::carry::Load;
+use tokio::net::TcpStream;
+use tokio_tungstenite::tungstenite::Message;
+use tokio_tungstenite::{MaybeTlsStream, WebSocketStream};
+use worldd::answers;
+
+type Ws = WebSocketStream<MaybeTlsStream<TcpStream>>;
+
+const BUILD: [u8; 4] = [0x12, 0x20, 0xc4, 0x01];
+const M: i64 = 1_000_000;
+/// How far the two carry each load, µm.
+const CARRIED: i64 = 25 * M;
+const CARRY: &str = "mars:carry_activity";
+const FRONT: &str = "mars:front";
+
+fn scratch(tag: &str) -> PathBuf {
+    // Short: a Unix socket's path is at most 104 bytes on macOS.
+    let d = std::env::temp_dir().join(format!("{tag}-{}", std::process::id()));
+    let _ = std::fs::remove_dir_all(&d);
+    std::fs::create_dir_all(&d).expect("a scratch folder");
+    d
+}
+
+fn construction(file: &str) -> json::Value {
+    let p = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds/construction");
+    json::parse(&std::fs::read_to_string(p.join(file)).unwrap()).unwrap()
+}
+
+/// The beam carried: the yard's fourth, the easternmost, lying with its length along z.
+fn beam_at() -> Vec3 {
+    let x = testworld::YARD_X + 2_000 + 3 * testworld::BEAM_PITCH;
+    Vec3::new(x * 1000, 0, testworld::YARD_Z * 1000)
+}
+/// The loose upright, standing on the open ground 3 m north of the beams' line, west of the stand.
+fn upright_at() -> Vec3 {
+    Vec3::new(38 * M, 0, -21 * M)
+}
+
+/// N2's test world with one upright standing loose on the open ground, and the folder of entries: the construction
+/// kinds (the carry among them) and the body.
+fn world(d: &Path) -> String {
+    let root = Path::new(env!("CARGO_MANIFEST_DIR")).join("../../../content/kinds");
+    let entries = d.join("entries");
+    std::fs::create_dir_all(&entries).unwrap();
+    for f in std::fs::read_dir(root.join("construction")).unwrap() {
+        let p = f.unwrap().path();
+        std::fs::copy(&p, entries.join(p.file_name().unwrap())).unwrap();
+    }
+    std::fs::copy(
+        root.join("body/humanoid.json"),
+        entries.join("humanoid.json"),
+    )
+    .unwrap();
+    let mut f = json::parse(&testworld::generate(1, 0).unwrap().text).unwrap();
+    let json::Value::Obj(top) = &mut f else {
+        panic!("facts")
+    };
+    let num = |v: i64| json::Value::Int(i128::from(v));
+    let u = upright_at();
+    for (k, v) in top.iter_mut() {
+        if let ("things", json::Value::Arr(a)) = (k.as_str(), v) {
+            a.push(json::Value::Obj(vec![
+                ("id".into(), json::Value::s("loose-upright")),
+                ("def".into(), json::Value::s("testworld-rack-upright@1")),
+                ("ref".into(), json::Value::s("testworld-rack-upright@1")),
+                ("parent".into(), json::Value::Null),
+                (
+                    "pose".into(),
+                    json::Value::Arr([u.x / 1000, 0, u.z / 1000, 0].map(num).to_vec()),
+                ),
+                ("scale_ppm".into(), num(1_000_000)),
+                ("name".into(), json::Value::s("a loose rack frame")),
+            ]));
+        }
+    }
+    f.to_json()
+}
+
+/// A running `worldd serve`, its output lines on a channel.
+struct Served {
+    child: Child,
+    lines: Receiver<String>,
+}
+
+impl Served {
+    fn line(&self, prefix: &str, secs: u64) -> String {
+        let end = Instant::now() + Duration::from_secs(secs);
+        while let Some(left) = end.checked_duration_since(Instant::now()) {
+            match self.lines.recv_timeout(left) {
+                Ok(l) if l.starts_with(prefix) => return l,
+                Ok(_) => {}
+                Err(_) => break,
+            }
+        }
+        panic!("no line {prefix:?}");
+    }
+}
+
+impl Drop for Served {
+    fn drop(&mut self) {
+        let _ = self.child.kill();
+        let _ = self.child.wait();
+    }
+}
+
+/// `worldd seed` of `facts` with the entries in `d`, two Souls born at (x m, z m); then `worldd serve` on `socket`.
+/// The world's folder, its two Souls and the process.
+fn seed_and_serve(
+    d: &Path,
+    facts: &str,
+    at: (i64, i64),
+    socket: &Path,
+) -> (PathBuf, [Id; 2], Served) {
+    let path = d.join("facts.json");
+    std::fs::write(&path, facts).unwrap();
+    let dir = d.join("w");
+    let out = Command::new(env!("CARGO_BIN_EXE_worldd"))
+        .args(["seed", "--facts"])
+        .arg(&path)
+        .arg("--dir")
+        .arg(&dir)
+        .args(["--souls", "2", "--at", &format!("{},{}", at.0, at.1)])
+        .arg("--entries")
+        .arg(d.join("entries"))
+        .output()
+        .expect("seed runs");
+    assert!(
+        out.status.success(),
+        "seed: {}",
+        String::from_utf8_lossy(&out.stderr)
+    );
+    let meta = json::parse(&std::fs::read_to_string(dir.join("world.json")).unwrap()).unwrap();
+    let scope: [u8; 16] = from_hex(meta.get("souls_scope").and_then(json::Value::str).unwrap())
+        .unwrap()
+        .try_into()
+        .unwrap();
+    let souls = [1, 2].map(|c| Id::new(Scope(scope), c).unwrap());
+    let mut child = Command::new(env!("CARGO_BIN_EXE_worldd"))
+        .args(["serve", "--dir"])
+        .arg(&dir)
+        .arg("--socket")
+        .arg(socket)
+        .args(["--machine", "test-machine"])
+        .env_remove("WORLDD_STORE")
+        .env_remove("DIRECTORY_STORE_URL")
+        .env_remove("SOULS_BACKUP_URL")
+        .env_remove("SOULS_BACKUP_KEY_FILE")
+        .stdout(Stdio::piped())
+        .stderr(Stdio::piped())
+        .spawn()
+        .expect("worldd serve starts");
+    let (tx, lines) = channel();
+    let out = child.stdout.take().expect("stdout");
+    let err = child.stderr.take().expect("stderr");
+    for pipe in [Box::new(out) as Box<dyn Read + Send>, Box::new(err)] {
+        let tx = tx.clone();
+        std::thread::spawn(move || {
+            for l in BufReader::new(pipe).lines().map_while(Result::ok) {
+                let _ = tx.send(l);
+            }
+        });
+    }
+    (dir, souls, Served { child, lines })
+}
+
+/// The carry's activity kind as the served world pins it (`world.kinds`' boot lines), as an intent names a kind: its
+/// plain name and its hash's bytes.
+fn carry_kind(dir: &Path) -> Value {
+    let text = std::fs::read_to_string(dir.join("world.kinds")).expect("world.kinds");
+    let full = text
+        .lines()
+        .filter_map(|l| l.strip_prefix("# souls-boot-activity "))
+        .filter_map(|l| l.split_once(' ').map(|(_, a)| a))
+        .find(|a| plain(a) == CARRY)
+        .expect("the carry's activity is served");
+    let (p, hex) = full.split_once('@').unwrap();
+    Value::Array(vec![
+        Value::Text(Name::new(p).unwrap()),
+        Value::Bytes(from_hex(hex).unwrap()),
+    ])
+}
+
+/// Every effect the world's log holds now.
+fn effects(dir: &Path) -> Vec<Effect> {
+    let bytes = std::fs::read(dir.join("log")).unwrap_or_default();
+    let Ok(r) = sim::log::recover(&bytes) else {
+        return Vec::new();
+    };
+    r.records
+        .into_iter()
+        .filter(|r| !sim::recorder::is_input(r))
+        .filter_map(|r| Part::read(&r).ok())
+        .flat_map(|p| p.effects)
+        .collect()
+}
+
+/// The first id `find` picks from the log's effects, within 20 s (the log reaches the disk beside the answer).
+fn in_log(dir: &Path, find: impl Fn(&[Effect]) -> Option<Id>) -> Id {
+    let end = Instant::now() + Duration::from_secs(20);
+    loop {
+        if let Some(id) = find(&effects(dir)) {
+            return id;
+        }
+        assert!(Instant::now() < end, "not in the log");
+        std::thread::sleep(Duration::from_millis(50));
+    }
+}
+
+/// The body born for `soul`, by its `souls:body-of` link.
+fn body_of(dir: &Path, soul: Id) -> Id {
+    in_log(dir, |es| {
+        es.iter()
+            .filter_map(|e| match &e.body {
+                Body::Changes(cs) => Some(cs),
+                _ => None,
+            })
+            .flatten()
+            .find_map(|c| match &c.change {
+                Change::Link { ty, ends, .. }
+                    if ty.as_str() == "souls:body-of" && ends.contains(&soul) =>
+                {
+                    ends.iter().copied().find(|e| *e != soul)
+                }
+                _ => None,
+            })
+    })
+}
+
+/// The carry made by the entries numbered `seq`.
+fn carry_made(dir: &Path, seq: &[u64]) -> Id {
+    in_log(dir, |es| {
+        es.iter()
+            .filter(|e| seq.contains(&e.envelope.sequence))
+            .filter_map(|e| match &e.body {
+                Body::Changes(cs) => Some(cs),
+                _ => None,
+            })
+            .flatten()
+            .find_map(|c| match &c.change {
+                Change::Create { node, kind, .. } if plain(kind.as_str()) == CARRY => Some(*node),
+                _ => None,
+            })
+    })
+}
+
+/// Each change of parent `load` made, in order: where it was put.
+fn moves_of(dir: &Path, load: Id) -> Vec<Pose> {
+    effects(dir)
+        .into_iter()
+        .filter_map(|e| match e.body {
+            Body::Transfer(TransferRec::Leave { node, pose, .. }) if node == load => Some(pose),
+            _ => None,
+        })
+        .collect()
+}
+
+fn int(v: i64) -> Value {
+    u64::try_from(v).map_or_else(|_| Value::Nint(v.unsigned_abs() - 1), Value::Uint)
+}
+
+fn point(p: Vec3) -> BTreeMap<u64, Value> {
+    BTreeMap::from([(1, Value::Array(vec![int(p.x), int(0), int(p.z)]))])
+}
+
+async fn next(ws: &mut Ws) -> Value {
+    loop {
+        let m = tokio::time::timeout(Duration::from_secs(90), ws.next())
+            .await
+            .expect("an answer within 90 s")
+            .expect("the socket is open")
+            .expect("a message");
+        if let Message::Binary(b) = m {
+            return decode(&b).unwrap().value;
+        }
+    }
+}
+
+async fn put(ws: &mut Ws, bytes: Vec<u8>) {
+    ws.send(Message::Binary(bytes.into())).await.unwrap();
+}
+
+/// One Soul on its own connection through the gateway, signed in with its own token.
+struct Soul {
+    ws: Ws,
+    id: Id,
+    lineage: Scope,
+    sequence: u64,
+}
+
+impl Soul {
+    async fn connect(url: &str, id: Id, lineage: Scope, token: &Token) -> Soul {
+        let (mut ws, _) = tokio_tungstenite::connect_async(url).await.unwrap();
+        let hello = Hello {
+            protocol: PROTOCOL,
+            build: BUILD.to_vec(),
+            refused: None,
+            other: None,
+        };
+        put(&mut ws, hello.to_bytes().unwrap()).await;
+        next(&mut ws).await;
+        let sign_in = BTreeMap::from([(1, Value::Text(Name::new(token.reveal()).unwrap()))]);
+        put(&mut ws, encode(&Value::Map(sign_in)).unwrap()).await;
+        let Value::Map(o) = next(&mut ws).await else {
+            panic!("an outcome")
+        };
+        assert_eq!(
+            o.get(&4),
+            Some(&Value::Text(Name::new(resume::STARTED).unwrap()))
+        );
+        Soul {
+            ws,
+            id,
+            lineage,
+            sequence: 0,
+        }
+    }
+
+    async fn send(&mut self, verb: &str, target: Id, parameters: BTreeMap<u64, Value>) {
+        self.sequence += 1;
+        let i = Intent {
+            actor: Actor::Soul(self.id),
+            verb: Name::new(verb).unwrap(),
+            target: Some(Target::Node(target)),
+            parameters,
+            sequence: self.sequence,
+            basis: Version {
+                lineage: self.lineage,
+                zone: Id::new(self.lineage, 0).unwrap(),
+                epoch: 1,
+                sequence: 0,
+            }
+            .to_value(),
+            expiry: answers::now() + 120_000_000,
+            resources: Vec::new(),
+            fallbacks: Vec::new(),
+            replaces: None,
+            body: None,
+            reflex: false,
+        };
+        put(&mut self.ws, encode(&i.to_value()).unwrap()).await;
+    }
+
+    /// The answer to this Soul's last intent: a receipt's entries, or a refusal's reason. A progress answer (kind 3)
+    /// is read past.
+    async fn answer(&mut self) -> Result<Vec<u64>, String> {
+        loop {
+            let Value::Map(f) = next(&mut self.ws).await else {
+                continue;
+            };
+            let Some(Value::Map(a)) = f.get(&2) else {
+                continue;
+            };
+            if a.get(&2) != Some(&Value::Uint(self.sequence)) {
+                continue;
+            }
+            match (a.get(&3), a.get(&5)) {
+                (Some(Value::Uint(1)), Some(Value::Array(e))) => {
+                    return Ok(e
+                        .iter()
+                        .filter_map(|v| match v {
+                            Value::Uint(n) => Some(*n),
+                            _ => None,
+                        })
+                        .collect());
+                }
+                (Some(Value::Uint(1)), _) => return Ok(Vec::new()),
+                (Some(Value::Uint(2)), _) => {
+                    return Err(match a.get(&4) {
+                        Some(Value::Text(t)) => t.as_str().to_owned(),
+                        other => format!("{other:?}"),
+                    });
+                }
+                _ => continue,
+            }
+        }
+    }
+
+    async fn act(
+        &mut self,
+        verb: &str,
+        target: Id,
+        parameters: BTreeMap<u64, Value>,
+    ) -> Result<Vec<u64>, String> {
+        self.send(verb, target, parameters).await;
+        self.answer().await
+    }
+}
+
+/// A gateway in this process, linked to the world's socket, with one token for each Soul: its URL and the tokens.
+async fn gateway(socket: &Path, souls: &[Id]) -> (String, Vec<Token>) {
+    let mut tokens = Tokens::default();
+    let mut out = Vec::new();
+    for &s in souls {
+        let grant = Grant::Actor(Actor::Soul(s));
+        let token = Token::issue(grant).unwrap();
+        tokens.add(grant, token.hash());
+        out.push(token);
+    }
+    let log: Log = Arc::new(|_: &str| {});
+    let gw = Gateway::with_receipts(tokens, BUILD.to_vec(), log, Receipts::off());
+    tokio::spawn(world_link::run(gw.clone(), socket.to_owned()));
+    let tcp = tokio::net::TcpListener::bind("127.0.0.1:0").await.unwrap();
+    let url = format!("ws://{}{}", tcp.local_addr().unwrap(), socket::PATH);
+    tokio::spawn(axum::serve(tcp, socket::router(gw.clone())).into_future());
+    let end = Instant::now() + Duration::from_secs(60);
+    while !gw.link.up() {
+        assert!(Instant::now() < end, "the gateway links to the world");
+        tokio::time::sleep(Duration::from_millis(5)).await;
+    }
+    (url, out)
+}
+
+/// Both walk to their places at a load whose middle is `at`, Soul 1 in front (east), then Soul 1 offers the carry to
+/// Soul 2 and Soul 2 accepts; the carry's activity. Before the accept, Soul 1 alone is refused its lift by name.
+async fn gather(
+    a: &mut Soul,
+    b: &mut Soul,
+    dir: &Path,
+    ground: Id,
+    load: Id,
+    entry: &json::Value,
+    at: Vec3,
+) -> Id {
+    let [back, front] = Load::of(entry).unwrap().places();
+    a.send("eden:walk", ground, point(Vec3::new(at.x + front, 0, at.z)))
+        .await;
+    b.send("eden:walk", ground, point(Vec3::new(at.x + back, 0, at.z)))
+        .await;
+    let (wa, wb) = (a.answer().await, b.answer().await);
+    wa.expect("Soul 1 walks to its place in front");
+    wb.expect("Soul 2 walks to its place behind");
+    let partner = body_of(dir, b.id);
+    let offered = a
+        .act(
+            "activity:offer",
+            ground,
+            BTreeMap::from([
+                (1, carry_kind(dir)),
+                (2, Value::Text(Name::new(FRONT).unwrap())),
+                (3, Value::Array(vec![partner.to_value()])),
+            ]),
+        )
+        .await
+        .expect("the carry offered");
+    let carry = carry_made(dir, &offered);
+    let alone = a
+        .act("carry:lift", carry, BTreeMap::from([(1, load.to_value())]))
+        .await;
+    assert_eq!(alone, Err("carry-needs-two".to_owned()), "a Soul alone");
+    b.act("activity:accept", carry, BTreeMap::new())
+        .await
+        .expect("Soul 2 accepts, and the carry starts");
+    carry
+}
+
+/// Soul 1 lifts `load`, both walk 25 m east, Soul 2 sets it down and both leave.
+async fn carry_east(
+    a: &mut Soul,
+    b: &mut Soul,
+    ground: Id,
+    carry: Id,
+    load: Id,
+    entry: &json::Value,
+    at: Vec3,
+) {
+    let [back, front] = Load::of(entry).unwrap().places();
+    a.act("carry:lift", carry, BTreeMap::from([(1, load.to_value())]))
+        .await
+        .expect("lifted");
+    a.send(
+        "eden:walk",
+        ground,
+        point(Vec3::new(at.x + front + CARRIED, 0, at.z)),
+    )
+    .await;
+    b.send(
+        "eden:walk",
+        ground,
+        point(Vec3::new(at.x + back + CARRIED, 0, at.z)),
+    )
+    .await;
+    let (wa, wb) = (a.answer().await, b.answer().await);
+    wa.expect("the front carries it 25 m");
+    wb.expect("the back carries it 25 m");
+    b.act("carry:set-down", carry, BTreeMap::new())
+        .await
+        .expect("set down");
+    for s in [a, b] {
+        s.act("activity:leave", carry, BTreeMap::new())
+            .await
+            .expect("a leave is always accepted");
+    }
+}
+
+/// The load's lift and its set-down, from the log: held in the carry's slot with its `long` axis (its own frame,
+/// µm from its middle) along the carry's +x, and set down with its middle 25 m east of `at` and its long axis still
+/// east to west.
+fn held_and_set_down(dir: &Path, name: &str, load: Id, entry: &json::Value, long: Vec3, at: Vec3) {
+    let l = Load::of(entry).unwrap();
+    let moved = moves_of(dir, load);
+    let [lift, down] = moved[..] else {
+        panic!("{name}: lifted once and set down once: {moved:?}")
+    };
+    assert!(
+        lift.frame.slot.is_some(),
+        "{name}: held in the carry's slot"
+    );
+    let end = lift.orientation.rotate(long).unwrap();
+    println!(
+        "{name}: held with its long axis's end at {end:?} in the carry's frame (+x the front)"
+    );
+    assert!(
+        (end.x - l.half_length).abs() <= 2 && end.y.abs() <= 2 && end.z.abs() <= 2,
+        "{name}: its long axis runs between the carriers: {end:?}"
+    );
+    let m = down.orientation.rotate(l.middle).unwrap();
+    let middle = Vec3::new(
+        down.position.x + m.x,
+        down.position.y + m.y,
+        down.position.z + m.z,
+    );
+    let end = down.orientation.rotate(long).unwrap();
+    println!("{name}: set down, its middle at {middle:?}, its long axis's end at {end:?}");
+    assert!(
+        (middle.x - at.x - CARRIED).abs() < 600_000 && (middle.z - at.z).abs() < 600_000,
+        "{name}: set down 25 m east: {middle:?}"
+    );
+    assert!(
+        (end.x.abs() - l.half_length).abs() < 20_000 && end.z.abs() < 20_000,
+        "{name}: set down lengthwise along the way it was carried: {end:?}"
+    );
+}
+
+#[tokio::test(flavor = "multi_thread")]
+async fn c4_a_served_world_carries_a_beam_and_an_upright_by_souls_intents_lengthwise() {
+    let d = scratch("c4");
+    let facts = world(&d);
+    let socket = d.join("s");
+    let (dir, souls, served) = seed_and_serve(&d, &facts, (44, -18), &socket);
+    let activities = served.line("activities: ", 180);
+    println!("{activities}");
+    assert!(activities.contains(CARRY), "the carry is an activity kind");
+    served.line("listening ", 180);
+    let im = import_eden::load(&facts).unwrap();
+    let (ground, beam, upright) = (
+        im.nodes["ground"],
+        im.nodes["yard-beam-4"],
+        im.nodes["loose-upright"],
+    );
+    let lineage = im.nodes["world"].scope();
+    let (url, tokens) = gateway(&socket, &souls).await;
+    let mut a = Soul::connect(&url, souls[0], lineage, &tokens[0]).await;
+    let mut b = Soul::connect(&url, souls[1], lineage, &tokens[1]).await;
+
+    let (beam_entry, upright_entry) = (
+        construction("rack_beam.json"),
+        construction("rack_upright.json"),
+    );
+    let first = gather(&mut a, &mut b, &dir, ground, beam, &beam_entry, beam_at()).await;
+    carry_east(&mut a, &mut b, ground, first, beam, &beam_entry, beam_at()).await;
+    let second = gather(
+        &mut a,
+        &mut b,
+        &dir,
+        ground,
+        upright,
+        &upright_entry,
+        upright_at(),
+    )
+    .await;
+    carry_east(
+        &mut a,
+        &mut b,
+        ground,
+        second,
+        upright,
+        &upright_entry,
+        upright_at(),
+    )
+    .await;
+    // The last parts reach the log in the tick after the last answer.
+    tokio::time::sleep(Duration::from_millis(500)).await;
+    drop(served);
+
+    // The beam's length is its z, the upright's its y (from its foot; its middle is half its height up).
+    held_and_set_down(
+        &dir,
+        "the beam",
+        beam,
+        &beam_entry,
+        Vec3::new(0, 0, Load::of(&beam_entry).unwrap().half_length),
+        beam_at(),
+    );
+    let up = Load::of(&upright_entry).unwrap();
+    held_and_set_down(
+        &dir,
+        "the upright",
+        upright,
+        &upright_entry,
+        Vec3::new(0, up.half_length, 0),
+        Vec3::new(upright_at().x, 0, upright_at().z),
+    );
+    println!(
+        "C4: a served world carried the beam and the upright 25 m by two Souls' intents through the gateway (walk, \
+         offer, a Soul alone refused carry-needs-two, accept, lift, carry, set down, leave), each held and set down \
+         lengthwise between its carriers"
+    );
+}

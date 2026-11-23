@@ -438,9 +438,17 @@ impl Engine {
                         .handle(board)
                         .and_then(|h| tree.node(h))
                         .ok_or_else(|| refusal("lift-needs-a-thing", show(board)))?;
-                    if let Some(load) = self.loads.get(plain(node.kind().as_str())) {
+                    let load = self.loads.get(plain(node.kind().as_str())).copied();
+                    if let Some(load) = &load {
+                        // 0.135 C4: its middle, wherever its origin is (a laid-flat upright's is at its end).
                         let middle = match (node.parent(), node.place()) {
-                            (Some(p), Some(at)) if p == ground => at.position,
+                            (Some(p), Some(at)) if p == ground => {
+                                let m = at
+                                    .orientation
+                                    .rotate(load.middle)
+                                    .map_err(|e| refusal("carry-pose", format!("{e:?}")))?;
+                                Vec3::new(at.position.x + m.x, 0, at.position.z + m.z)
+                            }
                             _ => {
                                 return Err(refusal(
                                     "carry-grip-out-of-reach",
@@ -481,6 +489,7 @@ impl Engine {
                         self.header.clone(),
                         self.rules.clone(),
                     );
+                    carry.load = load.unwrap_or_else(Load::board);
                     carry.lift(&mut tree, now, f, k, transfer)?;
                     self.carries.insert(activity, carry);
                 } else {
@@ -566,6 +575,14 @@ impl Engine {
                 self.header.clone(),
                 self.rules.clone(),
             );
+            // 0.135 C4: set down the way it lies, as its entry states it.
+            if let Some(l) = tr
+                .handle(load)
+                .and_then(|h| tr.node(h))
+                .and_then(|n| self.loads.get(plain(n.kind().as_str())))
+            {
+                carry.load = *l;
+            }
             match break_off(
                 &mut carry,
                 &mut self.activities,

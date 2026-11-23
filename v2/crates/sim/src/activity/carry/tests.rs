@@ -781,6 +781,7 @@ mod from_entry {
                 half_width: 51_000,
                 grips: [-1_097_000, 1_097_000],
                 crew: 2,
+                ..beam
             }
         );
         let upright = Load::of(&entry("rack_upright.json")).expect("the upright");
@@ -791,9 +792,95 @@ mod from_entry {
                 half_width: 609_500,
                 grips: [-780_000, 780_000],
                 crew: 1,
+                ..upright
             }
         );
         assert_eq!(upright.places(), [-780_000 - REACH, 780_000 + REACH]);
+    }
+
+    /// 0.135 C4: held in the carry's slot, each load's long axis runs along the carry's +x, from the back carrier to
+    /// the front (the beam's z, the upright's y), the beam on its edge and the upright flat, its middle at the slot's origin;
+    /// set down between carriers facing +z, it lies the same way, its middle between them and its lowest side on the
+    /// floor. B9's board is held as before.
+    #[test]
+    fn c4_a_load_is_held_and_set_down_lengthwise_between_its_carriers() {
+        use replica::pose::{Quat, Vec3};
+        let near = |a: Vec3, b: Vec3| {
+            (a.x - b.x).abs() <= 2 && (a.y - b.y).abs() <= 2 && (a.z - b.z).abs() <= 2
+        };
+        // Each load's long axis, the side that lies across, and the side that stands up, from its middle, µm: the
+        // beam stays on its edge, the upright is laid flat.
+        for (name, file, long, wide, thin) in [
+            (
+                "beam",
+                "rack_beam.json",
+                Vec3::new(0, 0, 1_371_500),
+                Vec3::new(25_500, 0, 0),
+                Vec3::new(0, 51_000, 0),
+            ),
+            (
+                "upright",
+                "rack_upright.json",
+                Vec3::new(0, 1_219_000, 0),
+                Vec3::new(609_500, 0, 0),
+                Vec3::new(0, 0, 38_000),
+            ),
+        ] {
+            let load = Load::of(&entry(file)).unwrap();
+            let (at, q) = load.held().unwrap();
+            // Its long axis's end, from its middle, turned: along the carry's +x, by half its length.
+            let end = q.rotate(long).unwrap();
+            assert!(
+                near(end, Vec3::new(load.half_length, 0, 0)),
+                "{name}: its length runs between the carriers: {end:?}"
+            );
+            let across = q.rotate(wide).unwrap();
+            assert!(
+                across.y.abs() <= 2 && across.x.abs() <= 2,
+                "{name}: its wider side lies across: {across:?}"
+            );
+            let up = q.rotate(thin).unwrap();
+            assert!(
+                up.x.abs() <= 2 && up.z.abs() <= 2,
+                "{name}: its thinnest side stands up: {up:?}"
+            );
+            let middle = q.rotate(load.middle).unwrap();
+            assert!(
+                near(
+                    Vec3::new(at.x + middle.x, at.y + middle.y, at.z + middle.z),
+                    Vec3::ZERO
+                ),
+                "{name}: its middle at the slot's origin"
+            );
+            // Set down between carriers that face +z (the carry's +x turned a quarter turn).
+            let facing = Quat::from_yaw_mdeg(-90_000).unwrap();
+            assert!(near(
+                facing.rotate(Vec3::new(1_000_000, 0, 0)).unwrap(),
+                Vec3::new(0, 0, 1_000_000)
+            ));
+            let c = Vec3::new(5 * M, 0, -3 * M);
+            let (p, o) = load.resting(c, facing).unwrap();
+            let m = o.rotate(load.middle).unwrap();
+            assert!(
+                near(
+                    Vec3::new(p.x + m.x, p.y + m.y, p.z + m.z),
+                    Vec3::new(c.x, up.y.abs(), c.z)
+                ),
+                "{name}: its middle between the carriers, its lowest side on the floor"
+            );
+            let end = o.rotate(long).unwrap();
+            assert!(
+                near(end, Vec3::new(0, 0, load.half_length)),
+                "{name}: set down lengthwise along the way they faced: {end:?}"
+            );
+        }
+        let board = Load::board();
+        assert_eq!(board.held().unwrap(), (Vec3::ZERO, Quat::IDENTITY));
+        let q = Quat::from_yaw_mdeg(30_000).unwrap();
+        assert_eq!(
+            board.resting(Vec3::new(1, 2, 3), q).unwrap(),
+            (Vec3::new(1, 2, 3), q)
+        );
     }
 
     /// Two walls with a 0.9 m passage between them, across a straight way east: the upright (1.22 m wide) is refused

@@ -31,6 +31,11 @@
 //!   geometry on the straight way there `carry-board-clips` ([`sweep_load`]); nothing is written. A load whose kind
 //!   has no entry is B9's 2 m board, as before.
 //!
+//! - **Held lengthwise (0.135 C4).** The carry's +x runs from the back carrier to the front, so a load is held in the
+//!   carry's slot turned so its longest side runs along it ([`Load::turn`]: a quarter turn about y for a beam whose
+//!   length is its z; an upright, whose length is its y, laid flat), its middle at the slot's origin ([`Load::held`]);
+//!   set down, it lies the same way, its middle between the carriers and its lowest side on the floor
+//!   ([`Load::resting`]). B9's board, whose length is its x, is held as before.
 //! - **A carry that breaks off sets its load down where it is (0.135 C3).** A partner's leave, carriers drifted more
 //!   than [`STRETCH`] from their span at the lift (one stopped, or its connection is gone, while the other walked
 //!   on), and a restart (a carry is not stored, so the load found riding is set down at the first tick) each set
@@ -97,6 +102,13 @@ pub struct Load {
     pub grips: [i64; 2],
     /// How many must carry it (`state.hold_crew`'s default; two when it says none).
     pub crew: u64,
+    /// The turn from its own frame to the carry's (0.135 C4): its longest side along the carry's +x, from the back
+    /// carrier to the front; a load whose length lies flat keeps its up, one whose length stands is laid flat.
+    pub turn: Quat,
+    /// The middle of its bounds in its own frame, µm: held at the carry's slot, set down between its carriers.
+    pub middle: Vec3,
+    /// Half its side that stands upright once turned, µm: how high its middle rests when it is set down.
+    pub rest: i64,
 }
 
 impl Load {
@@ -107,7 +119,25 @@ impl Load {
             half_width: HALF_WIDTH,
             grips: [-HALF_LENGTH, HALF_LENGTH],
             crew: 2,
+            turn: Quat::IDENTITY,
+            middle: Vec3::ZERO,
+            rest: 0,
         }
+    }
+
+    /// Where the load is held in the carry's slot (0.135 C4): its middle at the slot's origin, its long axis between
+    /// the carriers. Its position and orientation in the carry's frame.
+    pub fn held(&self) -> R<(Vec3, Quat)> {
+        let m = self.turn.rotate(self.middle).map_err(pose_refusal)?;
+        Ok((Vec3::new(-m.x, -m.y, -m.z), self.turn))
+    }
+
+    /// Where the load rests when set down (0.135 C4): its middle over `c` (on the floor, in the floor's frame, µm)
+    /// and its long axis along `q`'s +x. Its position and orientation in the floor's frame.
+    pub fn resting(&self, c: Vec3, q: Quat) -> R<(Vec3, Quat)> {
+        let o = q.then(self.turn).map_err(pose_refusal)?;
+        let m = o.rotate(self.middle).map_err(pose_refusal)?;
+        Ok((Vec3::new(c.x - m.x, c.y + self.rest - m.y, c.z - m.z), o))
     }
 
     /// A load from its kind's entry (`souls-entry/1`): `geometry.bounds_mm`, the `grip` points and
@@ -165,11 +195,21 @@ impl Load {
             Some(Json::Int(n)) => u64::try_from(*n).map_err(|_| "hold_crew is a count")?,
             _ => 2,
         };
+        // Its longest side onto the carry's +x (0.135 C4): x stays; z by a quarter turn about y; y laid flat, by the
+        // turn that takes y to x, x to z and z to y, so its wider side lies across as `half_width` has it.
+        let (turn, up) = match axis {
+            0 => (Ok(Quat::IDENTITY), h),
+            1 => (Quat::new(1 << 29, -(1 << 29), -(1 << 29), -(1 << 29)), d),
+            _ => (Quat::from_yaw_mdeg(90_000), h),
+        };
         Ok(Load {
             half_length: sides[axis] * 500,
             half_width: across * 500,
             grips: [back, front],
             crew,
+            turn: turn.map_err(|e| format!("a load's turn: {e:?}"))?,
+            middle: Vec3::new(0, h * 500, 0),
+            rest: up * 500,
         })
     }
 
@@ -570,6 +610,9 @@ pub struct Carry {
     pub track: Vec<(Micros, Vec3, Quat)>,
     /// How far apart its carriers stood at the lift, µm on the plan (0.135 C3).
     pub span: i64,
+    /// What it carries, as its kind's entry states it (B9's board when it has none): how it is held and set down
+    /// (0.135 C4).
+    pub load: Load,
 }
 
 /// How far the carriers may drift from their span at the lift before the carry breaks off, µm (0.135 C3): a partner
@@ -616,6 +659,7 @@ impl Carry {
             log: Log::new(header, rules, 0),
             track: Vec::new(),
             span: 0,
+            load: Load::board(),
         }
     }
 
@@ -669,6 +713,7 @@ impl Carry {
         transfer: Id,
     ) -> R<()> {
         let (c, q) = Carry::pose(front, back)?;
+        let (position, orientation) = self.load.held()?;
         let leave = TransferRec::Leave {
             transfer,
             node: self.board,
@@ -679,8 +724,8 @@ impl Carry {
                     node: self.activity,
                     slot: Some(SLOT),
                 },
-                position: Vec3::ZERO,
-                orientation: Quat::IDENTITY,
+                position,
+                orientation,
                 support: Support::Slot,
             },
         };
@@ -751,6 +796,7 @@ impl Carry {
         q: Quat,
         transfer: Id,
     ) -> R<()> {
+        let (position, orientation) = self.load.resting(c, q)?;
         let leave = TransferRec::Leave {
             transfer,
             node: self.board,
@@ -758,8 +804,8 @@ impl Carry {
             zone: self.log.header.zone,
             pose: Pose {
                 frame: Frame { node, slot: None },
-                position: c,
-                orientation: q,
+                position,
+                orientation,
                 support: Support::Surface {
                     surface: node,
                     height: 0,
