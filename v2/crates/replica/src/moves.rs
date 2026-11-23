@@ -75,6 +75,9 @@ impl Effector {
 pub struct Phase {
     pub name: Name,
     pub length: Micros,
+    /// The move's last phase may hold (0.134, for holding hands): it has no end of its own and lasts until the move is
+    /// released (`sim::moves::Moves::release`); `length` is then only its least. Written `{3: 1}`, and only when set.
+    pub held: bool,
 }
 
 /// A move, as data.
@@ -176,10 +179,22 @@ impl Move {
             }
             let length =
                 i64::try_from(length).or_else(|_| refuse("not-a-move", "a phase's length"))?;
+            let held = match p.get(&3) {
+                None => false,
+                Some(Value::Uint(1)) => true,
+                Some(_) => return refuse("not-a-move", "a phase holds as {3: 1}"),
+            };
             phases.push(Phase {
                 name: pname,
                 length,
+                held,
             });
+        }
+        if phases.iter().rev().skip(1).any(|p| p.held) {
+            return refuse(
+                "move-held-not-last",
+                format!("{}: only the last phase may hold", name.as_str()),
+            );
         }
         if phases.len() < 2 {
             return refuse(
@@ -259,7 +274,13 @@ impl Move {
         let phases = self
             .phases
             .iter()
-            .map(|p| map([(1, Value::Text(p.name.clone())), (2, int(p.length))]))
+            .map(|p| {
+                let mut m = BTreeMap::from([(1, Value::Text(p.name.clone())), (2, int(p.length))]);
+                if p.held {
+                    m.insert(3, Value::Uint(1));
+                }
+                Value::Map(m)
+            })
             .collect();
         Value::Map(BTreeMap::from([
             (1, Value::Text(self.name.clone())),
@@ -317,10 +338,18 @@ impl Move {
             ps.first().map(|p| p.0.as_str()),
             ps.last().map(|p| p.0.as_str()),
         );
-        if first != Some("start_up_us") || last != Some("recovery_us") {
+        if first != Some("start_up_us") || !matches!(last, Some("recovery_us" | "hold_us")) {
             return refuse(
                 "not-a-move",
-                format!("{bare}: phases start with start_up_us and end with recovery_us"),
+                format!(
+                    "{bare}: phases start with start_up_us and end with recovery_us or hold_us"
+                ),
+            );
+        }
+        if ps.iter().rev().skip(1).any(|p| p.0 == "hold_us") {
+            return refuse(
+                "move-held-not-last",
+                format!("{bare}: hold_us is the last phase"),
             );
         }
         let phases = ps
@@ -330,6 +359,7 @@ impl Move {
                 Ok(Phase {
                     name: entry_name(&format!("souls:{phase}"))?,
                     length: whole(Some(v), k)?,
+                    held: k == "hold_us",
                 })
             })
             .collect::<R<Vec<Phase>>>()?;
@@ -506,7 +536,8 @@ impl MoveRecord {
             .iter()
             .map(|p| {
                 at += p.length;
-                at
+                // A held phase has no end of its own: it lasts until the move is released.
+                if p.held { Micros::MAX } else { at }
             })
             .collect();
         MoveRecord {
@@ -738,9 +769,12 @@ mod tests {
                 mv.phases.first().map(|p| p.name.as_str()),
                 Some("souls:start-up")
             );
-            assert_eq!(
-                mv.phases.last().map(|p| p.name.as_str()),
-                Some("souls:recovery")
+            // The last is recovery, or a held phase (0.134: holding hands lasts until released).
+            assert!(
+                mv.phases
+                    .last()
+                    .is_some_and(|p| p.name.as_str() == "souls:recovery" || p.held),
+                "{label}"
             );
         }
         assert_eq!(lib.current().len(), texts.len());
