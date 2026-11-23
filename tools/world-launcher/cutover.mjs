@@ -1,5 +1,5 @@
 // The operator binds the old registry identity to one canonical v2 route. The canonical flag is the only switch.
-import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, renameSync, writeFileSync } from 'node:fs';
+import { closeSync, existsSync, fstatSync, mkdirSync, openSync, readFileSync, readSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { createHash } from 'node:crypto';
 import { isAbsolute, join } from 'node:path';
 import { worldIdOf } from './registry.mjs';
@@ -74,6 +74,13 @@ export function cutoverFence({ binding, file = process.env.SOULS_CUTOVER_BINDING
   // v2Bodies: the same-origin directory serving the v2 body catalogue (bodies.json and its models), as the operator places it
   const { oldWorldId, canonicalSlug, routesFile, clientDir, staticDir, v2Bodies = null } = binding;
   let publishing = null, published = null; // the flight, and the stream the files in staticDir were published for
+  // The manifest goes first: without it nothing here is served, so a reader never mixes one routing's files with another's
+  // while they are removed or rewritten. Then the six files (and any `.tmp` a stopped publish left).
+  const clear = () => {
+    if (!staticDir) return;
+    rmSync(join(staticDir, 'manifest.json'), { force: true });
+    for (const name of [...Object.keys(STATIC), 'manifest.json']) { rmSync(join(staticDir, name), { force: true }); rmSync(join(staticDir, `${name}.tmp`), { force: true }); }
+  };
   const manifest = () => { try { return JSON.parse(readBounded(join(staticDir, 'manifest.json'), 1024 * 1024)); } catch { return null; } };
   const route = () => {
     try {
@@ -108,14 +115,16 @@ export function cutoverFence({ binding, file = process.env.SOULS_CUTOVER_BINDING
       let stream = null;
       try { const r = route(); stream = r.canonical === true && publicStream(r.stream) ? r.stream : null; } catch { /* unverifiable: not routed */ }
       if (stream !== published) published = null; // rolled back (or re-routed): the next routing publishes afresh
+      // rolled back (or the routing cannot be verified): the previous routing's files go, so a re-route never serves them
+      if (!stream && staticDir && !publishing && existsSync(join(staticDir, 'manifest.json'))) clear();
       return stream;
     },
     /** #4177: the body catalogue's directory for the page, under the same rule as `v2Stream` (routed, else null). */
     v2Bodies(w) { return v2Bodies && this.v2Stream(w) ? v2Bodies : null; },
     /** #4177: at route time, the old world's static views (`read(path)` -> `{ status, body }` from its process) written
      *  into staticDir, each file whole (`.tmp`, then renamed; the origin never serves a `.tmp`), the manifest last. Once
-     *  per routing: a later call for the same stream does nothing. Resolves to the manifest, or null (not routed, no
-     *  staticDir, or the old world did not answer its snapshot). */
+     *  per routing: a later call for the same stream does nothing. Resolves to the manifest, or null (not routed, or no
+     *  staticDir); rejects when the old world does not answer its snapshot (nothing is then served: its views answer live). */
     publish(w, read) {
       const stream = staticDir ? this.v2Stream(w) : null;
       if (!stream) { published = null; return Promise.resolve(null); }
@@ -123,9 +132,10 @@ export function cutoverFence({ binding, file = process.env.SOULS_CUTOVER_BINDING
       return publishing ??= (async () => {
         const files = {};
         mkdirSync(staticDir, { recursive: true });
+        clear();
         for (const [name, path] of Object.entries(STATIC)) {
           let a; try { a = await read(path); } catch { a = null; }
-          if (a?.status !== 200) { if (name === 'snapshot.json') return null; continue; }
+          if (a?.status !== 200) { if (name === 'snapshot.json') { clear(); throw Error('cutover.static-snapshot-unavailable'); } continue; }
           writeFileSync(join(staticDir, `${name}.tmp`), a.body); renameSync(join(staticDir, `${name}.tmp`), join(staticDir, name));
           files[name] = { from: path, bytes: a.body.length, sha256: createHash('sha256').update(a.body).digest('hex') };
         }
@@ -152,10 +162,12 @@ export function cutoverFence({ binding, file = process.env.SOULS_CUTOVER_BINDING
         return false;
       }
       if (SERVED.has(path)) {
-        // #4177: published for this stream: the page reads the file; not yet (or none): the old world's live view answers
+        // #4177: published for this stream: the page reads the file; not yet (or none): the old world's live view answers.
+        // Only the query-less form is published: the snapshot's wire forms (`?defs=ref`, `&cols=1`; apps/server/src/god/
+        // routes.ts) differ in body and headers (x-defs-ref, x-ground-ref, column-packed entities), so they pass through.
         const name = SERVED.get(path), m = staticDir ? manifest() : null;
         let body = null;
-        try { if (m?.files?.[name] && m.stream === this.v2Stream(w) && !(path !== '/v1/world/snapshot' && url.search)) body = readBounded(join(staticDir, name), 64 * 1024 * 1024); } catch { body = null; }
+        try { if (m?.files?.[name] && m.stream === this.v2Stream(w) && !url.search) body = readBounded(join(staticDir, name), 64 * 1024 * 1024); } catch { body = null; }
         if (!body) return false;
         res.writeHead(200, { 'content-type': 'application/json', 'content-length': body.length, 'cache-control': 'no-cache', 'x-souls-static': 'published' }).end(req.method === 'HEAD' ? undefined : body);
         return true;

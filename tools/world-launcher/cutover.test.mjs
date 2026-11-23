@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { existsSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
+import { existsSync, readdirSync, mkdirSync, mkdtempSync, readFileSync, rmSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { createHash } from 'node:crypto';
 import { openLauncher } from './launcher.mjs';
@@ -71,9 +71,10 @@ test('actual launcher fences stable identity and aliases, preserves reads/other 
   const manifest = JSON.parse(readFileSync(join(staticDir, 'manifest.json')));
   assert.equal(manifest.stream, '/s/eden/'); assert.deepEqual(Object.keys(manifest.files).sort(), ['config.json', 'snapshot.json'], 'what the old world answered (the fake has no scene, items, platforms or kernel)');
   const published = readFileSync(join(staticDir, 'snapshot.json'), 'utf8');
-  for (const path of ['/w/eden/v1/world/snapshot', '/w/eden/v1/world/snapshot?defs=ref&cols=1', '/w/eden-2026/v1/world/snapshot']) {
+  for (const path of ['/w/eden/v1/world/snapshot', '/w/eden-2026/v1/world/snapshot']) {
     const r = await fetch(base + path); assert.equal(r.headers.get('x-souls-static'), 'published', path); assert.equal(await r.text(), published, path);
   }
+  assert.equal((await fetch(base + '/w/eden/v1/world/snapshot?defs=ref&cols=1')).headers.get('x-souls-static'), null, 'a wire form (other body and headers) passes through to the old world');
   assert.equal((await fetch(base + '/w/eden/v1/scene')).headers.get('x-souls-static'), null, 'a view not published: the old world answers');
   assert.equal(JSON.parse(readFileSync(join(staticDir, 'config.json'))).worldKey, 'eden', 'the old config published beside the stream');
   const before = readFileSync(hits, 'utf8');
@@ -101,6 +102,7 @@ test('actual launcher fences stable identity and aliases, preserves reads/other 
   const rolledBack = await pageConfig('/w/eden/');
   assert.equal(Object.hasOwn(rolledBack, 'v2Stream') || Object.hasOwn(rolledBack, 'v2Bodies'), false, 'rollback: the kept page no longer names the stream or the bodies');
   assert.equal((await fetch(base + '/w/eden/v1/world/snapshot')).headers.get('x-souls-static'), null, 'rollback: the old world answers its snapshot again');
+  assert.deepEqual(readdirSync(staticDir), [], 'rollback: the published files are removed');
   const old = await fetch(base + '/w/eden-2026/v1/config');
   assert.equal(old.headers.get('x-souls-engine'), 'old');
   assert.equal((await old.json()).worldId, 'eden-1', 'rollback returns the actual old world config with its engine header');
@@ -136,4 +138,24 @@ test('#4177: withV2Stream writes the stream into the inline config and leaves a 
   assert.deepEqual(config, { worldKey: 'eden', n: '</script>', v2Stream: '/s/eden/' });
   assert.ok(out.endsWith('<title>x</title></head></html>'));
   for (const other of ['<html><head></head></html>', '<script>window.__simConfig=[1]</script>', '<script>window.__simConfig={bad}</script>']) assert.equal(withV2Stream(other, '/s/eden/'), other);
+});
+
+test('#4177: a rollback removes the published views, and a re-route whose snapshot read fails serves none of them', async t => {
+  const dir = mkdtempSync(new URL('o4177-static-', scratch)), routesFile = join(dir, 'routes.json'), staticDir = join(dir, 'static');
+  t.after(() => rmSync(dir, { recursive: true, force: true }));
+  const routed = (canonical) => writeFileSync(routesFile, JSON.stringify({ schema: 'souls/world-routes/1', worlds: { eden: { gateway: 'http://127.0.0.1:7312', stream: '/s/eden/', canonical } } }));
+  const fence = cutoverFence({ binding: { oldWorldId: 'eden-1', canonicalSlug: 'eden', routesFile, clientDir: join(dir, 'client'), staticDir } }), w = { slug: 'eden', worldId: 'eden-1' };
+  const old = (path) => ({ status: path === '/v1/scene' || path === '/v1/world/snapshot' ? 200 : 404, body: Buffer.from(JSON.stringify({ path, at: 'first routing' })) });
+  const served = () => { let body = null; const res = { writeHead: () => ({ end: (b) => { body = String(b); } }) };
+    return fence.handle({ method: 'GET' }, res, w, new URL('http://x/w/eden/v1/world/snapshot')) ? body : null; };
+  routed(true);
+  assert.deepEqual(Object.keys((await fence.publish(w, old)).files), ['scene.json', 'snapshot.json']);
+  assert.match(served(), /first routing/);
+  routed(false);
+  assert.equal(fence.v2Stream(w), null);
+  assert.deepEqual(readdirSync(staticDir), [], 'rolled back: nothing left');
+  routed(true);
+  await assert.rejects(fence.publish(w, (path) => (path === '/v1/world/snapshot' ? { status: 503, body: Buffer.from('{}') } : old(path))), /cutover.static-snapshot-unavailable/);
+  assert.deepEqual(readdirSync(staticDir), [], 'a failed publish leaves nothing to serve');
+  assert.equal(served(), null, 'the snapshot falls through to the live old view');
 });
