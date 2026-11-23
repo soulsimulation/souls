@@ -60,6 +60,13 @@ pub trait Reach {
     fn tip(&self, _body: Id, _limb: &Name) -> Option<Name> {
         None
     }
+
+    /// The thing `body`'s move at `point` aims at, when the point stands for one (C23: a form's thing argument, as
+    /// worldd binds it). The record viewers read names it, not the form's own node, so the page turns the body
+    /// toward it (#4330).
+    fn aimed(&self, _body: Id, _point: &Name) -> Option<Id> {
+        None
+    }
 }
 
 /// The effector a move reaches with: the hand's, or the named tip of a tool held in it.
