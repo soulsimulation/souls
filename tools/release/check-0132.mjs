@@ -308,12 +308,14 @@ else if (ONLY.has('2')) {
   /** One timed step: the act sent, then the page polled until `shown` holds (at most 6 s); passes within 2 s. */
   let soul = null, arrivalT0 = null;
   const step = async (name, send, shown) => {
-    const b = soul ? await probe(page, soul) : null, pt0 = await page.evaluate(() => performance.now()), t0 = Date.now();
+    const b = soul ? await probe(page, soul) : null, pt0 = await page.evaluate(() => performance.now());
     // The world's tick at the send, as the page maps it (window.__worldAt, from the stream's own timestamps; a little
     // early by the soonest sample's lag): a step counts as shown only when the page draws a moment at or after it, never a moment
     // before the act (B3-7: a carry sent while the page still played the take's slide was seen walking at once).
     const since = await page.evaluate((pt0) => { const w = window.__worldAt?.(pt0); return w ? Math.floor(w / 50_000) : 0; }, pt0);
-    const sent = send();
+    // G-late: every time below is on one clock, this machine's, from the moment the client command starts (what an
+    // agent waits through): the page's moments, the client's sentAt and the world's answers as the client stamped them.
+    const t0 = Date.now(), sent = send(), back = Date.now();
     let seenMs = null;
     while (Date.now() - t0 < (soul ? 6000 : 30_000)) { // a Soul not on the page yet: wait longer, to say when it came
       if (!soul) {
@@ -327,10 +329,13 @@ else if (ONLY.has('2')) {
       if (soul && !s && Date.now() - t0 > 6000) break;
       await sleep(100);
     }
-    // what the world answered so far (its receipt's phases or refusal, by name), each with how long after the send it
-    // came (the client's own receipt: sentAt and each answer's at), and what the page showed last
+    // what the world answered so far (its receipt's phases or refusal, by name), each with how long after the command
+    // started the client had it (the client's own receipt: each answer's at), and what the page showed last
     const rc = sent?.sequence ? cli('receipt', String(sent.sequence)).receipt : null;
-    const timed = (rc?.answers ?? []).map((a) => ({ name: a.reason ?? a.answer, ms: rc.sentAt && a.at ? Date.parse(a.at) - Date.parse(rc.sentAt) : null }));
+    const timed = (rc?.answers ?? []).map((a) => ({ name: a.reason ?? a.answer, ms: a.at ? Date.parse(a.at) - t0 : null }));
+    // how long the client held the act before it went to the world (its own copy check), and how long the command took
+    const sentMs = rc?.sentAt ? Date.parse(rc.sentAt) - t0 : null, commandMs = back - t0;
+    const status = soul ? cli('status') : null, syncs = (status?.syncs ?? []).slice(-4).map((x) => `${x.kind} ${x.ms} ms`).join(', ');
     const answers = timed.map((a) => `${a.name}${a.ms !== null ? ` at ${a.ms} ms` : ''}`).join(' > ');
     // the answer the page shows (a receipt ends a sit, a take, a set-down, a say; a walk shows from its acceptance), and
     // the line's bar: on the page within 2 s of it
@@ -340,8 +345,9 @@ else if (ONLY.has('2')) {
     const last = soul ? await probe(page, soul) : null;
     const trace = soul ? await timeline(page, soul, pt0).catch(() => null) : null;
     if (trace) log(`timeline ${name}: ${JSON.stringify(trace)}`);
-    report.lines[2].steps.push({ name, answer: sent?.ok === false ? sent : { ok: true, sequence: sent?.sequence }, answers, timed, seenMs, afterAnswer, page: last, trace });
-    row(2, name, pass, `${sent?.ok === false ? `refused: ${JSON.stringify(sent).slice(0, 160)}` : `world: ${answers || 'no answer yet'}`}; on the page ${seenMs === null ? `not within 6 s (it shows ${last ? `${last.doing ?? '?'}, ${last.activity ?? '?'}${last.prop ? `, holding ${last.prop}` : ''}` : 'no such Soul'})` : `after ${seenMs} ms, ${afterAnswer ?? '?'} ms after the world's ${shownBy?.name ?? 'answer'}`}`);
+    log(`client ${name}: sent ${sentMs ?? '?'} ms after the command started, the command answered at ${commandMs} ms; the daemon has ${status?.entries ?? '?'} entries, ${status?.follows ?? '?'} follows, last syncs ${syncs || 'none'}`);
+    report.lines[2].steps.push({ name, answer: sent?.ok === false ? sent : { ok: true, sequence: sent?.sequence }, answers, timed, sentMs, commandMs, seenMs, afterAnswer, page: last, trace });
+    row(2, name, pass, `${sent?.ok === false ? `refused: ${JSON.stringify(sent).slice(0, 160)}` : `sent at ${sentMs ?? '?'} ms; world: ${answers || 'no answer yet'}`}; on the page ${seenMs === null ? `not within 6 s (it shows ${last ? `${last.doing ?? '?'}, ${last.activity ?? '?'}${last.prop ? `, holding ${last.prop}` : ''}` : 'no such Soul'})` : `after ${seenMs} ms, ${afterAnswer ?? '?'} ms after the world's ${shownBy?.name ?? 'answer'}`}`);
     return sent;
   };
   const walking = (s) => s.activity === 'walk'; // drawn walking at the moment the page plays

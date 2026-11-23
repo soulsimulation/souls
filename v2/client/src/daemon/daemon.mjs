@@ -546,7 +546,11 @@ function syncAnswer(sock, n, refused, bytes) {
   syncing = null;
   hearing();
   const behind = (done.kind === 'refresh' || done.kind === 'follow') && followsAgain({ at: sequenceOf(copyVersion), owed, again });
-  if (behind) carried.push(...waiters);
+  // A refresh's waiter is answered once the copy holds what was owed when it asked (`need`); only one still behind that
+  // is carried to the follow again. Entries named since keep the copy following, but an answer never waits on them: in
+  // a busy world they outrun the world's seals, and an act's check waited all of REFRESH_WITHIN (G-late, 0.132).
+  const at = sequenceOf(copyVersion);
+  if (behind) for (const w of waiters) { if (w.need !== undefined && w.need <= at) w(true); else carried.push(w); }
   else for (const w of waiters) w(true);
   // A refresh (R7) brings the copy current for an answer, and a follow for an entry (R9b); the stream's cursor stays
   // the last frame it was given.
@@ -781,10 +785,11 @@ const named = (rows, hs) => hs.map((e) => ({ ...e, ...(rows.get(e.from)?.name ? 
 // --- Commands on the Unix socket --------------------------------------------------------------------------------
 /** The copy brought current through the gateway (a sync under way is waited for); false if it could not be. */
 function refresh() {
-  if (syncing) return new Promise((ok) => syncing.waiters.push(ok));
-  if (!ws || !signedIn) return Promise.resolve(false);
-  startSync(ws, 'refresh');
-  return new Promise((ok) => syncing.waiters.push(ok));
+  if (!syncing && (!ws || !signedIn)) return Promise.resolve(false);
+  if (!syncing) startSync(ws, 'refresh');
+  // What it waits for is what was owed now: this Soul's own receipts and the entries named so far, not later ones.
+  const need = owed;
+  return new Promise((ok) => { const w = (v) => ok(v); w.need = need; syncing.waiters.push(w); });
 }
 
 /**
