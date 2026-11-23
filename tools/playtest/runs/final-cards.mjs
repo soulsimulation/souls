@@ -4,6 +4,7 @@
 // what was left open. Written to <playtestDir>/final-cards.json. No token, URL or message text is written.
 //   live:    readFinalCards({ base, playtestDir })      GET /v1/edge/inbox/:id with each seat's own credentials
 //   offline: finalCardsFromDb({ dataDir, playtestDir }) a finished run's kept world data, read-only
+import { isMain } from '../../lib/is-main.mjs';
 import { existsSync, readFileSync, writeFileSync } from 'node:fs';
 import { join } from 'node:path';
 import { readJsonl } from '../lib/jsonl.mjs';
@@ -93,7 +94,7 @@ export function readFinalCardsFile(playtestDir) {
 
 // CLI: node tools/playtest/runs/final-cards.mjs <runDir> [--data <worldDataDir>]: writes <runDir>/playtest/final-cards.json from
 // the run's kept world data (default <runDir>/playtest/server/data), for a run that finished before #1309.
-if (process.argv[1] && import.meta.url === new URL(`file://${process.argv[1]}`).href) {
+if (isMain(import.meta.url)) {
   const runDir = process.argv[2]; if (!runDir) { console.error('usage: final-cards.mjs <runDir> [--data <dir>]'); process.exit(2); }
   const i = process.argv.indexOf('--data'), playtestDir = join(runDir, 'playtest');
   const d = await finalCardsFromDb({ dataDir: i > 0 ? process.argv[i + 1] : join(playtestDir, 'server', 'data'), playtestDir });

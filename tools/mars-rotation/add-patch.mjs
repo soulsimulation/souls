@@ -6,6 +6,7 @@
 // Pure reads until --apply. The credential is read by path at runtime, never copied into the receipt.
 //   node add-patch.mjs --spec <worlds/patches/<id>/spec.json> --base <world URL> --receipt <abs JSON> [--token-file <path>]
 //                      [--apply | --recover | --rollback [--apply]]
+import { isMain } from '../lib/is-main.mjs';
 import assert from 'node:assert/strict';
 import { randomBytes } from 'node:crypto';
 import { readFileSync, writeFileSync, existsSync } from 'node:fs';
@@ -77,7 +78,7 @@ export function rollbackBatch(receipt, snapshot) {
   return { group, clientRef: group, expect, note: `Roll back ${receipt.spec}: remove ${ops.length} thing(s) it placed`, ops };
 }
 
-if (import.meta.url === 'file://' + process.argv[1]) {
+if (isMain(import.meta.url)) {
   const args = process.argv.slice(2), flag = (k, d) => { const i = args.indexOf('--' + k); return i < 0 ? d : args[i + 1]; };
   const base = flag('base', null)?.replace(/\/+$/, ''), out = flag('receipt', null), specPath = flag('spec', null), rollback = args.includes('--rollback');
   assert(base && out && specPath, '--spec <spec.json> --base <world URL> --receipt <absolute JSON path> [--apply|--recover|--rollback [--apply]]');

@@ -29,6 +29,8 @@
 // --stub: no world and no launcher; the drivers against stub.mjs, which sends each socket --stub-kb kB/s (default 50), for
 // the drivers' own CPU (A4). The open-file limit and the local port range are checked at the start and fail plainly.
 // Tools-only; never gated. Through `.github/workflows/timed-run.yml` (command `viewers`) on a souls-timed runner.
+// This bench drives today's launcher; the same swarm on a served v2 world (worldd, gatewayd and the viewers' origin) is
+// `v2.mjs` beside it (#4018).
 //
 //   node tools/bench/capacity/viewers/viewers.mjs [--viewers 0,50,200] [--souls 12] [--act-sec 10] [--arrive-per-sec 20]
 //        [--arrive-burst 300@40] [--dwell-sec 60] [--repeats 2] [--window-sec 120] [--out <dir>] [--port 4800]

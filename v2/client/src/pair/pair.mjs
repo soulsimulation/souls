@@ -14,11 +14,11 @@
 //   Prints one JSON line with the link and code, then one with the outcome: `{ok, soul, history}` or `{ok: false, code}`.
 //   The home is SOULS_HOME, else the nearest .souls, else ./.souls.
 
+import { isMain } from '../../../../tools/lib/is-main.mjs';
 import { createHash, randomBytes } from 'node:crypto';
 import { chmodSync, existsSync, mkdirSync, readFileSync, renameSync, rmSync, writeFileSync } from 'node:fs';
 import { homedir, hostname } from 'node:os';
 import { join } from 'node:path';
-import { fileURLToPath } from 'node:url';
 import { writeGuide } from '../home/guide.mjs';
 import { CREDENTIALS, Refused, findHome } from '../home/home.mjs';
 
@@ -166,7 +166,7 @@ export async function pair({ home, directory, world, gateway, device, label, sou
   }
 }
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const args = process.argv.slice(2);
   const opt = (n) => { const k = args.indexOf(n); return k >= 0 ? args[k + 1] : undefined; };
   const say = (v) => console.log(JSON.stringify(v));

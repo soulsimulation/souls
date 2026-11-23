@@ -25,6 +25,7 @@
 // boot's open wait (the initial projection) ends at once, and it stops the moment its boot ends. #2469: a drop never ends
 // its program, however long that boot takes. One writer per data dir: a world's next load is sent only once its previous
 // one has exited.
+import { isMain } from '../lib/is-main.mjs';
 import { fork } from 'node:child_process';
 import { EventEmitter } from 'node:events';
 import { createWriteStream, readFileSync } from 'node:fs';
@@ -246,4 +247,4 @@ export class ShardSet {
   }
 }
 
-if (process.argv[1] && import.meta.url === pathToFileURL(process.argv[1]).href) await runShard();
+if (isMain(import.meta.url)) await runShard();

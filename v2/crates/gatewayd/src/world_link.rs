@@ -20,11 +20,11 @@
 //! deadline; the gateway steps in only [`WEDGED`] after it, for a world that takes intents and never answers.
 //!
 //! **In progress** (C20, #3469). A form's act runs as long as its walk and its own steps take, from its start (a
-//! walk across the town, a long read). When one is still running at its [`DEADLINE`], the world says so with a
-//! progress answer, T10's accepted with how long the act has left (`worldd::answers::progress`), well inside
-//! [`WEDGED`]: the gateway passes it on to the actor and moves the intent's deadline to
-//! the world's, so it answers in-flight acts with progress, not `act.timed-out`. The intent stays kept until its
-//! answer comes; an intent the world has said nothing of still has [`DEADLINE`].
+//! walk across the town, a long read). When its run starts (a gateway walk: when its route is planned), the world
+//! says so with a progress answer, T10's accepted with how long the act has left (`worldd::answers::progress`; W11,
+//! #4087: in the tick it starts, not at [`DEADLINE`]): the gateway passes it on to the actor and moves the intent's
+//! deadline to the world's, so it answers in-flight acts with progress, not `act.timed-out`. The intent stays kept
+//! until its answer comes; an intent the world has said nothing of still has [`DEADLINE`].
 
 use std::collections::BTreeMap;
 use std::path::PathBuf;

@@ -2,9 +2,10 @@
 // Replay source templates and the reviewed patches into an isolated compiler model.
 // No service, credentials or live writes. Portable name paths keep the same genesis
 // usable with a different world seed; no copied live IDs or generated-child loss.
+import { isMain } from '../lib/is-main.mjs';
 import {readFileSync,writeFileSync,mkdirSync} from 'node:fs';
 import {dirname,resolve} from 'node:path';
-import {fileURLToPath,pathToFileURL} from 'node:url';
+import { fileURLToPath } from 'node:url';
 import {WorldModel,CORE_KIT,applyBatch,hashOf,correctKitDefines} from '../../packages/world-compiler/src/index.ts';
 import {AssetStore} from '../../apps/server/src/god/assets.ts';
 import {makePatch as fidelity,originalDefs} from '../mars-fidelity/patch.mjs';
@@ -113,7 +114,7 @@ export function materialize(name,{patched=true,fixtures=true,seed=`meaning:${nam
   }
   return {template,world,provenance};
 }
-if(process.argv[1]&&pathToFileURL(resolve(process.argv[1])).href===import.meta.url){
+if(isMain(import.meta.url)){
   const [name,out]=process.argv.slice(2);if(!name||!out)throw Error('usage: materialize.mjs <template-name> <output.json>');
   const {template,world,provenance}=materialize(name);mkdirSync(dirname(resolve(out)),{recursive:true});
   writeFileSync(out,JSON.stringify(template,null,2)+'\n');

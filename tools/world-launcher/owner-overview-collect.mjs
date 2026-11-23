@@ -1,9 +1,9 @@
 #!/usr/bin/env node
 // Explicit operator command, never invoked by page loads, world ticks or an agent scheduler.
+import { isMain } from '../lib/is-main.mjs';
 import { execFile } from 'node:child_process';
 import { chmodSync, mkdirSync, renameSync, writeFileSync } from 'node:fs';
 import { dirname, resolve } from 'node:path';
-import { pathToFileURL } from 'node:url';
 import { DEFAULT_ISSUES, MAX_ITEMS, POPULATION_LABELS, REPO, projectRecords, selectIssues } from './owner-overview-data.mjs';
 const gh = args => new Promise((yes, no) => execFile('gh', args, { encoding: 'utf8', timeout: 30_000, maxBuffer: 8 * 1024 * 1024 }, (e, out) => { if (e) no(new Error('GitHub collection failed; previous snapshot preserved.')); else { try { yes(JSON.parse(out)); } catch { no(new Error('Invalid GitHub response; previous snapshot preserved.')); } } }));
 export async function collectOverview(output, run = gh, now = () => new Date().toISOString()) {
@@ -21,7 +21,7 @@ export async function collectOverview(output, run = gh, now = () => new Date().t
   chmodSync(temporary, 0o600); renameSync(temporary, file);
   return snapshot;
 }
-if (process.argv[1] && import.meta.url === pathToFileURL(resolve(process.argv[1])).href) {
+if (isMain(import.meta.url)) {
   const output = process.argv[2];
   if (!output) { console.error('Usage: node tools/world-launcher/owner-overview-collect.mjs <DATA_DIR>/owner-overview.json'); process.exitCode = 1; }
   else { try { const s = await collectOverview(output); console.log(`Collected ${s.items.length} cards at ${s.observedAt}.`); } catch (e) { console.error(e.message); process.exitCode = 1; } }

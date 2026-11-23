@@ -16,8 +16,8 @@
 //   (the token, when the look asks one, is read from that environment variable, never from the file).
 // Sinks: `file:<path>` (a test sink: one JSON line per message), `discord-dm` (today's delivery: a bot's direct
 // message, DISCORD_BOT_TOKEN and DISCORD_USER_ID from the environment).
+import { isMain } from '../../../../tools/lib/is-main.mjs';
 import { appendFileSync, readFileSync, renameSync, writeFileSync } from 'node:fs';
-import { fileURLToPath } from 'node:url';
 
 export const LOOKS = 3;
 export const GAP_MS = 10_000;
@@ -117,7 +117,7 @@ export function sink(spec, { env = process.env, fetchImpl = fetch, now = Date.no
 
 const read = (file) => { try { return JSON.parse(readFileSync(file, 'utf8')); } catch { return {}; } };
 
-if (process.argv[1] === fileURLToPath(import.meta.url)) {
+if (isMain(import.meta.url)) {
   const argv = process.argv.slice(2), opt = (k, d) => { const i = argv.indexOf(`--${k}`); return i < 0 ? d : argv[i + 1]; };
   const instances = read(opt('instances')).instances ?? [];
   const statePath = opt('state'), send = sink(opt('sink')), every = Number(opt('every', 0)) * 1000;

@@ -1,5 +1,6 @@
 // Judge the V7 walk reports. node v7-receipt.mjs <outDir> <root> <rcOld> <rcNew> <rcGod> <rcApprove> <rcWindow>  → v7-receipt.json, exit 0 only on pass.
 // god = the God modal e2e (tools/god-skill/e2e/launcher.mjs, <outDir>/god/report.json): every one of its checks must be there and pass.
+import { isMain } from '../lib/is-main.mjs';
 import {readFileSync,writeFileSync,existsSync} from 'node:fs';import {execFileSync} from 'node:child_process';import {resolve} from 'node:path';
 // approve = lane HF's approval-link walk (tools/god-skill/e2e/approve-on-top.mjs, <outDir>/approve/report.json): the god opens
 // #approve/<id> in Clerk mode and the approval stays on top through the whole load; every scenario must be there and pass.
@@ -38,7 +39,7 @@ export function judge({old,fresh,god,approve,window:win,rcOld=0,rcNew=0,rcGod=0,
   for(const id of WINDOW_CHECKS){const s=(win?.steps||[]).find(x=>x.name.split(' ')[0]===id);add(`approve-in-window ${id}`,s?.ok,s?s.name:'no such check');}
   return {status:checks.every(c=>c.ok)?'pass':'fail',checks};
 }
-if(process.argv[1]&&resolve(process.argv[1])===new URL(import.meta.url).pathname){
+if(isMain(import.meta.url)){
   const [out,root,rcOld,rcNew,rcGod,rcApprove,rcWindow]=process.argv.slice(2);const rd=p=>existsSync(p)?JSON.parse(readFileSync(p,'utf8')):null;
   const j=judge({old:rd(resolve(out,'old/report.json')),fresh:rd(resolve(out,'new/report.json')),god:rd(resolve(out,'god/report.json')),approve:rd(resolve(out,'approve/report.json')),window:rd(resolve(out,'window/report.json')),rcOld:Number(rcOld),rcNew:Number(rcNew),rcGod:Number(rcGod??1),rcApprove:Number(rcApprove??1),rcWindow:Number(rcWindow??1)});
   const sha=execFileSync('git',['-C',root,'rev-parse','HEAD'],{encoding:'utf8'}).trim();
