@@ -10,6 +10,7 @@
 //   --pkg    replica's wasm-bindgen package of the same head (target/wasm-load/pkg): the page's and the client's
 //   --card   the new page's build (v2/web/dist): the front door serves the pairing card (/pair) from it
 //   --facts  Eden's facts (v2/tools/import-eden/export/export.ts; exported here when not given)
+//   --gl soft  SwiftShader even where there is a GPU (line 2 is then not reported)
 //   --mars-web  the people's character set the old page draws (default mars/viewer/dist/client, `pnpm build:viewer`)
 //   The old page is this checkout's apps/web/dist (`pnpm --filter web build`); caddy and node on PATH.
 //
@@ -26,7 +27,7 @@ import { copyFileSync, cpSync, existsSync, mkdirSync, readFileSync, renameSync, 
 import { createRequire } from 'node:module';
 import { dirname, join, resolve } from 'node:path';
 import { randomBytes } from 'node:crypto';
-import { fileURLToPath } from 'node:url';
+import { fileURLToPath, pathToFileURL } from 'node:url';
 
 const repo = resolve(dirname(fileURLToPath(import.meta.url)), '../..');
 const argv = process.argv.slice(2), opt = (k, d) => { const i = argv.indexOf(`--${k}`); return i >= 0 ? argv[i + 1] : d; };
@@ -131,12 +132,24 @@ const sw = JSON.parse(execFileSync(process.execPath, [join(repo, 'tools/world-la
 need(sw.page?.v2Stream, `the switch did not take: ${JSON.stringify(sw)}`);
 log(`switched: ${BASE}/w/${SLUG}/ reads ${sw.page.v2Stream}`);
 
-// The machine's GPU where there is one (B3-5): with software GL the page's place previews read pixels back for about
-// 20 s after it opens (WorldPlacePreviews.ts readRenderTargetPixels), holding its main thread and every stream message
-// behind them, which no viewer with a GPU sees. `--gl soft` keeps SwiftShader.
-const GL = opt('gl', process.platform === 'darwin' ? 'metal' : 'soft');
-const browser = await chromium.launch({ args: [...(GL === 'metal' ? ['--use-angle=metal', '--enable-gpu'] : ['--use-gl=angle', '--use-angle=swiftshader']), '--ignore-gpu-blocklist', '--autoplay-policy=no-user-gesture-required'] });
-const report = { base: '<local front door>', world: SLUG, agents: AGENTS, seconds: SECONDS, lines: {} };
+// The machine's GPU (B3-5, F5-run): with software GL the page's main thread blocks for about 20 s on shader compiles after
+// it opens, holding every stream message behind them, which no viewer with a GPU sees. The proof recorder's flag sets are
+// tried in order (ANGLE Metal on macOS; ANGLE Vulkan, ANGLE GL-EGL, EGL on Linux) and the first whose
+// WEBGL_debug_renderer_info names a hardware renderer is used. With none (or `--gl soft`) lines 3 and 4 still run on
+// SwiftShader, but line 2 is not reported: its 2 s would measure the software renderer, not the page.
+const { GPU_CANDIDATES, softwareGl } = await import(pathToFileURL(join(repo, '.claude/skills/proof/record.mjs')).href);
+const glBase = ['--no-sandbox', '--disable-dev-shm-usage', '--ignore-gpu-blocklist', '--enable-gpu', '--autoplay-policy=no-user-gesture-required'];
+const readGl = async (b) => { const p = await b.newPage(); try { return await p.evaluate(() => { const gl = document.createElement('canvas').getContext('webgl2'); const x = gl?.getExtension('WEBGL_debug_renderer_info'); return gl ? { vendor: gl.getParameter(x ? x.UNMASKED_VENDOR_WEBGL : gl.VENDOR), renderer: gl.getParameter(x ? x.UNMASKED_RENDERER_WEBGL : gl.RENDERER) } : {}; }); } finally { await p.close(); } };
+let browser, gl;
+for (const c of opt('gl') === 'soft' ? [] : GPU_CANDIDATES) {
+  let b; try { b = await chromium.launch({ args: [...glBase, ...c.args], ...(c.channel ? { channel: c.channel } : {}) }); } catch (e) { log(`gl ${c.label}: ${String(e?.message ?? e).split('\n')[0].slice(0, 120)}`); continue; }
+  const g = await readGl(b).catch(() => ({})); log(`gl ${c.label}: ${g.renderer ?? 'no WebGL'}`);
+  if (!softwareGl(g.renderer)) { browser = b; gl = { ...g, flags: c.label, software: false }; break; }
+  await b.close();
+}
+if (!browser) { browser = await chromium.launch({ args: [...glBase, '--use-gl=angle', '--use-angle=swiftshader', '--enable-unsafe-swiftshader'] }); gl = { ...(await readGl(browser).catch(() => ({}))), flags: 'swiftshader', software: true }; }
+log(`renderer: ${gl.renderer ?? 'none'} (${gl.software ? 'software' : 'hardware'})`);
+const report = { base: '<local front door>', world: SLUG, agents: AGENTS, seconds: SECONDS, gl: { vendor: gl.vendor ?? null, renderer: gl.renderer ?? null, flags: gl.flags, software: gl.software }, lines: {} };
 const rows = [];
 const row = (line, what, pass, detail) => { rows.push({ line, what, pass, detail }); log(`${pass ? 'PASS' : 'FAIL'} ${line} ${what}: ${detail}`); };
 
@@ -183,7 +196,8 @@ const probe = (page, soul) => page.evaluate((soul) => {
 }, soul);
 
 // ---- 2: a freshly paired agent ----
-if (ONLY.has('2')) {
+if (ONLY.has('2') && gl.software) row(2, 'line 2 needs a hardware GL renderer', false, `not reported: the browser's renderer is ${gl.renderer ?? 'none'} (software); run where WEBGL_debug_renderer_info names a GPU`);
+else if (ONLY.has('2')) {
   // The agent's own home, named with SOULS_HOME: an empty .souls is not a home, and the client would walk up from here
   // to the nearest real one (a person's own Souls, when the checkout sits in their folder).
   const cliIn = (home) => (...a) => { try { return JSON.parse(execFileSync(process.execPath, [join(repo, 'v2/client/src/cli/souls.mjs'), ...a], { cwd: home, encoding: 'utf8', env: { ...process.env, SOULS_HOME: join(home, '.souls'), SOULS_REPLICA_PKG: PKG }, timeout: 30_000 }).trim().split('\n').at(-1)); } catch (e) { const out = String(e.stdout ?? '').trim().split('\n').at(-1); try { return JSON.parse(out); } catch { return { ok: false, detail: String(out || e.message).slice(0, 300) }; } } };
@@ -311,7 +325,7 @@ if (ONLY.has('2')) {
   }
   cli('quit'); // the agent's daemon is this run's: stopped by its own command
   await ctx.close(); // the clip is written on close
-  report.clip = join(OUT, 'clip');
+  report.clip = 'clip/';
 }
 // ---- 4: a browser smoke of home, sign-in, sound, music, the camera ----
 if (ONLY.has('4')) {
@@ -402,8 +416,10 @@ if (ONLY.has('3')) {
 await browser.close();
 report.rows = rows;
 writeFileSync(join(OUT, 'report.json'), JSON.stringify(report, null, 2));
-console.log('\n| line | check | result | detail |\n|---|---|---|---|');
-for (const r of rows) console.log(`| ${r.line} | ${r.what} | ${r.pass ? 'pass' : 'FAIL'} | ${r.detail.replaceAll('|', '/')} |`);
-console.log(`\nreport: ${join(OUT, 'report.json')}${report.clip ? `; clip: ${report.clip}` : ''}`);
+const table = [`Renderer: ${gl.renderer ?? 'none'} (${gl.software ? 'software' : 'hardware'}, ${gl.flags})`, '', '| line | check | result | detail |', '|---|---|---|---|',
+  ...rows.map((r) => `| ${r.line} | ${r.what} | ${r.pass ? 'pass' : 'FAIL'} | ${r.detail.replaceAll('|', '/')} |`)].join('\n');
+writeFileSync(join(OUT, 'table.md'), table + '\n');
+console.log(`\n${table}`);
+console.log(`\nreport: ${join(OUT, 'report.json')}${report.clip ? `; clip: ${join(OUT, 'clip')}` : ''}`);
 if (KEEP) { log('kept running (--keep); Ctrl-C stops everything'); await new Promise(() => {}); }
 process.exit(rows.every((r) => r.pass) ? 0 : 1);

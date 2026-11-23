@@ -4,6 +4,7 @@
 //   cargo build -p gatewayd -p worldd -p directoryd --locked, and replica's wasm-bindgen package in target/wasm-load/pkg.
 
 import { strict as assert } from 'node:assert';
+import { createConnection } from 'node:net';
 import { spawn, spawnSync } from 'node:child_process';
 import { createHash, randomBytes } from 'node:crypto';
 import { chmodSync, mkdirSync, mkdtempSync, rmSync, statSync, writeFileSync } from 'node:fs';
@@ -192,4 +193,21 @@ test('R5: an act of my own ending, a quiet spell, and a Soul arriving each wake 
   await sleep(1500);
   assert.equal(f.lines.filter((l) => l.rule === arrives).length, before, 'no wake from a removed rule');
   f.stop();
+});
+
+test('a reader that went away takes nothing: a message that comes after its wait stopped reaches the next wait', async () => {
+  await ask({ op: 'wait', seconds: 0 }); // what came before, taken
+  // A `wait` whose command was stopped: its socket closes while the daemon holds the wait.
+  const c = createConnection(rt.socket);
+  await new Promise((ok) => c.on('connect', ok));
+  c.write(JSON.stringify({ op: 'wait', seconds: 30 }) + '\n');
+  await sleep(200);
+  c.destroy();
+  await sleep(200);
+  const { id } = await mailbox('put', { soul: GRANT, text: 'are you still there?' });
+  const got = await waitFor(async () => {
+    const r = await ask({ op: 'wait', seconds: 2 }, 7000);
+    return r.events?.find((e) => e.kind === 'mail' && e.id === id);
+  });
+  assert.equal(got.text, 'are you still there?', 'the next reader has it');
 });

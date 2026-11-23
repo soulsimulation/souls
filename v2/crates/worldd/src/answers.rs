@@ -23,8 +23,8 @@
 //! (`claim-taken`, `resource-held`, `out-of-reach`, ...). A gateway walk (C29) gets its planned route's time at walking
 //! speed, plus a margin and crossings, from the tick its route is planned, with no total cap and never beyond the
 //! intent's expiry. Its deadline is written as C20's entry and it receives C20's one progress answer in that tick
-//! (W11, #4087). C21's watch ends a stalled walk `walk.blocked`; waiting at a link and being carried do not count as
-//! stalled walking.
+//! (W11, #4087). A walk that makes no progress is the never-stuck ladder's (0.133 N1, `crate::unstick`): routed again,
+//! still bodies stepped aside, a shoulder turn, then its order ended `goal-unreachable` at 15 s.
 //! No move outlives its act: a walk still going at its act's deadline stops in that tick and ends `act.timed-out`; a
 //! sit, a lie or a rise runs to its end (a seat is never left half taken) and ends so then; a walk a new move
 //! replaces ends `claim-taken` in the tick the new move starts.
@@ -389,8 +389,9 @@ type Kept = (Vec<u8>, u64, Vec<(u64, Vec<u8>)>);
 
 /// What a restart needs besides the tree, kept in a checkpoint's seed (K5 keeps the seed opaque; K18c, #3176):
 /// `{1: [[actor, last sequence, [[sequence, answer frame], ...]], ...], 2: next intent counter, 3: [body row, ...]
-/// (`crate::bodies::row`), 4: the tick}`. Without it a restart from a checkpoint would forget the answers kept for
-/// repeats and the bodies that had not moved since.
+/// (`crate::bodies::row`), 4: the tick, 5: the active order starts, 6: the wind-down's state, one record of the rule
+/// per body (S6)}`. Without it a restart from a checkpoint would forget the answers kept for repeats, the bodies that
+/// had not moved since, and how long each body's agent had been silent.
 #[derive(Debug, Default)]
 struct Carry {
     sequences: Vec<Kept>,
@@ -398,6 +399,10 @@ struct Carry {
     placed: Placed,
     tick: i64,
     orders: Vec<Value>,
+    /// The wind-down's state: what [`skills::wind_down::WindDown::resume`] reads before the log's records after it.
+    wind: Vec<Value>,
+    /// When the wind-down began counting the bodies no record names: the world's first start (S6).
+    wind_since: Option<i64>,
 }
 
 impl Carry {
@@ -407,6 +412,7 @@ impl Carry {
         placed: Placed,
         tick: i64,
         orders: &[Effect],
+        wind: &[Effect],
     ) -> Carry {
         Carry {
             sequences: sequences
@@ -417,6 +423,8 @@ impl Carry {
             placed,
             tick,
             orders: orders.iter().map(Effect::to_value).collect(),
+            wind: wind.iter().map(Effect::to_value).collect(),
+            wind_since: None,
         }
     }
 
@@ -456,6 +464,12 @@ impl Carry {
         }
         if !self.orders.is_empty() {
             m.insert(5, Value::Array(self.orders.clone()));
+        }
+        if !self.wind.is_empty() {
+            m.insert(6, Value::Array(self.wind.clone()));
+        }
+        if let Some(t) = self.wind_since.and_then(|t| u64::try_from(t).ok()) {
+            m.insert(7, Value::Uint(t));
         }
         encode(&Value::Map(m)).unwrap_or_default()
     }
@@ -502,8 +516,44 @@ impl Carry {
         if let Some(Value::Array(rows)) = m.get(&5) {
             c.orders = rows.clone();
         }
+        if let Some(Value::Array(rows)) = m.get(&6) {
+            c.wind = rows.clone();
+        }
+        if let Some(Value::Uint(t)) = m.get(&7) {
+            c.wind_since = i64::try_from(*t).ok();
+        }
         Some(c)
     }
+}
+
+/// The wind-down's records and the Souls' acts reduced to what its resume reads (S6): each body's last record of the
+/// rule and each Soul's last act, in their order. [`skills::wind_down::WindDown::resume`] takes a body's state from its
+/// last record and lets a later act of its Soul own it, so a record or an act before those changes nothing.
+fn wind_carry(effects: &[Effect]) -> Vec<Effect> {
+    let mut last: BTreeMap<(u8, Id), usize> = BTreeMap::new();
+    for (i, e) in effects.iter().enumerate() {
+        if let Some((body, _)) = skills::wind_down::read(e) {
+            last.insert((0, body), i);
+        } else if let Actor::Soul(soul) = e.envelope.actor {
+            last.insert((1, soul), i);
+        }
+    }
+    let mut kept: Vec<usize> = last.into_values().collect();
+    kept.sort_unstable();
+    kept.into_iter().map(|i| effects[i].clone()).collect()
+}
+
+/// Effects carried as values, read back as a part of `header`'s.
+fn carried_effects(header: &replica::effects::Header, values: Vec<Value>) -> R<Vec<Effect>> {
+    let v = Value::Map(BTreeMap::from([
+        (1, Value::Bytes(header.hash().to_bytes())),
+        (2, Value::Array(values)),
+    ]));
+    let bytes = encode(&v).map_err(|e| Refusal {
+        name: "encoding",
+        detail: e.to_string(),
+    })?;
+    Ok(Part::read(&bytes)?.effects)
 }
 
 /// Keep only active order starts in original arrival order, including across checkpoint/tail overlap.
@@ -555,6 +605,9 @@ pub struct Config {
     pub lockstep: bool,
     /// K5's checkpoints: their folder and the log bytes between two.
     pub checkpoints: Option<(PathBuf, u64)>,
+    /// The newest checkpoint of that folder, already being read on another thread (S5: a serve reads it while it
+    /// builds the world's facts); none: [`start`] reads it itself.
+    pub restoring: Option<std::thread::JoinHandle<R<Option<checkpoint::Restored>>>>,
     /// Starts the view tier (R3) on the log, which each synced tick is handed to.
     pub views: bool,
     /// Nodes the auditor checks a tick (K11).
@@ -701,6 +754,7 @@ impl Config {
             clock: None,
             lockstep: false,
             checkpoints: None,
+            restoring: None,
             views: false,
             audit: 64,
             roots: None,
@@ -1182,7 +1236,11 @@ fn reserve_edit(edit: &Edit, lineage: Scope, next: &mut u64) -> Result<Minter, R
     let reserved = Minter::at(lineage, *next);
     let mut end = reserved.clone();
     for op in &edit.ops {
-        if matches!(op, edit::Op::Place { .. } | edit::Op::Doorway { .. }) {
+        // Every operation the edit lowering names a new id for (`sim::edit`'s `names`): a link too (#3934).
+        if matches!(
+            op,
+            edit::Op::Place { .. } | edit::Op::Doorway { .. } | edit::Op::Link { .. }
+        ) {
             end.mint().map_err(|e| Refused {
                 op: None,
                 name: "edit.ids-exhausted",
@@ -4280,6 +4338,11 @@ impl Clock {
             self.bodies.as_ref().map(Bodies::placed).unwrap_or_default(),
             self.tick,
             &self.order_records,
+            &self
+                .bodies
+                .as_ref()
+                .map(|b| b.wind.carried())
+                .unwrap_or_default(),
         );
         let version = Version {
             lineage: self.lineage,
@@ -4606,10 +4669,14 @@ pub fn start<S: Storage + 'static>(
     mut world: Replica,
     rules: Rules,
     storage: S,
-    cfg: Config,
+    mut cfg: Config,
 ) -> R<World> {
-    let restored = match &cfg.checkpoints {
-        Some((dir, _)) if dir.exists() => checkpoint::restore(dir)?,
+    let restored = match (&cfg.checkpoints, cfg.restoring.take()) {
+        (Some(_), Some(reading)) => reading.join().map_err(|_| Refusal {
+            name: "checkpoint-restore-panicked",
+            detail: "the checkpoint's reader stopped".into(),
+        })??,
+        (Some((dir, _)), None) if dir.exists() => checkpoint::restore(dir)?,
         _ => None,
     };
     for (name, why) in restored.iter().flat_map(|r| &r.rejected) {
@@ -4630,6 +4697,10 @@ pub fn start<S: Storage + 'static>(
     let mut order_records = Vec::new();
     // B16: the wind-down's records and the Souls' acts replayed, to rebuild it.
     let mut wind_records: Vec<Effect> = Vec::new();
+    // S6: when the wind-down began counting the bodies no record names, if a checkpoint carries it, and when each body
+    // born in the log after the checkpoint was born (counted from then, not from the first start).
+    let mut carried_since: Option<i64> = None;
+    let mut births: BTreeMap<Id, Micros> = BTreeMap::new();
     // A compacted log (#3837) holds no records before its cut: only a checkpoint at or after it can start the world.
     let held_from = found.first;
     if held_from > restored.as_ref().map_or(0, |r| r.root.record) {
@@ -4669,6 +4740,11 @@ pub fn start<S: Storage + 'static>(
                     order_records = Part::read(&bytes)?.effects;
                 }
                 last = (c.tick >= 0).then_some(c.tick);
+                // S6: the wind-down as it was, before the records after the checkpoint.
+                if !c.wind.is_empty() {
+                    wind_records = carried_effects(world.header(), c.wind)?;
+                }
+                carried_since = c.wind_since;
             }
             restart.checkpoint = Some(r.root.record);
             blobs = r.blobs;
@@ -4705,6 +4781,17 @@ pub fn start<S: Storage + 'static>(
                 })
                 .cloned(),
         );
+        for e in &part.effects {
+            if let Body::Changes(cs) = &e.body {
+                for c in cs {
+                    if let Change::Create { node, kind, .. } = &c.change
+                        && replica::world_model::plain(kind.as_str()) == "souls:body"
+                    {
+                        births.insert(*node, e.envelope.at);
+                    }
+                }
+            }
+        }
         read_back(&part, &mut placed, &mut last);
         // Nodes an edit placed took their ids on the intents' counter (G1b): never give one out again.
         for e in &part.effects {
@@ -4760,6 +4847,49 @@ pub fn start<S: Storage + 'static>(
         Some((dir, every)) => Some(Checkpoints::open(dir, *every, blobs)?),
         None => None,
     };
+    let mut cfg = cfg;
+    let tick_us = i64::try_from(cfg.tick.as_micros()).unwrap_or(50_000).max(1);
+    if 1_000_000 % tick_us != 0 {
+        return Err(Refusal {
+            name: "tick-rate",
+            detail: format!("a tick of {tick_us} µs is not a whole number of ticks a second"),
+        });
+    }
+    let shared = Arc::new(Mutex::new(0));
+    let mut pace: Box<dyn Pace + Send> = match (cfg.lockstep, cfg.clock.take()) {
+        (true, _) => Box::new(Stepped(Arc::clone(&shared))),
+        (false, Some(c)) => c,
+        (false, None) => Box::new(Real::start()),
+    };
+    let real0 = pace.now();
+    // World time starts as real time, µs from the Unix epoch (rate one); tick n starts at n ticks from it. The logged
+    // mappings follow, and the configured rate's (E7b).
+    let (line, mapping, publish) = timeline(&world, cfg.rate, real0, tick_us)?;
+    if cfg.rate.is_some() {
+        eprintln!(
+            "worldd: clock world {} real {} rate {}/{}",
+            mapping.world_us,
+            mapping.real_us,
+            mapping.rate().num(),
+            mapping.rate().den()
+        );
+    }
+    // A first start begins at the tick due now, not at the epoch's. The start's checkpoint carries the tick logged.
+    let logged_last = last;
+    let last = match (last, cfg.lockstep) {
+        (Some(n), _) => Some(n),
+        (None, true) => None,
+        (None, false) => Some(
+            line.tick_of(line.world_at(real0).map_err(time)?)
+                .map_err(time)?
+                - 1,
+        ),
+    };
+    // Body time is the next world tick start, not the real-time deadline returned by Ticker::due.
+    let body_start = line.tick_start(last.map_or(0, |n| n + 1)).map_err(time)?;
+    // S6: when the wind-down counts a body no record names from: the first start's, carried by each start's checkpoint
+    // (K20 below; a running checkpoint carries every body's own state instead).
+    let wind_since = carried_since.unwrap_or(body_start);
     // K20 (#3395): a tree holding changes no checkpoint has (a first start from the log, or the log after the newest
     // checkpoint) is sealed and checkpointed here, before the clock and its watchdog start: hashing the whole tree is
     // never a tick's work, and from here each tick's state hash and each checkpoint hash only what changed.
@@ -4768,13 +4898,19 @@ pub fn start<S: Storage + 'static>(
     {
         let at = log.durable_mark().at();
         if at.record >= records {
-            let carry = Carry::of(
+            let mut carry = Carry::of(
                 &sequences,
                 next_intent,
                 placed.clone(),
-                last.unwrap_or(-1),
+                logged_last.unwrap_or(-1),
                 &order_records,
+                &births
+                    .iter()
+                    .map(|(&b, &at)| skills::wind_down::WindDown::born(b, wind_since.max(at)))
+                    .chain(wind_carry(&wind_records))
+                    .collect::<Vec<_>>(),
             );
+            carry.wind_since = Some(wind_since);
             let version = Version {
                 lineage: cfg.lineage,
                 zone,
@@ -4793,7 +4929,6 @@ pub fn start<S: Storage + 'static>(
             )?;
         }
     }
-    let mut cfg = cfg;
     let make = cfg.bodies.take();
     let make_built = cfg.built_bodies.take();
     let recorded_builds = placed
@@ -4834,44 +4969,6 @@ pub fn start<S: Storage + 'static>(
         .into_iter()
         .map(|(at, n)| (i64::try_from(at).unwrap_or(i64::MAX), n))
         .collect();
-    let tick_us = i64::try_from(cfg.tick.as_micros()).unwrap_or(50_000).max(1);
-    if 1_000_000 % tick_us != 0 {
-        return Err(Refusal {
-            name: "tick-rate",
-            detail: format!("a tick of {tick_us} µs is not a whole number of ticks a second"),
-        });
-    }
-    let shared = Arc::new(Mutex::new(0));
-    let mut pace: Box<dyn Pace + Send> = match (cfg.lockstep, cfg.clock.take()) {
-        (true, _) => Box::new(Stepped(Arc::clone(&shared))),
-        (false, Some(c)) => c,
-        (false, None) => Box::new(Real::start()),
-    };
-    let real0 = pace.now();
-    // World time starts as real time, µs from the Unix epoch (rate one); tick n starts at n ticks from it. The logged
-    // mappings follow, and the configured rate's (E7b).
-    let (line, mapping, publish) = timeline(&world, cfg.rate, real0, tick_us)?;
-    if cfg.rate.is_some() {
-        eprintln!(
-            "worldd: clock world {} real {} rate {}/{}",
-            mapping.world_us,
-            mapping.real_us,
-            mapping.rate().num(),
-            mapping.rate().den()
-        );
-    }
-    // A first start begins at the tick due now, not at the epoch's.
-    let last = match (last, cfg.lockstep) {
-        (Some(n), _) => Some(n),
-        (None, true) => None,
-        (None, false) => Some(
-            line.tick_of(line.world_at(real0).map_err(time)?)
-                .map_err(time)?
-                - 1,
-        ),
-    };
-    // Body time is the next world tick start, not the real-time deadline returned by Ticker::due.
-    let body_start = line.tick_start(last.map_or(0, |n| n + 1)).map_err(time)?;
     let mut ticker = Ticker::new(line, mapping, last, real0).map_err(time)?;
     let beat = Arc::new(Heartbeat::new(real0));
     let tier = match cfg.views {
@@ -5166,6 +5263,8 @@ pub fn start<S: Storage + 'static>(
                             |s| c.life.as_ref().and_then(|l| l.life.body_of(s)),
                             &placed,
                             at,
+                            wind_since,
+                            &births,
                         );
                         if let Some(w) = &c.walkers {
                             w.offer_map(&b, c.replica.version());
@@ -5810,6 +5909,32 @@ mod tests {
     use replica::sync::{self, wire};
     use sim::log::{Mem, recover};
     use std::sync::{Condvar, Mutex};
+
+    /// K2 (#3934): a link is named a new id when the edit is lowered, so it is reserved at intake as a place is. Before,
+    /// an import's links took ids the live counter then gave again: the next edit was refused `id-duplicate`.
+    #[test]
+    fn k2_a_links_id_is_reserved_at_intake() {
+        let id = |n| Id::new(Scope([0x42; 16]), n).unwrap();
+        let link = edit::Op::Link {
+            name: 1,
+            ty: Name::new("eden:doorway").unwrap(),
+            ends: [edit::Ref::Node(id(2)), edit::Ref::Node(id(3))],
+            owner: replica::world_model::End::First,
+            field: 22,
+            row: Vec::new(),
+            door: None,
+        };
+        let e = Edit {
+            intent: id(9),
+            actor: Actor::Creator(id(8)),
+            planned: 0,
+            ops: vec![link],
+            claim: None,
+        };
+        let mut next = 5;
+        reserve_edit(&e, Scope([0x42; 16]), &mut next).unwrap();
+        assert_eq!(next, 6, "the link's id is reserved");
+    }
 
     /// #4117 review (0.132 scaling, #1960): a motion sample whose pose the log's reader refuses fails the tick's
     /// motion part in every build (this runs in release in CI too), so `write_motion` takes its per-sample fallback:
@@ -7461,6 +7586,91 @@ mod standing_order_carry_tests {
     }
 
     #[test]
+    /// S6: the wind-down's state rides in the carry and reads back as the same records; reduced to each body's last
+    /// record and each Soul's last act, the log's records rebuild the same rule as all of them.
+    fn s6_the_carry_holds_the_wind_down_and_its_reduction_rebuilds_the_same_rule() {
+        use skills::wind_down::{KNOBS, Order, Phase, State, WindDown, record};
+        let id = |n| Id::new(Scope([0x56; 16]), n).unwrap();
+        let (a, b, soul_b) = (id(1), id(2), id(3));
+        let rec = |body, phase, last: i64, wander: Option<i64>, at: i64| {
+            let s = State {
+                last,
+                wander,
+                zombie: None,
+                slept: false,
+                spot: None,
+            };
+            record(
+                &Order {
+                    body,
+                    phase,
+                    what: Vec::new(),
+                },
+                &s,
+                at,
+                0,
+            )
+        };
+        let act = |soul, at| {
+            let mut e = rec(soul, Phase::Woken, at, None, at);
+            e.envelope.actor = replica::effects::Actor::Soul(soul);
+            e.events = None;
+            e
+        };
+        let log = vec![
+            rec(a, Phase::Woken, 5, None, 5),
+            act(soul_b, 6),
+            rec(a, Phase::Wander, 5, Some(3_600_000_005), 3_600_000_005),
+            act(soul_b, 9),
+            rec(b, Phase::Woken, 7, None, 7),
+            act(soul_b, 12),
+        ];
+        let body_of = |s: Id| (s == soul_b).then_some(b);
+        let rebuilt = |effects: &[Effect]| {
+            let mut w = WindDown::new(KNOBS);
+            w.resume(effects, body_of, [a, b], 20);
+            ([a, b].map(|x| w.state(x).copied()), w.next())
+        };
+        let reduced = wind_carry(&log);
+        assert_eq!(
+            reduced.len(),
+            3,
+            "a's last record, b's last record, b's Soul's last act"
+        );
+        assert_eq!(rebuilt(&reduced), rebuilt(&log));
+        let mut carry = Carry::of(&Sequences::default(), 1, Placed::new(), 0, &[], &reduced);
+        assert_eq!(Carry::read(&carry.to_bytes()).unwrap().wind_since, None);
+        carry.wind_since = Some(1_795_000_000_000_000);
+        let back = Carry::read(&carry.to_bytes()).unwrap();
+        assert_eq!(back.wind, carry.wind);
+        assert_eq!(
+            back.wind_since,
+            Some(1_795_000_000_000_000),
+            "field 7 round-trips"
+        );
+        let mut w = WindDown::new(KNOBS);
+        w.resume(&log, body_of, [a, b], 20);
+        let header = crate::checkers::toggles::World::build(1, 1, 0)
+            .replica
+            .header()
+            .clone();
+        let carried = carried_effects(
+            &header,
+            Carry::of(
+                &Sequences::default(),
+                1,
+                Placed::new(),
+                0,
+                &[],
+                &w.carried(),
+            )
+            .wind,
+        )
+        .unwrap();
+        assert_eq!(rebuilt(&carried), rebuilt(&log));
+    }
+
+    #[test]
     fn carry_preserves_fifo_ignores_overlap_and_forgets_ended_orders() {
         let a = Id::new(Scope([0x73; 16]), 1).unwrap();
         let b = Id::new(Scope([0x73; 16]), 2).unwrap();
@@ -7471,7 +7681,7 @@ mod standing_order_carry_tests {
             active.iter().map(|e| e.envelope.node).collect::<Vec<_>>(),
             vec![a, b]
         );
-        let carry = Carry::of(&Sequences::default(), 1, Placed::new(), 0, &active);
+        let carry = Carry::of(&Sequences::default(), 1, Placed::new(), 0, &active, &[]);
         let bytes = carry.to_bytes();
         assert_eq!(Carry::read(&bytes).unwrap().orders, carry.orders);
         let Value::Map(mut old) = decode(&bytes).unwrap().value else {

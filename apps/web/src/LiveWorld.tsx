@@ -5,6 +5,7 @@ import { whenAssetsSettled } from './gen-mesh/gltf-assets.ts';
 import {ALL_OPTIONAL_APPEARANCE_PROFILES,type OptionalAppearanceProfiles} from './optional-appearance-profiles-all.ts';
 import {historyTakePath,historyTakePage} from './WorldTakeTransport.ts';
 import { v2History } from './v2-engine/history.ts';
+import { seekTick } from './v2-engine/moment-link.ts';
 import {WorldAuthoredBoundaries} from './WorldAuthoredBoundaries.ts';
 import {WorldTouchFree} from './touch/WorldTouchFree.ts';
 import {SoulSwipe,swipeStep,soulRing,interestScores} from './touch/soul-swipe.ts';
@@ -1383,7 +1384,8 @@ if(entityBatchEnabled&&entityLayer.active&&entityLayer.freezeSettled)entityLayer
     if (at === null) { setDraft(null); return; }
     // An explicit seek chooses a recorded moment even inside the live buffer.
     // The separate live command resumes the delayed live view.
-    const tick = Math.floor(Math.max(at - HOUR_SECONDS / dts, Math.min(at, wanted), 0));
+    // X3: a moved world's history keeps more than the last hour, so a moment link can name any time in it.
+    const tick = seekTick(wanted, at, HOUR_SECONDS / dts, !!v2History());
     // A newer buffered seek also supersedes an older network request.
     seeking.current?.abort(); seeking.current = null;
     const cur = past.current;
