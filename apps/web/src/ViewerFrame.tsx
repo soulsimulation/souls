@@ -16,6 +16,8 @@ import { arrivalGate } from './gen-mesh/lazy-assets.ts';
 import { TouchHints } from './touch/hints.tsx';
 import { v2History } from './v2-engine/history.ts';
 import { momentLink, momentTick } from './v2-engine/moment-link.ts';
+// X3: read at module load: Shell rewrites the landing fragment to its tab (#watch) before the scene is ready.
+const landingMoment = typeof location === 'undefined' ? null : momentTick(location.hash);
 
 /** Edge overlays are measured against World's actual viewport, never the window. */
 export function useViewerInsets(root: RefObject<HTMLDivElement | null>, visible: boolean, layout: string): ViewportInsets {
@@ -87,8 +89,7 @@ export function ViewerFrame({ handle, state, dt, navigationOpen, onNavigationCha
   useEffect(() => {
     if (opened.current || !handle || state?.shownTick == null || state.loading || !v2History()) return;
     opened.current = true;
-    const tick = momentTick(location.hash);
-    if (tick !== null) void handle.seek(tick);
+    if (landingMoment !== null) void handle.seek(landingMoment);
   }, [handle, state?.shownTick, state?.loading]);
   const copyMoment = (tick: number) => {
     const link = momentLink(location.href, tick);
