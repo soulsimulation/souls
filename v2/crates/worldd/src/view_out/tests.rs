@@ -2979,15 +2979,16 @@ fn a_still_world_is_not_projected_again_and_a_world_change_is_never_passed_by_qu
             .quiet_until
     };
     let projections = || tests::IDLE_PROJECTIONS.get();
-    // Still: the first idle projects once; the next ones only move the quiet time on.
+    // Still: the cut has just published the world's state, so no idle projects it again; they only move the quiet
+    // time on (C4).
     let before = projections();
     out.idle(real + 2_000_000).unwrap();
     out.idle(real + 3_000_000).unwrap();
     out.idle(real + 4_000_000).unwrap();
     assert_eq!(
         projections() - before,
-        1,
-        "one projection while nothing changes"
+        0,
+        "no projection while nothing changes"
     );
     assert_eq!(quiet(&out), Some(4_000_000 - SETTLE_US));
     // The world sets a field on the thing by itself at 5 s: no Soul, no intent.
@@ -3027,10 +3028,7 @@ fn a_still_world_is_not_projected_again_and_a_world_change_is_never_passed_by_qu
     let after = projections();
     out.idle(real + 8_000_000).unwrap();
     out.idle(real + 9_000_000).unwrap();
-    assert!(
-        projections() - after <= 1,
-        "still again: at most one projection"
-    );
+    assert_eq!(projections() - after, 0, "still again: no projection");
     assert_eq!(quiet(&out), Some(9_000_000 - SETTLE_US));
     let mut reader = PublicPlayer::start(h.stored(), &out.baseline).unwrap();
     for n in 0..2 {

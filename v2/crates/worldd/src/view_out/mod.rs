@@ -3310,6 +3310,15 @@ impl<S: ObjectStore> PublicWriter<S> {
         if self.rollover_due() {
             self.rollover()?;
         }
+        // The cut has just published the source's public state: the next idle need not project it again to find the
+        // world still (C4; at 500 agents that projection was most of the writer's core).
+        if self.migration_cut.is_none() {
+            self.still_at = Some((
+                self.canonical.version(),
+                self.player.version(),
+                self.player.next(),
+            ));
+        }
         lap.mark(9);
         self.pointer(None)?;
         lap.mark(10);
