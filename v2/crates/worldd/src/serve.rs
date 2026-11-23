@@ -267,7 +267,7 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
         let mut out = Vec::new();
         // 0.134 T3: a role's link's `most` is how many take it (a dance's offer, to several); `on_beat` puts its move
         // on the world's beat.
-        let (mut most, mut beat) = (0, false);
+        let (mut most, mut beat, mut follows) = (0, false, None);
         for (role, v) in &roles {
             most += match entry
                 .get("links")
@@ -278,6 +278,10 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
                 _ => 1,
             };
             beat |= v.get("on_beat") == Some(&Json::Bool(true));
+            // 0.135 G2: the role that follows the other's member.
+            if v.get("follows") == Some(&Json::Bool(true)) {
+                follows = Some(Name::new(&format!("{ns}:{role}")).ok_or("a role's name")?);
+            }
             let slot = v
                 .get("places")
                 .and_then(|p| p.get("slots"))
@@ -317,6 +321,7 @@ pub fn activity_kinds(entries: &[(String, Json)]) -> R<Vec<ActivityKind>> {
                 leave_within: 400_000,
                 most,
                 beat,
+                follows,
             },
         );
     }
@@ -678,11 +683,16 @@ fn build(facts: &str, entries: &[(String, Json)]) -> R<Built> {
 fn build_with(cache: Option<&Path>, facts: &str, entries: &[(String, Json)]) -> R<Built> {
     let (prepared, kept) = courses_cached(cache, facts, entries)?;
     stamp("facts: courses");
+    // A kind whose entry joins parts (a rack bay, a beam, a frame stand) takes its slots from its entry (0.135).
+    let texts: Vec<(String, String)> = entries
+        .iter()
+        .map(|(k, e)| (k.clone(), e.to_json()))
+        .collect();
     // A kept text that does not load is never the start's end: it is computed again.
-    let mut im = match import_eden::load(&prepared) {
+    let mut im = match import_eden::load_with(&prepared, &texts) {
         Err(e) if kept => {
             eprintln!("worldd: the kept facts' courses do not load ({e}); computing them again");
-            import_eden::load(&courses(facts, entries)?)?
+            import_eden::load_with(&courses(facts, entries)?, &texts)?
         }
         im => im?,
     };
@@ -2858,15 +2868,28 @@ mod tests {
                     "../../../../content/kinds/together/hold_hands.json"
                 )),
             ),
+            (
+                "eden:follow".to_owned(),
+                read(include_str!(
+                    "../../../../content/kinds/together/follow.json"
+                )),
+            ),
         ];
         let client = include_str!("../../../client/src/together/together.mjs");
         let kinds = activity_kinds(&entries).unwrap();
         for (k, mv) in kinds
             .iter()
-            .zip(["dance", "handshake", "high_five", "hold_hand", "hug"])
+            .zip(["dance", "", "handshake", "high_five", "hold_hand", "hug"])
         {
             println!("{}", k.name.as_str());
             assert_eq!(k.roles.len(), 2);
+            // 0.135 G2: following names no move; its first role follows.
+            if mv.is_empty() {
+                assert!(k.roles.iter().all(|r| r.mv.is_none()));
+                assert_eq!(k.follows.as_ref().map(Name::as_str), Some("eden:one"));
+                continue;
+            }
+            assert_eq!(k.follows, None);
             // 0.134 T3: the dance takes up to eight, on the beat; each touch is a pair.
             let dance = mv == "dance";
             assert_eq!((k.most, k.beat), if dance { (8, true) } else { (2, false) });

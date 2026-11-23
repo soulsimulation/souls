@@ -9,7 +9,7 @@ import { KINDS, OFFERER, togetherIntents } from './together.mjs';
 const id = (n) => `${'ab'.repeat(16)}-${n}`;
 
 test('together offers a handshake, a hug or a high five to one body; accept and decline answer it', () => {
-  for (const touch of ['handshake', 'hug', 'high-five', 'hold-hands']) {
+  for (const touch of ['handshake', 'hug', 'high-five', 'hold-hands', 'follow']) {
     assert.deepEqual(togetherIntents({ do: 'offer', touch, to: id(3) }, { place: id(1) }),
       [{ verb: 'activity:offer', target: id(1), params: { 1: KINDS[touch], 2: OFFERER, 3: [id(3)] } }]);
   }

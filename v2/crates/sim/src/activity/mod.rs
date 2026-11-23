@@ -61,6 +61,7 @@ use crate::structure::Structure;
 use crate::timers::{DueList, Timer};
 
 pub mod carry;
+pub mod follow;
 pub mod offer;
 pub mod seating;
 
@@ -837,9 +838,11 @@ impl Activities {
     ) -> R<Micros> {
         // A hold (T2) lasts while both stay: when one leaves, the rest leave it too, so nobody is kept in a hold that
         // is over and the next hold between them starts.
+        // 0.135 G2: a follow is over for both when either leaves, as a hold is.
         let holds = self.live.get(&activity).is_some_and(|l| {
             l.node.members.iter().any(|m| m.body == body)
-                && l.moves.values().any(|n| held(moves, *n))
+                && (self.kinds[&l.kind].follows.is_some()
+                    || l.moves.values().any(|n| held(moves, *n)))
         });
         let at = self.leave_one(tree, c, moves, due, mint, ask, body, activity)?;
         if holds {
@@ -957,7 +960,29 @@ impl Activities {
     pub fn walk_leaves(&self, moves: &Moves, body: Id) -> Option<Id> {
         let a = *self.holding.get(&body)?;
         let l = self.live.get(&a)?;
-        (self.kinds[&l.kind].beat || l.moves.values().any(|n| held(moves, *n))).then_some(a)
+        let kind = &self.kinds[&l.kind];
+        // 0.135 G2: the follower's own walk ends the follow; the leader's walks are what it follows.
+        let follower = kind.follows.as_ref().is_some_and(|f| {
+            l.node
+                .members
+                .iter()
+                .any(|m| m.body == body && m.role == *f)
+        });
+        (kind.beat || follower || l.moves.values().any(|n| held(moves, *n))).then_some(a)
+    }
+
+    /// Every follow running (0.135 G2): its activity, the leader's body, and the follower's body and Soul.
+    pub fn following(&self) -> Vec<(Id, Id, Id, Id)> {
+        self.live
+            .iter()
+            .filter(|(_, l)| l.node.state == State::Started)
+            .filter_map(|(a, l)| {
+                let f = self.kinds[&l.kind].follows.as_ref()?;
+                let follower = l.node.members.iter().find(|m| m.role == *f)?;
+                let leader = l.node.members.iter().find(|m| m.role != *f)?;
+                Some((*a, leader.body, follower.body, follower.soul))
+            })
+            .collect()
     }
 
     /// Releases every member's held move in `activity` (0.134 T2), so both hands come free, each written for viewers

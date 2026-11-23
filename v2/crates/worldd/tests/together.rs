@@ -37,8 +37,8 @@ use replica::world_model::{Audience, Kind};
 use sim::links::Doors;
 use sim::log::{Mem, recover};
 use sim::walk::town::Town;
-use worldd::answers::{self, Config};
-use worldd::bodies::Bodies;
+use worldd::answers::{self, BODIES, Config};
+use worldd::bodies::{Bodies, read_row};
 use worldd::checkers::Rules;
 
 const LINEAGE: Scope = Scope([0x71; 16]);
@@ -49,11 +49,23 @@ const HANDSHAKE: &str = "test:handshake";
 const BRIEF: &str = "test:brief_handshake";
 /// Holding hands (0.134 T2): each role names content's `hold_hand`, whose last phase holds until released.
 const HOLD: &str = "test:hold_hands";
+/// Following (0.135 G2): no move; the giver's role follows.
+fn follow() -> ActivityKind {
+    let mut k = touch(FOLLOW, 60_000_000, "souls:none");
+    for r in &mut k.roles {
+        r.mv = None;
+    }
+    k.follows = Some(name(GIVER));
+    k
+}
+
 /// Dancing together (0.134 T3).
 const DANCE: &str = "test:dance";
 /// A hug and a high-five, as the handshake: each ends with its moves.
 const HUG: &str = "test:hug";
 const HIGH_FIVE: &str = "test:high_five";
+/// Following (0.135 G2): the asker (the giver's role) follows the other.
+const FOLLOW: &str = "test:follow";
 const GIVER: &str = "test:giver";
 const TAKER: &str = "test:taker";
 
@@ -76,6 +88,7 @@ fn kinds() -> Vec<(&'static str, String)> {
         (DANCE, pinned(DANCE, 6)),
         (HUG, pinned(HUG, 7)),
         (HIGH_FIVE, pinned(HIGH_FIVE, 8)),
+        (FOLLOW, pinned(FOLLOW, 9)),
     ]
 }
 
@@ -105,6 +118,7 @@ fn touch(plain: &str, lasts: Micros, mv: &str) -> ActivityKind {
         leave_within: 400_000,
         most: 2,
         beat: false,
+        follows: None,
     }
 }
 
@@ -220,7 +234,9 @@ fn tree_rules() -> TreeRules {
                 full(PLACE),
                 k(
                     "place",
-                    &["body", HANDSHAKE, BRIEF, HOLD, DANCE, HUG, HIGH_FIVE],
+                    &[
+                        "body", HANDSHAKE, BRIEF, HOLD, DANCE, HUG, HIGH_FIVE, FOLLOW,
+                    ],
                 ),
             ),
             (full(WALKER), k("family", &[])),
@@ -230,6 +246,7 @@ fn tree_rules() -> TreeRules {
             (full(DANCE), k("activity", &[])),
             (full(HUG), k("activity", &[])),
             (full(HIGH_FIVE), k("activity", &[])),
+            (full(FOLLOW), k("activity", &[])),
         ]),
         souls: [soul(1), soul(2), soul(3), soul(4)].into(),
         audiences: BTreeMap::new(),
@@ -408,6 +425,7 @@ fn serve(tag: &str) -> Run {
             dance(),
             touch(HUG, 60_000_000, "souls:hug"),
             touch(HIGH_FIVE, 60_000_000, "souls:high_five"),
+            follow(),
         ],
     ));
     let rules = Rules {
@@ -456,7 +474,7 @@ impl Run {
             if let Body::Changes(cs) = &e.body {
                 for c in cs {
                     if let Change::Create { node, kind, .. } = &c.change
-                        && [HANDSHAKE, BRIEF, HOLD, DANCE, HUG, HIGH_FIVE]
+                        && [HANDSHAKE, BRIEF, HOLD, DANCE, HUG, HIGH_FIVE, FOLLOW]
                             .iter()
                             .any(|k| kind.as_str() == full(k))
                     {
@@ -864,5 +882,94 @@ fn t2_holds_again_and_with_another_partner() {
         .expect("Soul 3 comes over");
     hold(&mut a, &mut c, 3, "with another partner");
     println!("t2: three holds, each with both moves and both released");
+    run.stop();
+}
+
+impl Run {
+    /// Each body row the log holds, in order: the body and where it stood.
+    fn rows(&self) -> Vec<(Id, Vec3)> {
+        let log = self.store.0.lock().unwrap().bytes.clone();
+        recover(&log)
+            .unwrap()
+            .records
+            .into_iter()
+            .filter(|r| !sim::recorder::is_input(r))
+            .flat_map(|r| match Part::read(&r).unwrap().rest.get(&BODIES) {
+                Some(Value::Array(rows)) => rows.clone(),
+                _ => Vec::new(),
+            })
+            .filter_map(|v| read_row(&v).map(|(b, p, _)| (b, p.position)))
+            .collect()
+    }
+}
+
+fn walk_to(x: i64, z: i64) -> Value {
+    let int =
+        |n: i64| u64::try_from(n).map_or_else(|_| Value::Nint(n.unsigned_abs() - 1), Value::Uint);
+    Value::Array(vec![int(x), int(0), int(z)])
+}
+
+/// 0.135 G2: Soul 2 offers to follow Soul 1, and Soul 1 accepts. Soul 1 walks 30 m with two turns (10 m east,
+/// 8 m south, 12 m east); Soul 2 is walked to its place 1 m behind by the walks the world sends. At every tick either
+/// moved, Soul 2 is within 2.5 m of its place and never moves more than 0.2 m in a tick (walked, never placed). Then
+/// Soul 2 walks on its own: the follow is over for both.
+#[test]
+fn g2_a_soul_follows_another_over_a_walk_with_two_turns() {
+    let run = serve("follow");
+    let (mut a, mut b) = (run.client(1), run.client(2));
+    let follow = run.created(&b.offer(FOLLOW, 1).expect("Soul 2 offers to follow"));
+    a.act("activity:accept", Some(follow), &[])
+        .expect("Soul 1 accepts");
+    let rows_before = run.rows().len();
+    for (x, z) in [
+        (-30_000_000, 30_000_000),
+        (-30_000_000, 22_000_000),
+        (-18_000_000, 22_000_000),
+    ] {
+        a.act("eden:walk", Some(ground()), &[(1, walk_to(x, z))])
+            .unwrap_or_else(|e| panic!("Soul 1 walks to ({x}, {z}): {e}"));
+    }
+    // The follower arrives behind.
+    std::thread::sleep(Duration::from_millis(2_000));
+    let (mut leader, mut follower) = (at(1), at(2));
+    let (mut worst, mut step) = (0_i64, 0_i64);
+    let len = |a: Vec3, b: Vec3| {
+        ((((a.x - b.x) as i128).pow(2) + ((a.z - b.z) as i128).pow(2)).isqrt()) as i64
+    };
+    for (body, p) in run.rows().into_iter().skip(rows_before) {
+        if body == soul(1) {
+            leader = p;
+        } else if body == soul(2) {
+            step = step.max(len(p, follower));
+            follower = p;
+        } else {
+            continue;
+        }
+        let place = sim::activity::follow::place(leader, follower);
+        worst = worst.max(len(follower, place));
+    }
+    println!(
+        "g2: the follower within {} mm of its place; at most {} mm a tick",
+        worst / 1000,
+        step / 1000
+    );
+    assert!(worst <= 2_500_000, "within 2.5 m of its place: {worst} µm");
+    assert!(
+        step <= 200_000,
+        "walked, never placed: {step} µm in one tick"
+    );
+    assert!(
+        len(follower, leader) < 2_000_000,
+        "the follower ended behind: {follower:?} {leader:?}"
+    );
+    // Soul 2 walks on its own: the follow ends for both.
+    let lefts = run.lefts();
+    b.act(
+        "eden:walk",
+        Some(ground()),
+        &[(1, walk_to(-18_000_000, 26_000_000))],
+    )
+    .expect("Soul 2 walks on its own");
+    assert_eq!(run.lefts(), lefts + 2, "the follow is over for both");
     run.stop();
 }

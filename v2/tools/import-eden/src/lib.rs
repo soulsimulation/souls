@@ -343,6 +343,59 @@ fn name_kind(line: &str) -> R<(String, replica::world_model::Kind)> {
 
 /// Builds the tree from the facts file's text.
 pub fn load(text: &str) -> R<Import> {
+    load_with(text, &[])
+}
+
+/// The slots of each kind whose entry joins parts (0.135, ahead of A2): an entry that declares a link type, or a slot
+/// that names the kinds it admits. Keyed by the kind's plain name, each slot by the number its entry gives it (K3's
+/// reader, `replica::kinds::entry`), with what it admits. Entries that do not read are left to the facts.
+fn joining_slots(entries: &[(String, String)]) -> BTreeMap<String, BTreeMap<u64, Vec<String>>> {
+    use replica::rules::json::Value as J;
+    let mut out = BTreeMap::new();
+    for (_, text) in entries {
+        let Ok(mut e) = replica::rules::json::parse(text) else {
+            continue;
+        };
+        // The kind's admission only: its forms and timed fields are not read here (as `worldd` loads its forms).
+        if let J::Obj(o) = &mut e {
+            o.retain(|(k, _)| k != "forms");
+            if let Some((_, J::Obj(state))) = o.iter_mut().find(|(k, _)| k == "state") {
+                state.retain(|(_, f)| f.get("type").and_then(J::str) != Some("timed"));
+            }
+        }
+        let Ok(kind) = replica::kinds::entry::entry_to_kind(&e.to_json()) else {
+            continue;
+        };
+        let mut kinds = replica::kinds::Kinds::default();
+        kinds.load(&[("entry", kind.as_str())]);
+        for name in kinds.admits().into_keys() {
+            let Some(def) = kinds.get(&name) else {
+                continue;
+            };
+            let names_kinds = def
+                .slots
+                .values()
+                .any(|sl| sl.admits.iter().any(|a| a.contains(':')));
+            if def.links.is_empty() && !names_kinds {
+                continue;
+            }
+            let slots = def
+                .slots
+                .iter()
+                .map(|(n, sl)| (*n, sl.admits.iter().cloned().collect()))
+                .collect();
+            out.insert(plain(def.name.as_str()).to_owned(), slots);
+        }
+    }
+    out
+}
+
+/// [`load`], with the world's entries (`(name, its souls-entry/1 text)`): a kind whose entry joins parts (it declares a
+/// link type, or slots naming the kinds they admit: a rack bay, a beam, a frame stand) takes its slots from its entry,
+/// numbered and admitting as the entry says, beside any slot only its things have. Every other kind is the facts'.
+/// Those kinds' names (their hashes) follow their entries, so a world seeded with such entries before is seeded again.
+pub fn load_with(text: &str, entries: &[(String, String)]) -> R<Import> {
+    let joining = joining_slots(entries);
     let f = json::parse(text)?;
     if s(&f, "format")? != "souls/import-eden/1" {
         return Err("not a souls/import-eden/1 file".into());
@@ -396,15 +449,26 @@ pub fn load(text: &str) -> R<Import> {
     }
     for k in need(&f, "kinds")?.arr() {
         let r = s(k, "ref")?;
-        let slots: String = slots_of
+        // The facts' slots (each admits a thing), and a joining kind's own slots from its entry over them.
+        let mut by_n: BTreeMap<i64, Vec<String>> = slots_of
             .get(r)
-            .map(|ns| {
-                ns.iter()
-                    .map(|n| format!("{n}: [\"thing\"]"))
-                    .collect::<Vec<_>>()
-                    .join(", ")
-            })
+            .map(|ns| ns.iter().map(|n| (*n, vec!["thing".to_owned()])).collect())
             .unwrap_or_default();
+        if let Some(own) = joining.get(kind_name(s(k, "name")?).as_str()) {
+            for (n, admits) in own {
+                if let Ok(n) = i64::try_from(*n) {
+                    by_n.insert(n, admits.clone());
+                }
+            }
+        }
+        let slots: String = by_n
+            .iter()
+            .map(|(n, admits)| {
+                let a: Vec<String> = admits.iter().map(|x| format!("\"{x}\"")).collect();
+                format!("{n}: [{}]", a.join(", "))
+            })
+            .collect::<Vec<_>>()
+            .join(", ");
         let children = if has_floors.contains(r) {
             format!("[\"thing\", \"{FLOOR}\"]")
         } else {

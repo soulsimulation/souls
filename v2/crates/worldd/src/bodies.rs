@@ -234,6 +234,8 @@ pub struct Bodies {
     pub unstuck: crate::unstick::Unstuck,
     /// The rule's own move going on each body, by its intent id.
     wind_moves: BTreeMap<Id, Id>,
+    /// Each follower's walk the world sent (0.135 G2): its id and where it is going.
+    follow_moves: BTreeMap<Id, (Id, Vec3)>,
     /// Each body the rule put to sleep on the ground: the driver holding it lying.
     sleeping: BTreeMap<Id, Driver>,
 }
@@ -402,6 +404,7 @@ impl Bodies {
             wind_log: Vec::new(),
             unstuck: crate::unstick::Unstuck::default(),
             wind_moves: BTreeMap::new(),
+            follow_moves: BTreeMap::new(),
             sleeping: BTreeMap::new(),
         })
     }
@@ -1584,6 +1587,60 @@ impl Bodies {
         if let Some(s) = self.wind.state(body) {
             let e = wind_down::record(o, s, at, 0);
             self.wind_log.push(e);
+        }
+    }
+
+    /// The follows running (0.135 G2, `sim::activity::follow`): `(activity, leader, follower, follower's Soul)`. Each
+    /// follower whose place behind its leader has moved on is sent a walk there, by the path every walk intent takes
+    /// ([`Bodies::start`]), under a fresh id, as its Soul's own; a follower whose follow has ended is stopped where
+    /// it is.
+    pub fn follow(&mut self, follows: &[(Id, Id, Id, Id)]) {
+        use sim::activity::follow::{again, place};
+        let now: BTreeSet<Id> = follows.iter().map(|f| f.2).collect();
+        let ended: Vec<Id> = self
+            .follow_moves
+            .keys()
+            .filter(|b| !now.contains(b))
+            .copied()
+            .collect();
+        for body in ended {
+            if let Some((id, _)) = self.follow_moves.remove(&body) {
+                self.cancel(id);
+            }
+        }
+        for &(_, leader, follower, soul) in follows {
+            let c = &self.runner.controller;
+            let (Some(l), Some(f)) = (c.body(leader), c.body(follower)) else {
+                continue;
+            };
+            if sim::index::place_of(l).0 != self.town.ground
+                || sim::index::place_of(f).0 != self.town.ground
+            {
+                continue;
+            }
+            let to = place(l.pose.position, f.pose.position);
+            let aimed = self.follow_moves.get(&follower).map(|m| m.1);
+            if !again(aimed, f.pose.position, to) {
+                continue;
+            }
+            let Ok(id) = self.mint.mint() else { continue };
+            let node = self.town.ground;
+            let ask = Ask::Walk {
+                node,
+                point: Some(Vec3::new(to.x, 0, to.z)),
+            };
+            let started = self.start(vec![(
+                id,
+                Asked {
+                    body: follower,
+                    actor: Actor::Soul(soul),
+                    ask,
+                    fallbacks: Vec::new(),
+                },
+            )]);
+            if started.iter().all(|(_, r)| r.is_ok()) {
+                self.follow_moves.insert(follower, (id, to));
+            }
         }
     }
 

@@ -3746,6 +3746,8 @@ impl Clock {
                 &mut b.slots,
                 now,
             );
+            // 0.135 G2: each follower walks to its place behind its leader, by walks the world sends.
+            b.follow(&e.following());
         }
     }
 
@@ -5003,6 +5005,7 @@ pub fn start<S: Storage + 'static>(
     )?;
     let publisher = Arc::new(Publisher::new(&world));
     let (kinds, library) = (rules.kinds.clone(), acts::library()?);
+    let engine_entries = rules.kinds.clone();
     let structure = Arc::new(sim::structure::Structure::from_entries(&rules.kinds));
     let (header, engine_header) = (world.header().clone(), world.header().clone());
     // The ids the forms and the engine mint (links, transfers, things made): a scope of their own for each start,
@@ -5196,8 +5199,11 @@ pub fn start<S: Storage + 'static>(
             acts
         },
         forming: Vec::new(),
+        // 0.135 C2: a load is carried as its kind's entry states.
         engine: engine_parts.map(|(rules, kinds)| {
-            Engine::new(engine_header, rules, kinds, engine_scope).with_beats(beats)
+            Engine::new(engine_header, rules, kinds, engine_scope)
+                .with_beats(beats)
+                .with_loads(&engine_entries)
         }),
         engine_acts: Vec::new(),
         engine_done: Vec::new(),
@@ -5279,6 +5285,8 @@ pub fn start<S: Storage + 'static>(
                         if let Err(r) = crate::orders::resume(&mut b, &order_parts, at) {
                             eprintln!("worldd: standing orders were not restored: {r}");
                         }
+                        // N2: a form's run open at the kill is ended `restart` in the first tick (`Acts::recover`).
+                        c.forms.recover(&wind_records, at);
                         b.wind_resume(
                             &wind_records,
                             |s| c.life.as_ref().and_then(|l| l.life.body_of(s)),

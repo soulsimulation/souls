@@ -12,7 +12,7 @@
 //!   with one owner, `v2/docs/zones.md` rule 4), so the node and its links are in the log and survive a restart.
 //!
 //! A kind is decoded from `{1: name, 2: revision, 3: [{1: role, 2: place, 3: [want, ...]}, ...], 4: proposal lasts
-//! µs, 5: leave within µs, 6?: members at most (two when absent), 7?: 1 when its moves go on the world's beat}`, a want as in a move (`replica::moves`): `{1: 1 every | 2 one | 3 named, 2: class number
+//! µs, 5: leave within µs, 6?: members at most (two when absent), 7?: 1 when its moves go on the world's beat, 8?: the role that follows}`, a want as in a move (`replica::moves`): `{1: 1 every | 2 one | 3 named, 2: class number
 //! or resource name}`.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -73,6 +73,9 @@ pub struct ActivityKind {
     /// Its roles' moves go on the world's beat (0.134 T3, `v2/docs/time.md` rule 7): each member's move begins on one
     /// beat, aimed at its own body, and begins again on the next beat after it ends, until the member leaves.
     pub beat: bool,
+    /// The role whose member follows the other's (0.135 G2), if any: it walks to its place behind the leader each
+    /// time the leader moves on, by walks the world sends, until either leaves or the follower walks on its own.
+    pub follows: Option<Name>,
 }
 
 fn uint(v: Option<&Value>, what: &str) -> R<u64> {
@@ -114,7 +117,7 @@ impl ActivityKind {
         let Value::Map(m) = v else {
             return refuse("not-an-activity", "an activity kind is a map");
         };
-        if let Some(k) = m.keys().find(|k| **k == 0 || **k > 7) {
+        if let Some(k) = m.keys().find(|k| **k == 0 || **k > 8) {
             return refuse("not-an-activity", format!("field {k}"));
         }
         let name = text(m.get(&1), "the name")?;
@@ -191,6 +194,18 @@ impl ActivityKind {
             None => false,
             v => uint(v, "on the beat")? == 1,
         };
+        let follows = match m.get(&8) {
+            None => None,
+            v => Some(text(v, "the role that follows")?),
+        };
+        if let Some(f) = &follows
+            && !roles.iter().any(|r| r.name == *f)
+        {
+            return refuse(
+                "not-an-activity",
+                format!("{} follows as no role of its", f.as_str()),
+            );
+        }
         Ok(ActivityKind {
             name,
             revision,
@@ -199,6 +214,7 @@ impl ActivityKind {
             leave_within,
             most,
             beat,
+            follows,
         })
     }
 
