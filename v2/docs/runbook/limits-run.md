@@ -121,6 +121,24 @@ world's state, Eden's memory and the gateway's connect time.
 **Join time and frame rate** are read from the old page in a real browser, at `https://soul.game/w/eden/` during
 a rung. That is P3's own step, not this script's.
 
+## What the first production run met (24 Nov 2026)
+
+No 10-minute rung finished; the published result is on pull request #4642. Read these before the next run:
+
+- **The agents' path.** 500 agents through the SSH forwards (relayed through a laptop) never got the driver's read of
+  Eden's copy: `no answer to a sync request in 30 s`. Through the front door it works. The driver carries no TLS, so
+  a plain-to-TLS proxy on the load machine's loopback carries each agent on its own connection:
+  `rewrite /v2/* /w/eden{uri}` then `reverse_proxy https://soul.game` with `header_up Host soul.game`, and
+  `GATEWAY=ws://<that loopback address and port>`. The driver needs more than 1,024 open files at 500 agents
+  (`served.sh` raises its soft limit).
+- **The viewers come after the driver's read** (`served.sh`): from a load machine 175 ms away, their first pictures
+  (about 9 MB each) starve it.
+- **The viewers' origin gives way first.** `souls-origin` (MemoryMax 256 MB) was killed for memory each time 100
+  viewers joined, and real visitors saw "View unavailable". The guard watches Eden only, so watch the origin's
+  `NRestarts` beside it, and stop at the first restart.
+- **At 500 agents without viewers,** Eden kept every tick on time, but the old page showed "Catching up · This world's
+  stream is not available right now" within two minutes. The run was stopped there.
+
 ## How long it takes
 
 A served rung is its load (`SECS`, 600) plus about 60 s: the preflight (about 12 s), the driver's sign-in of 500

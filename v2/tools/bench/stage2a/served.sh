@@ -17,6 +17,8 @@ V2=$(cd "$(dirname "$0")/../../.." && pwd)
 B=${CARGO_TARGET_DIR:-$V2/target}/release
 for v in GATEWAY TOKENS_FILE PROBE STREAM DRIVER_CPUS; do [ -n "${!v:-}" ] || { echo "served.sh: $v is not set" >&2; exit 2; }; done
 rm -rf "$D"; mkdir -p "$D/run"
+# 500 agents are 500 sockets: a soft limit of 1024 open files is too near (24 Nov), and raising it needs no root.
+ulimit -n "$(ulimit -Hn)" 2> /dev/null || true
 cat /proc/loadavg > "$D/loadavg.before"
 GP= VP= DP=
 stop_all() { for p in $DP $VP $GP; do kill "$p" 2> /dev/null; done; }
