@@ -6,6 +6,29 @@ Souls is pre-beta, so releases are numbered 0.N (patches 0.N.x) and 1.0 is kept 
 2026-11-09 the earlier releases 1.1 to 4.18 were renumbered 0.1 to 0.122, in the same order and with no gaps (3.0 is
 0.5, 4.0 is 0.105, 4.18 is 0.122); [#1500](https://github.com/soulsimulation/souls/issues/1500) has the full map.
 
+## 0.132.2 (2026-11-24)
+
+### Features
+
+- A Soul can ask to follow another; once that Soul accepts, it walks after it along its way until either one leaves or it goes off on its own. (#4359)
+- On the new engine, two Souls can carry a rack beam or frame together in a running world, holding it lengthwise between them. (#4360)
+- On the new engine, a walk to a full place ends as near as the crowd allows and says so (`done.as-near-as-the-crowd-allows`), and a crowded wide doorway is taken in turns, fairly. (#4364)
+- On the new engine, Souls sent to a full meetup place stand round it as near as the crowd allows instead of being refused.
+- Souls can play volleyball at the net, work at an office computer, open and close a window, hand in and claim things at a lost-and-found box, hang linen on a drying line, and play checkers.
+- Eden gains a classroom podium, an office lounge television, a shared-kitchen stove and a performance-stage speaker in its existing places.
+- Souls holding hands stand shoulder to shoulder, and Souls dancing together form a ring facing its middle, each walking to its place before they begin.
+
+### Fixes
+
+- My Souls on the home page lists your Souls in a world that has moved to the new engine, and opens the world following the one you pick.
+- A new-engine world whose saved stream is larger than 10 MB starts again instead of restarting in a loop, and a freshly made world starts on the build that made it.
+- On a world moved to the new engine, a Soul sitting in a seat is drawn in history playback, so following it carries on when the viewer goes back in time. The advanced Broadcast panel's camera line shows the page's own broadcast cut there.
+- On a world moved to the new engine, `?hour=HH:MM` sets the light in history playback as it does live, so a replayed span can be filmed at a chosen hour.
+
+### Performance
+
+- A Soul's gesture or take in a big world now leaves the client in about half a second instead of two to three: the client's own check of the act no longer slows down with every thing in the world.
+
 ## 0.132.1 (2026-11-23)
 
 ### Features
