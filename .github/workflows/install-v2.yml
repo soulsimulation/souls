@@ -1,6 +1,8 @@
 # Installs Engine v2's programs beside today's system on the production machine (Engine v2 O17, #2810), through
-# v2/tools/ops/install.sh. A dry run by default: it prints the plan and changes nothing. Even an apply starts, enables
-# and restarts nothing, and never touches today's units, users, data, proxy, DNS or firewall.
+# v2/tools/ops/install.sh. A dry run by default: it prints the plan and changes nothing. An apply starts, enables and
+# restarts one unit, the alarm daemon souls-alarms (O2, #2731): it enables and starts it, and restarts it when its unit
+# or drop-in changed; it wakes only worlds that went to sleep. Uninstall stops and disables it. An apply starts no world
+# or gateway, and never touches today's units, users, data, proxy, DNS or firewall.
 #   gh workflow run install-v2.yml --ref main                      (the dry run: the plan)
 #   gh workflow run install-v2.yml --ref main -f action=apply
 #   gh workflow run install-v2.yml --ref main -f action=uninstall
