@@ -27,12 +27,16 @@ For Mars College instead (steps 9 and 10): `WORLD=https://soul.game/w/mars-colle
 
 ## 1. Two folders, the client in each
 
+From any empty folder of yours:
+
 ```sh
-mkdir -p ~/souls-walkthrough/a ~/souls-walkthrough/b
-cd ~/souls-walkthrough/a && curl -fsSO "${WORLD}eden.mjs"
-cd ~/souls-walkthrough/b && curl -fsSO "${WORLD}eden.mjs"
-cd ~/souls-walkthrough/a
+mkdir -p souls-walkthrough/a souls-walkthrough/b
+(cd souls-walkthrough/a && curl -fsSO "${WORLD}eden.mjs")
+(cd souls-walkthrough/b && curl -fsSO "${WORLD}eden.mjs")
+cd souls-walkthrough/a
 ```
+
+Every later block runs in `souls-walkthrough/a`; `(cd ../b && ...)` runs a command as the second Soul.
 
 ## 2. Pair both Souls
 
