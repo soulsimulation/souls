@@ -66,7 +66,12 @@ test("a cast's and a battery's old words in the new client's, and what the strea
   const { placeIds, receiptsOf, kindName } = await import('./battery.mjs');
   assert.deepEqual(newWords(['act', 'walk to the pond hall', '--wait', '100']), ['act', '?the pond hall', '--wait']);
   assert.deepEqual(newWords(['act', 'walk:lab-presentation-hall', '--wait', '60']), ['act', '?lab-presentation-hall', '--wait']);
-  assert.deepEqual(newWords(['act', '{{prev.found[0].act}}']), ['act', '{{prev.found[0].id}}']);
+  assert.deepEqual(newWords(['act', '{{prev.found[0].act}}']), ['act', '!{{prev.found[0].id}}', '--wait'], 'the found thing\'s own offer, waited for');
+  assert.deepEqual(newWords(['act', 'walk:pond']), ['act', '?pond', '--wait'], 'an act waits for the world\'s verdict');
+  const { offerOf } = await import('./director.mjs');
+  const seat = (offers) => ({ cli: async (...w) => (w[0] === 'inspect' ? { offers } : null) });
+  assert.equal(await offerOf(seat([{ name: 'walk', act: 'walk:t-1' }, { name: 'sit', act: 'sit:t-1' }]), 't-1'), 'sit:t-1');
+  assert.equal(await offerOf(seat([{ name: 'walk', act: 'walk:t-1' }]), 't-1'), 't-1', 'a thing that offers only a walk is walked to');
   assert.deepEqual(newWords(['say', 'Hello']), ['say', 'Hello']);
   assert.match(newWords(['act', 'sit-ground:here']).skip, /sit-ground/);
   assert.match(newWords(['plan', '["walk:cottage"]', '--for', '{id}']).skip, /plan/);
