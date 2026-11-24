@@ -2349,3 +2349,125 @@ fn q2_a_walk_ends_in_a_buildings_main_room_on_the_ground_or_beside_a_soul() {
         "inside the stair hall: {at:?}"
     );
 }
+
+/// I4's durable half (0.133 verification): a walk outlives the gateway connection it came on (the gateway restarted
+/// under it), and its answer comes on the gateway's next connection, once: handed on at once while one is up, held
+/// until one asks while none is (`worldd::handover`).
+#[test]
+#[allow(clippy::disallowed_methods)] // waits in real time for the walk back to end
+fn i4_a_walks_answer_outlives_its_gateway_connection_once() {
+    let store = Mem::with(Vec::new());
+    let mut cfg = Config::new(LINEAGE, 1);
+    cfg.tick = Duration::from_millis(50);
+    cfg.bodies = Some(Box::new(|_: &worldd::bodies::Placed| bodies()));
+    let world = answers::start(
+        toggles::World::build(0, 0, 0).replica,
+        toggles::rules(),
+        store.clone(),
+        cfg,
+    )
+    .expect("the world starts");
+    let path = std::env::temp_dir().join(format!("i4-handover-{}.sock", std::process::id()));
+    let _ = std::fs::remove_file(&path);
+    let listener = UnixListener::bind(&path).unwrap();
+    let door = world.door();
+    std::thread::spawn(move || {
+        for stream in listener.incoming().flatten() {
+            let door = door.clone();
+            std::thread::spawn(move || answers::serve(door, stream));
+        }
+    });
+    // A gateway's connection: its handover ask first.
+    let gateway = || {
+        let mut s = UnixStream::connect(&path).unwrap();
+        s.set_read_timeout(Some(Duration::from_secs(30))).unwrap();
+        let ask = worldd::handover::ask();
+        s.write_all(&u32::try_from(ask.len()).unwrap().to_be_bytes())
+            .unwrap();
+        s.write_all(&ask).unwrap();
+        Client(s)
+    };
+    // The sequence of the next answer that is not a run's progress; `None` when nothing comes.
+    let final_of = |c: &mut Client| -> Option<u64> {
+        loop {
+            let mut len = [0u8; 4];
+            c.0.read_exact(&mut len).ok()?;
+            let mut frame = vec![0u8; u32::from_be_bytes(len) as usize];
+            c.0.read_exact(&mut frame).unwrap();
+            if answers::progress_of(&frame).is_some() {
+                continue;
+            }
+            let Value::Map(m) = decode(&frame).unwrap().value else {
+                panic!("a frame")
+            };
+            let Some(Value::Map(a)) = m.get(&2) else {
+                panic!("an answer")
+            };
+            match a.get(&2) {
+                Some(Value::Uint(s)) => return Some(*s),
+                _ => panic!("an answer names its sequence"),
+            }
+        }
+    };
+    // The walk goes on the first connection, which ends at once; the next one is told how it ended.
+    let mut first = gateway();
+    first.send(1, "eden:walk", Some(thing()));
+    drop(first);
+    let mut second = gateway();
+    assert_eq!(
+        final_of(&mut second),
+        Some(1),
+        "handed on to the next gateway"
+    );
+    // A walk back, sent on the second connection, which ends at once too: the walk ends with no gateway connected.
+    let back = start();
+    let (_, ground) = town();
+    let mut i = Intent::read(&intent_bytes(
+        body_id(),
+        2,
+        "eden:walk",
+        Some(Target::Node(ground)),
+        &[],
+        answers::now() + 60_000_000,
+    ))
+    .unwrap();
+    let int = |n: i64| {
+        if n >= 0 {
+            Value::Uint(n as u64)
+        } else {
+            Value::Nint(n.unsigned_abs() - 1)
+        }
+    };
+    i.parameters.insert(
+        1,
+        Value::Array([back.x, back.y, back.z].into_iter().map(int).collect()),
+    );
+    let bytes = encode(&i.to_value()).unwrap();
+    second
+        .0
+        .write_all(&u32::try_from(bytes.len()).unwrap().to_be_bytes())
+        .unwrap();
+    second.0.write_all(&bytes).unwrap();
+    drop(second);
+    let ended = || {
+        logged(&store.0.lock().unwrap().bytes)
+            .values()
+            .flatten()
+            .filter(|e| e.1 == MOVE_ENDED)
+            .count()
+    };
+    let by = std::time::Instant::now() + Duration::from_secs(30);
+    while ended() < 2 {
+        assert!(std::time::Instant::now() < by, "the walk back ends");
+        std::thread::sleep(Duration::from_millis(20));
+    }
+    let mut third = gateway();
+    assert_eq!(final_of(&mut third), Some(2), "held for the next gateway");
+    third
+        .0
+        .set_read_timeout(Some(Duration::from_millis(500)))
+        .unwrap();
+    assert_eq!(final_of(&mut third), None, "each answer comes once");
+    drop(third);
+    world.stop();
+}

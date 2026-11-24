@@ -80,7 +80,10 @@ async fn world(listener: UnixListener, answered: Arc<AtomicUsize>) {
             if s.read_exact(&mut bytes).await.is_err() {
                 break;
             }
-            let i = Intent::read(&bytes).unwrap();
+            // The gateway's handover ask (`world_link::handover_ask`) comes first on each connection.
+            let Ok(i) = Intent::read(&bytes) else {
+                continue;
+            };
             let answer = if i.verb.as_str() == REFUSED {
                 Answer::Refused {
                     actor: i.actor,
@@ -397,10 +400,10 @@ fn unix_us() -> i64 {
         .as_micros() as i64
 }
 
-/// A stand-in world that takes `n` intents, never answers, then goes away for good.
+/// A stand-in world that takes `n` intents (after the gateway's handover ask), never answers, then goes away for good.
 async fn mute_world(listener: UnixListener, n: usize) {
     let (mut s, _) = listener.accept().await.unwrap();
-    for _ in 0..n {
+    for _ in 0..=n {
         let mut len = [0u8; 4];
         s.read_exact(&mut len).await.unwrap();
         let mut bytes = vec![0u8; u32::from_be_bytes(len) as usize];
@@ -907,11 +910,16 @@ async fn o16_a_stopping_gateway_closes_each_socket_with_1012() {
 /// answer, `worldd::answers::progress`: T10's accepted with field 5), then goes away.
 async fn busy_world(listener: UnixListener, left: u64) {
     let (mut s, _) = listener.accept().await.unwrap();
-    let mut len = [0u8; 4];
-    s.read_exact(&mut len).await.unwrap();
-    let mut bytes = vec![0u8; u32::from_be_bytes(len) as usize];
-    s.read_exact(&mut bytes).await.unwrap();
-    let i = Intent::read(&bytes).unwrap();
+    let i = loop {
+        let mut len = [0u8; 4];
+        s.read_exact(&mut len).await.unwrap();
+        let mut bytes = vec![0u8; u32::from_be_bytes(len) as usize];
+        s.read_exact(&mut bytes).await.unwrap();
+        // The gateway's handover ask comes first.
+        if let Ok(i) = Intent::read(&bytes) {
+            break i;
+        }
+    };
     let Value::Map(mut answer) = (Answer::Accepted {
         actor: i.actor,
         sequence: i.sequence,

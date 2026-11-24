@@ -24,6 +24,14 @@ doubled.
      answered is answered the same way again, never twice committed;
   4. keeps its cursor moving forward only: a repeat's answer carries the version of its first commit;
   5. treats `world.restarting` as the gateway's own answer, not the world's: it sends the intent again shortly after.
+
+  The served Soul client (`v2/client/src/daemon/daemon.mjs`) sends each intent at most once and does not do step 3.
+- **The world hands on what the old gateway can no longer take.** Each gateway connection to the world begins with a
+  handover ask (`{31: []}`). An act still going when its gateway went (a walk across the town) ends after the
+  restart; the world sends its answer to the newest gateway connection, or holds it until one asks
+  (`worldd::handover`), and the new gateway passes it to the Soul's socket once (`gatewayd` `world_link`). On SIGTERM
+  the gateway lets the world go before it closes the sockets, so answers in those last moments go to the next gateway
+  too.
 - **Never in the same step as a world's deploy.** `deploy` holds the machine's step (`$WORLDS_ROOT/step.lock`)
   shared while it runs; `gateway-upgrade` takes it exclusive and refuses `gateway-upgrade.world-deploying` while any
   world deploys, and a deploy refuses `deploy.gateway-upgrading` while the gateway is upgraded.
