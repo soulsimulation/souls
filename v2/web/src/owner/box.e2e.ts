@@ -256,7 +256,7 @@ test('#3781: an ack with no --close shows its note under the open message; the a
   assert.equal(closed.state, m.state, 'closed once, by the act');
   assert.notEqual(closed.outcome, 'replied');
   assert.equal(ada.texts.filter((t) => t.includes('"close"') && t.includes(m.id!)).length, 1, 'one close');
-  assert.equal((await ask({ op: 'ack', id: m.id, reply: 'done now' })).code, 'mail-not-found', 'closed: nothing more to note');
+  assert.equal((await ask({ op: 'ack', id: m.id, reply: 'done now' })).code, 'mail-closed', 'closed: the agent is told its note is not shown');
   report.note = { state: m.state, notes: m.notes };
 });
 

@@ -1,6 +1,7 @@
 //! A creator's own kinds (#3697): a definition is a `souls:kind` node at the root holding its canonical record; a thing
 //! of the kind is placed by its full name; a replica replaying the log learns the kind from it; and each check at
-//! commit refuses by name (`kind.invalid`, `kind.too-large`, `kind.collision`, `kind.namespace`, `kind.in-use`).
+//! commit refuses by name (`kind.invalid`, `kind.too-large`, `kind.collision`, `kind.namespace`, `kind.in-use`,
+//! `kind.field-reserved`).
 
 use super::*;
 use replica::edit::{Edit, Op, Ref, Spot, World, check};
@@ -310,6 +311,17 @@ fn each_check_at_commit_refuses_by_name() {
             w.code(vec![define_op(1, root, &r)]),
             "kind.namespace",
             "{ns}"
+        );
+    }
+    // kind.field-reserved: a state field numbered like one the engine keeps on things (the marks, a tint).
+    for n in [143, 144, 145] {
+        let r = format!(
+            r#"{{"format":"souls-entry/1","kind":"gene:x","owner":"thing","state":{{"hue":{{"n":{n},"type":"int","default":0}}}}}}"#
+        );
+        assert_eq!(
+            w.code(vec![define_op(1, root, &r)]),
+            "kind.field-reserved",
+            "{n}"
         );
     }
     // kind.collision: the same full name again.
@@ -675,6 +687,7 @@ fn a_form_cannot_put_a_creators_solid_thing_into_a_slot_with_a_point() {
             &Bound::Put {
                 what: Of::Node(thing),
                 slot: 1,
+                on: None,
             },
         )
     };

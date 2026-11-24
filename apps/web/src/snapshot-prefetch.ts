@@ -63,7 +63,9 @@ export function entryPrefetchScript(base: string, oldKeys: readonly string[] = O
     + `var ph=false;try{ph=(${phasedEntryWanted.toString()})(location.search||'',typeof matchMedia==='function'&&matchMedia('(pointer: coarse)').matches,screen.width,screen.height,navigator.deviceMemory)===true;}catch(e){}window[${JSON.stringify(PHASED_GLOBAL)}]=ph;`
     // lane PAIR-UI: an #approve link may be handed to an open tab (Shell.tsx), so it opens no world socket, not even
     // in a phased (phone) second phase; a full boot opens its own
-    + (hello ? `if(typeof WebSocket!=='function')return;var os=function(){if(/^#approve\\//.test(location.hash||''))return;var h=${JSON.stringify(hello)},u=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+w+'/ws',s=new WebSocket(u+'?hello='+encodeURIComponent(h)),o={url:u,ws:s,queue:[],hello:h,sent:true};`
+    // A page the new engine runs (its config names `v2Stream`) reads its stream and never adopts this socket: opened, it
+    // only cost the old world a join and closed itself unread 20 s later, a drop nothing resumed (release probe, 24 Nov)
+    + (hello ? `if(typeof WebSocket!=='function'||window.__simConfig&&typeof window.__simConfig.v2Stream==='string')return;var os=function(){if(/^#approve\\//.test(location.hash||''))return;var h=${JSON.stringify(hello)},u=(location.protocol==='https:'?'wss':'ws')+'://'+location.host+w+'/ws',s=new WebSocket(u+'?hello='+encodeURIComponent(h)),o={url:u,ws:s,queue:[],hello:h,sent:true};`
       + `s.onmessage=function(e){o.queue.push(e.data);};`
       + `setTimeout(function(){if(!o.adopted)try{s.close();}catch(e){}},20000);window[${JSON.stringify(SOCKET_GLOBAL)}]=o;};`
       + `if(ph)window[${JSON.stringify(OPEN_SOCKET_GLOBAL)}]=function(){delete window[${JSON.stringify(OPEN_SOCKET_GLOBAL)}];os();};else os();` : '')
