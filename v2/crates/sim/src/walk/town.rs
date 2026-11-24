@@ -1549,6 +1549,10 @@ impl Town {
     ) -> Result<(Town, Town), String> {
         let wanted: std::collections::BTreeSet<Size> =
             sizes.into_iter().filter(|&s| s != Size::Standard).collect();
+        // The calling thread is checked, as [`Town::prepare_classes`] checks it: never on the clock.
+        if !wanted.is_empty() {
+            crate::commit::off_clock();
+        }
         let (copy, versions) = (tree.frozen(), Versions::default());
         let (towns, classes) = std::thread::scope(|s| {
             let jobs: Vec<_> = wanted
@@ -3581,5 +3585,103 @@ mod passage_tests {
             !at(f0, v(900_000, 0, -10_000_000)),
             "past the doorway's band"
         );
+    }
+}
+
+#[cfg(test)]
+mod start_classes_tests {
+    use super::*;
+
+    /// One class's geometry as plain values: every piece, the layout, the terrain flags, the open squares, the
+    /// buildings' order, what each building knows and reaches, the joined ones, and where each link is.
+    fn shape(g: &Geometry) -> [String; 7] {
+        let b = &g.basis;
+        [
+            format!(
+                "{:?}",
+                g.surfaces
+                    .iter()
+                    .map(|(id, s)| (*id, format!("{:?}", s.pieces())))
+                    .collect::<Vec<_>>()
+            ),
+            format!("{} {:?}", b.layout.count, b.layout.squares),
+            format!("{:?}", b.flags),
+            format!(
+                "{:?}",
+                b.open
+                    .squares
+                    .iter()
+                    .map(|(k, p)| (*k, format!("{p:?}")))
+                    .collect::<Vec<_>>()
+            ),
+            format!(
+                "{:?}",
+                g.buildings.iter().map(|b| b.thing).collect::<Vec<_>>()
+            ),
+            format!("{:?} {:?} {:?}", b.known, b.reach, b.joined),
+            format!("{:?}", g.link_at),
+        ]
+    }
+
+    /// S12: a world's start cuts each class once on its threads, beside the standard cut, and copies it to the
+    /// planner; both towns hold the geometry the old path gave (one thread, then [`Town::prepare_classes`] on each).
+    #[test]
+    fn classes_cut_with_the_towns_equal_the_old_path() {
+        const NAMES: [&str; 7] = [
+            "pieces",
+            "layout",
+            "flags",
+            "open squares",
+            "buildings",
+            "known reach joined",
+            "link_at",
+        ];
+        let classes = [Size::Large, Size::Giant];
+        for seed in [1, 7] {
+            let towns = |new: bool| {
+                let facts = testworld::generate(seed, 0).unwrap();
+                let imported = import_eden::load(&facts.text).unwrap();
+                let root = imported.nodes["world"];
+                let ground = imported.nodes["ground"];
+                let header = import_eden::header(root, &imported.rules).unwrap();
+                let next = imported.tree.to_state().next;
+                let doors = Doors::new(header, imported.rules, next);
+                if new {
+                    Town::with_planner_classes_on(
+                        imported.tree,
+                        ground,
+                        doors,
+                        crate::ground::START_THREADS,
+                        classes,
+                    )
+                    .unwrap()
+                } else {
+                    let (mut town, mut planner) =
+                        Town::with_planner_on(imported.tree, ground, doors, 1).unwrap();
+                    town.prepare_classes(classes).unwrap();
+                    planner.prepare_classes(classes).unwrap();
+                    (town, planner)
+                }
+            };
+            let (old, new) = (towns(false), towns(true));
+            for (which, a, b) in [("town", &old.0, &new.0), ("planner", &old.1, &new.1)] {
+                assert_eq!(
+                    a.classes.keys().collect::<Vec<_>>(),
+                    b.classes.keys().collect::<Vec<_>>(),
+                    "seed {seed} {which}: the classes"
+                );
+                for size in classes {
+                    let (x, y) = (shape(&a.classes[&size]), shape(&b.classes[&size]));
+                    assert!(x[4] != "[]", "seed {seed} has buildings");
+                    for (k, (x, y)) in x.iter().zip(&y).enumerate() {
+                        assert!(
+                            x == y,
+                            "seed {seed} {which} {size:?}: the {} differ",
+                            NAMES[k]
+                        );
+                    }
+                }
+            }
+        }
     }
 }
