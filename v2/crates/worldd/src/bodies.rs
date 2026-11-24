@@ -1827,7 +1827,7 @@ impl Bodies {
 
     /// Members taking their places (0.135 G3, `sim::activity::places`): `(activity, body, Soul, node, place,
     /// facing)`, the place in `node`'s axes. Each walks there by the path every walk intent takes
-    /// ([`Bodies::start`]), as its Soul's own, then turns to its facing; one already within 0.15 m only turns. The
+    /// ([`Bodies::start`]), as its Soul's own, then turns to its facing; one already within 5 cm only turns. The
     /// place is a target, never a constraint: a walk that ends short, or cannot start, still ends the taking, and a
     /// seated member, or one no longer on `node`, is placed where it is. A walk to a place no longer in `todo` (its
     /// member left) ends. Returns the members that have taken their places, by (activity, body).
@@ -1857,7 +1857,9 @@ impl Bodies {
             }
             let at = m.pose.position;
             let (dx, dz) = (i128::from(at.x - to.x), i128::from(at.z - to.z));
-            let near = dx * dx + dz * dz <= 150_000i128.pow(2);
+            // Within a granted spot's reach of it (`AT_SPOT`, where any walk to it ends): a member farther walks, so
+            // two members end at most twice that off the distance their places keep (0.134 item 5).
+            let near = dx * dx + dz * dz <= i128::from(skills::route::AT_SPOT).pow(2);
             if let Some(&id) = self.place_moves.get(&(activity, body)) {
                 let moving = self.live.get(&body).is_some_and(|(i, _)| *i == id)
                     || self.waiting.iter().any(|w| w.id == id);
