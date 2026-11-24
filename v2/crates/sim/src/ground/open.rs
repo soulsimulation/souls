@@ -63,6 +63,9 @@ pub type Square = ((i32, i32), Vec<Piece>, Vec<Meet>, Vec<Vec<bool>>);
 pub struct Recut {
     pub squares: Vec<Square>,
     pub index: Index,
+    /// Whether the open ground's own doorways (its gates, placed by the buildings whose rooms they lead into) changed:
+    /// a building with a doorway onto the ground placed, moved or removed (S13).
+    pub gates_moved: bool,
 }
 
 impl Index {
@@ -322,17 +325,40 @@ impl Index {
                 parts.insert(k, p);
             }
         }
+        // The ground's doorways are placed by the buildings they lead into (`Scene::ground_doorways`): read again, and
+        // where one changed, the squares about it before and after are cut again with the change (S13).
+        let gates = Scene::ground_doorways(after, gh).map_err(|_| "the ground's doorways")?;
+        let gates_moved = gates != *self.gates;
+        let gates = if gates_moved {
+            for d in self.gates.iter().filter(|d| !gates.contains(d)) {
+                changed_bb = Some(join(changed_bb, door_bb(d)));
+            }
+            for d in gates.iter().filter(|d| !self.gates.contains(d)) {
+                changed_bb = Some(join(changed_bb, door_bb(d)));
+            }
+            Arc::new(gates)
+        } else {
+            self.gates.clone()
+        };
+        let widest = parts
+            .values()
+            .flat_map(|p| &p.scene.doorways)
+            .chain(gates.iter())
+            .map(|d| d.width / 2)
+            .max()
+            .unwrap_or(0);
         let index = Index {
             ground: self.ground,
             parts: Arc::new(parts),
-            gates: self.gates.clone(),
+            gates,
             terrain: self.terrain.clone(),
-            widest: self.widest,
+            widest,
         };
         let Some(changed_bb) = changed_bb else {
             return Ok(Recut {
                 squares: Vec::new(),
                 index,
+                gates_moved,
             });
         };
         // The change, grown, and every doorway near it (a box beside one sets its depth).
@@ -394,6 +420,7 @@ impl Index {
         Ok(Recut {
             squares: out,
             index,
+            gates_moved,
         })
     }
 
