@@ -30,7 +30,9 @@
 //! - **In the log** (K18, #3160). Each tick's part lists the bodies whose pose changed ([`Bodies::moved`]), a body in
 //!   a seat with its stance ([`row`]); a restart builds each where the log last had it standing
 //!   ([`Bodies::add_body_at`]) and hands each that sat back into its seat ([`Bodies::seat_placed`], K18c #3176), so
-//!   the seat is held in the slots table again and a rise or another sit sees it.
+//!   the seat is held in the slots table again and a rise or another sit sees it. A body being carried across a link
+//!   is not written while it crosses: its pose then lies on neither end's ground, so the log keeps where it last
+//!   stood until it lands (#4669: a kill mid-crossing once left every later restart refusing every move).
 //!
 //! - **Seen moving** (#3799). After each step the world writes each body's motion on its node, as T4's samples: at
 //!   each hand-off (a start, a stop, a turn, a seat taken or left, a new floor) and every [`KEYFRAME_US`] while it
@@ -248,6 +250,10 @@ pub struct Bodies {
     /// Its records since the world last took them, cause and actor the world; and the never-stuck ladder's (0.133 N1,
     /// [`crate::unstick`]), which the world writes the same way.
     pub wind_log: Vec<Effect>,
+    /// What a restart did with each body the log had standing off its floor (E11d, killed during a climb out), by
+    /// name: `climb-out`, `resume-nearest`, `resume-seated` (back in the place it was climbing out of),
+    /// `resume-seated-other` (that place taken: another free place of its thing) or `resume-held` (left where it was).
+    pub resumed: Vec<(Id, &'static str)>,
     /// The never-stuck ladder over the bodies' walks (0.133 N1).
     pub unstuck: crate::unstick::Unstuck,
     /// The rule's own move going on each body, by its intent id.
@@ -426,6 +432,7 @@ impl Bodies {
                     .unwrap_or(wind_down::KNOBS),
             ),
             wind_log: Vec::new(),
+            resumed: Vec::new(),
             unstuck: crate::unstick::Unstuck::default(),
             wind_moves: BTreeMap::new(),
             place_moves: BTreeMap::new(),
@@ -653,10 +660,39 @@ impl Bodies {
             name: "body-class-unprepared",
             detail: "no prepared geometry".into(),
         })?;
+        let mut resume = None;
         let body = match placed.get(&body.id) {
             Some((p, _)) => match p.support {
                 Support::Surface { surface, .. } => match surfaces.get(&surface) {
-                    Some(s) => s.place_built(body.id, p.frame, p.position, p.orientation, build)?,
+                    // A body the log had off its floor (killed mid-climb out of a seat, E11d) is placed where it was
+                    // and climbs on by the climb's own rule, or is left there when no way out is clean
+                    // (`sim::slots::Resumed`): never refused, so one body never stops the others starting.
+                    Some(s) => {
+                        let r = self.slots.resume(
+                            &self.town,
+                            s,
+                            body.id,
+                            p.frame,
+                            p.position,
+                            p.orientation,
+                            build,
+                        );
+                        if !matches!(r, sim::slots::Resumed::Stood | sim::slots::Resumed::Held) {
+                            self.resumed.push((body.id, r.name()));
+                        }
+                        resume = match r {
+                            sim::slots::Resumed::Held => Some((surface, None, p.position)),
+                            _ => r.to().map(|to| (surface, Some(to), p.position)),
+                        };
+                        sim::slots::placed_off(
+                            s,
+                            body.id,
+                            p.frame,
+                            p.position,
+                            p.orientation,
+                            build,
+                        )?
+                    }
                     None => {
                         return Err(Refusal {
                             name: "no-surface",
@@ -669,7 +705,72 @@ impl Bodies {
             None => body,
         };
         self.logged.insert(body.id, body.pose);
-        self.add_body_built(family, body, build)
+        let id = body.id;
+        self.add_body_built(family, body, build)?;
+        match resume {
+            Some((floor, Some(to), _)) => {
+                self.runner
+                    .controller
+                    .carry(id, sim::slots::climb_track(floor, to))?;
+            }
+            // No clean way on (E11d): seated again in the place it was climbing out of. A climb starts at its place
+            // and goes straight away from it, so that is the place of the things the body is over nearest where the
+            // log had it (ties by thing, slot, place); held there by the place's own position (`restore`'s `was`),
+            // else, taken, another free place of that thing, named. Its next rise climbs out or is refused by name.
+            // With none free it is left where the log had it, as a seat gone at a restart leaves a body.
+            Some((floor, None, at)) => {
+                let now = self.runner.now;
+                let d = |p: Vec3| i128::from(p.x - at.x).pow(2) + i128::from(p.z - at.z).pow(2);
+                let mut left: Vec<(i128, Id, u64, u32, Vec3)> = Vec::new();
+                for thing in self.slots.over(floor, at, build) {
+                    for pl in self.slots.places_of(thing) {
+                        for k in 0..pl.most() {
+                            let spot = pl.spot(k);
+                            let Ok(off) = pl.facing.rotate(Vec3::new(spot.x, 0, spot.z)) else {
+                                continue;
+                            };
+                            let w = Vec3::new(pl.point.x + off.x, 0, pl.point.z + off.z);
+                            left.push((d(w), thing, pl.place.slot, k, spot));
+                        }
+                    }
+                }
+                left.sort_by_key(|&(d, thing, slot, k, _)| (d, thing, slot, k));
+                let name = left.first().copied().and_then(|(_, thing, slot, k, spot)| {
+                    let slots = std::iter::once(Some(slot)).chain(
+                        self.slots
+                            .places_of(thing)
+                            .map(|p| Some(p.place.slot))
+                            .filter(|s| *s != Some(slot))
+                            .collect::<Vec<_>>(),
+                    );
+                    for s in slots {
+                        if self
+                            .slots
+                            .restore(
+                                &mut self.runner.controller,
+                                id,
+                                (thing, s),
+                                Some(spot),
+                                sim::controller::Stance::Sit,
+                                now,
+                            )
+                            .is_ok()
+                        {
+                            let same = self.slots.spot_of(id) == Some((thing, slot, k));
+                            return Some(if same {
+                                "resume-seated"
+                            } else {
+                                "resume-seated-other"
+                            });
+                        }
+                    }
+                    None
+                });
+                self.resumed.push((id, name.unwrap_or("resume-held")));
+            }
+            None => {}
+        }
+        Ok(())
     }
 
     /// Restart, after the seats are added (K18c, #3176): each body the log last had in a seat's slot is handed back
@@ -709,11 +810,19 @@ impl Bodies {
         c.ids()
             .filter_map(|id| {
                 let b = c.body(id)?;
-                let stance = match b.pose.support {
+                // A body carried across a link follows the link's line in the frame of the floor it set out from,
+                // past that floor's edge: it is kept where it last stood until it lands, so a restart never finds it
+                // off its ground. The world's own carries (a step aside, a walk-out) stay on their ground and are
+                // written as they go.
+                let pose = match self.logged.get(&id) {
+                    Some(p) if c.carrying(id).is_some() => *p,
+                    _ => b.pose,
+                };
+                let stance = match pose.support {
                     Support::Slot => self.slots.stance(id),
                     _ => self.sleeping.contains_key(&id).then_some(Stance::Lie),
                 };
-                Some((id, (b.pose, stance)))
+                Some((id, (pose, stance)))
             })
             .collect()
     }
@@ -820,8 +929,9 @@ impl Bodies {
         out
     }
 
-    /// Every body's pose as the controller holds it, in id order, a seated one's included (K18c): part of the zone's
-    /// state hash.
+    /// Every body's pose as the controller holds it, in id order, a seated one's included (K18c), one crossing a link
+    /// where it last stood ([`Bodies::placed`]): part of the zone's state hash, so a restart's state equals the last
+    /// record's.
     pub fn poses(&self) -> Vec<(Id, Pose)> {
         self.every()
             .into_iter()
@@ -1728,7 +1838,7 @@ impl Bodies {
 
     /// Members taking their places (0.135 G3, `sim::activity::places`): `(activity, body, Soul, node, place,
     /// facing)`, the place in `node`'s axes. Each walks there by the path every walk intent takes
-    /// ([`Bodies::start`]), as its Soul's own, then turns to its facing; one already within 0.15 m only turns. The
+    /// ([`Bodies::start`]), as its Soul's own, then turns to its facing; one already within 5 cm only turns. The
     /// place is a target, never a constraint: a walk that ends short, or cannot start, still ends the taking, and a
     /// seated member, or one no longer on `node`, is placed where it is. A walk to a place no longer in `todo` (its
     /// member left) ends. Returns the members that have taken their places, by (activity, body).
@@ -1758,7 +1868,9 @@ impl Bodies {
             }
             let at = m.pose.position;
             let (dx, dz) = (i128::from(at.x - to.x), i128::from(at.z - to.z));
-            let near = dx * dx + dz * dz <= 150_000i128.pow(2);
+            // Within a granted spot's reach of it (`AT_SPOT`, where any walk to it ends): a member farther walks, so
+            // two members end at most twice that off the distance their places keep (0.134 item 5).
+            let near = dx * dx + dz * dz <= i128::from(skills::route::AT_SPOT).pow(2);
             if let Some(&id) = self.place_moves.get(&(activity, body)) {
                 let moving = self.live.get(&body).is_some_and(|(i, _)| *i == id)
                     || self.waiting.iter().any(|w| w.id == id);

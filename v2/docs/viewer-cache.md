@@ -13,7 +13,10 @@ price are the owner's (C4 on #2636).
    them. A world that stops or restarts never stops the origin, and an origin under load never slows the world.
    Every request for one immutable file shares one buffer of it (the newest 64 MB stay held, `ORIGIN_CACHE_MB`), so
    a join wave all asking for a 9 MB baseline costs the origin one copy, not one per request (#4018). Each request
-   still checks the file on disk; the pointer is read afresh every time.
+   still checks the file on disk; the pointer is read afresh every time. A body goes out 256 KB at a time, and a
+   reader that takes nothing for 20 s is let go (its connection closed, counted as `stalled`; the page starts again
+   from the newest baseline), so a stalled viewer never holds a socket and an old baseline for as long as it stays
+   connected. A slow reader that keeps taking bytes is never let go.
    **Several processes share its port** (Linux, Node 22.12 or later: `listen({ reusePort })`), so the kernel spreads
    viewers' connections across them and no process sits in their path; one thread saturated near 1,000 viewers
    (#4018). `ORIGIN_PROCESSES` sets how many; the default is the host's cores less `ORIGIN_RESERVE_CORES` (2, what
@@ -21,7 +24,7 @@ price are the owner's (C4 on #2636).
    the default is 1. The process started by the unit only starts them and starts again, a second later, any that
    ends, while the others serve. Each holds its own buffers (`ORIGIN_CACHE_MB`, 32 a process when there are
    several). `ORIGIN_STATS` gets `bytes` summed over the processes and `processes`, one row each: pid, requests by
-   kind, disk reads, bytes, processor seconds, resident bytes and restarts.
+   kind, readers let go (`stalled`), disk reads, bytes, processor seconds, resident bytes and restarts.
 2. **Three kinds of answer, and nothing else:**
 
    | Request | Status | `Cache-Control` |

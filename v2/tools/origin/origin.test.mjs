@@ -3,7 +3,8 @@
 import assert from 'node:assert/strict';
 import { createHash } from 'node:crypto';
 import { existsSync, readFileSync, mkdirSync, mkdtempSync, renameSync, rmSync, writeFileSync } from 'node:fs';
-import { get } from 'node:http';
+import { Agent, get } from 'node:http';
+import { connect } from 'node:net';
 import { join } from 'node:path';
 import { fileURLToPath } from 'node:url';
 import { after, before, test } from 'node:test';
@@ -305,4 +306,50 @@ test('#4018: concurrent requests for one immutable file share one read and one b
     }
   }
   rmSync(name);
+});
+
+test('a viewer that takes nothing for stallMs is let go; a slow one that keeps taking finishes; an idle keep-alive stays', async () => {
+  const big = Buffer.alloc(16 << 20, 3), name = join(dir, stream, '10');
+  writeFileSync(name, big);
+  const { server: s, stats } = createOrigin(dir, {}, { stallMs: 300 });
+  await new Promise((ok) => s.listen(0, '127.0.0.1', ok));
+  const port = s.address().port, path = `/${stream}/10`;
+  try {
+    // Asks for 16 MB and never reads: the origin closes it, rather than holding the socket and its buffer for as long
+    // as the reader stays connected.
+    // (The paused reader cannot see its socket close, so this watches the origin's side.)
+    const c = connect(port, '127.0.0.1', () => { c.pause(); c.write(`GET ${path} HTTP/1.1\r\nHost: x\r\n\r\n`); });
+    c.on('error', () => {});
+    const connections = () => new Promise((ok) => s.getConnections((_, n) => ok(n)));
+    const t0 = Date.now();
+    while (Date.now() - t0 < 3000 && (stats.stalled < 1 || (await connections()) > 0)) await new Promise((ok) => setTimeout(ok, 50));
+    c.destroy();
+    assert.equal(stats.stalled, 1, 'a stalled reader is let go');
+    assert.equal(await connections(), 0, 'and its connection is closed');
+    // Reads 16 MB a slice at a time with a pause after each, taking far longer than stallMs in all: never let go.
+    const agent = new Agent({ keepAlive: true, maxSockets: 1 });
+    const t1 = Date.now();
+    const body = await new Promise((ok, no) => {
+      get({ port, host: '127.0.0.1', path, agent }, (res) => {
+        const chunks = [];
+        res.on('data', (c) => { chunks.push(c); res.pause(); setTimeout(() => res.resume(), 2); });
+        res.on('end', () => ok(Buffer.concat(chunks)));
+        res.on('error', no);
+      }).on('error', no);
+    });
+    assert.ok(Date.now() - t1 > 300, `the slow read took longer than stallMs (${Date.now() - t1} ms)`);
+    assert.ok(big.equals(body), 'the slow reader got every byte');
+    assert.equal(stats.stalled, 1);
+    // Idle past stallMs between requests: the connection is kept (keepAliveTimeout governs idle, not stallMs).
+    await new Promise((ok) => setTimeout(ok, 600));
+    const reused = await new Promise((ok, no) => {
+      const r = get({ port, host: '127.0.0.1', path: `/${stream}/7`, agent }, (res) => { res.resume(); res.on('end', () => ok(r.reusedSocket)); });
+      r.on('error', no);
+    });
+    assert.equal(reused, true, 'an idle keep-alive connection outlives stallMs');
+    agent.destroy();
+  } finally {
+    s.close();
+    rmSync(name);
+  }
 });

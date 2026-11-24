@@ -22,12 +22,12 @@ sends to these programs once the owner places its site file. Routing between the
 | Units | `souls.slice`, `worldd@.service` (O1) and its drop-in `worldd@.service.d/10-install.conf`, `souls-gateway@.service`, `souls-directory.service`, `souls-origin.service`, `souls-agents.service`, `souls-alarms.service` and its drop-in `souls-alarms.service.d/10-install.conf` (the one unit it starts) | root, 644 |
 
 The view tier runs inside each world's process (`worldd`), so it has no unit of its own. Every program runs as
-`souls` in `souls.slice`, whose `MemoryMax` is 14 GB: eleven worlds at their measured peaks (Eden 1.7 GB, the others
+`souls` in `souls.slice`, whose `MemoryMax` is 18 GB (14 GB until 24 Nov, raised for headroom): eleven worlds at their measured peaks (Eden 1.7 GB, the others
 0.85 GB) with a third to spare, inside what the production host has left beside today's system (its units' comment has
 the numbers), and `MemoryLow` 2 GB for Eden's.
 Inside it a world may use 2 GB (O1) unless `v2/tools/ops/units/world-limits.json` gives it more (Eden 4 GB; the
 install writes its `worldd@<world>.service.d/limits.conf`, [world-restarting](world-restarting.md#how-a-world-runs)),
-a gateway 512 MB, the directory 256 MB, the origin 1 GB for all its processes (6 on 8 cores, `ORIGIN_PROCESSES`;
+a gateway 512 MB, the directory 256 MB, the origin 2 GB for all its processes (6 on 8 cores, `ORIGIN_PROCESSES`;
 [viewer cache](../viewer-cache.md)). The processor and the disk are shared, never capped: the slice's `CPUWeight`
 and `IOWeight` are 20 against the default 100, so when both systems are busy the new one gets a fifth of what today's
 gets, and all of it when today's is idle; neither system's world time is throttled. `TasksMax` is 4,096. Every unit
@@ -158,8 +158,9 @@ in the journal (`degraded: world-owner-unavailable <world>`). Only a store out o
 way: a world the store answers is missing, or whose record differs from the map, is refused by name
 (`world-authority-missing`, `world-authority-mismatch`, `world-authority-invalid`). A tokens file is never written with
 an owner older than the one it names, so a handoff is never undone by a slow read. A revoke or retire rewrites the
-world's tokens file at once with the owner it already names, reading no owner, and is refused (`tokens-file`) if that
-write fails. The directory writes only the files of the world a change is for. A world whose files it could not write,
+world's tokens file at once with the owner it already names, reading no owner. A write that fails is tried twice more
+within about 150 ms; if it still fails, the world is retried in the background as below, a revoke is refused
+(`tokens-file`, so it never answers before the gateway stops taking the token) and a retire stands. The directory writes only the files of the world a change is for. A world whose files it could not write,
 or wrote from the owner last read, is retried in the background with back-off until the store answers. A start whose store does not answer logs
 `degraded: world-authority-unavailable` and serves, keeping the files already written.
 

@@ -1,0 +1,238 @@
+{
+  "format": "souls-entry/1",
+  "kind": "eden:group_jumps",
+  "owner": "thing",
+  "links": {
+    "starter": {
+      "n": 1,
+      "from": "body",
+      "most": 1,
+      "audience": {
+        "rule": "everyone"
+      }
+    },
+    "participant": {
+      "n": 2,
+      "from": "body",
+      "most": 7,
+      "audience": {
+        "rule": "everyone"
+      }
+    }
+  },
+  "points": {
+    "by_lead": {
+      "role": "stand",
+      "at_mm": [
+        -2400,
+        0,
+        1200
+      ],
+      "yaw_mdeg": 270000
+    },
+    "by_s1": {
+      "role": "stand",
+      "at_mm": [
+        -800,
+        0,
+        1200
+      ],
+      "yaw_mdeg": 270000
+    },
+    "by_s2": {
+      "role": "stand",
+      "at_mm": [
+        800,
+        0,
+        1200
+      ],
+      "yaw_mdeg": 270000
+    },
+    "by_s3": {
+      "role": "stand",
+      "at_mm": [
+        2400,
+        0,
+        1200
+      ],
+      "yaw_mdeg": 270000
+    },
+    "by_s4": {
+      "role": "stand",
+      "at_mm": [
+        -2400,
+        0,
+        -1200
+      ],
+      "yaw_mdeg": 270000
+    },
+    "by_s5": {
+      "role": "stand",
+      "at_mm": [
+        -800,
+        0,
+        -1200
+      ],
+      "yaw_mdeg": 270000
+    },
+    "by_s6": {
+      "role": "stand",
+      "at_mm": [
+        800,
+        0,
+        -1200
+      ],
+      "yaw_mdeg": 270000
+    },
+    "by_s7": {
+      "role": "stand",
+      "at_mm": [
+        2400,
+        0,
+        -1200
+      ],
+      "yaw_mdeg": 270000
+    }
+  },
+  "slots": {
+    "lead": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        -2400,
+        0,
+        1200
+      ],
+      "stand": "by_lead"
+    },
+    "s1": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        -800,
+        0,
+        1200
+      ],
+      "stand": "by_s1"
+    },
+    "s2": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        800,
+        0,
+        1200
+      ],
+      "stand": "by_s2"
+    },
+    "s3": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        2400,
+        0,
+        1200
+      ],
+      "stand": "by_s3"
+    },
+    "s4": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        -2400,
+        0,
+        -1200
+      ],
+      "stand": "by_s4"
+    },
+    "s5": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        -800,
+        0,
+        -1200
+      ],
+      "stand": "by_s5"
+    },
+    "s6": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        800,
+        0,
+        -1200
+      ],
+      "stand": "by_s6"
+    },
+    "s7": {
+      "admits": "body",
+      "most": 1,
+      "at_mm": [
+        2400,
+        0,
+        -1200
+      ],
+      "stand": "by_s7"
+    }
+  },
+  "geometry": {
+    "bounds_mm": [
+      5800,
+      100,
+      3600
+    ]
+  },
+  "forms": {},
+  "roles": {
+    "starter": {
+      "need": "required",
+      "places": {
+        "in": "here",
+        "slots": [
+          "lead"
+        ],
+        "within_mm": 3000
+      },
+      "move": "jump",
+      "on_beat": true
+    },
+    "participant": {
+      "need": "required",
+      "places": {
+        "in": "here",
+        "slots": [
+          "s1",
+          "s2",
+          "s3",
+          "s4",
+          "s5",
+          "s6",
+          "s7"
+        ],
+        "within_mm": 3000
+      },
+      "move": "jump",
+      "on_beat": true
+    }
+  },
+  "motion": {
+    "how": "fixed"
+  },
+  "loose": {
+    "ever": true
+  },
+  "text": {
+    "card": "Group jumps for two to eight Souls; join or leave independently.",
+    "exercise": "exercise",
+    "group_jumps": "group jumps",
+    "rules": "Offer group jumps to nearby standing Souls on the same floor. Invited Souls may accept and walk to their own places through ordinary movement admission. The starter jumps with the group. Each accepted member repeats jumps and may leave independently."
+  },
+  "card": {
+    "text": "card",
+    "category": "exercise",
+    "synonyms": [
+      "group_jumps"
+    ]
+  }
+}
