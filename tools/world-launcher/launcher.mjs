@@ -1022,12 +1022,12 @@ export async function openLauncher(cfg = {}) {
   }
   /** #2304 A3: a world's page (the web build's, with the world's own title and links) and the build's files, served here
    *  for a world that is not up. False: not a page or a file of the build (the caller loads the world, or refuses). */
-  function worldPage(req, res, slug, w, rest) {
+  function worldPage(req, res, slug, w, rest, filesOnly = false) {
     if (req.method !== 'GET' && req.method !== 'HEAD') return false;
     const head = { 'x-sim-cache': 'unloaded' };
     if (rest.startsWith('/assets/')) { const f = inside(webDir, rest); if (f && serveFile(res, f, 'public, max-age=31536000, immutable', req)) return true; return false; }
     if (rest === '/manifest.webmanifest') return serveFile(res, join(webDir, 'manifest.webmanifest'), 'public, max-age=3600', req);
-    if (!(rest === '/' || rest === '/index.html' || pageAsk(req, rest))) return false;
+    if (filesOnly || !(rest === '/' || rest === '/index.html' || pageAsk(req, rest))) return false;
     let html; try { html = readFileSync(join(webDir, 'index.html'), 'utf8'); } catch { return false; }
     const body = Buffer.from(withWorldMeta(html, { name: w.name ?? slug, url: `${publicOrigin}${wp(slug)}/` }));
     res.writeHead(200, robotsOf(slug, { 'content-type': 'text/html; charset=utf-8', 'cache-control': 'no-cache', 'content-length': String(body.length), ...head })).end(req.method === 'HEAD' ? undefined : body);
@@ -1309,9 +1309,11 @@ export async function openLauncher(cfg = {}) {
     // #2304 A3/A4: a world that is not up serves its page and the web build's files from here, without loading it: to a
     // declared crawler always (and nothing else: a crawler never loads a world, nor thaws one), to anyone with
     // --unload-still. The world loads when the page's live connection or its first data request arrives.
+    // A visitor's page of a world routed to the new engine is not served here: its /v1/config is the new client's, so a
+    // page without the world's inline config said "There is no world at this address" (live, 24 Nov); it loads the world.
     const crawler = crawlerAgent(req.headers['user-agent']), k0 = pool.state(slug);
     if (crawler ? pool.status(slug).status !== 'running' : unloadStill && !k0?.child && !k0?.adopted) {
-      if (worldPage(req, res, slug, w, edgeRest)) return;
+      if (worldPage(req, res, slug, w, edgeRest, !crawler && !!cutover?.v2Stream(w))) return;
       if (crawler) { json(res, 503, { ok: false, code: 'world.unloaded', slug, message: 'This world is not loaded; its page is served without it.' }, { 'retry-after': '3600', 'cache-control': 'no-store' }); return; }
     }
     const resident = residentRead(edgeRest, req.method);
